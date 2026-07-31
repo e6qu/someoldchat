@@ -3,6 +3,7 @@ package grpc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,6 +160,53 @@ func requireSeed(t *testing.T, err error) {
 	}
 }
 
+func seedWorkflowParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	manifest := `{"display_information":{"name":"Workflow parity"},"settings":{"function_runtime":"remote"},"functions":{"triage":{"title":"Triage","description":"Triage a request","input_parameters":{"properties":{"item":{"type":"string","title":"Item"}},"required":["item"]},"output_parameters":{"properties":{"result":{"type":"string","title":"Result"}},"required":["result"]}}}}`
+	requireSeed(t, target.CreateApp(context.Background(), domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Workflow parity", ClientID: "workflow-client",
+		SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "workflow-client", SecretHash: "client-hash", AppID: "A1"}))
+	requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+		AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+	}))
+	workflow := domain.WorkflowDefinition{
+		ID: "WfParity", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "triage-workflow",
+		Title: "Triage workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage request"}]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflow(context.Background(), workflow, events.Event{
+		ID: "evt_workflow_parity", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now,
+	}))
+	trigger := domain.WorkflowTrigger{
+		ID: "FtParity", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run triage",
+		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+		ID: "evt_trigger_parity", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
+	}))
+	run := domain.WorkflowRun{
+		ID: "WxParity", WorkflowID: workflow.ID, WorkflowVersion: 1, TriggerID: trigger.ID,
+		WorkspaceID: "T1", AppID: "A1", ActorID: "U1", ConversationID: "C1",
+		Status: domain.WorkflowRunRunning, Inputs: `{"item":"request"}`, Outputs: `{}`,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	execution := domain.WorkflowStep{
+		ID: "FxParity", WorkflowRunID: run.ID, WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+		FunctionID: "FnParity", EditID: "triage", Status: domain.WorkflowStepExecuting,
+		Inputs: run.Inputs, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflowRun(context.Background(), run, &execution, []events.Event{{
+		ID: "evt_run_parity", WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now,
+	}}))
+}
+
 func newParity(t *testing.T, testCase parityCase) parity {
 	t.Helper()
 	seed := testCase.seed
@@ -278,6 +326,105 @@ func parityCases() []parityCase {
 		return domain.NewMessageTimestamp(message.CreatedAt)
 	}
 	return []parityCase{
+		{
+			name: "workflow permissions discovery and completion survive the composition seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+					AppID: "A1", CallbackID: "created-workflow", Title: "Created workflow",
+					Description: "Created through the shared seam", InputSchema: `{}`,
+					Steps: `[{"function_id":"triage","title":"Triage request"}]`,
+				})
+				if err != nil {
+					return nil, err
+				}
+				loaded, err := chat.GetWorkflow(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				loaded.Title = "Published workflow"
+				published, err := chat.UpdateWorkflow(ctx, "T1", "U1", loaded, loaded.Version, true)
+				if err != nil {
+					return nil, err
+				}
+				workflows, more, _, err := chat.ListWorkflows(ctx, "T1", "U1", domain.PageRequest{Limit: 100})
+				if err != nil {
+					return nil, err
+				}
+				trigger, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					WorkflowID: published.ID, Title: "Run published workflow", Type: "link", Config: `{}`, Enabled: true,
+				}, 0)
+				if err != nil {
+					return nil, err
+				}
+				triggers, err := chat.ListWorkflowTriggers(ctx, "T1", "U1", published.ID)
+				if err != nil {
+					return nil, err
+				}
+				run, err := chat.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"item":"request"}`, "workflow-parity")
+				if err != nil {
+					return nil, err
+				}
+				storedRun, err := chat.GetWorkflowRun(ctx, "T1", "U1", run.ID)
+				if err != nil {
+					return nil, err
+				}
+				sum := sha256.Sum256([]byte("A1\x00triage"))
+				functionID := fmt.Sprintf("Fn%X", sum[:8])
+				initialFunction, err := chat.GetFunctionPermission(ctx, "T1", "U1", "A1", functionID, "")
+				if err != nil {
+					return nil, err
+				}
+				setFunction, err := chat.SetFunctionPermission(ctx, "T1", "U1", "A1", functionID, "", domain.AutomationPermission{
+					PermissionType: "named_entities", UserIDs: []domain.UserID{"U1", "U2"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				storedFunction, err := chat.GetFunctionPermission(ctx, "T1", "U1", "A1", functionID, "")
+				if err != nil {
+					return nil, err
+				}
+				initialTrigger, err := chat.GetTriggerPermission(ctx, "T1", "U1", "A1", "FtParity")
+				if err != nil {
+					return nil, err
+				}
+				setTrigger, err := chat.SetTriggerPermission(ctx, "T1", "U1", "A1", "FtParity", domain.AutomationPermission{PermissionType: "everyone"})
+				if err != nil {
+					return nil, err
+				}
+				storedTrigger, err := chat.GetTriggerPermission(ctx, "T1", "U1", "A1", "FtParity")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetFeaturedWorkflows(ctx, "T1", "U1", "C1", []domain.WorkflowTriggerID{"FtParity"}); err != nil {
+					return nil, err
+				}
+				featured, err := chat.ListFeaturedWorkflows(ctx, "T1", "U1", []domain.ConversationID{"C1"})
+				if err != nil {
+					return nil, err
+				}
+				steps, err := chat.ListFunctionWorkflowSteps(ctx, "T1", "U1", "A1", functionID, "WfParity", "", "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CompleteFunction(ctx, "T1", "U1", "A1", "FxParity", `{"result":"done"}`, ""); err != nil {
+					return nil, err
+				}
+				return []any{
+					created.Status, loaded.Title, published.Status, published.Version,
+					len(workflows), more, len(triggers), triggers[0].Type,
+					run.Status, storedRun.Status, storedRun.WorkflowVersion,
+					initialFunction.PermissionType,
+					setFunction.PermissionType, len(setFunction.UserIDs),
+					storedFunction.PermissionType, len(storedFunction.UserIDs),
+					initialTrigger.PermissionType,
+					setTrigger.PermissionType, storedTrigger.PermissionType,
+					len(featured), featured[0].Title,
+					len(steps), steps[0].Title, steps[0].StepID,
+				}, nil
+			},
+		},
 		{
 			name: "typed posting channel canvases and app workspace paging survive the composition seam",
 			seed: func(t *testing.T, target *memory.Store) {

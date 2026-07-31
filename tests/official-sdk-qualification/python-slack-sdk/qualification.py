@@ -17,6 +17,10 @@ reminder_client = WebClient(
     token="xoxp-reminder-qualification",
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
 )
+workflow_client = WebClient(
+    token="xoxb-workflow-qualification",
+    base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
+)
 app_client = WebClient(
     token=os.environ.get("SAMEOLDCHAT_APP_TOKEN", "xapp-test"),
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
@@ -323,6 +327,82 @@ updated_step = client.workflows_updateStep(
     outputs=[{"type": "text", "name": "answer", "label": "Answer"}],
 )
 assert updated_step["ok"] is True
+function_permission = workflow_client.api_call(
+    "functions.distributions.permissions.set",
+    params={
+        "function_callback_id": "triage",
+        "function_app_id": "A3",
+        "permission_type": "named_entities",
+        "user_ids": json.dumps(["U1", "U2"]),
+    },
+)
+assert function_permission["ok"] is True
+assert [user["user_id"] for user in function_permission["users"]] == ["U1", "U2"]
+assert workflow_client.api_call(
+    "functions.distributions.permissions.add",
+    params={"function_id": "FnB4D6AFBF12045549", "user_ids": json.dumps(["U3"])},
+)["ok"] is True
+assert workflow_client.api_call(
+    "functions.distributions.permissions.remove",
+    params={"function_id": "FnB4D6AFBF12045549", "user_ids": json.dumps(["U3"])},
+)["ok"] is True
+listed_function_permission = workflow_client.api_call(
+    "functions.distributions.permissions.list", params={"function_id": "FnB4D6AFBF12045549"}
+)
+assert [user["user_id"] for user in listed_function_permission["users"]] == ["U1", "U2"]
+trigger_permission = workflow_client.api_call(
+    "workflows.triggers.permissions.set",
+    params={
+        "trigger_id": "FtQualification",
+        "permission_type": "named_entities",
+        "user_ids": json.dumps(["U1", "U2"]),
+    },
+)
+assert trigger_permission["ok"] is True
+assert workflow_client.api_call(
+    "workflows.triggers.permissions.add",
+    params={"trigger_id": "FtQualification", "user_ids": json.dumps(["U3"])},
+)["ok"] is True
+assert workflow_client.api_call(
+    "workflows.triggers.permissions.remove",
+    params={"trigger_id": "FtQualification", "user_ids": json.dumps(["U3"])},
+)["ok"] is True
+assert workflow_client.api_call(
+    "workflows.triggers.permissions.set",
+    params={"trigger_id": "FtQualification", "permission_type": "everyone"},
+)["ok"] is True
+assert workflow_client.api_call(
+    "workflows.triggers.permissions.list", params={"trigger_id": "FtQualification"}
+)["permission_type"] == "everyone"
+assert workflow_client.api_call(
+    "workflows.featured.set",
+    params={"channel_id": "C1", "trigger_ids": json.dumps(["FtQualification"])},
+)["ok"] is True
+featured_workflows = workflow_client.api_call(
+    "workflows.featured.list", params={"channel_ids": json.dumps(["C1"])}
+)
+assert featured_workflows["featured_workflows"][0]["triggers"][0]["id"] == "FtQualification"
+assert workflow_client.api_call(
+    "workflows.featured.remove",
+    params={"channel_id": "C1", "trigger_ids": json.dumps(["FtQualification"])},
+)["ok"] is True
+assert workflow_client.api_call(
+    "workflows.featured.add",
+    params={"channel_id": "C1", "trigger_ids": json.dumps(["FtQualification"])},
+)["ok"] is True
+function_steps = workflow_client.api_call(
+    "functions.workflows.steps.list",
+    params={"function_id": "FnB4D6AFBF12045549", "workflow_id": "WfQualification"},
+)
+assert function_steps["steps_versions"][0]["title"] == "Triage"
+assert workflow_client.api_call(
+    "functions.completeSuccess",
+    params={"function_execution_id": "FxQualification", "outputs": json.dumps({"result": "qualified by Python"})},
+)["ok"] is True
+assert workflow_client.api_call(
+    "functions.completeError",
+    params={"function_execution_id": "FxQualificationError", "error": "qualified failure from Python"},
+)["ok"] is True
 opened_dialog = client.dialog_open(
     trigger_id="qualification-dialog-trigger",
     dialog={

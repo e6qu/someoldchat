@@ -127,7 +127,11 @@ func NewWorkflowTriggerID() (WorkflowTriggerID, error) {
 	return WorkflowTriggerID(value), err
 }
 func NewWorkflowRunID() (WorkflowRunID, error) {
-	value, err := PublicID("Wr")
+	// Slack exposes workflow executions as Wx… identifiers in
+	// function_executed payloads and functions.* completion calls. Keep the
+	// durable run in that same public identifier space so transports never have
+	// to invent a second execution identity.
+	value, err := PublicID("Wx")
 	return WorkflowRunID(value), err
 }
 func NewFunctionExecutionID() (WorkflowStepID, error) {

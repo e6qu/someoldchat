@@ -202,6 +202,42 @@ func appHomeOpened(delivered Delivered) ([]Inner, error) {
 	return []Inner{inner}, nil
 }
 
+func functionExecuted(delivered Delivered) ([]Inner, error) {
+	values, err := stringFields(delivered, "function_execution_id", "workflow_execution_id")
+	if err != nil {
+		return nil, err
+	}
+	function, exists := delivered.Object["function"]
+	if !exists || len(function) == 0 {
+		return nil, fmt.Errorf("%w: function_executed payload has no function", ErrSlackEventIncomplete)
+	}
+	inputs, exists := delivered.Object["inputs"]
+	if !exists || len(inputs) == 0 {
+		return nil, fmt.Errorf("%w: function_executed payload has no inputs", ErrSlackEventIncomplete)
+	}
+	var functionObject, inputObject map[string]json.RawMessage
+	if json.Unmarshal(function, &functionObject) != nil || functionObject == nil {
+		return nil, fmt.Errorf("%w: function_executed payload has an invalid function", ErrSlackEventIncomplete)
+	}
+	if json.Unmarshal(inputs, &inputObject) != nil || inputObject == nil {
+		return nil, fmt.Errorf("%w: function_executed payload has invalid inputs", ErrSlackEventIncomplete)
+	}
+	fields := []Field{
+		{name: "function", value: append(json.RawMessage(nil), function...)},
+		{name: "inputs", value: append(json.RawMessage(nil), inputs...)},
+		String("function_execution_id", values["function_execution_id"]),
+		String("workflow_execution_id", values["workflow_execution_id"]),
+	}
+	if token, exists := delivered.Field("bot_access_token"); exists && strings.TrimSpace(token) != "" {
+		fields = append(fields, String("bot_access_token", token))
+	}
+	inner, err := newInner("function_executed", delivered, fields...)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
 func broadcastableToApp(event Event, appID string) (Delivered, bool, error) {
 	var (
 		delivered Delivered

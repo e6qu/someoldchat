@@ -3,8 +3,10 @@ package slack
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -203,7 +205,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -245,7 +247,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
 	}, domain.AppManifestRevision{
 		AppID: "A1", Version: 1,
-		Manifest:  `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}}}`,
+		Manifest:  `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}},"settings":{"function_runtime":"remote"},"functions":{"triage":{"title":"Triage","description":"Triage an item","input_parameters":{"properties":{"item":{"type":"string","title":"Item"}},"required":["item"]},"output_parameters":{"properties":{"result":{"type":"string","title":"Result"}},"required":["result"]}}}}`,
 		CreatedBy: "U1", CreatedAt: now,
 	}, domain.OAuthClient{ID: "fixture-app-client", SecretHash: "fixture-client-secret-hash", AppID: "A1"}); err != nil {
 		panic(err)
@@ -982,6 +984,128 @@ func seedFunctionExecution(t *testing.T, repository *memory.Store, executionID d
 	}
 	if err := repository.CreateWorkflowRun(ctx, run, &step, []events.Event{{ID: domain.EventID("run-" + string(executionID)), WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflow := domain.WorkflowDefinition{
+		ID: "WfHTTP", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "triage-workflow",
+		Title: "Triage workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage step"}]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflow(ctx, workflow, events.Event{ID: "workflow-http", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	trigger := domain.WorkflowTrigger{
+		ID: "FtHTTP", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run triage",
+		Type: "link", Config: `{}`, Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.SetWorkflowTrigger(ctx, trigger, 0, events.Event{ID: "trigger-http", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(path string, values url.Values) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(values.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s status=%d body=%s err=%v", path, response.Code, response.Body, err)
+		}
+		return body
+	}
+	functionReference := url.Values{"function_callback_id": {"triage"}, "function_app_id": {"A1"}}
+	defaultFunction := call("/api/functions.distributions.permissions.list", functionReference)
+	if users, ok := defaultFunction["users"].([]any); defaultFunction["permission_type"] != "app_collaborators" || !ok || len(users) != 1 {
+		t.Fatalf("default function collaborators=%v", defaultFunction)
+	}
+	functionReference.Set("permission_type", "named_entities")
+	functionReference.Set("user_ids", `["U1","U2"]`)
+	setFunction := call("/api/functions.distributions.permissions.set", functionReference)
+	if setFunction["ok"] != true || setFunction["permission_type"] != "named_entities" {
+		t.Fatalf("function permission set=%v", setFunction)
+	}
+	invalidFunction := call("/api/functions.distributions.permissions.set", url.Values{
+		"function_callback_id": {"triage"}, "function_app_id": {"A1"}, "permission_type": {"workspace_admins"},
+	})
+	if invalidFunction["ok"] != false || invalidFunction["error"] != "invalid_permission_type" {
+		t.Fatalf("invalid function permission=%v", invalidFunction)
+	}
+	missingFunctionType := call("/api/functions.distributions.permissions.set", url.Values{
+		"function_callback_id": {"triage"}, "function_app_id": {"A1"},
+	})
+	if missingFunctionType["ok"] != false || missingFunctionType["error"] != "permission_type_required" {
+		t.Fatalf("missing function permission type=%v", missingFunctionType)
+	}
+	missingFunctionUser := call("/api/functions.distributions.permissions.set", url.Values{
+		"function_callback_id": {"triage"}, "function_app_id": {"A1"},
+		"permission_type": {"named_entities"}, "user_ids": {`["U-missing"]`},
+	})
+	if missingFunctionUser["ok"] != false || missingFunctionUser["error"] != "user_not_found" {
+		t.Fatalf("missing function permission user=%v", missingFunctionUser)
+	}
+	listFunction := call("/api/functions.distributions.permissions.list", url.Values{"function_callback_id": {"triage"}, "function_app_id": {"A1"}})
+	if users, ok := listFunction["users"].([]any); listFunction["ok"] != true || !ok || len(users) != 2 {
+		t.Fatalf("function permission list=%v", listFunction)
+	}
+	defaultTrigger := call("/api/workflows.triggers.permissions.list", url.Values{"trigger_id": {"FtHTTP"}})
+	if users, ok := defaultTrigger["user_ids"].([]any); defaultTrigger["permission_type"] != "app_collaborators" || !ok || len(users) != 1 {
+		t.Fatalf("default trigger collaborators=%v", defaultTrigger)
+	}
+	setTrigger := call("/api/workflows.triggers.permissions.set", url.Values{
+		"trigger_id": {"FtHTTP"}, "permission_type": {"everyone"},
+	})
+	if setTrigger["ok"] != true || setTrigger["permission_type"] != "everyone" {
+		t.Fatalf("trigger permission set=%v", setTrigger)
+	}
+	invalidTrigger := call("/api/workflows.triggers.permissions.set", url.Values{
+		"trigger_id": {"FtHTTP"}, "permission_type": {"workspace_admins"},
+	})
+	if invalidTrigger["ok"] != false || invalidTrigger["error"] != "invalid_permission_type" {
+		t.Fatalf("invalid trigger permission=%v", invalidTrigger)
+	}
+	emptyTriggerEntities := call("/api/workflows.triggers.permissions.set", url.Values{
+		"trigger_id": {"FtHTTP"}, "permission_type": {"named_entities"},
+	})
+	if emptyTriggerEntities["ok"] != false || emptyTriggerEntities["error"] != "named_entities_cannot_be_empty" {
+		t.Fatalf("empty trigger named entities=%v", emptyTriggerEntities)
+	}
+	missingTriggerChannel := call("/api/workflows.triggers.permissions.set", url.Values{
+		"trigger_id": {"FtHTTP"}, "permission_type": {"named_entities"}, "channel_ids": {`["C-missing"]`},
+	})
+	if missingTriggerChannel["ok"] != false || missingTriggerChannel["error"] != "channel_not_found" {
+		t.Fatalf("missing trigger permission channel=%v", missingTriggerChannel)
+	}
+	listTrigger := call("/api/workflows.triggers.permissions.list", url.Values{"trigger_id": {"FtHTTP"}})
+	if listTrigger["ok"] != true || listTrigger["permission_type"] != "everyone" {
+		t.Fatalf("trigger permission list=%v", listTrigger)
+	}
+	featured := call("/api/workflows.featured.set", url.Values{"channel_id": {"C1"}, "trigger_ids": {`["FtHTTP"]`}})
+	if featured["ok"] != true {
+		t.Fatalf("featured set=%v", featured)
+	}
+	listFeatured := call("/api/workflows.featured.list", url.Values{"channel_ids": {`["C1"]`}})
+	groups, ok := listFeatured["featured_workflows"].([]any)
+	if listFeatured["ok"] != true || !ok || len(groups) != 1 {
+		t.Fatalf("featured list=%v", listFeatured)
+	}
+	sum := sha256.Sum256([]byte("A1\x00triage"))
+	functionID := fmt.Sprintf("Fn%X", sum[:8])
+	steps := call("/api/functions.workflows.steps.list", url.Values{"function_id": {functionID}, "workflow_id": {"WfHTTP"}})
+	versions, ok := steps["steps_versions"].([]any)
+	if steps["ok"] != true || !ok || len(versions) != 1 {
+		t.Fatalf("workflow steps=%v", steps)
+	}
+	missingFunctionSteps := call("/api/functions.workflows.steps.list", url.Values{
+		"function_id": {"FnMissing"}, "workflow_id": {"WfHTTP"},
+	})
+	if missingFunctionSteps["ok"] != false || missingFunctionSteps["error"] != "function_not_found" {
+		t.Fatalf("missing function workflow steps=%v", missingFunctionSteps)
 	}
 }
 

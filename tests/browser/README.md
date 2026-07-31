@@ -1,6 +1,6 @@
 # Browser qualification
 
-This suite runs 36 seeded journeys in Chromium, Firefox, and WebKit and
+This suite runs 37 seeded journeys in Chromium, Firefox, and WebKit and
 exercises behavior that server-side tests cannot observe: session-authenticated
 workspace entry, public-channel preview and joining, message posting with the
 advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
@@ -26,6 +26,9 @@ and removal. It also
 exercises message-reminder `M`, preset and custom local times, personal
 reminder editing/completion/deletion, `/remind` channel creation, and the
 private `/remind list` projection. It also
+creates and installs a remote-function app, builds and publishes a two-step
+workflow, creates a link trigger, starts one durable execution, reloads its run
+state, and checks the builder and run views for automated accessibility. It also
 schedules a message in the browser's local time zone, verifies that the
 pending item does not appear in channel history, reviews it on the Scheduled
 surface, and cancels it. It signs out through the application UI,

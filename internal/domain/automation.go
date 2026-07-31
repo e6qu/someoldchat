@@ -27,6 +27,24 @@ type WorkflowDefinition struct {
 	UpdatedAt        time.Time
 }
 
+type WorkflowRevision struct {
+	WorkflowID  WorkflowID
+	WorkspaceID WorkspaceID
+	Version     uint64
+	Title       string
+	Steps       string
+	Status      WorkflowStatus
+	CreatedAt   time.Time
+}
+
+type WorkflowStepVersion struct {
+	Title                  string     `json:"title"`
+	WorkflowID             WorkflowID `json:"workflow_id"`
+	StepID                 string     `json:"step_id"`
+	IsDeleted              bool       `json:"is_deleted"`
+	WorkflowVersionCreated string     `json:"workflow_version_created"`
+}
+
 type WorkflowTrigger struct {
 	ID          WorkflowTriggerID
 	WorkflowID  WorkflowID

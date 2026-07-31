@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +45,7 @@ type slackFunctionSnapshot struct {
 	DateCreated      int64                           `json:"date_created"`
 	DateUpdated      int64                           `json:"date_updated"`
 	DateDeleted      int64                           `json:"date_deleted"`
+	Runtime          string                          `json:"-"`
 }
 
 func normalizeJSONObject(raw string, allowEmpty bool) (string, error) {
@@ -102,8 +105,11 @@ func (m Messages) CreateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	steps, _, err := normalizeWorkflowSteps(value.Steps)
+	steps, stepValues, err := normalizeWorkflowSteps(value.Steps)
 	if err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	if err := m.validateWorkflowFunctions(ctx, value.AppID, stepValues); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	id, err := domain.NewWorkflowID()
@@ -145,6 +151,14 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if _, _, err := m.GetDeveloperApp(ctx, workspaceID, actor, current.AppID); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
+	unpublish := !publish && value.Status == domain.WorkflowDisabled
+	// A published workflow must keep executing its published revision while
+	// edits are staged. The current store does not yet retain a separate mutable
+	// draft snapshot, so rejecting that transition is safer than either taking
+	// the workflow offline or executing unpublished steps.
+	if !publish && current.Status == domain.WorkflowPublished && !unpublish {
+		return domain.WorkflowDefinition{}, ErrInvalidWorkflowStep
+	}
 	value.Title = strings.TrimSpace(value.Title)
 	value.Description = strings.TrimSpace(value.Description)
 	value.CallbackID = strings.TrimSpace(value.CallbackID)
@@ -155,8 +169,14 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	steps, _, err := normalizeWorkflowSteps(value.Steps)
+	steps, stepValues, err := normalizeWorkflowSteps(value.Steps)
 	if err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	if publish && len(stepValues) == 0 {
+		return domain.WorkflowDefinition{}, ErrInvalidWorkflowStep
+	}
+	if err := m.validateWorkflowFunctions(ctx, current.AppID, stepValues); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	value.ID = current.ID
@@ -175,6 +195,9 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 		value.Status = domain.WorkflowPublished
 		value.PublishedVersion = expectedVersion + 1
 		topic = "workflow.published"
+	} else if unpublish {
+		value.Status = domain.WorkflowDisabled
+		topic = "workflow.unpublished"
 	}
 	event, err := newEvent(workspaceID, actor, events.NewPayload(topic,
 		events.String("workflow_id", string(value.ID)),
@@ -194,7 +217,58 @@ func (m Messages) ListWorkflows(ctx context.Context, workspaceID domain.Workspac
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return nil, false, "", err
 	}
-	return m.Store.ListWorkflows(ctx, workspaceID, request)
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	// Visibility must precede pagination. Filtering one store page could return
+	// an empty page with `more=true`, or under-fill every page when another
+	// developer owns drafts between visible workflows. Scan bounded raw pages
+	// until we have one visible look-ahead item or exhaust the workspace.
+	visible := make([]domain.WorkflowDefinition, 0, request.Limit+1)
+	cursor := request.Cursor
+	batchSize := max(100, request.Limit+1)
+	for len(visible) <= request.Limit {
+		values, more, next, err := m.Store.ListWorkflows(ctx, workspaceID, domain.PageRequest{Limit: batchSize, Cursor: cursor})
+		if err != nil {
+			return nil, false, "", err
+		}
+		for _, value := range values {
+			if value.OwnerID == actor || value.Status == domain.WorkflowPublished {
+				visible = append(visible, value)
+				if len(visible) > request.Limit {
+					break
+				}
+			}
+		}
+		if len(visible) > request.Limit || !more {
+			break
+		}
+		cursor = next
+	}
+	more := len(visible) > request.Limit
+	if !more {
+		return visible, false, "", nil
+	}
+	visible = visible[:request.Limit]
+	next, err := domain.NewListCursor(string(visible[len(visible)-1].ID))
+	if err != nil {
+		return nil, false, "", err
+	}
+	return visible, true, next, nil
+}
+
+func (m Messages) GetWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowDefinition, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	value, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	if value.OwnerID != actor && value.Status != domain.WorkflowPublished {
+		return domain.WorkflowDefinition{}, store.ErrNotFound
+	}
+	return value, nil
 }
 
 func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, value domain.WorkflowTrigger, expectedVersion uint64) (domain.WorkflowTrigger, error) {
@@ -235,6 +309,9 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 		if getErr != nil {
 			return domain.WorkflowTrigger{}, getErr
 		}
+		if current.WorkflowID != value.WorkflowID || current.AppID != workflow.AppID {
+			return domain.WorkflowTrigger{}, store.ErrNotFound
+		}
 		value.CreatedAt = current.CreatedAt
 		value.Version = expectedVersion + 1
 	}
@@ -250,6 +327,27 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 		return domain.WorkflowTrigger{}, err
 	}
 	return value, nil
+}
+
+func (m Messages) ListWorkflowTriggers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowTrigger, error) {
+	workflow, err := m.GetWorkflow(ctx, workspaceID, actor, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	values, err := m.Store.ListWorkflowTriggers(ctx, workspaceID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if workflow.OwnerID == actor {
+		return values, nil
+	}
+	visible := values[:0]
+	for _, value := range values {
+		if value.Enabled {
+			visible = append(visible, value)
+		}
+	}
+	return visible, nil
 }
 
 func functionInputs(step workflowFunctionDefinition, runInputs string) (string, error) {
@@ -298,8 +396,28 @@ func (m Messages) workflowFunctionSnapshot(ctx context.Context, appID domain.App
 		ID: workflowFunctionID(appID, callbackID), CallbackID: callbackID, Title: function.Title,
 		Description: function.Description, Type: "app", InputParameters: function.InputParameters,
 		OutputParameters: function.OutputParameters, AppID: appID, DateCreated: app.CreatedAt.Unix(),
-		DateUpdated: app.UpdatedAt.Unix(), DateDeleted: 0,
+		DateUpdated: app.UpdatedAt.Unix(), DateDeleted: 0, Runtime: parsed.FunctionRuntime,
 	}, nil
+}
+
+func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.AppID, steps []workflowFunctionDefinition) error {
+	for _, step := range steps {
+		stepAppID := step.AppID
+		if stepAppID == "" {
+			stepAppID = appID
+		}
+		// Cross-app/built-in/connector steps need their own availability and
+		// authorization model. Accepting them as ordinary callbacks would defer
+		// a guaranteed failure until after a user publishes the workflow.
+		if stepAppID != appID {
+			return ErrInvalidWorkflowStep
+		}
+		function, err := m.workflowFunctionSnapshot(ctx, stepAppID, step.FunctionID)
+		if err != nil || function.Runtime != "remote" {
+			return ErrInvalidWorkflowStep
+		}
+	}
+	return nil
 }
 
 func (m Messages) newFunctionExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time) (domain.WorkflowStep, events.Event, error) {
@@ -310,6 +428,9 @@ func (m Messages) newFunctionExecution(ctx context.Context, run domain.WorkflowR
 	function, err := m.workflowFunctionSnapshot(ctx, appID, step.FunctionID)
 	if err != nil {
 		return domain.WorkflowStep{}, events.Event{}, err
+	}
+	if function.Runtime != "remote" {
+		return domain.WorkflowStep{}, events.Event{}, ErrInvalidWorkflowStep
 	}
 	executionID, err := domain.NewFunctionExecutionID()
 	if err != nil {
@@ -472,6 +593,24 @@ func (m Messages) canRunWorkflowTrigger(ctx context.Context, workflow domain.Wor
 	}
 }
 
+func (m Messages) workflowStepsAtVersion(ctx context.Context, workflow domain.WorkflowDefinition, version uint64) ([]workflowFunctionDefinition, error) {
+	if workflow.Version == version {
+		_, steps, err := normalizeWorkflowSteps(workflow.Steps)
+		return steps, err
+	}
+	revisions, err := m.Store.ListWorkflowRevisions(ctx, workflow.WorkspaceID, workflow.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, revision := range revisions {
+		if revision.Version == version {
+			_, steps, err := normalizeWorkflowSteps(revision.Steps)
+			return steps, err
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (m Messages) CompleteFunction(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, executionID domain.WorkflowStepID, outputs, failure string) error {
 	execution, err := m.Store.GetWorkflowStep(ctx, workspaceID, executionID)
 	if err != nil {
@@ -494,7 +633,7 @@ func (m Messages) CompleteFunction(ctx context.Context, workspaceID domain.Works
 	if err != nil {
 		return err
 	}
-	_, steps, err := normalizeWorkflowSteps(workflow.Steps)
+	steps, err := m.workflowStepsAtVersion(ctx, workflow, run.WorkflowVersion)
 	if err != nil {
 		return err
 	}
@@ -572,4 +711,343 @@ func (m Messages) GetWorkflowRun(ctx context.Context, workspaceID domain.Workspa
 		}
 	}
 	return run, nil
+}
+
+func (m Messages) resolveWorkflowFunction(ctx context.Context, appID domain.AppID, functionID, callbackID string) (slackFunctionSnapshot, error) {
+	functionID = strings.TrimSpace(functionID)
+	callbackID = strings.TrimSpace(callbackID)
+	if callbackID != "" {
+		function, err := m.workflowFunctionSnapshot(ctx, appID, callbackID)
+		if err != nil {
+			return slackFunctionSnapshot{}, err
+		}
+		if functionID != "" && function.ID != functionID {
+			return slackFunctionSnapshot{}, store.ErrNotFound
+		}
+		return function, nil
+	}
+	app, revision, err := m.Store.GetApp(ctx, appID)
+	if err != nil {
+		return slackFunctionSnapshot{}, err
+	}
+	parsed, problems := appmanifest.Parse(revision.Manifest)
+	if len(problems) != 0 {
+		return slackFunctionSnapshot{}, store.ErrConflict
+	}
+	for candidate := range parsed.Functions {
+		if workflowFunctionID(app.ID, candidate) == functionID {
+			return m.workflowFunctionSnapshot(ctx, appID, candidate)
+		}
+	}
+	return slackFunctionSnapshot{}, store.ErrNotFound
+}
+
+func (m Messages) GetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, functionID, callbackID string) (domain.AutomationPermission, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	function, err := m.resolveWorkflowFunction(ctx, appID, functionID, callbackID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	value, err := m.Store.GetAutomationPermission(ctx, workspaceID, "function", function.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		value = domain.AutomationPermission{
+			ResourceType: "function", ResourceID: function.ID, WorkspaceID: workspaceID, AppID: appID,
+			PermissionType: "app_collaborators",
+		}
+		return m.withAppCollaboratorOwner(ctx, value)
+	}
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if value.AppID != appID {
+		return domain.AutomationPermission{}, ErrFunctionAccessDenied
+	}
+	return m.withAppCollaboratorOwner(ctx, value)
+}
+
+func (m Messages) SetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, functionID, callbackID string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	function, err := m.resolveWorkflowFunction(ctx, appID, functionID, callbackID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities", "system"}, value.PermissionType) {
+		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
+	}
+	value.ResourceType = "function"
+	value.ResourceID = function.ID
+	value.WorkspaceID = workspaceID
+	value.AppID = appID
+	value.UpdatedAt = time.Now().UTC()
+	if err := m.validateAutomationEntities(ctx, &value); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("function.permission_set",
+		events.String("target_app_id", string(appID)),
+		events.String("function_id", function.ID),
+		events.String("permission_type", value.PermissionType),
+	), value.UpdatedAt)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := m.Store.SetAutomationPermission(ctx, value, event); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return m.withAppCollaboratorOwner(ctx, value)
+}
+
+func (m Messages) GetTriggerPermission(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID domain.WorkflowTriggerID) (domain.AutomationPermission, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	trigger, err := m.Store.GetWorkflowTrigger(ctx, workspaceID, triggerID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if trigger.AppID != appID {
+		return domain.AutomationPermission{}, ErrFunctionAccessDenied
+	}
+	value, err := m.Store.GetAutomationPermission(ctx, workspaceID, "trigger", string(triggerID))
+	if errors.Is(err, store.ErrNotFound) {
+		value = domain.AutomationPermission{
+			ResourceType: "trigger", ResourceID: string(triggerID), WorkspaceID: workspaceID, AppID: appID,
+			PermissionType: "app_collaborators",
+		}
+		return m.withAppCollaboratorOwner(ctx, value)
+	}
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if value.AppID != appID {
+		return domain.AutomationPermission{}, ErrFunctionAccessDenied
+	}
+	return m.withAppCollaboratorOwner(ctx, value)
+}
+
+func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID domain.WorkflowTriggerID, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	trigger, err := m.Store.GetWorkflowTrigger(ctx, workspaceID, triggerID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if trigger.AppID != appID {
+		return domain.AutomationPermission{}, ErrFunctionAccessDenied
+	}
+	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, value.PermissionType) {
+		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
+	}
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	value.ResourceType = "trigger"
+	value.ResourceID = string(triggerID)
+	value.WorkspaceID = workspaceID
+	value.AppID = appID
+	value.UpdatedAt = time.Now().UTC()
+	if err := m.validateAutomationEntities(ctx, &value); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.trigger_permission_set",
+		events.String("target_app_id", string(appID)),
+		events.String("trigger_id", string(triggerID)),
+		events.String("permission_type", value.PermissionType),
+	), value.UpdatedAt)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := m.Store.SetAutomationPermission(ctx, value, event); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return m.withAppCollaboratorOwner(ctx, value)
+}
+
+// withAppCollaboratorOwner projects the collaborator identity Slack includes
+// in permission responses without persisting it as named-entity state. The
+// current developer-app model has one collaborator (the owner); when that
+// model grows, this one projection point can return the full collaborator set.
+func (m Messages) withAppCollaboratorOwner(ctx context.Context, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	if value.PermissionType != "app_collaborators" {
+		return value, nil
+	}
+	app, _, err := m.Store.GetApp(ctx, value.AppID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if app.DevelopmentWorkspaceID != value.WorkspaceID {
+		return domain.AutomationPermission{}, store.ErrNotFound
+	}
+	value.UserIDs = []domain.UserID{app.OwnerID}
+	return value, nil
+}
+
+func (m Messages) validateAutomationEntities(ctx context.Context, value *domain.AutomationPermission) error {
+	if value.PermissionType != "named_entities" {
+		value.UserIDs = nil
+		value.ChannelIDs = nil
+		value.TeamIDs = nil
+		value.OrgIDs = nil
+		return nil
+	}
+	if len(value.UserIDs)+len(value.ChannelIDs)+len(value.TeamIDs)+len(value.OrgIDs) == 0 {
+		return ErrAutomationEntitiesEmpty
+	}
+	for _, userID := range value.UserIDs {
+		user, err := m.Store.GetUser(ctx, userID)
+		if err != nil || user.WorkspaceID != value.WorkspaceID {
+			return ErrAutomationUserNotFound
+		}
+	}
+	for _, channelID := range value.ChannelIDs {
+		channel, err := m.Store.GetConversation(ctx, channelID)
+		if err != nil || channel.WorkspaceID != value.WorkspaceID {
+			return ErrAutomationChannelNotFound
+		}
+	}
+	for _, teamID := range value.TeamIDs {
+		if teamID != value.WorkspaceID {
+			return ErrAutomationTeamNotFound
+		}
+	}
+	for _, orgID := range value.OrgIDs {
+		if strings.TrimSpace(orgID) == "" {
+			return ErrAutomationOrgNotFound
+		}
+	}
+	return nil
+}
+
+func (m Messages) SetFeaturedWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, triggerIDs []domain.WorkflowTriggerID) error {
+	if len(triggerIDs) > 15 {
+		return ErrInvalidWorkflowStep
+	}
+	if err := m.authorizeConversation(ctx, workspaceID, actor, conversationID); err != nil {
+		return err
+	}
+	values := make([]domain.FeaturedWorkflow, len(triggerIDs))
+	for index, triggerID := range triggerIDs {
+		trigger, err := m.Store.GetWorkflowTrigger(ctx, workspaceID, triggerID)
+		if err != nil {
+			return err
+		}
+		if trigger.Type != "link" {
+			return ErrInvalidWorkflowStep
+		}
+		workflow, err := m.Store.GetWorkflow(ctx, workspaceID, trigger.WorkflowID)
+		if err != nil {
+			return err
+		}
+		allowed, err := m.canRunWorkflowTrigger(ctx, workflow, trigger, actor, conversationID)
+		if err != nil {
+			return err
+		}
+		if !allowed || workflow.OwnerID != actor {
+			return ErrWorkflowPermissionDenied
+		}
+		values[index] = domain.FeaturedWorkflow{
+			WorkspaceID: workspaceID, ConversationID: conversationID, TriggerID: triggerID,
+			Title: trigger.Title, Position: index,
+		}
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.featured_set",
+		events.String("channel_id", string(conversationID)),
+		events.Int("trigger_count", int64(len(values))),
+	), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.SetFeaturedWorkflows(ctx, workspaceID, conversationID, values, event)
+}
+
+func (m Messages) ListFeaturedWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationIDs []domain.ConversationID) ([]domain.FeaturedWorkflow, error) {
+	if len(conversationIDs) == 0 {
+		return nil, ErrInvalidWorkflowStep
+	}
+	for _, conversationID := range conversationIDs {
+		if err := m.authorizeConversation(ctx, workspaceID, actor, conversationID); err != nil {
+			return nil, err
+		}
+	}
+	return m.Store.ListFeaturedWorkflows(ctx, workspaceID, conversationIDs)
+}
+
+func (m Messages) ListFunctionWorkflowSteps(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, functionID string, workflowID domain.WorkflowID, workflowReference string, workflowAppID domain.AppID) ([]domain.WorkflowStepVersion, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(functionID) == "" {
+		return nil, ErrInvalidWorkflowStep
+	}
+	function, err := m.resolveWorkflowFunction(ctx, appID, functionID, "")
+	if err != nil || function.ID != functionID {
+		return nil, ErrWorkflowFunctionNotFound
+	}
+	var workflows []domain.WorkflowDefinition
+	if workflowID != "" {
+		workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+		if err != nil {
+			return nil, err
+		}
+		workflows = []domain.WorkflowDefinition{workflow}
+	} else {
+		callbackID := strings.TrimPrefix(strings.TrimSpace(workflowReference), "#/workflows/")
+		if callbackID == "" || workflowAppID == "" {
+			return nil, ErrInvalidWorkflowStep
+		}
+		var cursor domain.Cursor
+		for {
+			page, more, next, err := m.Store.ListWorkflows(ctx, workspaceID, domain.PageRequest{Limit: 100, Cursor: cursor})
+			if err != nil {
+				return nil, err
+			}
+			for _, workflow := range page {
+				if workflow.AppID == workflowAppID && workflow.CallbackID == callbackID {
+					workflows = append(workflows, workflow)
+				}
+			}
+			if !more {
+				break
+			}
+			cursor = next
+		}
+		if len(workflows) == 0 {
+			return nil, store.ErrNotFound
+		}
+	}
+	values := make([]domain.WorkflowStepVersion, 0)
+	for _, workflow := range workflows {
+		revisions, err := m.Store.ListWorkflowRevisions(ctx, workspaceID, workflow.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, revision := range revisions {
+			_, steps, err := normalizeWorkflowSteps(revision.Steps)
+			if err != nil {
+				return nil, err
+			}
+			for index, step := range steps {
+				stepAppID := step.AppID
+				if stepAppID == "" {
+					stepAppID = workflow.AppID
+				}
+				if workflowFunctionID(stepAppID, step.FunctionID) != functionID {
+					continue
+				}
+				title := step.Title
+				if title == "" {
+					if function, err := m.workflowFunctionSnapshot(ctx, stepAppID, step.FunctionID); err == nil {
+						title = function.Title
+					}
+				}
+				values = append(values, domain.WorkflowStepVersion{
+					Title: title, WorkflowID: workflow.ID, StepID: strconv.Itoa(index), IsDeleted: false,
+					WorkflowVersionCreated: strconv.FormatInt(revision.CreatedAt.UnixMicro(), 10),
+				})
+			}
+		}
+	}
+	return values, nil
 }

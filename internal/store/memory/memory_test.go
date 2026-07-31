@@ -72,9 +72,27 @@ func TestWorkflowAutomationLifecycleIsAtomicAndVersioned(t *testing.T) {
 	if err := s.UpdateWorkflow(ctx, workflow, 1, events.Event{ID: "E3", WorkspaceID: "T1", Topic: "workflow.updated", CreatedAt: workflow.UpdatedAt}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale update error=%v", err)
 	}
+	revisions, err := s.ListWorkflowRevisions(ctx, "T1", "Wf1")
+	if err != nil || len(revisions) != 2 || revisions[0].Version != 1 || revisions[1].Version != 2 {
+		t.Fatalf("revisions=%+v err=%v", revisions, err)
+	}
 	trigger := domain.WorkflowTrigger{ID: "Ft1", WorkflowID: "Wf1", WorkspaceID: "T1", AppID: "A1", Title: "Run triage", Type: "link", Config: `{}`, Enabled: true, CreatedAt: now, UpdatedAt: now}
 	if err := s.SetWorkflowTrigger(ctx, trigger, 0, events.Event{ID: "E4", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
 		t.Fatal(err)
+	}
+	otherWorkflow := workflow
+	otherWorkflow.ID = "Wf2"
+	otherWorkflow.Version = 1
+	otherWorkflow.Status = domain.WorkflowDraft
+	otherWorkflow.PublishedVersion = 0
+	if err := s.CreateWorkflow(ctx, otherWorkflow, events.Event{ID: "E4b", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	movedTrigger := trigger
+	movedTrigger.WorkflowID = otherWorkflow.ID
+	movedTrigger.UpdatedAt = now.Add(2 * time.Second)
+	if err := s.SetWorkflowTrigger(ctx, movedTrigger, 1, events.Event{ID: "E4c", WorkspaceID: "T1", Topic: "workflow.trigger_updated", CreatedAt: movedTrigger.UpdatedAt}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("trigger moved across workflows: %v", err)
 	}
 	permission := domain.AutomationPermission{ResourceType: "trigger", ResourceID: "Ft1", WorkspaceID: "T1", AppID: "A1", PermissionType: "named_entities", UserIDs: []domain.UserID{"U1"}, UpdatedAt: now}
 	if err := s.SetAutomationPermission(ctx, permission, events.Event{ID: "E5", WorkspaceID: "T1", Topic: "workflow.permission_set", CreatedAt: now}); err != nil {

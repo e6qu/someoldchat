@@ -218,14 +218,14 @@ In progress. The 2026-07-30 post-merge audit reconciled the ledger with Slack's
 current method catalog rather than treating every historical ledger entry as a
 current method:
 
-- Slack's current reference contains 310 methods. SameOldChat registers 223 of
-  them and leaves 87 unimplemented.
+- Slack's current reference contains 310 methods. SameOldChat registers 236 of
+  them and leaves 74 unimplemented.
 - The 320-entry ledger also retains ten legacy methods for clients that still
   call them. Those methods are useful compatibility inventory, but they are not
   part of the current Slack denominator.
 - After correcting overstated method claims and separating deprecated
   `reminders.*` from first-party Later, the ledger records 199 current methods
-  as `behavior-compatible`, 21 as `sdk-compatible`, two as
+  as `behavior-compatible`, 35 as `sdk-compatible`, two as
   `schema-compatible`, and none as
   `verified-against-slack`. A passing route, local test, or SDK parse is not
   itself live Slack equivalence.
@@ -233,9 +233,9 @@ current method:
   explicit, reviewed downgrade backed by a concrete deviation; otherwise a
   false compatibility claim becomes permanent.
 
-The remaining 87 current methods break down as 50 `admin.*`, five `apps.*`,
-five `assistant.*`, nine `conversations.*`, six `functions.*`, three `team.*`,
-one `users.*`, and eight `workflows.*`. This sweep added datastore query/count,
+The remaining 74 current methods break down as 50 `admin.*`, five `apps.*`,
+five `assistant.*`, nine `conversations.*`, one `functions.*`, three `team.*`,
+and one `users.*`. This sweep added datastore query/count,
 conversation-canvas creation, `auth.teams.list`, `rtm.start`, and
 `team.preferences.list`; each addition records the Slack variants it does not
 yet claim rather than treating a happy response as full compatibility.
@@ -356,7 +356,7 @@ differential results remain named gaps.
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 102 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 36 Playwright scenarios cite 76 IDs. `make journey-check` rejects
+and 37 Playwright scenarios cite 78 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -367,10 +367,11 @@ SDK evidence is now measured at the HTTP boundary too. The pinned official
 Node, Python, and Java clients record every `/api/{method}` path they actually
 request, and the Deno runtime records its two verified function-completion
 requests at its own receiver. `make sdk-qualification` fails if any operation
-claimed at `sdk-compatible` or above is absent. The current result is 231 of
-231 claimed methods observed (221 current plus ten retained legacy methods)
-across 233 distinct SDK-observed paths;
-this proves SDK serialization/decoding only, not live Slack equivalence.
+claimed at `sdk-compatible` or above is absent. The workflow pass adds direct
+Node and Python observations for 13 current function/workflow methods; the
+network-enabled qualification result remains a required CI gate rather than a
+locally inferred count. This proves SDK serialization/decoding only, not live
+Slack equivalence.
 
 Current app-execution work replaces installed-bot-only event filtering with
 bot/user authorization perspectives and immutable callback snapshots. Message
@@ -385,11 +386,42 @@ subscription on Events API and RTM as Slack documents. File-unshare mutation
 production, retained attempt/authorization history, and controlled live-Slack
 differential outcomes remain the next event-runtime gaps.
 
+The current workflow-execution pass replaces the decorative workflow target
+with one durable cross-layer slice. A developer-app owner can create a draft
+from owned remote functions, configure ordered steps and an input schema,
+publish or unpublish, create and enable or disable a link/shortcut trigger,
+start one idempotent `Wx` run, and reopen its exact running or terminal state.
+Definitions, revisions, triggers, runs, function completion, distribution and
+trigger permissions, featured workflows, and workflow-step listing share the
+local/generated-gRPC seam and memory/portable-SQL stores. The Slack HTTP
+methods newly qualify through the pinned official Node and Python SDKs, while
+the three-engine browser journey uses the real app-management, OAuth, builder,
+trigger, and run surfaces. Invalid permission classes now retain Slack's
+`invalid_permission_type` error instead of being flattened into authorization
+or generic argument errors. App-owned `function_executed` records now translate
+to the current Slack callback shape and bypass manifest subscription filtering,
+as Slack's no-scope automatic-dispatch contract requires, on both HTTP Events
+API and Socket Mode.
+
+The same pass keeps the remaining boundary explicit. Workflow managers,
+find/use/copy permissions, plan and admin policy, built-in and connector
+functions, typed variable mapping, forms, buttons, branches, icons,
+copy/delete and drag reordering, trigger-change rules, scheduled/webhook/list/
+message/join/reaction trigger workers, activity dashboards, asynchronous CSV
+exports, staged editing while an older published revision remains live,
+cancellation of already-running executions on unpublish, multi-org permission
+semantics, typed workflow/function input and output enforcement, exact rate
+limits, and controlled live-Slack outcomes remain.
+`function_executed.bot_access_token` is also
+unimplemented because installation credentials are deliberately stored only
+as hashes; completing it requires a secure retrievable execution-credential
+design, not a fabricated token.
+
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 136 representative exact assertions
-explicitly citing 51 of the 102 journey IDs across every journey domain.
-`make journey-check` prints the other 51 as upstream-text evidence
+developer pages and currently checks 155 representative exact assertions
+explicitly citing 53 of the 102 journey IDs across every journey domain.
+`make journey-check` prints the other 49 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and
@@ -488,8 +520,8 @@ Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for
 that per-method record. The compatibility report now makes the missing records
-explicit: only 26 of the 221 current methods claimed at `sdk-compatible` or
-above carry method-level evidence in the ledger; 195 claims still require
+explicit: only 41 of the 234 current methods claimed at `sdk-compatible` or
+above carry method-level evidence in the ledger; 193 claims still require
 individual review and evidence even though the official SDK aggregate observes
 their request paths.
 

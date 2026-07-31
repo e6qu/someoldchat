@@ -2218,6 +2218,169 @@ func (r Remote) WorkflowUpdateStep(ctx context.Context, workspaceID domain.Works
 	return nil
 }
 
+func optionalUnixNano(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UTC().UnixNano()
+}
+
+func optionalTimeFromUnixNano(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, value).UTC()
+}
+
+func encodeWorkflowDefinition(value domain.WorkflowDefinition) *chatv1.WorkflowDefinition {
+	return &chatv1.WorkflowDefinition{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), AppId: string(value.AppID),
+		OwnerId: string(value.OwnerID), CallbackId: value.CallbackID, Title: value.Title,
+		Description: value.Description, InputSchema: value.InputSchema, Steps: value.Steps,
+		Status: string(value.Status), Version: value.Version, PublishedVersion: value.PublishedVersion,
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeWorkflowDefinition(value *chatv1.WorkflowDefinition) domain.WorkflowDefinition {
+	if value == nil {
+		return domain.WorkflowDefinition{}
+	}
+	return domain.WorkflowDefinition{
+		ID: domain.WorkflowID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		AppID: domain.AppID(value.GetAppId()), OwnerID: domain.UserID(value.GetOwnerId()),
+		CallbackID: value.GetCallbackId(), Title: value.GetTitle(), Description: value.GetDescription(),
+		InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
+		Version: value.GetVersion(), PublishedVersion: value.GetPublishedVersion(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
+	}
+}
+
+func encodeWorkflowTrigger(value domain.WorkflowTrigger) *chatv1.WorkflowTrigger {
+	return &chatv1.WorkflowTrigger{
+		Id: string(value.ID), WorkflowId: string(value.WorkflowID), WorkspaceId: string(value.WorkspaceID),
+		AppId: string(value.AppID), Title: value.Title, Type: value.Type, Config: value.Config,
+		Enabled: value.Enabled, Version: value.Version,
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeWorkflowTrigger(value *chatv1.WorkflowTrigger) domain.WorkflowTrigger {
+	if value == nil {
+		return domain.WorkflowTrigger{}
+	}
+	return domain.WorkflowTrigger{
+		ID: domain.WorkflowTriggerID(value.GetId()), WorkflowID: domain.WorkflowID(value.GetWorkflowId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
+		Title: value.GetTitle(), Type: value.GetType(), Config: value.GetConfig(),
+		Enabled: value.GetEnabled(), Version: value.GetVersion(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
+	}
+}
+
+func encodeWorkflowRun(value domain.WorkflowRun) *chatv1.WorkflowRun {
+	return &chatv1.WorkflowRun{
+		Id: string(value.ID), WorkflowId: string(value.WorkflowID), WorkflowVersion: value.WorkflowVersion,
+		TriggerId: string(value.TriggerID), WorkspaceId: string(value.WorkspaceID), AppId: string(value.AppID),
+		ActorId: string(value.ActorID), ChannelId: string(value.ConversationID), Status: string(value.Status),
+		Inputs: value.Inputs, Outputs: value.Outputs, Error: value.Error, CurrentStep: int32(value.CurrentStep),
+		IdempotencyKey: value.IdempotencyKey, CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
+		UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt), CompletedAtUnixNano: optionalUnixNano(value.CompletedAt),
+	}
+}
+
+func decodeWorkflowRun(value *chatv1.WorkflowRun) domain.WorkflowRun {
+	if value == nil {
+		return domain.WorkflowRun{}
+	}
+	return domain.WorkflowRun{
+		ID: domain.WorkflowRunID(value.GetId()), WorkflowID: domain.WorkflowID(value.GetWorkflowId()),
+		WorkflowVersion: value.GetWorkflowVersion(), TriggerID: domain.WorkflowTriggerID(value.GetTriggerId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
+		ActorID: domain.UserID(value.GetActorId()), ConversationID: domain.ConversationID(value.GetChannelId()),
+		Status: domain.WorkflowRunStatus(value.GetStatus()), Inputs: value.GetInputs(), Outputs: value.GetOutputs(),
+		Error: value.GetError(), CurrentStep: int(value.GetCurrentStep()), IdempotencyKey: value.GetIdempotencyKey(),
+		CreatedAt:   optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+		UpdatedAt:   optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
+		CompletedAt: optionalTimeFromUnixNano(value.GetCompletedAtUnixNano()),
+	}
+}
+
+func (r Remote) CreateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowDefinition) (domain.WorkflowDefinition, error) {
+	out, err := r.workflows.CreateWorkflow(ctx, &chatv1.WorkflowMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Workflow: encodeWorkflowDefinition(value),
+	})
+	return decodeWorkflowDefinition(out), err
+}
+
+func (r Remote) GetWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowDefinition, error) {
+	out, err := r.workflows.GetWorkflow(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	return decodeWorkflowDefinition(out), err
+}
+
+func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowDefinition, expectedVersion uint64, publish bool) (domain.WorkflowDefinition, error) {
+	out, err := r.workflows.UpdateWorkflow(ctx, &chatv1.WorkflowMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Workflow: encodeWorkflowDefinition(value),
+		ExpectedVersion: expectedVersion, Publish: publish,
+	})
+	return decodeWorkflowDefinition(out), err
+}
+
+func (r Remote) ListWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+	out, err := r.workflows.ListWorkflows(ctx, &chatv1.WorkflowListRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit),
+		Cursor: string(request.Cursor), Descending: request.Descending,
+	})
+	if err != nil {
+		return nil, false, "", err
+	}
+	values := make([]domain.WorkflowDefinition, 0, len(out.GetWorkflows()))
+	for _, value := range out.GetWorkflows() {
+		values = append(values, decodeWorkflowDefinition(value))
+	}
+	return values, out.GetHasMore(), domain.Cursor(out.GetNextCursor()), nil
+}
+
+func (r Remote) SetWorkflowTrigger(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowTrigger, expectedVersion uint64) (domain.WorkflowTrigger, error) {
+	out, err := r.workflows.SetWorkflowTrigger(ctx, &chatv1.WorkflowTriggerMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Trigger: encodeWorkflowTrigger(value), ExpectedVersion: expectedVersion,
+	})
+	return decodeWorkflowTrigger(out), err
+}
+
+func (r Remote) ListWorkflowTriggers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowTrigger, error) {
+	out, err := r.workflows.ListWorkflowTriggers(ctx, &chatv1.WorkflowTriggerListRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.WorkflowTrigger, 0, len(out.GetTriggers()))
+	for _, value := range out.GetTriggers() {
+		values = append(values, decodeWorkflowTrigger(value))
+	}
+	return values, nil
+}
+
+func (r Remote) RunWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID domain.WorkflowTriggerID, conversationID domain.ConversationID, inputs, idempotencyKey string) (domain.WorkflowRun, error) {
+	out, err := r.workflows.RunWorkflow(ctx, &chatv1.WorkflowRunRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: string(triggerID),
+		ChannelId: string(conversationID), Inputs: inputs, IdempotencyKey: idempotencyKey,
+	})
+	return decodeWorkflowRun(out), err
+}
+
+func (r Remote) GetWorkflowRun(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, runID domain.WorkflowRunID) (domain.WorkflowRun, error) {
+	out, err := r.workflows.GetWorkflowRun(ctx, &chatv1.WorkflowRunGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowRunId: string(runID),
+	})
+	return decodeWorkflowRun(out), err
+}
+
 func (r Remote) CompleteFunction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, executionID domain.WorkflowStepID, outputs, failure string) error {
 	out, err := r.workflows.CompleteFunction(ctx, &chatv1.FunctionCompletionRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
@@ -2227,6 +2390,147 @@ func (r Remote) CompleteFunction(ctx context.Context, workspaceID domain.Workspa
 		return err
 	}
 	return requireAcknowledgement(out.GetOk(), "complete function")
+}
+
+func encodeAutomationPermission(value domain.AutomationPermission) *chatv1.AutomationPermission {
+	return &chatv1.AutomationPermission{
+		ResourceType: value.ResourceType, ResourceId: value.ResourceID, WorkspaceId: string(value.WorkspaceID),
+		AppId: string(value.AppID), PermissionType: value.PermissionType,
+		UserIds: userStrings(value.UserIDs), ChannelIds: conversationStrings(value.ChannelIDs),
+		TeamIds: workspaceStrings(value.TeamIDs), OrgIds: append([]string(nil), value.OrgIDs...),
+		UpdatedAtUnixNano: value.UpdatedAt.UnixNano(),
+	}
+}
+
+func workspaceStrings(values []domain.WorkspaceID) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = string(value)
+	}
+	return result
+}
+
+func decodeAutomationPermission(value *chatv1.AutomationPermission) domain.AutomationPermission {
+	if value == nil {
+		return domain.AutomationPermission{}
+	}
+	result := domain.AutomationPermission{
+		ResourceType: value.GetResourceType(), ResourceID: value.GetResourceId(),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
+		PermissionType: value.GetPermissionType(), OrgIDs: append([]string(nil), value.GetOrgIds()...),
+	}
+	for _, id := range value.GetUserIds() {
+		result.UserIDs = append(result.UserIDs, domain.UserID(id))
+	}
+	for _, id := range value.GetChannelIds() {
+		result.ChannelIDs = append(result.ChannelIDs, domain.ConversationID(id))
+	}
+	for _, id := range value.GetTeamIds() {
+		result.TeamIDs = append(result.TeamIDs, domain.WorkspaceID(id))
+	}
+	if value.GetUpdatedAtUnixNano() != 0 {
+		result.UpdatedAt = time.Unix(0, value.GetUpdatedAtUnixNano()).UTC()
+	}
+	return result
+}
+
+func functionPermissionRequest(workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, functionID, callbackID string, permission domain.AutomationPermission) *chatv1.FunctionPermissionRequest {
+	return &chatv1.FunctionPermissionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		FunctionId: functionID, FunctionCallbackId: callbackID, Permission: encodeAutomationPermission(permission),
+	}
+}
+
+func (r Remote) GetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, functionID, callbackID string) (domain.AutomationPermission, error) {
+	out, err := r.workflows.GetFunctionPermission(ctx, functionPermissionRequest(workspaceID, userID, appID, functionID, callbackID, domain.AutomationPermission{}))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) SetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, functionID, callbackID string, permission domain.AutomationPermission) (domain.AutomationPermission, error) {
+	out, err := r.workflows.SetFunctionPermission(ctx, functionPermissionRequest(workspaceID, userID, appID, functionID, callbackID, permission))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func triggerPermissionRequest(workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID domain.WorkflowTriggerID, permission domain.AutomationPermission) *chatv1.TriggerPermissionRequest {
+	return &chatv1.TriggerPermissionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		TriggerId: string(triggerID), Permission: encodeAutomationPermission(permission),
+	}
+}
+
+func (r Remote) GetTriggerPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID domain.WorkflowTriggerID) (domain.AutomationPermission, error) {
+	out, err := r.workflows.GetTriggerPermission(ctx, triggerPermissionRequest(workspaceID, userID, appID, triggerID, domain.AutomationPermission{}))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) SetTriggerPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID domain.WorkflowTriggerID, permission domain.AutomationPermission) (domain.AutomationPermission, error) {
+	out, err := r.workflows.SetTriggerPermission(ctx, triggerPermissionRequest(workspaceID, userID, appID, triggerID, permission))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) SetFeaturedWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, triggerIDs []domain.WorkflowTriggerID) error {
+	ids := make([]string, len(triggerIDs))
+	for index, id := range triggerIDs {
+		ids[index] = string(id)
+	}
+	out, err := r.workflows.SetFeaturedWorkflows(ctx, &chatv1.FeaturedWorkflowsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(conversationID), TriggerIds: ids,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "set featured workflows")
+}
+
+func (r Remote) ListFeaturedWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationIDs []domain.ConversationID) ([]domain.FeaturedWorkflow, error) {
+	ids := make([]string, len(conversationIDs))
+	for index, id := range conversationIDs {
+		ids[index] = string(id)
+	}
+	out, err := r.workflows.ListFeaturedWorkflows(ctx, &chatv1.FeaturedWorkflowsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ChannelIds: ids,
+	})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.FeaturedWorkflow, 0, len(out.GetWorkflows()))
+	for _, value := range out.GetWorkflows() {
+		values = append(values, domain.FeaturedWorkflow{
+			WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ConversationID: domain.ConversationID(value.GetChannelId()),
+			TriggerID: domain.WorkflowTriggerID(value.GetTriggerId()), Title: value.GetTitle(), Position: int(value.GetPosition()),
+		})
+	}
+	return values, nil
+}
+
+func (r Remote) ListFunctionWorkflowSteps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, functionID string, workflowID domain.WorkflowID, workflowReference string, workflowAppID domain.AppID) ([]domain.WorkflowStepVersion, error) {
+	out, err := r.workflows.ListFunctionWorkflowSteps(ctx, &chatv1.FunctionWorkflowStepsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), FunctionId: functionID,
+		WorkflowId: string(workflowID), Workflow: workflowReference, WorkflowAppId: string(workflowAppID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.WorkflowStepVersion, 0, len(out.GetStepsVersions()))
+	for _, value := range out.GetStepsVersions() {
+		values = append(values, domain.WorkflowStepVersion{
+			Title: value.GetTitle(), WorkflowID: domain.WorkflowID(value.GetWorkflowId()), StepID: value.GetStepId(),
+			IsDeleted: value.GetIsDeleted(), WorkflowVersionCreated: value.GetWorkflowVersionCreated(),
+		})
+	}
+	return values, nil
 }
 
 func (r Remote) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string) error {
@@ -4475,6 +4779,99 @@ func (s *Server) UpdateStep(ctx context.Context, input *chatv1.WorkflowStepUpdat
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
 }
 
+func (s *Server) CreateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {
+	value, err := s.implementation.CreateWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), decodeWorkflowDefinition(input.GetWorkflow()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) GetWorkflow(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowDefinition, error) {
+	value, err := s.implementation.GetWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {
+	value, err := s.implementation.UpdateWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeWorkflowDefinition(input.GetWorkflow()), input.GetExpectedVersion(), input.GetPublish(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) ListWorkflows(ctx context.Context, input *chatv1.WorkflowListRequest) (*chatv1.WorkflowListResponse, error) {
+	values, more, next, err := s.implementation.ListWorkflows(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.PageRequest{Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor()), Descending: input.GetDescending()},
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.WorkflowListResponse{HasMore: more, NextCursor: string(next), Workflows: make([]*chatv1.WorkflowDefinition, 0, len(values))}
+	for _, value := range values {
+		out.Workflows = append(out.Workflows, encodeWorkflowDefinition(value))
+	}
+	return out, nil
+}
+
+func (s *Server) SetWorkflowTrigger(ctx context.Context, input *chatv1.WorkflowTriggerMutationRequest) (*chatv1.WorkflowTrigger, error) {
+	value, err := s.implementation.SetWorkflowTrigger(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeWorkflowTrigger(input.GetTrigger()), input.GetExpectedVersion(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowTrigger(value), nil
+}
+
+func (s *Server) ListWorkflowTriggers(ctx context.Context, input *chatv1.WorkflowTriggerListRequest) (*chatv1.WorkflowTriggerListResponse, error) {
+	values, err := s.implementation.ListWorkflowTriggers(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.WorkflowTriggerListResponse{Triggers: make([]*chatv1.WorkflowTrigger, 0, len(values))}
+	for _, value := range values {
+		out.Triggers = append(out.Triggers, encodeWorkflowTrigger(value))
+	}
+	return out, nil
+}
+
+func (s *Server) RunWorkflow(ctx context.Context, input *chatv1.WorkflowRunRequest) (*chatv1.WorkflowRun, error) {
+	value, err := s.implementation.RunWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowTriggerID(input.GetTriggerId()), domain.ConversationID(input.GetChannelId()),
+		input.GetInputs(), input.GetIdempotencyKey(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowRun(value), nil
+}
+
+func (s *Server) GetWorkflowRun(ctx context.Context, input *chatv1.WorkflowRunGetRequest) (*chatv1.WorkflowRun, error) {
+	value, err := s.implementation.GetWorkflowRun(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.WorkflowRunID(input.GetWorkflowRunId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowRun(value), nil
+}
+
 func (s *Server) CompleteFunction(ctx context.Context, input *chatv1.FunctionCompletionRequest) (*chatv1.WorkflowStepMutationResponse, error) {
 	if err := s.implementation.CompleteFunction(ctx,
 		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
@@ -4483,6 +4880,103 @@ func (s *Server) CompleteFunction(ctx context.Context, input *chatv1.FunctionCom
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) GetFunctionPermission(ctx context.Context, input *chatv1.FunctionPermissionRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.GetFunctionPermission(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		input.GetFunctionId(), input.GetFunctionCallbackId(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) SetFunctionPermission(ctx context.Context, input *chatv1.FunctionPermissionRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.SetFunctionPermission(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		input.GetFunctionId(), input.GetFunctionCallbackId(), decodeAutomationPermission(input.GetPermission()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) GetTriggerPermission(ctx context.Context, input *chatv1.TriggerPermissionRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.GetTriggerPermission(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		domain.WorkflowTriggerID(input.GetTriggerId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) SetTriggerPermission(ctx context.Context, input *chatv1.TriggerPermissionRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.SetTriggerPermission(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		domain.WorkflowTriggerID(input.GetTriggerId()), decodeAutomationPermission(input.GetPermission()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) SetFeaturedWorkflows(ctx context.Context, input *chatv1.FeaturedWorkflowsRequest) (*chatv1.WorkflowStepMutationResponse, error) {
+	triggerIDs := make([]domain.WorkflowTriggerID, len(input.GetTriggerIds()))
+	for index, id := range input.GetTriggerIds() {
+		triggerIDs[index] = domain.WorkflowTriggerID(id)
+	}
+	if err := s.implementation.SetFeaturedWorkflows(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetChannelId()), triggerIDs,
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ListFeaturedWorkflows(ctx context.Context, input *chatv1.FeaturedWorkflowsRequest) (*chatv1.FeaturedWorkflowsResponse, error) {
+	channelIDs := make([]domain.ConversationID, len(input.GetChannelIds()))
+	for index, id := range input.GetChannelIds() {
+		channelIDs[index] = domain.ConversationID(id)
+	}
+	values, err := s.implementation.ListFeaturedWorkflows(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), channelIDs,
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.FeaturedWorkflowsResponse{Workflows: make([]*chatv1.FeaturedWorkflow, 0, len(values))}
+	for _, value := range values {
+		out.Workflows = append(out.Workflows, &chatv1.FeaturedWorkflow{
+			WorkspaceId: string(value.WorkspaceID), ChannelId: string(value.ConversationID),
+			TriggerId: string(value.TriggerID), Title: value.Title, Position: int32(value.Position),
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) ListFunctionWorkflowSteps(ctx context.Context, input *chatv1.FunctionWorkflowStepsRequest) (*chatv1.WorkflowStepVersionsResponse, error) {
+	values, err := s.implementation.ListFunctionWorkflowSteps(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		input.GetFunctionId(), domain.WorkflowID(input.GetWorkflowId()), input.GetWorkflow(), domain.AppID(input.GetWorkflowAppId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.WorkflowStepVersionsResponse{StepsVersions: make([]*chatv1.WorkflowStepVersion, 0, len(values))}
+	for _, value := range values {
+		out.StepsVersions = append(out.StepsVersions, &chatv1.WorkflowStepVersion{
+			Title: value.Title, WorkflowId: string(value.WorkflowID), StepId: value.StepID,
+			IsDeleted: value.IsDeleted, WorkflowVersionCreated: value.WorkflowVersionCreated,
+		})
+	}
+	return out, nil
 }
 
 func (s *Server) OpenDialog(ctx context.Context, input *chatv1.OpenDialogRequest) (*chatv1.DialogMutationResponse, error) {

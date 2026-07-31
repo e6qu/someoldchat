@@ -70,11 +70,36 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if err != nil || workflow.Status != domain.WorkflowPublished || workflow.PublishedVersion != 2 {
 		t.Fatalf("workflow=%+v err=%v", workflow, err)
 	}
+	unpublishedEdit := workflow
+	unpublishedEdit.Title = "Unpublished title"
+	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", unpublishedEdit, workflow.Version, false); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("published workflow accepted an edit without publishing it: %v", err)
+	}
+	stillPublished, err := repository.GetWorkflow(ctx, "T1", workflow.ID)
+	if err != nil || stillPublished.Status != domain.WorkflowPublished || stillPublished.Title != workflow.Title {
+		t.Fatalf("failed edit changed the published workflow: %+v err=%v", stillPublished, err)
+	}
 	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Run triage", Type: "link", Config: `{}`, Enabled: true,
 	}, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	otherWorkflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Other workflow", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","title":"Classify"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	movedTrigger := trigger
+	movedTrigger.WorkflowID = otherWorkflow.ID
+	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", movedTrigger, trigger.Version); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("trigger moved across workflows: %v", err)
+	}
+	unchangedTrigger, err := repository.GetWorkflowTrigger(ctx, "T1", trigger.ID)
+	if err != nil || unchangedTrigger.WorkflowID != workflow.ID || unchangedTrigger.Version != trigger.Version {
+		t.Fatalf("failed move changed trigger: %+v err=%v", unchangedTrigger, err)
 	}
 	if err := repository.SetAutomationPermission(ctx, domain.AutomationPermission{
 		ResourceType: "trigger", ResourceID: string(trigger.ID), WorkspaceID: "T1", AppID: "A1",
@@ -136,6 +161,15 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if !ok || executionID == "" {
 		t.Fatalf("function execution id missing: %+v", delivered)
 	}
+	republished := workflow
+	republished.Steps = `[
+		{"function_id":"triage","title":"First classification"},
+		{"function_id":"triage","title":"Second classification"}
+	]`
+	republished, err = messages.UpdateWorkflow(ctx, "T1", "U1", republished, workflow.Version, true)
+	if err != nil || republished.PublishedVersion != 3 {
+		t.Fatalf("republished workflow=%+v err=%v", republished, err)
+	}
 	if err := messages.CompleteFunction(ctx, "T1", "UB", "wrong-app", domain.WorkflowStepID(executionID), `{"priority":1}`, ""); !errors.Is(err, ErrFunctionAccessDenied) {
 		t.Fatalf("wrong app error=%v", err)
 	}
@@ -154,5 +188,43 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	}
 	if _, err := repository.GetWorkflowRunByIdempotency(ctx, "T1", ""); !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("empty idempotency error=%v", err)
+	}
+}
+
+func TestListWorkflowsAppliesVisibilityBeforePagination(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	now := time.Now().UTC()
+	if err := repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []domain.User{
+		{ID: "U1", WorkspaceID: "T1", Name: "owner"},
+		{ID: "U2", WorkspaceID: "T1", Name: "viewer"},
+	} {
+		if err := repository.SeedUser(user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, workflow := range []domain.WorkflowDefinition{
+		{ID: "Wf001", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", Title: "private draft", InputSchema: `{}`, Steps: `[]`, Status: domain.WorkflowDraft, CreatedAt: now, UpdatedAt: now},
+		{ID: "Wf002", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", Title: "first published", InputSchema: `{}`, Steps: `[]`, Status: domain.WorkflowPublished, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "Wf003", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", Title: "second published", InputSchema: `{}`, Steps: `[]`, Status: domain.WorkflowPublished, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repository.CreateWorkflow(ctx, workflow, events.Event{
+			ID: domain.EventID("workflow-list-" + string(rune('a'+index))), WorkspaceID: "T1",
+			Topic: "workflow.created", CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages := Messages{Store: repository}
+	first, more, next, err := messages.ListWorkflows(ctx, "T1", "U2", domain.PageRequest{Limit: 1})
+	if err != nil || len(first) != 1 || first[0].ID != "Wf002" || !more || next == "" {
+		t.Fatalf("first visible page=%+v more=%v next=%q err=%v", first, more, next, err)
+	}
+	second, more, next, err := messages.ListWorkflows(ctx, "T1", "U2", domain.PageRequest{Limit: 1, Cursor: next})
+	if err != nil || len(second) != 1 || second[0].ID != "Wf003" || more || next != "" {
+		t.Fatalf("second visible page=%+v more=%v next=%q err=%v", second, more, next, err)
 	}
 }

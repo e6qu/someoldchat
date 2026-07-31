@@ -374,6 +374,7 @@ type Store interface {
 	UpdateWorkflow(context.Context, domain.WorkflowDefinition, uint64, events.Event) error
 	GetWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID) (domain.WorkflowDefinition, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
+	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)
 	SetWorkflowTrigger(context.Context, domain.WorkflowTrigger, uint64, events.Event) error
 	GetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID) (domain.WorkflowTrigger, error)
 	ListWorkflowTriggers(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowTrigger, error)

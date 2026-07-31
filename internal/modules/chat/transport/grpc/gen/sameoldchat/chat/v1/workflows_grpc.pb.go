@@ -19,10 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkflowsService_StepCompleted_FullMethodName    = "/sameoldchat.chat.v1.WorkflowsService/StepCompleted"
-	WorkflowsService_StepFailed_FullMethodName       = "/sameoldchat.chat.v1.WorkflowsService/StepFailed"
-	WorkflowsService_UpdateStep_FullMethodName       = "/sameoldchat.chat.v1.WorkflowsService/UpdateStep"
-	WorkflowsService_CompleteFunction_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/CompleteFunction"
+	WorkflowsService_StepCompleted_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/StepCompleted"
+	WorkflowsService_StepFailed_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/StepFailed"
+	WorkflowsService_UpdateStep_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/UpdateStep"
+	WorkflowsService_CreateWorkflow_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/CreateWorkflow"
+	WorkflowsService_GetWorkflow_FullMethodName               = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflow"
+	WorkflowsService_UpdateWorkflow_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/UpdateWorkflow"
+	WorkflowsService_ListWorkflows_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflows"
+	WorkflowsService_SetWorkflowTrigger_FullMethodName        = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowTrigger"
+	WorkflowsService_ListWorkflowTriggers_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflowTriggers"
+	WorkflowsService_RunWorkflow_FullMethodName               = "/sameoldchat.chat.v1.WorkflowsService/RunWorkflow"
+	WorkflowsService_GetWorkflowRun_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflowRun"
+	WorkflowsService_CompleteFunction_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/CompleteFunction"
+	WorkflowsService_GetFunctionPermission_FullMethodName     = "/sameoldchat.chat.v1.WorkflowsService/GetFunctionPermission"
+	WorkflowsService_SetFunctionPermission_FullMethodName     = "/sameoldchat.chat.v1.WorkflowsService/SetFunctionPermission"
+	WorkflowsService_GetTriggerPermission_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/GetTriggerPermission"
+	WorkflowsService_SetTriggerPermission_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/SetTriggerPermission"
+	WorkflowsService_SetFeaturedWorkflows_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/SetFeaturedWorkflows"
+	WorkflowsService_ListFeaturedWorkflows_FullMethodName     = "/sameoldchat.chat.v1.WorkflowsService/ListFeaturedWorkflows"
+	WorkflowsService_ListFunctionWorkflowSteps_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/ListFunctionWorkflowSteps"
 )
 
 // WorkflowsServiceClient is the client API for WorkflowsService service.
@@ -32,7 +47,22 @@ type WorkflowsServiceClient interface {
 	StepCompleted(ctx context.Context, in *WorkflowStepRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	StepFailed(ctx context.Context, in *WorkflowStepRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	UpdateStep(ctx context.Context, in *WorkflowStepUpdateRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
+	CreateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
+	GetWorkflow(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
+	UpdateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
+	ListWorkflows(ctx context.Context, in *WorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error)
+	SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error)
+	ListWorkflowTriggers(ctx context.Context, in *WorkflowTriggerListRequest, opts ...grpc.CallOption) (*WorkflowTriggerListResponse, error)
+	RunWorkflow(ctx context.Context, in *WorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
+	GetWorkflowRun(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
 	CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
+	GetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
+	SetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
+	GetTriggerPermission(ctx context.Context, in *TriggerPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
+	SetTriggerPermission(ctx context.Context, in *TriggerPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
+	SetFeaturedWorkflows(ctx context.Context, in *FeaturedWorkflowsRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
+	ListFeaturedWorkflows(ctx context.Context, in *FeaturedWorkflowsRequest, opts ...grpc.CallOption) (*FeaturedWorkflowsResponse, error)
+	ListFunctionWorkflowSteps(ctx context.Context, in *FunctionWorkflowStepsRequest, opts ...grpc.CallOption) (*WorkflowStepVersionsResponse, error)
 }
 
 type workflowsServiceClient struct {
@@ -73,10 +103,160 @@ func (c *workflowsServiceClient) UpdateStep(ctx context.Context, in *WorkflowSte
 	return out, nil
 }
 
+func (c *workflowsServiceClient) CreateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowDefinition)
+	err := c.cc.Invoke(ctx, WorkflowsService_CreateWorkflow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) GetWorkflow(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowDefinition)
+	err := c.cc.Invoke(ctx, WorkflowsService_GetWorkflow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) UpdateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowDefinition)
+	err := c.cc.Invoke(ctx, WorkflowsService_UpdateWorkflow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) ListWorkflows(ctx context.Context, in *WorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowListResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_ListWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowTrigger)
+	err := c.cc.Invoke(ctx, WorkflowsService_SetWorkflowTrigger_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) ListWorkflowTriggers(ctx context.Context, in *WorkflowTriggerListRequest, opts ...grpc.CallOption) (*WorkflowTriggerListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowTriggerListResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_ListWorkflowTriggers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) RunWorkflow(ctx context.Context, in *WorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowRun)
+	err := c.cc.Invoke(ctx, WorkflowsService_RunWorkflow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) GetWorkflowRun(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRun, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowRun)
+	err := c.cc.Invoke(ctx, WorkflowsService_GetWorkflowRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *workflowsServiceClient) CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkflowStepMutationResponse)
 	err := c.cc.Invoke(ctx, WorkflowsService_CompleteFunction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) GetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationPermission)
+	err := c.cc.Invoke(ctx, WorkflowsService_GetFunctionPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) SetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationPermission)
+	err := c.cc.Invoke(ctx, WorkflowsService_SetFunctionPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) GetTriggerPermission(ctx context.Context, in *TriggerPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationPermission)
+	err := c.cc.Invoke(ctx, WorkflowsService_GetTriggerPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) SetTriggerPermission(ctx context.Context, in *TriggerPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationPermission)
+	err := c.cc.Invoke(ctx, WorkflowsService_SetTriggerPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) SetFeaturedWorkflows(ctx context.Context, in *FeaturedWorkflowsRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowStepMutationResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_SetFeaturedWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) ListFeaturedWorkflows(ctx context.Context, in *FeaturedWorkflowsRequest, opts ...grpc.CallOption) (*FeaturedWorkflowsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FeaturedWorkflowsResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_ListFeaturedWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) ListFunctionWorkflowSteps(ctx context.Context, in *FunctionWorkflowStepsRequest, opts ...grpc.CallOption) (*WorkflowStepVersionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowStepVersionsResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_ListFunctionWorkflowSteps_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +270,22 @@ type WorkflowsServiceServer interface {
 	StepCompleted(context.Context, *WorkflowStepRequest) (*WorkflowStepMutationResponse, error)
 	StepFailed(context.Context, *WorkflowStepRequest) (*WorkflowStepMutationResponse, error)
 	UpdateStep(context.Context, *WorkflowStepUpdateRequest) (*WorkflowStepMutationResponse, error)
+	CreateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error)
+	GetWorkflow(context.Context, *WorkflowGetRequest) (*WorkflowDefinition, error)
+	UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error)
+	ListWorkflows(context.Context, *WorkflowListRequest) (*WorkflowListResponse, error)
+	SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error)
+	ListWorkflowTriggers(context.Context, *WorkflowTriggerListRequest) (*WorkflowTriggerListResponse, error)
+	RunWorkflow(context.Context, *WorkflowRunRequest) (*WorkflowRun, error)
+	GetWorkflowRun(context.Context, *WorkflowRunGetRequest) (*WorkflowRun, error)
 	CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error)
+	GetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error)
+	SetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error)
+	GetTriggerPermission(context.Context, *TriggerPermissionRequest) (*AutomationPermission, error)
+	SetTriggerPermission(context.Context, *TriggerPermissionRequest) (*AutomationPermission, error)
+	SetFeaturedWorkflows(context.Context, *FeaturedWorkflowsRequest) (*WorkflowStepMutationResponse, error)
+	ListFeaturedWorkflows(context.Context, *FeaturedWorkflowsRequest) (*FeaturedWorkflowsResponse, error)
+	ListFunctionWorkflowSteps(context.Context, *FunctionWorkflowStepsRequest) (*WorkflowStepVersionsResponse, error)
 }
 
 // UnimplementedWorkflowsServiceServer should be embedded to have
@@ -109,8 +304,53 @@ func (UnimplementedWorkflowsServiceServer) StepFailed(context.Context, *Workflow
 func (UnimplementedWorkflowsServiceServer) UpdateStep(context.Context, *WorkflowStepUpdateRequest) (*WorkflowStepMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateStep not implemented")
 }
+func (UnimplementedWorkflowsServiceServer) CreateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateWorkflow not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) GetWorkflow(context.Context, *WorkflowGetRequest) (*WorkflowDefinition, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetWorkflow not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateWorkflow not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) ListWorkflows(context.Context, *WorkflowListRequest) (*WorkflowListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListWorkflows not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetWorkflowTrigger not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) ListWorkflowTriggers(context.Context, *WorkflowTriggerListRequest) (*WorkflowTriggerListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListWorkflowTriggers not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) RunWorkflow(context.Context, *WorkflowRunRequest) (*WorkflowRun, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunWorkflow not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) GetWorkflowRun(context.Context, *WorkflowRunGetRequest) (*WorkflowRun, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetWorkflowRun not implemented")
+}
 func (UnimplementedWorkflowsServiceServer) CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteFunction not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) GetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFunctionPermission not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) SetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetFunctionPermission not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) GetTriggerPermission(context.Context, *TriggerPermissionRequest) (*AutomationPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTriggerPermission not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) SetTriggerPermission(context.Context, *TriggerPermissionRequest) (*AutomationPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetTriggerPermission not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) SetFeaturedWorkflows(context.Context, *FeaturedWorkflowsRequest) (*WorkflowStepMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetFeaturedWorkflows not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) ListFeaturedWorkflows(context.Context, *FeaturedWorkflowsRequest) (*FeaturedWorkflowsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFeaturedWorkflows not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) ListFunctionWorkflowSteps(context.Context, *FunctionWorkflowStepsRequest) (*WorkflowStepVersionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFunctionWorkflowSteps not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) testEmbeddedByValue() {}
 
@@ -186,6 +426,150 @@ func _WorkflowsService_UpdateStep_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkflowsService_CreateWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).CreateWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_CreateWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).CreateWorkflow(ctx, req.(*WorkflowMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_GetWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).GetWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_GetWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).GetWorkflow(ctx, req.(*WorkflowGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_UpdateWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).UpdateWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_UpdateWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).UpdateWorkflow(ctx, req.(*WorkflowMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_ListWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).ListWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_ListWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).ListWorkflows(ctx, req.(*WorkflowListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_SetWorkflowTrigger_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowTriggerMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).SetWorkflowTrigger(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_SetWorkflowTrigger_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).SetWorkflowTrigger(ctx, req.(*WorkflowTriggerMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_ListWorkflowTriggers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowTriggerListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).ListWorkflowTriggers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_ListWorkflowTriggers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).ListWorkflowTriggers(ctx, req.(*WorkflowTriggerListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_RunWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).RunWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_RunWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).RunWorkflow(ctx, req.(*WorkflowRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_GetWorkflowRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowRunGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).GetWorkflowRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_GetWorkflowRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).GetWorkflowRun(ctx, req.(*WorkflowRunGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorkflowsService_CompleteFunction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FunctionCompletionRequest)
 	if err := dec(in); err != nil {
@@ -200,6 +584,132 @@ func _WorkflowsService_CompleteFunction_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(WorkflowsServiceServer).CompleteFunction(ctx, req.(*FunctionCompletionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_GetFunctionPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FunctionPermissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).GetFunctionPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_GetFunctionPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).GetFunctionPermission(ctx, req.(*FunctionPermissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_SetFunctionPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FunctionPermissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).SetFunctionPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_SetFunctionPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).SetFunctionPermission(ctx, req.(*FunctionPermissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_GetTriggerPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TriggerPermissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).GetTriggerPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_GetTriggerPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).GetTriggerPermission(ctx, req.(*TriggerPermissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_SetTriggerPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TriggerPermissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).SetTriggerPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_SetTriggerPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).SetTriggerPermission(ctx, req.(*TriggerPermissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_SetFeaturedWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FeaturedWorkflowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).SetFeaturedWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_SetFeaturedWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).SetFeaturedWorkflows(ctx, req.(*FeaturedWorkflowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_ListFeaturedWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FeaturedWorkflowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).ListFeaturedWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_ListFeaturedWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).ListFeaturedWorkflows(ctx, req.(*FeaturedWorkflowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_ListFunctionWorkflowSteps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FunctionWorkflowStepsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).ListFunctionWorkflowSteps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_ListFunctionWorkflowSteps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).ListFunctionWorkflowSteps(ctx, req.(*FunctionWorkflowStepsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -224,8 +734,68 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _WorkflowsService_UpdateStep_Handler,
 		},
 		{
+			MethodName: "CreateWorkflow",
+			Handler:    _WorkflowsService_CreateWorkflow_Handler,
+		},
+		{
+			MethodName: "GetWorkflow",
+			Handler:    _WorkflowsService_GetWorkflow_Handler,
+		},
+		{
+			MethodName: "UpdateWorkflow",
+			Handler:    _WorkflowsService_UpdateWorkflow_Handler,
+		},
+		{
+			MethodName: "ListWorkflows",
+			Handler:    _WorkflowsService_ListWorkflows_Handler,
+		},
+		{
+			MethodName: "SetWorkflowTrigger",
+			Handler:    _WorkflowsService_SetWorkflowTrigger_Handler,
+		},
+		{
+			MethodName: "ListWorkflowTriggers",
+			Handler:    _WorkflowsService_ListWorkflowTriggers_Handler,
+		},
+		{
+			MethodName: "RunWorkflow",
+			Handler:    _WorkflowsService_RunWorkflow_Handler,
+		},
+		{
+			MethodName: "GetWorkflowRun",
+			Handler:    _WorkflowsService_GetWorkflowRun_Handler,
+		},
+		{
 			MethodName: "CompleteFunction",
 			Handler:    _WorkflowsService_CompleteFunction_Handler,
+		},
+		{
+			MethodName: "GetFunctionPermission",
+			Handler:    _WorkflowsService_GetFunctionPermission_Handler,
+		},
+		{
+			MethodName: "SetFunctionPermission",
+			Handler:    _WorkflowsService_SetFunctionPermission_Handler,
+		},
+		{
+			MethodName: "GetTriggerPermission",
+			Handler:    _WorkflowsService_GetTriggerPermission_Handler,
+		},
+		{
+			MethodName: "SetTriggerPermission",
+			Handler:    _WorkflowsService_SetTriggerPermission_Handler,
+		},
+		{
+			MethodName: "SetFeaturedWorkflows",
+			Handler:    _WorkflowsService_SetFeaturedWorkflows_Handler,
+		},
+		{
+			MethodName: "ListFeaturedWorkflows",
+			Handler:    _WorkflowsService_ListFeaturedWorkflows_Handler,
+		},
+		{
+			MethodName: "ListFunctionWorkflowSteps",
+			Handler:    _WorkflowsService_ListFunctionWorkflowSteps_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -65,7 +65,11 @@ conversation_canvas_api_url='https://docs.slack.dev/reference/methods/conversati
 datastore_query_url='https://docs.slack.dev/tools/deno-slack-sdk/guides/retrieving-items-from-a-datastore/'
 events_api_url='https://docs.slack.dev/apis/events-api/'
 list_url='https://slack.com/help/articles/27452748828179-Use-lists-in-Slack'
-workflow_url='https://slack.com/help/articles/360035692513-Guide-to-Workflow-Builder'
+workflow_url='https://slack.com/help/articles/17542172840595-Build-a-workflow--Create-a-workflow-in-Slack/'
+workflow_manage_url='https://slack.com/help/articles/15363614064275-Manage-workflows-in-Slack'
+function_executed_url='https://docs.slack.dev/reference/events/function_executed/'
+workflow_steps_url='https://docs.slack.dev/reference/methods/functions.workflows.steps.list/'
+workflow_responses_export_url='https://docs.slack.dev/reference/methods/functions.workflows.steps.responses.export/'
 roles_url='https://slack.com/help/articles/360018112273-Roles-in-Slack'
 connect_url='https://slack.com/help/articles/360035092414-What-is-Slack-Connect'
 accessibility_url='https://slack.com/help/articles/4455747966739-Accessibility-in-Slack'
@@ -120,6 +124,10 @@ fetch "$datastore_query_url" "$work/datastore-query.html"
 fetch "$events_api_url" "$work/events-api.html"
 fetch "$list_url" "$work/list.html"
 fetch "$workflow_url" "$work/workflow.html"
+fetch "$workflow_manage_url" "$work/workflow-manage.html"
+fetch "$function_executed_url" "$work/function-executed.html"
+fetch "$workflow_steps_url" "$work/workflow-steps.html"
+fetch "$workflow_responses_export_url" "$work/workflow-responses-export.html"
 fetch "$roles_url" "$work/roles.html"
 fetch "$connect_url" "$work/connect.html"
 fetch "$accessibility_url" "$work/accessibility.html"
@@ -345,6 +353,42 @@ assert_contains "$work/list.html" 'create a list' \
 	'[LIST-01] lists have a current first-party creation journey' "$list_url"
 assert_contains "$work/workflow.html" 'Workflow Builder' \
 	'[WORKFLOW-03] workflow creation is a current first-party surface' "$workflow_url"
+assert_contains "$work/workflow.html" 'From a link' \
+	'[WORKFLOW-01] a shared link is a current workflow trigger' "$workflow_url"
+assert_contains "$work/workflow.html" 'From a webhook' \
+	'[WORKFLOW-01] an external webhook is a current workflow trigger' "$workflow_url"
+assert_contains "$work/workflow.html" 'On a schedule' \
+	'[WORKFLOW-01] a recurring schedule is a current workflow trigger' "$workflow_url"
+assert_contains "$work/workflow.html" 'When a message is posted' \
+	'[WORKFLOW-01] message keywords are a current workflow trigger' "$workflow_url"
+assert_contains "$work/workflow.html" 'When an emoji reaction is used' \
+	'[WORKFLOW-01] emoji reactions are a current workflow trigger' "$workflow_url"
+assert_contains "$work/workflow.html" 'will occur in the order you specify' \
+	'[WORKFLOW-02] workflow steps execute in configured order' "$workflow_url"
+assert_contains "$work/workflow.html" 'Variables allow the workflow to use information from previous steps' \
+	'[WORKFLOW-02] workflow variables carry prior information' "$workflow_url"
+assert_contains "$work/workflow.html" 'add others as workflow managers' \
+	'[WORKFLOW-03] workflow ownership is not restricted to one creator' "$workflow_url"
+assert_contains "$work/workflow.html" 'Who can find and use this workflow?' \
+	'[WORKFLOW-03] workflow discovery and execution have configurable access' "$workflow_url"
+assert_contains "$work/workflow-manage.html" 'you can unpublish it' \
+	'[WORKFLOW-03] unpublishing makes a workflow unavailable' "$workflow_manage_url"
+assert_contains "$work/workflow-manage.html" 'generate a .CSV file' \
+	'[WORKFLOW-03] workflow administration can export published workflows' "$workflow_manage_url"
+assert_contains "$work/function-executed.html" 'bot_access_token' \
+	'[WORKFLOW-02] function execution supplies its scoped bot credential' "$function_executed_url"
+assert_contains "$work/function-executed.html" 'No scopes required!' \
+	'[WORKFLOW-02] function execution delivery does not require an event scope' "$function_executed_url"
+assert_contains "$work/function-executed.html" 'event will be dispatched for any function which belongs to your app' \
+	'[WORKFLOW-02] app-owned functions receive execution callbacks without a manifest event subscription' "$function_executed_url"
+assert_contains "$work/function-executed.html" 'Fx' \
+	'[WORKFLOW-02] function execution uses an Fx identity' "$function_executed_url"
+assert_contains "$work/function-executed.html" 'Wx' \
+	'[WORKFLOW-02] workflow execution uses a Wx identity' "$function_executed_url"
+assert_contains "$work/workflow-steps.html" 'steps_versions' \
+	'[WORKFLOW-02] function workflow-step listing returns versioned step usage' "$workflow_steps_url"
+assert_contains "$work/workflow-responses-export.html" 'step_id' \
+	'[WORKFLOW-03] form response export identifies the workflow step' "$workflow_responses_export_url"
 assert_contains "$work/roles.html" 'Workspace Primary Owner' \
 	'[ADMIN-01] workspace roles have distinct administrative authority' "$roles_url"
 assert_contains "$work/connect.html" 'work alongside people from other companies' \

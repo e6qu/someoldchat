@@ -29,6 +29,7 @@ func runQualification(t *testing.T, open opener) {
 		{"drafts and sent repository", draftsAndSentRepositoryContract},
 		{"OpenID refresh token rotation is durable", openIDRefreshTokenRotationIsDurable},
 		{"lists repository", listsRepositoryContract},
+		{"workflow automation repository", workflowAutomationRepositoryContract},
 		{"published wave one repository", publishedWaveOneRepositoryContract},
 		{"published integration repository", publishedIntegrationRepositoryContract},
 		{"durable event delivery repository", durableEventDeliveryRepositoryContract},
@@ -325,6 +326,178 @@ type qualificationStore interface {
 	SeedUser(context.Context, domain.User) error
 	SeedConversation(context.Context, domain.Conversation) error
 	SeedConversationMember(context.Context, domain.ConversationID, domain.UserID) error
+}
+
+func workflowAutomationRepositoryContract(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-workflow-" + suffix)
+	userID := domain.UserID("U-workflow-" + suffix)
+	conversationID := domain.ConversationID("C-workflow-" + suffix)
+	workflowID := domain.WorkflowID("Wf" + suffix)
+	triggerID := domain.WorkflowTriggerID("Ft" + suffix)
+	runID := domain.WorkflowRunID("Wx" + suffix)
+	stepID := domain.WorkflowStepID("Fx" + suffix)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	event := func(id, topic string, at time.Time) events.Event {
+		return events.Event{
+			ID: domain.EventID("E-workflow-" + id + "-" + suffix), WorkspaceID: workspaceID,
+			ActorID: userID, Topic: topic, CreatedAt: at,
+		}
+	}
+	for _, seed := range []func() error{
+		func() error {
+			return repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Workflow qualification"})
+		},
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: "workflow-owner"})
+		},
+		func() error {
+			return repository.SeedConversation(ctx, domain.Conversation{ID: conversationID, WorkspaceID: workspaceID, Name: "workflow-channel"})
+		},
+		func() error { return repository.SeedConversationMember(ctx, conversationID, userID) },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	workflow := domain.WorkflowDefinition{
+		ID: workflowID, WorkspaceID: workspaceID, AppID: "A-workflow", OwnerID: userID,
+		CallbackID: "triage", Title: "Triage", Description: "Durable workflow",
+		InputSchema: `{"type":"object"}`, Steps: `[{"function_id":"triage"}]`,
+		Status: domain.WorkflowDraft, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflow(ctx, workflow, event("create", "workflow.created", now)); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil || created.Version != 1 || created.Status != domain.WorkflowDraft {
+		t.Fatalf("created workflow=%+v err=%v", created, err)
+	}
+	workflow.Title = "Published triage"
+	workflow.Status = domain.WorkflowPublished
+	workflow.PublishedVersion = 2
+	workflow.UpdatedAt = now.Add(time.Second)
+	if err := repository.UpdateWorkflow(ctx, workflow, 1, event("publish", "workflow.published", workflow.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.UpdateWorkflow(ctx, workflow, 1, event("stale", "workflow.updated", workflow.UpdatedAt)); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale workflow update error=%v, want ErrConflict", err)
+	}
+	revisions, err := repository.ListWorkflowRevisions(ctx, workspaceID, workflowID)
+	if err != nil || len(revisions) != 2 || revisions[0].Version != 1 || revisions[1].Version != 2 {
+		t.Fatalf("workflow revisions=%+v err=%v", revisions, err)
+	}
+
+	trigger := domain.WorkflowTrigger{
+		ID: triggerID, WorkflowID: workflowID, WorkspaceID: workspaceID, AppID: workflow.AppID,
+		Title: "Run triage", Type: "link", Config: `{}`, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.SetWorkflowTrigger(ctx, trigger, 0, event("trigger", "workflow.trigger_created", now)); err != nil {
+		t.Fatal(err)
+	}
+	otherWorkflow := workflow
+	otherWorkflow.ID = domain.WorkflowID(string(workflowID) + "-other")
+	otherWorkflow.CallbackID = "triage-other-" + suffix
+	otherWorkflow.Status = domain.WorkflowDraft
+	otherWorkflow.PublishedVersion = 0
+	otherWorkflow.UpdatedAt = now.Add(2 * time.Second)
+	if err := repository.CreateWorkflow(ctx, otherWorkflow, event("other-workflow", "workflow.created", otherWorkflow.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	movedTrigger := trigger
+	movedTrigger.WorkflowID = otherWorkflow.ID
+	movedTrigger.UpdatedAt = now.Add(3 * time.Second)
+	if err := repository.SetWorkflowTrigger(ctx, movedTrigger, 1, event("move-trigger", "workflow.trigger_updated", movedTrigger.UpdatedAt)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("trigger moved across workflows: %v", err)
+	}
+	triggers, err := repository.ListWorkflowTriggers(ctx, workspaceID, workflowID)
+	if err != nil || len(triggers) != 1 || triggers[0].Version != 1 || !triggers[0].Enabled {
+		t.Fatalf("workflow triggers=%+v err=%v", triggers, err)
+	}
+	permission := domain.AutomationPermission{
+		ResourceType: "trigger", ResourceID: string(triggerID), WorkspaceID: workspaceID,
+		AppID: workflow.AppID, PermissionType: "named_entities", UserIDs: []domain.UserID{userID},
+		ChannelIDs: []domain.ConversationID{conversationID}, UpdatedAt: now,
+	}
+	if err := repository.SetAutomationPermission(ctx, permission, event("permission", "workflow.trigger_permission_set", now)); err != nil {
+		t.Fatal(err)
+	}
+	storedPermission, err := repository.GetAutomationPermission(ctx, workspaceID, "trigger", string(triggerID))
+	if err != nil || storedPermission.PermissionType != "named_entities" ||
+		len(storedPermission.UserIDs) != 1 || storedPermission.UserIDs[0] != userID ||
+		len(storedPermission.ChannelIDs) != 1 || storedPermission.ChannelIDs[0] != conversationID {
+		t.Fatalf("workflow permission=%+v err=%v", storedPermission, err)
+	}
+	if err := repository.SetFeaturedWorkflows(ctx, workspaceID, conversationID, []domain.FeaturedWorkflow{{
+		TriggerID: triggerID, Title: trigger.Title,
+	}}, event("featured", "workflow.featured_set", now)); err != nil {
+		t.Fatal(err)
+	}
+	featured, err := repository.ListFeaturedWorkflows(ctx, workspaceID, []domain.ConversationID{conversationID})
+	if err != nil || len(featured) != 1 || featured[0].TriggerID != triggerID ||
+		featured[0].WorkspaceID != workspaceID || featured[0].ConversationID != conversationID {
+		t.Fatalf("featured workflows=%+v err=%v", featured, err)
+	}
+
+	run := domain.WorkflowRun{
+		ID: runID, WorkflowID: workflowID, WorkflowVersion: 2, TriggerID: triggerID,
+		WorkspaceID: workspaceID, AppID: workflow.AppID, ActorID: userID,
+		ConversationID: conversationID, Status: domain.WorkflowRunRunning,
+		Inputs: `{"item":"incident"}`, Outputs: `{}`, IdempotencyKey: "workflow-once-" + suffix,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	step := domain.WorkflowStep{
+		ID: stepID, WorkflowRunID: runID, WorkspaceID: workspaceID, AppID: workflow.AppID,
+		UserID: userID, FunctionID: "FnTriage", EditID: "triage", Status: domain.WorkflowStepExecuting,
+		Inputs: run.Inputs, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflowRun(ctx, run, &step, []events.Event{
+		event("run", "workflow.run_started", now),
+		event("step", "function_executed", now),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := run
+	duplicate.ID = domain.WorkflowRunID("Wx-duplicate-" + suffix)
+	if err := repository.CreateWorkflowRun(ctx, duplicate, nil, []events.Event{
+		event("duplicate", "workflow.run_started", now),
+	}); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate workflow run error=%v, want ErrAlreadyExists", err)
+	}
+	idempotentRun, err := repository.GetWorkflowRunByIdempotency(ctx, workspaceID, run.IdempotencyKey)
+	if err != nil || idempotentRun.ID != runID {
+		t.Fatalf("idempotent workflow run=%+v err=%v", idempotentRun, err)
+	}
+	step.Status = domain.WorkflowStepCompleted
+	step.Outputs = `{"result":"ok"}`
+	step.UpdatedAt = now.Add(2 * time.Second)
+	run.Status = domain.WorkflowRunCompleted
+	run.Outputs = step.Outputs
+	run.CurrentStep = 1
+	run.UpdatedAt = step.UpdatedAt
+	run.CompletedAt = step.UpdatedAt
+	if err := repository.AdvanceWorkflowRun(ctx, step, nil, run, 0, []events.Event{
+		event("complete", "workflow.run_completed", run.CompletedAt),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	storedRun, err := repository.GetWorkflowRun(ctx, workspaceID, runID)
+	if err != nil || storedRun.Status != domain.WorkflowRunCompleted ||
+		storedRun.Outputs != run.Outputs || storedRun.CurrentStep != 1 ||
+		storedRun.WorkflowVersion != 2 || storedRun.CompletedAt.IsZero() {
+		t.Fatalf("completed workflow run=%+v err=%v", storedRun, err)
+	}
+	storedStep, err := repository.GetWorkflowStep(ctx, workspaceID, stepID)
+	if err != nil || storedStep.Status != domain.WorkflowStepCompleted || storedStep.Outputs != step.Outputs {
+		t.Fatalf("completed workflow step=%+v err=%v", storedStep, err)
+	}
 }
 
 func coreRepositoryContract(t *testing.T, open opener) {

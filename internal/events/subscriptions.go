@@ -64,7 +64,8 @@ func FilterSubscribedSlackEventBodies(ctx context.Context, bodies [][]byte, botE
 		}
 		botSubscribed := botSubscriptions[eventName]
 		userSubscribed := userSubscriptions[eventName]
-		if !botSubscribed && !userSubscribed {
+		automatic := AutomaticSlackEvent(eventName)
+		if !automatic && !botSubscribed && !userSubscribed {
 			continue
 		}
 		if len(envelope.Authorizations) == 0 {
@@ -76,7 +77,7 @@ func FilterSubscribedSlackEventBodies(ctx context.Context, bodies [][]byte, botE
 		}
 		kept := envelope.Authorizations[:0]
 		for _, authorization := range envelope.Authorizations {
-			if authorization.IsBot && botSubscribed || !authorization.IsBot && userSubscribed {
+			if automatic || authorization.IsBot && botSubscribed || !authorization.IsBot && userSubscribed {
 				kept = append(kept, authorization)
 			}
 		}

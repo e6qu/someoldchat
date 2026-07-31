@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,6 +103,19 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workflows.updateStep", h.workflowUpdateStep)
 	mux.HandleFunc("POST /api/functions.completeSuccess", h.functionsCompleteSuccess)
 	mux.HandleFunc("POST /api/functions.completeError", h.functionsCompleteError)
+	mux.HandleFunc("POST /api/functions.distributions.permissions.add", h.functionsDistributionsPermissionsAdd)
+	mux.HandleFunc("POST /api/functions.distributions.permissions.list", h.functionsDistributionsPermissionsList)
+	mux.HandleFunc("POST /api/functions.distributions.permissions.remove", h.functionsDistributionsPermissionsRemove)
+	mux.HandleFunc("POST /api/functions.distributions.permissions.set", h.functionsDistributionsPermissionsSet)
+	mux.HandleFunc("POST /api/functions.workflows.steps.list", h.functionsWorkflowsStepsList)
+	mux.HandleFunc("POST /api/workflows.featured.add", h.workflowsFeaturedAdd)
+	mux.HandleFunc("POST /api/workflows.featured.list", h.workflowsFeaturedList)
+	mux.HandleFunc("POST /api/workflows.featured.remove", h.workflowsFeaturedRemove)
+	mux.HandleFunc("POST /api/workflows.featured.set", h.workflowsFeaturedSet)
+	mux.HandleFunc("POST /api/workflows.triggers.permissions.add", h.workflowsTriggersPermissionsAdd)
+	mux.HandleFunc("POST /api/workflows.triggers.permissions.list", h.workflowsTriggersPermissionsList)
+	mux.HandleFunc("POST /api/workflows.triggers.permissions.remove", h.workflowsTriggersPermissionsRemove)
+	mux.HandleFunc("POST /api/workflows.triggers.permissions.set", h.workflowsTriggersPermissionsSet)
 	mux.HandleFunc("GET /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("POST /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("GET /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
@@ -1473,6 +1487,494 @@ func writeFunctionCompletionError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 	}
+}
+
+func (h Handler) functionPermissionRequest(w http.ResponseWriter, r *http.Request) (map[string]string, auth.Principal, domain.AppID, bool) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return nil, auth.Principal{}, "", false
+	}
+	principal, err := h.authenticate(r, "")
+	if err != nil {
+		writeAuthError(w, err)
+		return nil, auth.Principal{}, "", false
+	}
+	appID := principal.AppID
+	if supplied := domain.AppID(strings.TrimSpace(fields["function_app_id"])); supplied != "" {
+		if principal.AppID != "" && supplied != principal.AppID {
+			writeError(w, "access_denied")
+			return nil, auth.Principal{}, "", false
+		}
+		appID = supplied
+	}
+	if appID == "" || strings.TrimSpace(fields["function_id"]) == "" && strings.TrimSpace(fields["function_callback_id"]) == "" {
+		writeError(w, "function_not_found")
+		return nil, auth.Principal{}, "", false
+	}
+	return fields, principal, appID, true
+}
+
+func functionPermissionResponse(value domain.AutomationPermission, users []domain.User) map[string]any {
+	response := map[string]any{"ok": true, "permission_type": value.PermissionType}
+	renderedUsers := make([]map[string]any, 0, len(users))
+	for _, user := range users {
+		renderedUsers = append(renderedUsers, map[string]any{
+			"user_id": user.ID, "username": user.Name, "email": user.Email,
+		})
+	}
+	response["users"] = renderedUsers
+	if len(value.TeamIDs) != 0 {
+		response["team_ids"] = value.TeamIDs
+	}
+	if len(value.OrgIDs) != 0 {
+		response["org_ids"] = value.OrgIDs
+	}
+	return response
+}
+
+func (h Handler) functionPermissionUsers(ctx context.Context, principal auth.Principal, value domain.AutomationPermission) ([]domain.User, error) {
+	users := make([]domain.User, 0, len(value.UserIDs))
+	for _, userID := range value.UserIDs {
+		user, err := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, userID)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, nil
+}
+
+func writeFunctionPermissionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, "function_not_found")
+	case errors.Is(err, service.ErrAutomationUserNotFound):
+		writeError(w, "user_not_found")
+	case errors.Is(err, service.ErrAutomationChannelNotFound),
+		errors.Is(err, service.ErrAutomationTeamNotFound),
+		errors.Is(err, service.ErrAutomationOrgNotFound),
+		errors.Is(err, service.ErrAutomationEntitiesEmpty):
+		writeError(w, "invalid_named_entities")
+	case errors.Is(err, service.ErrFunctionAccessDenied):
+		writeError(w, "access_denied")
+	case errors.Is(err, service.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
+		writeError(w, "invalid_arguments")
+	default:
+		writeError(w, mapServiceError(err, "invalid_arguments"))
+	}
+}
+
+func (h Handler) functionsDistributionsPermissionsList(w http.ResponseWriter, r *http.Request) {
+	fields, principal, appID, ok := h.functionPermissionRequest(w, r)
+	if !ok {
+		return
+	}
+	value, err := h.Messages.GetFunctionPermission(r.Context(), principal.WorkspaceID, principal.UserID, appID, fields["function_id"], fields["function_callback_id"])
+	if err != nil {
+		writeFunctionPermissionError(w, err)
+		return
+	}
+	users, err := h.functionPermissionUsers(r.Context(), principal, value)
+	if err != nil {
+		writeFunctionPermissionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, functionPermissionResponse(value, users))
+}
+
+func (h Handler) functionsDistributionsPermissionsSet(w http.ResponseWriter, r *http.Request) {
+	fields, principal, appID, ok := h.functionPermissionRequest(w, r)
+	if !ok {
+		return
+	}
+	permissionType := strings.TrimSpace(fields["permission_type"])
+	if permissionType == "" {
+		writeError(w, "permission_type_required")
+		return
+	}
+	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities", "system"}, permissionType) {
+		writeError(w, "invalid_permission_type")
+		return
+	}
+	value := domain.AutomationPermission{
+		PermissionType: permissionType,
+		UserIDs:        parseIDList[domain.UserID](fields["user_ids"]),
+		TeamIDs:        parseIDList[domain.WorkspaceID](fields["team_ids"]),
+		OrgIDs:         parseIDList[string](fields["org_ids"]),
+	}
+	value, err := h.Messages.SetFunctionPermission(r.Context(), principal.WorkspaceID, principal.UserID, appID, fields["function_id"], fields["function_callback_id"], value)
+	if err != nil {
+		writeFunctionPermissionError(w, err)
+		return
+	}
+	users, err := h.functionPermissionUsers(r.Context(), principal, value)
+	if err != nil {
+		writeFunctionPermissionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, functionPermissionResponse(value, users))
+}
+
+func mergeUserIDs(current []domain.UserID, changes []domain.UserID, add bool) []domain.UserID {
+	values := make(map[domain.UserID]struct{}, len(current)+len(changes))
+	for _, id := range current {
+		values[id] = struct{}{}
+	}
+	for _, id := range changes {
+		if add {
+			values[id] = struct{}{}
+		} else {
+			delete(values, id)
+		}
+	}
+	result := make([]domain.UserID, 0, len(values))
+	for id := range values {
+		result = append(result, id)
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left] < result[right] })
+	return result
+}
+
+func (h Handler) mutateFunctionPermission(w http.ResponseWriter, r *http.Request, add bool) {
+	fields, principal, appID, ok := h.functionPermissionRequest(w, r)
+	if !ok {
+		return
+	}
+	current, err := h.Messages.GetFunctionPermission(r.Context(), principal.WorkspaceID, principal.UserID, appID, fields["function_id"], fields["function_callback_id"])
+	if err != nil {
+		writeFunctionPermissionError(w, err)
+		return
+	}
+	if current.PermissionType != "named_entities" {
+		writeError(w, "invalid_permission_type")
+		return
+	}
+	changes := parseIDList[domain.UserID](fields["user_ids"])
+	if len(changes) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	current.UserIDs = mergeUserIDs(current.UserIDs, changes, add)
+	if len(current.UserIDs) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	current, err = h.Messages.SetFunctionPermission(r.Context(), principal.WorkspaceID, principal.UserID, appID, fields["function_id"], fields["function_callback_id"], current)
+	if err != nil {
+		writeFunctionPermissionError(w, err)
+		return
+	}
+	users, err := h.functionPermissionUsers(r.Context(), principal, current)
+	if err != nil {
+		writeFunctionPermissionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, functionPermissionResponse(current, users))
+}
+
+func (h Handler) functionsDistributionsPermissionsAdd(w http.ResponseWriter, r *http.Request) {
+	h.mutateFunctionPermission(w, r, true)
+}
+
+func (h Handler) functionsDistributionsPermissionsRemove(w http.ResponseWriter, r *http.Request) {
+	h.mutateFunctionPermission(w, r, false)
+}
+
+func triggerPermissionRequest(w http.ResponseWriter, r *http.Request) (map[string]string, domain.WorkflowTriggerID, bool) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return nil, "", false
+	}
+	triggerID := domain.WorkflowTriggerID(strings.TrimSpace(fields["trigger_id"]))
+	if triggerID == "" {
+		writeError(w, "trigger_not_found")
+		return nil, "", false
+	}
+	return fields, triggerID, true
+}
+
+func requireTriggerApp(w http.ResponseWriter, principal auth.Principal) bool {
+	if principal.AppID == "" {
+		writeError(w, "trigger_not_found")
+		return false
+	}
+	return true
+}
+
+func triggerPermissionResponse(value domain.AutomationPermission) map[string]any {
+	return map[string]any{
+		"ok": true, "permission_type": value.PermissionType, "user_ids": value.UserIDs,
+		"channel_ids": value.ChannelIDs, "team_ids": value.TeamIDs, "org_ids": value.OrgIDs,
+	}
+}
+
+func writeTriggerPermissionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, "trigger_not_found")
+	case errors.Is(err, service.ErrAutomationUserNotFound):
+		writeError(w, "user_not_found")
+	case errors.Is(err, service.ErrAutomationChannelNotFound):
+		writeError(w, "channel_not_found")
+	case errors.Is(err, service.ErrAutomationTeamNotFound):
+		writeError(w, "team_not_found")
+	case errors.Is(err, service.ErrAutomationOrgNotFound):
+		writeError(w, "org_not_found")
+	case errors.Is(err, service.ErrAutomationEntitiesEmpty):
+		writeError(w, "named_entities_cannot_be_empty")
+	case errors.Is(err, service.ErrFunctionAccessDenied), errors.Is(err, service.ErrWorkflowPermissionDenied):
+		writeError(w, "access_denied")
+	case errors.Is(err, service.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
+		writeError(w, "invalid_arguments")
+	default:
+		writeError(w, mapServiceError(err, "invalid_arguments"))
+	}
+}
+
+func (h Handler) workflowsTriggersPermissionsList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeTriggersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	_, triggerID, ok := triggerPermissionRequest(w, r)
+	if !ok {
+		return
+	}
+	if !requireTriggerApp(w, principal) {
+		return
+	}
+	value, err := h.Messages.GetTriggerPermission(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, triggerID)
+	if err != nil {
+		writeTriggerPermissionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, triggerPermissionResponse(value))
+}
+
+func (h Handler) workflowsTriggersPermissionsSet(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeTriggersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, triggerID, ok := triggerPermissionRequest(w, r)
+	if !ok {
+		return
+	}
+	if !requireTriggerApp(w, principal) {
+		return
+	}
+	permissionType := strings.TrimSpace(fields["permission_type"])
+	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, permissionType) {
+		writeError(w, "invalid_permission_type")
+		return
+	}
+	value := domain.AutomationPermission{
+		PermissionType: permissionType,
+		UserIDs:        parseIDList[domain.UserID](fields["user_ids"]), ChannelIDs: parseIDList[domain.ConversationID](fields["channel_ids"]),
+		TeamIDs: parseIDList[domain.WorkspaceID](fields["team_ids"]), OrgIDs: parseIDList[string](fields["org_ids"]),
+	}
+	value, err = h.Messages.SetTriggerPermission(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, triggerID, value)
+	if err != nil {
+		writeTriggerPermissionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, triggerPermissionResponse(value))
+}
+
+func mergeStringIDs[T ~string](current, changes []T, add bool) []T {
+	values := make(map[T]struct{}, len(current)+len(changes))
+	for _, id := range current {
+		values[id] = struct{}{}
+	}
+	for _, id := range changes {
+		if add {
+			values[id] = struct{}{}
+		} else {
+			delete(values, id)
+		}
+	}
+	result := make([]T, 0, len(values))
+	for id := range values {
+		result = append(result, id)
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left] < result[right] })
+	return result
+}
+
+func (h Handler) mutateTriggerPermission(w http.ResponseWriter, r *http.Request, fields map[string]string, principal auth.Principal, triggerID domain.WorkflowTriggerID, add bool) {
+	current, err := h.Messages.GetTriggerPermission(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, triggerID)
+	if err != nil {
+		writeTriggerPermissionError(w, err)
+		return
+	}
+	if current.PermissionType != "named_entities" {
+		writeError(w, "invalid_permission_type")
+		return
+	}
+	current.UserIDs = mergeStringIDs(current.UserIDs, parseIDList[domain.UserID](fields["user_ids"]), add)
+	current.ChannelIDs = mergeStringIDs(current.ChannelIDs, parseIDList[domain.ConversationID](fields["channel_ids"]), add)
+	current.TeamIDs = mergeStringIDs(current.TeamIDs, parseIDList[domain.WorkspaceID](fields["team_ids"]), add)
+	current.OrgIDs = mergeStringIDs(current.OrgIDs, parseIDList[string](fields["org_ids"]), add)
+	if len(current.UserIDs)+len(current.ChannelIDs)+len(current.TeamIDs)+len(current.OrgIDs) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	current, err = h.Messages.SetTriggerPermission(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, triggerID, current)
+	if err != nil {
+		writeTriggerPermissionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, triggerPermissionResponse(current))
+}
+
+func (h Handler) workflowsTriggersPermissionsAdd(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeTriggersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, triggerID, ok := triggerPermissionRequest(w, r)
+	if !ok {
+		return
+	}
+	if !requireTriggerApp(w, principal) {
+		return
+	}
+	h.mutateTriggerPermission(w, r, fields, principal, triggerID, true)
+}
+
+func (h Handler) workflowsTriggersPermissionsRemove(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeTriggersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, triggerID, ok := triggerPermissionRequest(w, r)
+	if !ok {
+		return
+	}
+	if !requireTriggerApp(w, principal) {
+		return
+	}
+	h.mutateTriggerPermission(w, r, fields, principal, triggerID, false)
+}
+
+func (h Handler) workflowsFeaturedList(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	principal, err := h.authenticate(r, auth.ScopeBookmarksRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	channelIDs := parseIDList[domain.ConversationID](fields["channel_ids"])
+	values, err := h.Messages.ListFeaturedWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, channelIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, "channel_not_found")
+		} else {
+			writeError(w, mapServiceError(err, "error_invalid_channels"))
+		}
+		return
+	}
+	grouped := make(map[domain.ConversationID][]map[string]any, len(channelIDs))
+	for _, value := range values {
+		grouped[value.ConversationID] = append(grouped[value.ConversationID], map[string]any{"id": value.TriggerID, "title": value.Title})
+	}
+	rendered := make([]map[string]any, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		triggers := grouped[channelID]
+		if triggers == nil {
+			triggers = []map[string]any{}
+		}
+		rendered = append(rendered, map[string]any{"channel_id": channelID, "triggers": triggers})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "featured_workflows": rendered})
+}
+
+func (h Handler) setFeaturedWorkflows(w http.ResponseWriter, r *http.Request, mode string) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	principal, err := h.authenticate(r, auth.ScopeBookmarksWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	channelID := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	triggerIDs := parseIDList[domain.WorkflowTriggerID](fields["trigger_ids"])
+	if mode != "set" {
+		current, listErr := h.Messages.ListFeaturedWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, []domain.ConversationID{channelID})
+		if listErr != nil {
+			writeError(w, mapServiceError(listErr, "error_modifying_workflows"))
+			return
+		}
+		existing := make([]domain.WorkflowTriggerID, 0, len(current))
+		for _, value := range current {
+			existing = append(existing, value.TriggerID)
+		}
+		triggerIDs = mergeStringIDs(existing, triggerIDs, mode == "add")
+	}
+	if err := h.Messages.SetFeaturedWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, channelID, triggerIDs); err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, "channel_not_found")
+		case errors.Is(err, service.ErrWorkflowPermissionDenied):
+			writeError(w, "access_denied")
+		default:
+			writeError(w, mapServiceError(err, "error_modifying_workflows"))
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) workflowsFeaturedSet(w http.ResponseWriter, r *http.Request) {
+	h.setFeaturedWorkflows(w, r, "set")
+}
+
+func (h Handler) workflowsFeaturedAdd(w http.ResponseWriter, r *http.Request) {
+	h.setFeaturedWorkflows(w, r, "add")
+}
+
+func (h Handler) workflowsFeaturedRemove(w http.ResponseWriter, r *http.Request) {
+	h.setFeaturedWorkflows(w, r, "remove")
+}
+
+func (h Handler) functionsWorkflowsStepsList(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	principal, err := h.authenticate(r, "")
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	values, err := h.Messages.ListFunctionWorkflowSteps(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID,
+		strings.TrimSpace(fields["function_id"]), domain.WorkflowID(strings.TrimSpace(fields["workflow_id"])),
+		strings.TrimSpace(fields["workflow"]), domain.AppID(strings.TrimSpace(fields["workflow_app_id"])))
+	if err != nil {
+		if errors.Is(err, service.ErrWorkflowFunctionNotFound) {
+			writeError(w, "function_not_found")
+		} else if errors.Is(err, store.ErrNotFound) {
+			writeError(w, "unknown_workflow_id")
+		} else {
+			writeError(w, mapServiceError(err, "invalid_arguments"))
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "steps_versions": values})
 }
 
 func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {

@@ -1306,6 +1306,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
         <a class="side-link" href="/app/canvases" aria-label="Canvases"><span class="side-icon" aria-hidden="true">▤</span><span class="side-text">Canvases</span></a>
         <a class="side-link" href="/app/lists" aria-label="Lists"><span class="side-icon" aria-hidden="true">☷</span><span class="side-text">Lists</span></a>
+        <a class="side-link" href="/app/workflows" aria-label="Workflows"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">Workflows</span></a>
         <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
         <a class="side-link" href="/app/developer/apps" aria-label="Developer apps"><span class="side-icon" aria-hidden="true">⌘</span><span class="side-text">Developer apps</span></a>
         {{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
@@ -3271,6 +3272,14 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
 	mux.HandleFunc("POST /app/lists/{listID}/items/create", h.createListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/toggle", h.toggleListItem)
+	mux.HandleFunc("GET /app/workflows", h.workflows)
+	mux.HandleFunc("POST /app/workflows/create", h.createWorkflow)
+	mux.HandleFunc("GET /app/workflows/{workflowID}", h.workflow)
+	mux.HandleFunc("POST /app/workflows/{workflowID}/update", h.updateWorkflow)
+	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers", h.createWorkflowTrigger)
+	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers/{triggerID}", h.updateWorkflowTrigger)
+	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers/{triggerID}/run", h.runWorkflow)
+	mux.HandleFunc("GET /app/workflows/runs/{runID}", h.workflowRun)
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
 	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
 	mux.HandleFunc("POST /app/apps/{appID}/action", h.appHomeAction)

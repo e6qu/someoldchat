@@ -204,3 +204,92 @@ func TestEventProcessorHydratesARealMessageOnlyForTheInstalledBot(t *testing.T) 
 		t.Fatalf("callback=%s", received)
 	}
 }
+
+func TestEventProcessorDeliversOwnedFunctionWithoutManifestSubscription(t *testing.T) {
+	ctx := context.Background()
+	var received string
+	receiver := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var envelope struct {
+			Type      string `json:"type"`
+			Challenge string `json:"challenge"`
+			Event     struct {
+				Type string `json:"type"`
+			} `json:"event"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Error(err)
+			return
+		}
+		if envelope.Type == "url_verification" {
+			_, _ = io.WriteString(w, envelope.Challenge)
+			return
+		}
+		if envelope.Event.Type == "function_executed" {
+			received = string(body)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
+
+	repository := memory.New()
+	if err := repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(domain.User{ID: "UB", WorkspaceID: "T1", Name: "workflow-bot"}); err != nil {
+		t.Fatal(err)
+	}
+	key := []byte(strings.Repeat("k", 32))
+	messages := service.Messages{Store: repository, AppCredentialKey: key, AppHTTPClient: receiver.Client()}
+	configuration, err := messages.IssueAppConfigurationToken(ctx, "T1", "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"display_information":{"name":"Functions"},"settings":{"function_runtime":"remote","event_subscriptions":{"request_url":"` + receiver.URL + `"}},"functions":{"triage":{"title":"Triage","input_parameters":{"properties":{}},"output_parameters":{"properties":{}}}}}`
+	app, _, err := messages.CreateAppFromManifest(ctx, configuration.Token, manifest, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: app.ID, WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: app.ID, UserID: "UB", Name: "workflow-bot", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedToken(ctx, "xoxb-workflow", domain.TokenRecord{WorkspaceID: "T1", UserID: "UB", AppID: app.ID, BotID: "B1", TokenType: "bot"}); err != nil {
+		t.Fatal(err)
+	}
+	functionEvent, err := events.New("evt_function", "T1", "U1", events.NewPayload("function_executed",
+		events.String("target_app_id", string(app.ID)),
+		events.String("function_execution_id", "Fx1"),
+		events.String("function_id", "Fn1"),
+		events.String("workflow_run_id", "Wx1"),
+	), time.Unix(1700000001, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	functionEvent.PrivatePayload = `{"app_id":"` + string(app.ID) + `","function_execution_id":"Fx1","function":{"id":"Fn1","callback_id":"triage","title":"Triage","type":"app","input_parameters":[],"output_parameters":[],"app_id":"` + string(app.ID) + `","date_created":1700000000,"date_updated":1700000000,"date_deleted":0},"workflow_execution_id":"Wx1","inputs":{"incident":"INC-1"}}`
+	if err := repository.AppendEvent(ctx, functionEvent); err != nil {
+		t.Fatal(err)
+	}
+
+	processor := EventProcessor{Store: repository, AppCredentialKey: key, Owner: "worker-1", Lease: time.Minute, Client: receiver.Client()}
+	for attempt := 0; attempt < 20 && received == ""; attempt++ {
+		if _, err := processor.RunOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(received, `"type":"function_executed"`) ||
+		!strings.Contains(received, `"function_execution_id":"Fx1"`) ||
+		!strings.Contains(received, `"workflow_execution_id":"Wx1"`) ||
+		!strings.Contains(received, `"incident":"INC-1"`) {
+		t.Fatalf("callback=%s", received)
+	}
+}

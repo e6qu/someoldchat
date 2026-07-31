@@ -1,0 +1,589 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
+	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store"
+)
+
+type workflowFunctionOption struct {
+	AppID       string
+	AppName     string
+	CallbackID  string
+	Title       string
+	Description string
+}
+
+type workflowAppOption struct {
+	ID   string
+	Name string
+}
+
+type workflowCardView struct {
+	ID          string
+	Title       string
+	Description string
+	Status      string
+	Version     uint64
+	Owned       bool
+	UpdatedAt   string
+}
+
+type workflowStepSlot struct {
+	Number   int
+	Selected string
+}
+
+type workflowTriggerView struct {
+	ID              string
+	Title           string
+	Type            string
+	Enabled         bool
+	Version         uint64
+	IdempotencyKey  string
+	CanRun          bool
+	CanManage       bool
+	WorkflowVersion uint64
+}
+
+type workflowsData struct {
+	CSRFToken string
+	Notice    string
+	Apps      []workflowAppOption
+	Functions []workflowFunctionOption
+	Workflows []workflowCardView
+	MoreURL   string
+}
+
+type workflowData struct {
+	CSRFToken       string
+	Notice          string
+	ID              string
+	AppID           string
+	Title           string
+	Description     string
+	CallbackID      string
+	Status          string
+	Version         uint64
+	Published       uint64
+	UpdatedAt       string
+	Owned           bool
+	InputSchema     string
+	Functions       []workflowFunctionOption
+	StepSlots       []workflowStepSlot
+	StepCount       int
+	Triggers        []workflowTriggerView
+	HasFunctions    bool
+	HasInputSchema  bool
+	PublishedStatus bool
+}
+
+type workflowRunData struct {
+	WorkflowID string
+	RunID      string
+	Status     string
+	Version    uint64
+	Inputs     string
+	Outputs    string
+	Error      string
+	CreatedAt  string
+	UpdatedAt  string
+	Completed  string
+}
+
+const workflowsMarkup = `{{define "title"}}Workflows · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(980px,calc(100% - 32px));margin:28px auto 56px}.heading{display:flex;justify-content:space-between;gap:20px;align-items:start}.heading h2,.heading p{margin:0}.heading p{margin-top:5px;color:var(--muted)}
+.create{margin:20px 0;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.create summary{font-weight:800;cursor:pointer}.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}.fields label{display:grid;gap:6px;font-weight:700}.fields .wide{grid-column:1/-1}.fields input,.fields textarea,.fields select{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.fields textarea{min-height:90px;resize:vertical}.fields button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}.card{display:grid;gap:9px;min-height:145px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);text-decoration:none}.card:hover{border-color:var(--action);background:var(--hover)}.card h3,.card p{margin:0}.card p{color:var(--muted)}.meta{display:flex;gap:8px;align-self:end;color:var(--muted);font-size:12px}.pill{padding:2px 7px;border-radius:999px;background:var(--panel-strong);font-weight:800}.empty{padding:32px;border:1px dashed var(--line);border-radius:10px;text-align:center;color:var(--muted)}.problem{padding:14px;border:1px solid var(--warning);border-radius:8px;background:var(--panel)}
+@media(max-width:620px){.fields{grid-template-columns:1fr}}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `<script>(function(){var app=document.getElementById('workflow-app');var fn=document.getElementById('workflow-function');if(!app||!fn)return;function sync(){var selected=app.value;Array.prototype.forEach.call(fn.options,function(option){if(!option.dataset.app)return;option.hidden=option.dataset.app!==selected;option.disabled=option.dataset.app!==selected});if(fn.selectedOptions.length&&fn.selectedOptions[0].disabled)fn.value=''}app.addEventListener('change',sync);sync()})();</script>{{end}}
+{{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><h1>Workflows</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
+<div class="heading"><div><h2>Workflows</h2><p>Build, publish, and run durable automations backed by installed app functions.</p></div></div>
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if .Functions}}<details class="create"><summary>Create a workflow</summary><form class="fields" method="post" action="/app/workflows/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input name="title" maxlength="255" required></label><label>Owning app<select id="workflow-app" name="app_id" required><option value="">Choose an app</option>{{range .Apps}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label class="wide">Description<textarea name="description" maxlength="2000"></textarea></label><label class="wide">First step<select id="workflow-function" name="function_callback" required><option value="">Choose a function</option>{{range .Functions}}<option value="{{.CallbackID}}" data-app="{{.AppID}}">{{.AppName}} · {{.Title}}</option>{{end}}</select></label><label>Workflow reference<input name="callback_id" maxlength="255" placeholder="triage-request"></label><button type="submit">Create workflow</button></form></details>{{else}}<p class="problem">Workflow Builder needs a developer app with at least one manifest function. <a href="/app/developer/apps">Create or update an app manifest</a>, then return here.</p>{{end}}
+<div class="grid">{{range .Workflows}}<a class="card" href="/app/workflows/{{.ID}}"><h3>{{.Title}}</h3><p>{{if .Description}}{{.Description}}{{else}}No description{{end}}</p><div class="meta"><span class="pill">{{.Status}}</span><span>v{{.Version}}</span>{{if .Owned}}<span>Owned by you</span>{{end}}<time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></div></a>{{else}}<p class="empty">No workflows are available yet.</p>{{end}}</div>{{if .MoreURL}}<p><a href="{{.MoreURL}}">Show more workflows</a></p>{{end}}</main>{{end}}`
+
+var workflowsTemplate = mustPage(workflowsMarkup)
+
+const workflowMarkup = `{{define "title"}}{{.Title}} · Workflow · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(920px,calc(100% - 32px));margin:28px auto 60px}.hero{display:flex;align-items:start;justify-content:space-between;gap:18px}.hero h2,.hero p{margin:0}.hero p{margin-top:6px;color:var(--muted)}.status{padding:5px 10px;border-radius:999px;background:var(--panel-strong);font-weight:800;text-transform:capitalize}
+.panel{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.panel h3{margin:0 0 6px}.panel>p{margin:0 0 14px;color:var(--muted)}.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.fields label{display:grid;gap:6px;font-weight:700}.fields .wide{grid-column:1/-1}.fields input,.fields textarea,.fields select{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.fields textarea{min-height:90px;resize:vertical}.actions{display:flex;gap:9px;flex-wrap:wrap;grid-column:1/-1}.actions button,.run button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.actions .secondary{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}
+.step-list,.trigger-list{display:grid;gap:10px;margin:12px 0}.step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;align-items:center}.step b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--on-accent)}.trigger{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:13px;border:1px solid var(--line);border-radius:8px}.trigger h4,.trigger p{margin:0}.trigger p{color:var(--muted);font-size:13px}.trigger-actions{display:flex;gap:7px;align-items:center}.trigger-actions form{margin:0}.trigger-actions button{padding:7px 10px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);font-weight:800}.trigger-actions .run button{background:var(--action);color:var(--on-strong);border-color:transparent}.empty{padding:18px;border:1px dashed var(--line);border-radius:8px;color:var(--muted)}
+@media(max-width:650px){.fields{grid-template-columns:1fr}.fields .wide{grid-column:1}.trigger{grid-template-columns:1fr}.trigger-actions{flex-wrap:wrap}}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app/workflows">← Workflows</a><h1>Workflow Builder</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="hero"><div><h2>{{.Title}}</h2><p>{{if .Description}}{{.Description}}{{else}}No description{{end}} · version {{.Version}}{{if .Published}}, published version {{.Published}}{{end}}</p></div><span class="status">{{.Status}}</span></div>
+{{if .Owned}}<section class="panel" aria-labelledby="builder-heading"><h3 id="builder-heading">Build workflow</h3><p>Steps run from top to bottom. Publishing makes the current version available to its enabled triggers; unpublished workflows can retain draft changes.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="step_count" value="{{.StepCount}}"><label>Name<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Workflow reference<input name="callback_id" maxlength="255" value="{{.CallbackID}}"></label><label class="wide">Description<textarea name="description" maxlength="2000">{{.Description}}</textarea></label><label class="wide">Input metadata (JSON object; syntax validation only)<textarea name="input_schema" spellcheck="false">{{.InputSchema}}</textarea></label><fieldset class="wide"><legend>Steps</legend><div class="step-list">{{range .StepSlots}}{{$slot := .}}<label class="step"><b aria-hidden="true">{{.Number}}</b><span><span class="visually-hidden">Step {{.Number}}</span><select name="step_{{.Number}}"{{if eq .Number 1}} required{{end}}><option value="">{{if eq .Number 1}}Choose a function{{else}}No step{{end}}</option>{{range $.Functions}}<option value="{{.CallbackID}}"{{if eq .CallbackID $slot.Selected}} selected{{end}}>{{.Title}} · {{.CallbackID}}</option>{{end}}</select></span></label>{{end}}</div></fieldset><div class="actions">{{if .PublishedStatus}}<button name="action" value="publish" type="submit">Publish changes</button><button class="secondary" name="action" value="unpublish" type="submit">Unpublish</button>{{else}}<button name="action" value="save" type="submit">Save draft</button><button name="action" value="publish" type="submit">Publish</button>{{end}}</div></form></section>
+<section class="panel" aria-labelledby="trigger-heading"><h3 id="trigger-heading">Triggers</h3><p>Create a link or shortcut trigger after the workflow is ready. Scheduled and webhook execution are not offered here until their workers are enabled.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/triggers"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Trigger name<input name="title" maxlength="255" required></label><label>Trigger type<select name="type"><option value="link">Link</option><option value="shortcut">Shortcut</option></select></label><button type="submit">Create trigger</button></form></section>{{end}}
+<section class="panel" aria-labelledby="available-heading"><h3 id="available-heading">Available triggers</h3><div class="trigger-list">{{range .Triggers}}<article class="trigger"><div><h4>{{.Title}}</h4><p>{{.Type}} · {{if .Enabled}}enabled{{else}}disabled{{end}} · workflow v{{.WorkflowVersion}}</p></div><div class="trigger-actions">{{if .CanRun}}<form class="run" method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}/run"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">{{if $.HasInputSchema}}<label>Inputs (JSON)<textarea name="inputs">{}</textarea></label>{{end}}<button type="submit">Run</button></form>{{end}}{{if .CanManage}}<form method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="type" value="{{.Type}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div></article>{{else}}<p class="empty">No triggers have been configured.</p>{{end}}</div></section>
+</main>{{end}}`
+
+var workflowTemplate = mustPage(workflowMarkup)
+
+const workflowRunMarkup = `{{define "title"}}Workflow run · SameOldChat{{end}}
+{{define "styles"}}<style>.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}.layout{width:min(760px,calc(100% - 32px));margin:32px auto}.card{padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.card h2{margin-top:0}.status{font-weight:800;text-transform:capitalize}.facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:9px 16px}.facts dt{font-weight:800}.facts dd{margin:0;overflow-wrap:anywhere}.facts pre{white-space:pre-wrap;margin:0}.error{color:var(--danger)}</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app/workflows/{{.WorkflowID}}">← Workflow</a><h1>Run activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout"><article class="card"><h2>Workflow run</h2><p class="status">{{.Status}}</p><dl class="facts"><dt>Execution</dt><dd><code>{{.RunID}}</code></dd><dt>Version</dt><dd>{{.Version}}</dd><dt>Started</dt><dd><time datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></dd><dt>Updated</dt><dd><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></dd>{{if .Completed}}<dt>Completed</dt><dd><time datetime="{{.Completed}}">{{.Completed}}</time></dd>{{end}}<dt>Inputs</dt><dd><pre>{{.Inputs}}</pre></dd><dt>Outputs</dt><dd><pre>{{.Outputs}}</pre></dd>{{if .Error}}<dt>Error</dt><dd class="error">{{.Error}}</dd>{{end}}</dl>{{if eq .Status "running"}}<p role="status">An app function is running. Reload to see its latest durable state.</p>{{end}}</article></main>{{end}}`
+
+var workflowRunTemplate = mustPage(workflowRunMarkup)
+
+func (h Handler) workflowPrincipal(w http.ResponseWriter, r *http.Request) (auth.Principal, string, bool) {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return auth.Principal{}, "", false
+	}
+	csrf, err := pageCSRFToken(r)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return auth.Principal{}, "", false
+	}
+	return principal, csrf, true
+}
+
+func (h Handler) workflowOptions(ctx context.Context, principal auth.Principal, appFilter domain.AppID) ([]workflowAppOption, []workflowFunctionOption, error) {
+	apps, err := h.Messages.ListDeveloperApps(ctx, principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	appOptions := make([]workflowAppOption, 0, len(apps))
+	functions := make([]workflowFunctionOption, 0)
+	for _, app := range apps {
+		if appFilter != "" && app.ID != appFilter {
+			continue
+		}
+		_, manifest, err := h.Messages.GetDeveloperApp(ctx, principal.WorkspaceID, principal.UserID, app.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		parsed, problems := appmanifest.Parse(manifest)
+		if len(problems) != 0 || parsed.FunctionRuntime != "remote" {
+			continue
+		}
+		before := len(functions)
+		for callback, function := range parsed.Functions {
+			functions = append(functions, workflowFunctionOption{
+				AppID: string(app.ID), AppName: app.Name, CallbackID: callback,
+				Title: function.Title, Description: function.Description,
+			})
+		}
+		if len(functions) > before {
+			appOptions = append(appOptions, workflowAppOption{ID: string(app.ID), Name: app.Name})
+		}
+	}
+	sort.Slice(appOptions, func(left, right int) bool { return appOptions[left].Name < appOptions[right].Name })
+	sort.Slice(functions, func(left, right int) bool {
+		if functions[left].AppName != functions[right].AppName {
+			return functions[left].AppName < functions[right].AppName
+		}
+		return functions[left].Title < functions[right].Title
+	})
+	return appOptions, functions, nil
+}
+
+func workflowFunctionExists(options []workflowFunctionOption, appID domain.AppID, callback string) bool {
+	for _, option := range options {
+		if option.AppID == string(appID) && option.CallbackID == callback {
+			return true
+		}
+	}
+	return false
+}
+
+func (h Handler) workflows(w http.ResponseWriter, r *http.Request) {
+	principal, csrf, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	request := domain.PageRequest{Limit: 48, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))}
+	values, more, next, err := h.Messages.ListWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	if err != nil {
+		h.writeStoreError(w, err, "Workflows are temporarily unavailable.")
+		return
+	}
+	apps, functions, err := h.workflowOptions(r.Context(), principal, "")
+	if err != nil {
+		h.writeStoreError(w, err, "Workflow functions are temporarily unavailable.")
+		return
+	}
+	cards := make([]workflowCardView, 0, len(values))
+	for _, value := range values {
+		cards = append(cards, workflowCardView{
+			ID: string(value.ID), Title: value.Title, Description: value.Description,
+			Status: string(value.Status), Version: value.Version, Owned: value.OwnerID == principal.UserID,
+			UpdatedAt: value.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
+		})
+	}
+	moreURL := ""
+	if more {
+		moreURL = "/app/workflows?cursor=" + url.QueryEscape(string(next))
+	}
+	h.writeHTML(w, workflowsTemplate, workflowsData{
+		CSRFToken: csrf, Notice: strings.TrimSpace(r.URL.Query().Get("notice")),
+		Apps: apps, Functions: functions, Workflows: cards, MoreURL: moreURL,
+	}, http.StatusOK, "workflow rendering unavailable")
+}
+
+func (h Handler) createWorkflow(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Workflows and try again.")
+	if !ok {
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	callback := strings.TrimSpace(fields["function_callback"])
+	_, options, err := h.workflowOptions(r.Context(), principal, appID)
+	if err != nil || !workflowFunctionExists(options, appID, callback) {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The workflow was not created", "Choose a function belonging to the selected app.")
+		return
+	}
+	steps, _ := json.Marshal([]map[string]string{{"function_id": callback, "title": workflowFunctionTitle(options, callback)}})
+	value, err := h.Messages.CreateWorkflow(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowDefinition{
+		AppID: appID, CallbackID: strings.TrimSpace(fields["callback_id"]), Title: strings.TrimSpace(fields["title"]),
+		Description: strings.TrimSpace(fields["description"]), InputSchema: `{}`, Steps: string(steps),
+	})
+	if err != nil {
+		h.writeWorkflowMutationError(w, r, "The workflow was not created", err)
+		return
+	}
+	h.redirectMutation(w, r, "/app/workflows/"+url.PathEscape(string(value.ID))+"?notice=Draft+created")
+}
+
+func workflowFunctionTitle(options []workflowFunctionOption, callback string) string {
+	for _, option := range options {
+		if option.CallbackID == callback {
+			return option.Title
+		}
+	}
+	return callback
+}
+
+func decodeWorkflowCallbacks(raw string) []string {
+	var steps []struct {
+		FunctionID string `json:"function_id"`
+	}
+	if json.Unmarshal([]byte(raw), &steps) != nil {
+		return nil
+	}
+	result := make([]string, 0, len(steps))
+	for _, step := range steps {
+		result = append(result, step.FunctionID)
+	}
+	return result
+}
+
+func workflowSlots(callbacks []string) []workflowStepSlot {
+	count := max(5, len(callbacks)+1)
+	result := make([]workflowStepSlot, count)
+	for index := range result {
+		result[index].Number = index + 1
+		if index < len(callbacks) {
+			result[index].Selected = callbacks[index]
+		}
+	}
+	return result
+}
+
+func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
+	principal, csrf, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	id := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
+	value, err := h.Messages.GetWorkflow(r.Context(), principal.WorkspaceID, principal.UserID, id)
+	if err != nil {
+		h.writeStoreError(w, err, "That workflow is not available.")
+		return
+	}
+	triggers, err := h.Messages.ListWorkflowTriggers(r.Context(), principal.WorkspaceID, principal.UserID, id)
+	if err != nil {
+		h.writeStoreError(w, err, "Workflow triggers are temporarily unavailable.")
+		return
+	}
+	_, functions, err := h.workflowOptions(r.Context(), principal, value.AppID)
+	if err != nil && value.OwnerID == principal.UserID {
+		h.writeStoreError(w, err, "Workflow functions are temporarily unavailable.")
+		return
+	}
+	triggerViews := make([]workflowTriggerView, 0, len(triggers))
+	for _, trigger := range triggers {
+		key, err := domain.PublicID("workflow_run_")
+		if err != nil {
+			h.writeStoreError(w, err, "Workflow run controls are temporarily unavailable.")
+			return
+		}
+		canRun := false
+		if trigger.Enabled && value.Status == domain.WorkflowPublished {
+			permission, err := h.Messages.GetTriggerPermission(r.Context(), principal.WorkspaceID, principal.UserID, value.AppID, trigger.ID)
+			if err != nil {
+				h.writeStoreError(w, err, "Workflow permissions are temporarily unavailable.")
+				return
+			}
+			canRun = workflowPermissionAllows(permission, principal, value.OwnerID)
+		}
+		triggerViews = append(triggerViews, workflowTriggerView{
+			ID: string(trigger.ID), Title: trigger.Title, Type: trigger.Type, Enabled: trigger.Enabled,
+			Version: trigger.Version, IdempotencyKey: key, CanRun: canRun,
+			CanManage: value.OwnerID == principal.UserID, WorkflowVersion: value.PublishedVersion,
+		})
+	}
+	inputSchema := strings.TrimSpace(value.InputSchema)
+	if inputSchema == "" {
+		inputSchema = "{}"
+	}
+	slots := workflowSlots(decodeWorkflowCallbacks(value.Steps))
+	h.writeHTML(w, workflowTemplate, workflowData{
+		CSRFToken: csrf, Notice: strings.TrimSpace(r.URL.Query().Get("notice")),
+		ID: string(value.ID), AppID: string(value.AppID), Title: value.Title, Description: value.Description,
+		CallbackID: value.CallbackID, Status: string(value.Status), Version: value.Version,
+		Published: value.PublishedVersion, UpdatedAt: value.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
+		Owned: value.OwnerID == principal.UserID, InputSchema: inputSchema, Functions: functions,
+		StepSlots: slots, StepCount: len(slots), Triggers: triggerViews,
+		HasFunctions: len(functions) != 0, HasInputSchema: inputSchema != "{}",
+		PublishedStatus: value.Status == domain.WorkflowPublished,
+	}, http.StatusOK, "workflow rendering unavailable")
+}
+
+func workflowPermissionAllows(permission domain.AutomationPermission, principal auth.Principal, ownerID domain.UserID) bool {
+	switch permission.PermissionType {
+	case "everyone":
+		return true
+	case "app_collaborators":
+		return principal.UserID == ownerID
+	case "named_entities":
+		return slices.Contains(permission.UserIDs, principal.UserID) ||
+			slices.Contains(permission.TeamIDs, principal.WorkspaceID)
+	default:
+		return false
+	}
+}
+
+func encodeWorkflowSteps(fields map[string]string, options []workflowFunctionOption, appID domain.AppID) (string, error) {
+	count := 10
+	if raw := strings.TrimSpace(fields["step_count"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			return "", errors.New("workflow step count is invalid")
+		}
+		count = parsed
+	}
+	steps := make([]map[string]string, 0, count)
+	for index := 1; index <= count; index++ {
+		callback := strings.TrimSpace(fields[fmt.Sprintf("step_%d", index)])
+		if callback == "" {
+			continue
+		}
+		if !workflowFunctionExists(options, appID, callback) {
+			return "", errors.New("function is not part of the workflow app")
+		}
+		steps = append(steps, map[string]string{"function_id": callback, "title": workflowFunctionTitle(options, callback)})
+	}
+	if len(steps) == 0 {
+		return "", errors.New("at least one workflow step is required")
+	}
+	encoded, err := json.Marshal(steps)
+	return string(encoded), err
+}
+
+func (h Handler) updateWorkflow(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the workflow and try again.")
+	if !ok {
+		return
+	}
+	id := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
+	current, err := h.Messages.GetWorkflow(r.Context(), principal.WorkspaceID, principal.UserID, id)
+	if err != nil || current.OwnerID != principal.UserID {
+		h.writeMutationError(w, r, http.StatusNotFound, "The workflow was not saved", "It no longer exists or you are not its owner.")
+		return
+	}
+	expected, err := strconv.ParseUint(strings.TrimSpace(fields["version"]), 10, 64)
+	if err != nil || expected != current.Version {
+		h.writeMutationError(w, r, http.StatusConflict, "The workflow was not saved", "It changed elsewhere. Reload before editing.")
+		return
+	}
+	_, options, err := h.workflowOptions(r.Context(), principal, current.AppID)
+	if err != nil || len(options) == 0 {
+		h.writeMutationError(w, r, http.StatusConflict, "The workflow was not saved", "Its app no longer exposes the functions used by this workflow.")
+		return
+	}
+	steps, err := encodeWorkflowSteps(fields, options, current.AppID)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The workflow was not saved", err.Error()+".")
+		return
+	}
+	current.Title = strings.TrimSpace(fields["title"])
+	current.Description = strings.TrimSpace(fields["description"])
+	current.CallbackID = strings.TrimSpace(fields["callback_id"])
+	current.InputSchema = strings.TrimSpace(fields["input_schema"])
+	current.Steps = steps
+	action := strings.TrimSpace(fields["action"])
+	publish := action == "publish"
+	if action != "save" && action != "publish" && action != "unpublish" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The workflow was not saved", "Choose Save draft, Publish, or Unpublish.")
+		return
+	}
+	if action == "unpublish" {
+		current.Status = domain.WorkflowDisabled
+	}
+	updated, err := h.Messages.UpdateWorkflow(r.Context(), principal.WorkspaceID, principal.UserID, current, expected, publish)
+	if err != nil {
+		h.writeWorkflowMutationError(w, r, "The workflow was not saved", err)
+		return
+	}
+	notice := "Draft saved"
+	if publish {
+		notice = "Workflow published"
+	} else if action == "unpublish" {
+		notice = "Workflow unpublished"
+	}
+	h.redirectMutation(w, r, "/app/workflows/"+url.PathEscape(string(updated.ID))+"?notice="+url.QueryEscape(notice))
+}
+
+func (h Handler) createWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the workflow and try again.")
+	if !ok {
+		return
+	}
+	workflowID := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
+	triggerType := strings.TrimSpace(fields["type"])
+	if triggerType != "link" && triggerType != "shortcut" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The trigger was not created", "Choose Link or Shortcut.")
+		return
+	}
+	_, err := h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
+		WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]), Type: triggerType, Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		h.writeWorkflowMutationError(w, r, "The trigger was not created", err)
+		return
+	}
+	h.redirectMutation(w, r, "/app/workflows/"+url.PathEscape(string(workflowID))+"?notice=Trigger+created")
+}
+
+func (h Handler) updateWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the workflow and try again.")
+	if !ok {
+		return
+	}
+	workflowID := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
+	triggerID := domain.WorkflowTriggerID(strings.TrimSpace(r.PathValue("triggerID")))
+	version, err := strconv.ParseUint(strings.TrimSpace(fields["version"]), 10, 64)
+	if err != nil || version == 0 {
+		h.writeMutationError(w, r, http.StatusConflict, "The trigger was not updated", "Reload the workflow and try again.")
+		return
+	}
+	_, err = h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
+		ID: triggerID, WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]),
+		Type: strings.TrimSpace(fields["type"]), Config: `{}`, Enabled: fields["enabled"] == "true",
+	}, version)
+	if err != nil {
+		h.writeWorkflowMutationError(w, r, "The trigger was not updated", err)
+		return
+	}
+	h.redirectMutation(w, r, "/app/workflows/"+url.PathEscape(string(workflowID))+"?notice=Trigger+updated")
+}
+
+func (h Handler) runWorkflow(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the workflow and try again.")
+	if !ok {
+		return
+	}
+	workflowID := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
+	triggerID := domain.WorkflowTriggerID(strings.TrimSpace(r.PathValue("triggerID")))
+	triggers, err := h.Messages.ListWorkflowTriggers(r.Context(), principal.WorkspaceID, principal.UserID, workflowID)
+	if err != nil {
+		h.writeWorkflowMutationError(w, r, "The workflow did not start", err)
+		return
+	}
+	found := false
+	for _, trigger := range triggers {
+		if trigger.ID == triggerID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		h.writeMutationError(w, r, http.StatusNotFound, "The workflow did not start", "That trigger does not belong to this workflow.")
+		return
+	}
+	inputs := strings.TrimSpace(fields["inputs"])
+	if inputs == "" {
+		inputs = "{}"
+	}
+	run, err := h.Messages.RunWorkflow(r.Context(), principal.WorkspaceID, principal.UserID, triggerID, "", inputs, strings.TrimSpace(fields["idempotency_key"]))
+	if err != nil {
+		h.writeWorkflowMutationError(w, r, "The workflow did not start", err)
+		return
+	}
+	h.redirectMutation(w, r, "/app/workflows/runs/"+url.PathEscape(string(run.ID)))
+}
+
+func (h Handler) workflowRun(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	run, err := h.Messages.GetWorkflowRun(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowRunID(strings.TrimSpace(r.PathValue("runID"))))
+	if err != nil {
+		h.writeStoreError(w, err, "That workflow run is not available.")
+		return
+	}
+	completed := ""
+	if !run.CompletedAt.IsZero() {
+		completed = run.CompletedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	}
+	h.writeHTML(w, workflowRunTemplate, workflowRunData{
+		WorkflowID: string(run.WorkflowID), RunID: string(run.ID), Status: string(run.Status),
+		Version: run.WorkflowVersion, Inputs: run.Inputs, Outputs: run.Outputs, Error: run.Error,
+		CreatedAt: run.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
+		UpdatedAt: run.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"), Completed: completed,
+	}, http.StatusOK, "workflow run rendering unavailable")
+}
+
+func (h Handler) writeWorkflowMutationError(w http.ResponseWriter, r *http.Request, title string, err error) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		h.writeMutationError(w, r, http.StatusNotFound, title, "The workflow, trigger, app, or function is no longer available.")
+	case errors.Is(err, store.ErrConflict):
+		h.writeMutationError(w, r, http.StatusConflict, title, "The workflow changed elsewhere or is not currently runnable. Reload and try again.")
+	default:
+		h.writeMutationError(w, r, http.StatusBadRequest, title, "Check the workflow fields and try again.")
+	}
+}

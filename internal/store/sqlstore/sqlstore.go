@@ -173,6 +173,13 @@ CREATE TABLE IF NOT EXISTS workflows (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS workflows_callback ON workflows(workspace_id, app_id, callback_id) WHERE callback_id <> '';
 CREATE INDEX IF NOT EXISTS workflows_workspace_id ON workflows(workspace_id, id);
+CREATE TABLE IF NOT EXISTS workflow_revisions (
+ workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), version INTEGER NOT NULL, title TEXT NOT NULL,
+ steps TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at INTEGER NOT NULL,
+ PRIMARY KEY (workflow_id, version)
+);
+CREATE INDEX IF NOT EXISTS workflow_revisions_workspace ON workflow_revisions(workspace_id, workflow_id, version);
 CREATE TABLE IF NOT EXISTS workflow_triggers (
  id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
@@ -457,7 +464,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 120
+const schemaVersion = 121
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2681,6 +2688,24 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			if _, err := db.ExecContext(ctx, statement); err != nil {
 				return fmt.Errorf("migrate workflow automation: %w", err)
 			}
+		}
+	}
+	if version < 121 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workflow_revisions (
+			workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), version INTEGER NOT NULL, title TEXT NOT NULL,
+			steps TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at INTEGER NOT NULL,
+			PRIMARY KEY (workflow_id, version)
+		)`); err != nil {
+			return fmt.Errorf("migrate workflow revisions: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS workflow_revisions_workspace ON workflow_revisions(workspace_id, workflow_id, version)`); err != nil {
+			return fmt.Errorf("index workflow revisions: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO workflow_revisions(workflow_id, workspace_id, version, title, steps, status, created_at)
+			SELECT id, workspace_id, version, title, steps, status, updated_at FROM workflows WHERE true
+			ON CONFLICT(workflow_id, version) DO NOTHING`); err != nil {
+			return fmt.Errorf("backfill workflow revisions: %w", err)
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -5473,6 +5498,12 @@ func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 	if err != nil {
 		return classify(err)
 	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
+		workflow_id, workspace_id, version, title, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Version, value.Title, value.Steps,
+		value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
@@ -5512,6 +5543,12 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 			return lookupErr
 		}
 		return store.ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
+		workflow_id, workspace_id, version, title, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, expectedVersion+1, value.Title, value.Steps,
+		value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -5560,6 +5597,34 @@ func (s *Store) ListWorkflows(ctx context.Context, workspace domain.WorkspaceID,
 	return values, more, next, err
 }
 
+func (s *Store) ListWorkflowRevisions(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID) ([]domain.WorkflowRevision, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workflow_id, workspace_id, version, title, steps, status, created_at
+		FROM workflow_revisions WHERE workspace_id = ? AND workflow_id = ? ORDER BY version`, workspace, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowRevision, 0)
+	for rows.Next() {
+		var value domain.WorkflowRevision
+		var created int64
+		if err := rows.Scan(&value.WorkflowID, &value.WorkspaceID, &value.Version, &value.Title, &value.Steps, &value.Status, &created); err != nil {
+			return nil, err
+		}
+		value.CreatedAt = time.Unix(0, created).UTC()
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		if _, err := s.GetWorkflow(ctx, workspace, workflowID); err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
 const workflowTriggerColumns = `id, workflow_id, workspace_id, app_id, title, type, config, enabled, version, created_at, updated_at`
 
 func scanWorkflowTrigger(row interface{ Scan(...any) error }) (domain.WorkflowTrigger, error) {
@@ -5604,9 +5669,9 @@ func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTri
 	} else {
 		result, updateErr := tx.ExecContext(ctx, `UPDATE workflow_triggers SET
 			workflow_id = ?, app_id = ?, title = ?, type = ?, config = ?, enabled = ?, version = ?, updated_at = ?
-			WHERE id = ? AND workspace_id = ? AND version = ?`,
+			WHERE id = ? AND workspace_id = ? AND workflow_id = ? AND app_id = ? AND version = ?`,
 			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, value.Enabled, expectedVersion+1,
-			value.UpdatedAt.UTC().UnixNano(), value.ID, value.WorkspaceID, expectedVersion)
+			value.UpdatedAt.UTC().UnixNano(), value.ID, value.WorkspaceID, value.WorkflowID, value.AppID, expectedVersion)
 		if updateErr != nil {
 			return classify(updateErr)
 		}
@@ -5615,13 +5680,18 @@ func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTri
 			return rowsErr
 		}
 		if changed == 0 {
+			var currentWorkflow domain.WorkflowID
+			var currentApp domain.AppID
 			var version uint64
-			lookupErr := tx.QueryRowContext(ctx, `SELECT version FROM workflow_triggers WHERE id = ? AND workspace_id = ?`, value.ID, value.WorkspaceID).Scan(&version)
+			lookupErr := tx.QueryRowContext(ctx, `SELECT workflow_id, app_id, version FROM workflow_triggers WHERE id = ? AND workspace_id = ?`, value.ID, value.WorkspaceID).Scan(&currentWorkflow, &currentApp, &version)
 			if errors.Is(lookupErr, sql.ErrNoRows) {
 				return store.ErrNotFound
 			}
 			if lookupErr != nil {
 				return lookupErr
+			}
+			if currentWorkflow != value.WorkflowID || currentApp != value.AppID {
+				return store.ErrNotFound
 			}
 			return store.ErrConflict
 		}

@@ -77,6 +77,8 @@ const (
 	ScopeCallsRead               Scope = "calls:read"
 	ScopeCallsWrite              Scope = "calls:write"
 	ScopeWorkflowStepsExecute    Scope = "workflow.steps:execute"
+	ScopeTriggersRead            Scope = "triggers:read"
+	ScopeTriggersWrite           Scope = "triggers:write"
 	ScopeTokensBasic             Scope = "tokens.basic"
 	ScopeAdmin                   Scope = "admin"
 	ScopeAdminUsersRead          Scope = "admin.users:read"
@@ -509,6 +511,8 @@ var allScopes = []Scope{
 	ScopeCallsRead,
 	ScopeCallsWrite,
 	ScopeWorkflowStepsExecute,
+	ScopeTriggersRead,
+	ScopeTriggersWrite,
 	ScopeTokensBasic,
 	ScopeAdmin,
 	ScopeAdminUsersRead,
