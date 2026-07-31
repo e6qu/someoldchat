@@ -117,11 +117,11 @@ member.
    update. Continue returns to that destination with the draft restored; delete
    removes only the selected draft. A destination the member can no longer
    access is not reopened or leaked.
-3. Scheduled items show the destination, exact local delivery time, text and
-   delivery/failure state. Edit preserves the original until valid replacement
-   text and time commit. Reschedule, send now, cancel and delete address the
-   exact item and reconcile a concurrent worker outcome instead of reporting a
-   second success.
+3. Scheduled items show the destination, exact local delivery time, text, file
+   count, and delivery/failure state. Edit preserves the original text, staged
+   files, and time until a valid replacement commits. Reschedule, send now,
+   cancel and delete address the exact item and reconcile a concurrent worker
+   outcome instead of reporting a second success.
 4. Sent items are newest first and open the exact authorized conversation,
    thread and message. Deletion or later permission loss produces an
    unavailable/redacted result rather than exposing retained content.
@@ -147,6 +147,22 @@ errors are enforced by the backend and match `chat.scheduleMessage`.
 Scheduling creates a durable pending message, clears only the scheduled draft,
 shows it in Drafts & sent, and does not insert an ordinary history message or
 `message` event before delivery.
+
+The first-party composer can schedule the same zero-to-ten staged files that it
+can send immediately, with or without comment text. The pending schedule owns
+the private upload after its short-lived upload ticket and draft expire.
+Cancelling releases that ownership for blob reconciliation. Delivery completes
+the uploads, every file share, the one message, Activity/outbox effects, and
+the scheduled-message idempotency key in one transaction. A worker crash
+before or after that commit boundary is retryable without a duplicate message,
+an early file share, or a collectable pending blob.
+
+This is a first-party Slack UI contract, not a new `chat.scheduleMessage`
+parameter. Slack's current help sequence explicitly permits adding attachments
+before choosing the schedule action. The published Web API `attachments`
+argument means legacy structured message attachments; it does not accept
+hosted file IDs. SameOldChat therefore carries staged file references only on
+its authenticated internal service/gRPC seam.
 
 ## SCHED-02 — Deliver, reschedule, send now, or cancel
 
@@ -208,6 +224,13 @@ outcomes are not HTTP 500 responses.
   and Drafts & sent count before one send promotes the uploads into one message.
   Deleting the draft removes the durable references so ordinary blob
   reconciliation can reclaim the now-orphaned objects.
+- Scheduled attachment persistence: browser, memory, SQLite/PostgreSQL,
+  generated-gRPC differential, and worker tests cover file-only and
+  text-plus-file schedules, Drafts & sent projection, ticket expiry, draft
+  cleanup, blob retention, reschedule, cancellation, send now, due delivery,
+  and retry after the file/message commit. The ordinary Slack Web API request
+  remains unchanged and current Node/Python/Java SDK qualification continues
+  to prove only its published text/blocks/structured-attachments surface.
 - Differential: capture exact suggestion, draft, schedule-window, quota,
   thread, and failure behavior in a dedicated Slack workspace.
 
@@ -220,10 +243,10 @@ outcomes are not HTTP 500 responses.
 | COMP-03 | [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups) | A user group's unique handle notifies its members; the emoji and developer transport sources checked below establish the other completion representations. |
 | DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack automatically saves unfinished composer work and the same composer accepts attachments; the separately checked file journey establishes the ten-file staging limit. Exact cross-client retention remains a controlled live-workspace differential even though local reload/restart persistence is executable. |
 | DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
-| SCHED-01 | [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages) | Slack schedules from the send control using suggested or custom local times. |
+| SCHED-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages-in-Slack-Send-and-read-messages-in-Slack) | Slack's current first-party sequence says to add attachments, emoji, mentions, or formatting and then choose the send-arrow schedule action; the separately checked dedicated schedule guide establishes suggested/custom local times. |
 | SCHED-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | First-party scheduled items can be edited, rescheduled, sent, cancelled, or deleted; Slack's developer scheduling guide separately establishes the app-facing delete-plus-schedule update boundary below. |
 
-Sources checked 2026-07-30:
+Sources checked 2026-07-31:
 
 - [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages)
 - [Record audio and video clips](https://slack.com/help/articles/4406235165587-Record-audio-and-video-clips-in-Slack)

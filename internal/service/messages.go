@@ -5179,7 +5179,7 @@ func (m Messages) UpdateScheduledMessage(ctx context.Context, workspaceID domain
 		return domain.ScheduledMessage{}, err
 	}
 	text = strings.TrimSpace(text)
-	if text == "" || messageTextTooLong(text) || postAt.IsZero() {
+	if messageTextTooLong(text) || postAt.IsZero() {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
 	now := time.Now().UTC()
@@ -5221,12 +5221,7 @@ func (m Messages) SendScheduledMessageNow(ctx context.Context, workspaceID domai
 	if err != nil {
 		return domain.Message{}, err
 	}
-	request, requestErr := ScheduledMessagePostRequest(item)
-	if requestErr != nil {
-		_ = m.Store.ReleaseScheduledMessage(ctx, owner, item.ID, item.PostAt)
-		return domain.Message{}, requestErr
-	}
-	message, postErr := m.PostMessageAs(ctx, item.WorkspaceID, item.Author, request)
+	message, postErr := m.PostScheduledMessage(ctx, item.WorkspaceID, item.ID)
 	if postErr != nil {
 		releaseErr := m.Store.ReleaseScheduledMessage(ctx, owner, item.ID, item.PostAt)
 		return domain.Message{}, errors.Join(postErr, releaseErr)
@@ -5270,30 +5265,9 @@ func (m Messages) SaveDraftWithAttachments(ctx context.Context, workspaceID doma
 	if (strings.TrimSpace(text) == "" && len(attachments) == 0) || messageTextTooLong(text) || len(attachments) > 10 {
 		return domain.Draft{}, ErrInvalidMessage
 	}
-	normalizedAttachments := make([]domain.DraftAttachment, 0, len(attachments))
-	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(attachments))
-	for _, attachment := range attachments {
-		attachment.UploadID = domain.ExternalUploadID(strings.TrimSpace(string(attachment.UploadID)))
-		attachment.Title = strings.TrimSpace(attachment.Title)
-		if attachment.UploadID == "" || len(attachment.Title) > 255 {
-			return domain.Draft{}, ErrInvalidExternalUpload
-		}
-		if _, duplicate := seenUploads[attachment.UploadID]; duplicate {
-			return domain.Draft{}, ErrInvalidExternalUpload
-		}
-		upload, err := m.Store.GetExternalUpload(ctx, attachment.UploadID)
-		if err != nil || upload.WorkspaceID != workspaceID || upload.Uploader != userID ||
-			upload.Status != domain.ExternalUploadUploaded || !upload.ExpiresAt.After(time.Now().UTC()) {
-			return domain.Draft{}, ErrInvalidExternalUpload
-		}
-		if attachment.Title == "" {
-			attachment.Title = upload.Title
-		}
-		attachment.Name = upload.Name
-		attachment.MIMEType = upload.MIMEType
-		attachment.Size = upload.Size
-		normalizedAttachments = append(normalizedAttachments, attachment)
-		seenUploads[attachment.UploadID] = struct{}{}
+	normalizedAttachments, err := m.normalizeComposerAttachments(ctx, workspaceID, userID, attachments)
+	if err != nil {
+		return domain.Draft{}, err
 	}
 	if thread != "" {
 		createdAt, err := domain.ParseMessageTimestamp(thread)
@@ -5319,6 +5293,47 @@ func (m Messages) SaveDraftWithAttachments(ctx context.Context, workspaceID doma
 		return domain.Draft{}, err
 	}
 	return m.Store.UpsertDraft(ctx, value, event)
+}
+
+func (m Messages) normalizeComposerAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, attachments []domain.DraftAttachment) ([]domain.DraftAttachment, error) {
+	if len(attachments) > 10 {
+		return nil, ErrInvalidMessage
+	}
+	normalizedAttachments := make([]domain.DraftAttachment, 0, len(attachments))
+	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(attachments))
+	for _, attachment := range attachments {
+		attachment.UploadID = domain.ExternalUploadID(strings.TrimSpace(string(attachment.UploadID)))
+		attachment.Title = strings.TrimSpace(attachment.Title)
+		if attachment.UploadID == "" || len(attachment.Title) > 255 {
+			return nil, ErrInvalidExternalUpload
+		}
+		if _, duplicate := seenUploads[attachment.UploadID]; duplicate {
+			return nil, ErrInvalidExternalUpload
+		}
+		upload, err := m.Store.GetExternalUpload(ctx, attachment.UploadID)
+		if err != nil || upload.WorkspaceID != workspaceID || upload.Uploader != userID ||
+			upload.Status != domain.ExternalUploadUploaded {
+			return nil, ErrInvalidExternalUpload
+		}
+		if !upload.ExpiresAt.After(time.Now().UTC()) {
+			referenced, referenceErr := m.Store.PendingUploadReferenceExists(ctx, workspaceID, userID, attachment.UploadID)
+			if referenceErr != nil {
+				return nil, referenceErr
+			}
+			if !referenced {
+				return nil, ErrInvalidExternalUpload
+			}
+		}
+		if attachment.Title == "" {
+			attachment.Title = upload.Title
+		}
+		attachment.Name = upload.Name
+		attachment.MIMEType = upload.MIMEType
+		attachment.Size = upload.Size
+		normalizedAttachments = append(normalizedAttachments, attachment)
+		seenUploads[attachment.UploadID] = struct{}{}
+	}
+	return normalizedAttachments, nil
 }
 
 func (m Messages) Draft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.Draft, error) {
@@ -6277,9 +6292,13 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 	if request.CredentialHash == "" || messagePayloadTooLong(request.Blocks, request.Attachments) {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
+	fileAttachments, fileErr := m.normalizeComposerAttachments(ctx, workspaceID, userID, request.FileAttachments)
+	if fileErr != nil {
+		return domain.ScheduledMessage{}, fileErr
+	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(request.Blocks))
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(request.Attachments))
-	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) || request.PostAt.IsZero() {
+	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "" && len(fileAttachments) == 0) || messageTextTooLong(text) || request.PostAt.IsZero() {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
 	metadata := ""
@@ -6291,6 +6310,13 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 		if err != nil {
 			return domain.ScheduledMessage{}, ErrInvalidMessage
 		}
+	}
+	if len(fileAttachments) != 0 && (normalizedAttachments != "" || request.AppID != "" || request.BotID != "" || metadata != "" || strings.TrimSpace(request.StreamState) != "") {
+		// Hosted composer files are a private first-party contract. Slack's
+		// published schedule API uses "attachments" for structured message
+		// attachments and exposes no hosted file-id parameter, so app-authored
+		// payload extensions must not be silently combined with this seam.
+		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
 	streamState, err := normalizeScheduledMessageState(request.StreamState, text, normalizedBlocks, request.ThreadTimestamp)
 	if err != nil {
@@ -6332,7 +6358,7 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 		WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID,
 		AppID: request.AppID, BotID: request.BotID, CredentialHash: request.CredentialHash,
 		Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Metadata: metadata, StreamState: streamState,
-		ThreadTimestamp: request.ThreadTimestamp, PostAt: postAt, CreatedAt: now,
+		ThreadTimestamp: request.ThreadTimestamp, PostAt: postAt, CreatedAt: now, FileAttachments: fileAttachments,
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("message.scheduled", events.String("scheduled_message_id", string(id)), events.String("channel_id", string(channel)), events.String("post_at", string(domain.NewMessageTimestamp(value.PostAt)))), now)
 	if err != nil {
@@ -6365,6 +6391,34 @@ func ScheduledMessagePostRequest(value domain.ScheduledMessage) (domain.MessageP
 		UnfurlLinks: state.UnfurlLinks, UnfurlMedia: state.UnfurlMedia,
 		Username: state.Username, IconEmoji: state.IconEmoji, IconURL: state.IconURL,
 	}, nil
+}
+
+// PostScheduledMessage is the one deferred-delivery path shared by the worker
+// and first-party "Send now". The canonical pending record is loaded from the
+// repository rather than trusted from an internal caller. For composer files,
+// upload completion, every file share, the message, Activity/outbox effects,
+// and the scheduled ID's idempotency record commit in one transaction.
+func (m Messages) PostScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, id domain.ScheduledMessageID) (domain.Message, error) {
+	value, err := m.Store.GetScheduledMessage(ctx, workspaceID, id)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	request, err := ScheduledMessagePostRequest(value)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if len(value.FileAttachments) == 0 {
+		return m.postMessageAs(ctx, value.WorkspaceID, value.Author, request, value.ID)
+	}
+	completions := make([]domain.ExternalUploadCompletion, 0, len(value.FileAttachments))
+	for _, attachment := range value.FileAttachments {
+		completions = append(completions, domain.ExternalUploadCompletion{ID: attachment.UploadID, Title: attachment.Title})
+	}
+	_, err = m.completeExternalUploads(ctx, value.WorkspaceID, value.Author, completions, []domain.ConversationID{value.Channel}, value.Text, value.Blocks, value.ThreadTimestamp, string(value.ID))
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return m.Store.GetIdempotentMessage(ctx, value.WorkspaceID, value.Author, string(value.ID))
 }
 
 func normalizeScheduledMessageState(raw, text, blocks string, threadTimestamp domain.MessageTimestamp) (string, error) {
@@ -6479,6 +6533,13 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 }
 
 func (m Messages) PostMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, request domain.MessagePostRequest) (domain.Message, error) {
+	return m.postMessageAs(ctx, workspaceID, authorID, request, "")
+}
+
+func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, request domain.MessagePostRequest, scheduledID domain.ScheduledMessageID) (domain.Message, error) {
+	if scheduledID != "" && request.IdempotencyKey != string(scheduledID) {
+		return domain.Message{}, ErrInvalidMessage
+	}
 	if request.IdempotencyKey != "" {
 		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, request.IdempotencyKey)
 		if err == nil {
@@ -6574,7 +6635,11 @@ func (m Messages) PostMessageAs(ctx context.Context, workspaceID domain.Workspac
 		if err != nil {
 			return domain.Message{}, err
 		}
-		err = m.Store.CreateMessage(ctx, message, event, request.IdempotencyKey)
+		if scheduledID == "" {
+			err = m.Store.CreateMessage(ctx, message, event, request.IdempotencyKey)
+		} else {
+			err = m.Store.CreateScheduledMessagePost(ctx, scheduledID, message, event)
+		}
 		if errors.Is(err, store.ErrMessageTimestampTaken) {
 			message.CreatedAt = message.CreatedAt.Add(time.Microsecond)
 			continue
@@ -6755,6 +6820,19 @@ func normalizeFileShareChannels(values []domain.ConversationID) []domain.Convers
 }
 
 func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) ([]domain.File, error) {
+	return m.completeExternalUploads(ctx, workspaceID, userID, completions, channels, initialComment, blocks, threadTimestamp, "")
+}
+
+func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) ([]domain.File, error) {
+	if idempotencyKey != "" {
+		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, userID, idempotencyKey)
+		if err == nil {
+			return append([]domain.File(nil), cached.Files...), nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return nil, err
 	}
@@ -6783,11 +6861,11 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 			return nil, store.ErrNotFound
 		}
 		if !value.ExpiresAt.After(time.Now().UTC()) {
-			draftOwned, draftErr := m.Store.DraftAttachmentExists(ctx, workspaceID, userID, value.ID)
-			if draftErr != nil {
-				return nil, draftErr
+			pendingOwned, pendingErr := m.Store.PendingUploadReferenceExists(ctx, workspaceID, userID, value.ID)
+			if pendingErr != nil {
+				return nil, pendingErr
 			}
-			if !draftOwned {
+			if !pendingOwned {
 				return nil, ErrInvalidExternalUpload
 			}
 		}
@@ -6827,8 +6905,13 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		// draft-owned upload through files.completeUploadExternal in one
 		// channel, then "send" the stale draft in another; the composer would
 		// report success and clear the draft although no message was posted.
-		if !sameFileShareChannels(completed, channels) {
+		if len(channels) != 0 && !sameFileShareChannels(completed, channels) {
 			return nil, ErrInvalidExternalUpload
+		}
+		if idempotencyKey != "" {
+			if _, err := m.Store.GetIdempotentMessage(ctx, workspaceID, userID, idempotencyKey); err != nil {
+				return nil, ErrInvalidExternalUpload
+			}
 		}
 		return completed, nil
 	}
@@ -6876,7 +6959,12 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		messageEvents[index] = emitted
 	}
 	for {
-		err := m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit, messages, messageEvents)
+		var err error
+		if idempotencyKey == "" {
+			err = m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit, messages, messageEvents)
+		} else {
+			err = m.Store.CompleteScheduledExternalUploads(ctx, domain.ScheduledMessageID(idempotencyKey), completions, files, channels, eventsToEmit, messages[0], messageEvents[0])
+		}
 		if errors.Is(err, store.ErrMessageTimestampTaken) {
 			// Completion is transactional, so none of the tickets or shares
 			// changed. Move the public message timestamps together and retry;
@@ -6900,6 +6988,13 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		// finish: reporting a conflict would make a retry or a duplicated
 		// request look like a failure. Re-read and answer with what the winner
 		// produced, exactly as a sequential retry is answered.
+		if errors.Is(err, store.ErrIdempotencyConflict) {
+			cached, cachedErr := m.Store.GetIdempotentMessage(ctx, workspaceID, userID, idempotencyKey)
+			if cachedErr != nil {
+				return nil, errors.Join(err, cachedErr)
+			}
+			return append([]domain.File(nil), cached.Files...), nil
+		}
 		if !errors.Is(err, store.ErrConflict) {
 			return nil, err
 		}
@@ -6908,6 +7003,13 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 			return nil, err
 		}
 		files = settled
+		if idempotencyKey != "" {
+			cached, cachedErr := m.Store.GetIdempotentMessage(ctx, workspaceID, userID, idempotencyKey)
+			if cachedErr != nil {
+				return nil, errors.Join(err, cachedErr)
+			}
+			return append([]domain.File(nil), cached.Files...), nil
+		}
 		break
 	}
 	return files, nil

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2030,6 +2031,76 @@ func TestFirstPartyDraftAndScheduledManagementLifecycle(t *testing.T) {
 	history, err = messages.ScheduledMessageHistory(ctx, "T1", "U1", true, domain.PageRequest{Limit: 10})
 	if err != nil || len(history.Items) != 1 || history.Items[0].DeliveredAt.IsZero() || !history.Items[0].FailedAt.IsZero() || history.Items[0].FailureCode != "" {
 		t.Fatalf("delivered history=%+v err=%v", history, err)
+	}
+}
+
+func TestScheduledComposerFilesSurviveTicketExpiryAndDeliverIdempotently(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+	now := time.Now().UTC()
+	upload := domain.ExternalUpload{
+		ID: "scheduled-upload", WorkspaceID: "T1", Uploader: "U1", Name: "evidence.txt", Title: "evidence.txt",
+		MIMEType: "text/plain", BlobKey: "T1/external/scheduled-upload", Size: 8,
+		Status: domain.ExternalUploadUploaded, CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute), UploadedAt: now.Add(-time.Hour),
+	}
+	if err := s.CreateExternalUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	attachment := domain.DraftAttachment{
+		UploadID: upload.ID, Name: upload.Name, Title: "Evidence", MIMEType: upload.MIMEType, Size: upload.Size,
+	}
+	// Establish the durable draft ownership that lets an already-open composer
+	// survive the short-lived upload ticket.
+	if _, err := s.UpsertDraft(ctx, domain.Draft{
+		WorkspaceID: "T1", UserID: "U1", ConversationID: "C1", Text: "send later",
+		Attachments: []domain.DraftAttachment{attachment}, UpdatedAt: now,
+	}, events.Event{ID: "draft-event", WorkspaceID: "T1", Topic: "draft.saved", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := messages.SaveDraftWithAttachments(ctx, "T1", "U1", "C1", "", "send later", []domain.DraftAttachment{{UploadID: upload.ID, Title: "Evidence"}})
+	if err != nil || len(draft.Attachments) != 1 {
+		t.Fatalf("expired durable draft could not be saved: draft=%+v err=%v", draft, err)
+	}
+	scheduled, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
+		Channel: "C1", PostAt: now.Add(time.Hour), CredentialHash: InternalScheduledCredential("T1", "U1"),
+		FileAttachments: draft.Attachments,
+	})
+	if err != nil || scheduled.Text != "" || len(scheduled.FileAttachments) != 1 {
+		t.Fatalf("file-only schedule=%+v err=%v", scheduled, err)
+	}
+	if err := messages.DeleteDraft(ctx, "T1", "U1", "C1", ""); err != nil {
+		t.Fatal(err)
+	}
+	referenced, err := s.PendingUploadReferenceExists(ctx, "T1", "U1", upload.ID)
+	if err != nil || !referenced {
+		t.Fatalf("scheduled upload lost durable ownership: referenced=%v err=%v", referenced, err)
+	}
+	var references []string
+	if err := s.WalkBlobReferences(ctx, "T1", func(value string) error {
+		references = append(references, value)
+		return nil
+	}); err != nil || !slices.Contains(references, upload.BlobKey) {
+		t.Fatalf("scheduled blob was collectable: references=%v err=%v", references, err)
+	}
+	first, err := messages.PostScheduledMessage(ctx, scheduled.WorkspaceID, scheduled.ID)
+	if err != nil || len(first.Files) != 1 || first.Files[0].ID != domain.FileID(upload.ID) {
+		t.Fatalf("first delivery=%+v err=%v", first, err)
+	}
+	if err := messages.DeleteScheduledMessage(ctx, "T1", "U1", "C1", scheduled.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("committed schedule was cancelled before acknowledgement: %v", err)
+	}
+	second, err := messages.PostScheduledMessage(ctx, scheduled.WorkspaceID, scheduled.ID)
+	if err != nil || second.ID != first.ID {
+		t.Fatalf("retry delivery=%+v err=%v, want message %s", second, err, first.ID)
+	}
+	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != first.ID {
+		t.Fatalf("delivery duplicated message: history=%+v err=%v", history, err)
 	}
 }
 

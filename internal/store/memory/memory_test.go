@@ -408,3 +408,72 @@ func TestScheduledMessagesAreDurableAndRemovable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestExternalUploadBatchPreflightsEveryMessageBeforeMutation(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	for _, conversation := range []domain.ConversationID{"C1", "C2"} {
+		s.SeedConversation(domain.Conversation{ID: conversation, WorkspaceID: "T1"})
+		s.SeedConversationMember(conversation, "U1")
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := s.CreateMessage(ctx, domain.Message{
+		ID: "M-taken", WorkspaceID: "T1", Conversation: "C2", AuthorID: "U1", Text: "existing", CreatedAt: now.Add(-time.Second),
+	}, events.Event{ID: "existing-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: now.Add(-time.Second)}, ""); err != nil {
+		t.Fatal(err)
+	}
+	completions := make([]domain.ExternalUploadCompletion, 2)
+	files := make([]domain.File, 2)
+	fileEvents := make([]events.Event, 2)
+	for index, uploadID := range []domain.ExternalUploadID{"upload-1", "upload-2"} {
+		completions[index] = domain.ExternalUploadCompletion{ID: uploadID}
+		files[index] = domain.File{
+			ID: domain.FileID(uploadID), WorkspaceID: "T1", Uploader: "U1", Name: "evidence.txt", Title: "Evidence",
+			MIMEType: "text/plain", BlobKey: "T1/external/" + string(uploadID), Size: 8, CreatedAt: now,
+		}
+		fileEvents[index] = events.Event{ID: domain.EventID("file-event-" + string(uploadID)), WorkspaceID: "T1", Topic: "file.created", CreatedAt: now}
+		if err := s.CreateExternalUpload(ctx, domain.ExternalUpload{
+			ID: uploadID, WorkspaceID: "T1", Uploader: "U1", Name: files[index].Name, Title: files[index].Title,
+			MIMEType: files[index].MIMEType, BlobKey: files[index].BlobKey, Size: files[index].Size,
+			Status: domain.ExternalUploadUploaded, CreatedAt: now, ExpiresAt: now.Add(time.Hour), UploadedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := domain.Message{
+		ID: "M-first", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1",
+		Text: "first", CreatedAt: now, Files: append([]domain.File(nil), files...),
+	}
+	second := domain.Message{
+		ID: "M-taken", WorkspaceID: "T1", Conversation: "C2", AuthorID: "U1",
+		Text: "second", CreatedAt: now.Add(time.Microsecond), Files: append([]domain.File(nil), files...),
+	}
+	err := s.CompleteExternalUploads(ctx, completions, files, []domain.ConversationID{"C1", "C2"}, fileEvents,
+		[]domain.Message{first, second},
+		[]events.Event{
+			{ID: "first-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: first.CreatedAt},
+			{ID: "second-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: second.CreatedAt},
+		})
+	if !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("batch error=%v, want already exists", err)
+	}
+	for _, completion := range completions {
+		upload, err := s.GetExternalUpload(ctx, completion.ID)
+		if err != nil || upload.Status != domain.ExternalUploadUploaded || upload.FileID != "" {
+			t.Fatalf("upload %s changed=%+v err=%v", completion.ID, upload, err)
+		}
+		if _, err := s.GetFile(ctx, domain.FileID(completion.ID)); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("file %s leaked after rollback: %v", completion.ID, err)
+		}
+	}
+	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 0 {
+		t.Fatalf("first message leaked=%+v err=%v", history, err)
+	}
+	followed, err := s.IsThreadFollowed(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(first.CreatedAt))
+	if err != nil || followed {
+		t.Fatalf("rolled-back message left a thread follow: followed=%v err=%v", followed, err)
+	}
+}

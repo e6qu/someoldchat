@@ -292,6 +292,27 @@ func draftsAndSentRepositoryContract(t *testing.T, open opener) {
 	if err != nil || len(history.Items) != 1 || history.Items[0].DeliveredAt.IsZero() || !history.Items[0].FailedAt.IsZero() || history.Items[0].FailureCode != "" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
+	postedSchedule := domain.ScheduledMessage{
+		WorkspaceID: workspace, ID: domain.ScheduledMessageID("Q-posted-" + suffix), Channel: channel,
+		Author: user, CredentialHash: credential, Text: "commit before acknowledgement", PostAt: now.Add(4 * time.Hour), CreatedAt: now,
+	}
+	if err := repository.CreateScheduledMessage(ctx, postedSchedule, event("schedule-post-create", "message.scheduled")); err != nil {
+		t.Fatal(err)
+	}
+	postedMessage := domain.Message{
+		ID: domain.MessageID("M-posted-" + suffix), WorkspaceID: workspace, Conversation: channel,
+		AuthorID: user, Text: postedSchedule.Text, CreatedAt: now.Add(2 * time.Second),
+	}
+	if err := repository.CreateScheduledMessagePost(ctx, postedSchedule.ID, postedMessage, event("schedule-post-message", "message.created")); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := repository.GetIdempotentMessage(ctx, workspace, user, string(postedSchedule.ID))
+	if err != nil || cached.ID != postedMessage.ID {
+		t.Fatalf("scheduled idempotent message=%+v err=%v", cached, err)
+	}
+	if err := repository.DeleteScheduledMessageForCredential(ctx, workspace, credential, channel, postedSchedule.ID, event("schedule-post-delete", "message.schedule_deleted")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("committed schedule was cancelled before acknowledgement: %v", err)
+	}
 	if err := repository.DeleteDraft(ctx, workspace, user, channel, "", event("draft-delete", "draft.deleted")); err != nil {
 		t.Fatal(err)
 	}

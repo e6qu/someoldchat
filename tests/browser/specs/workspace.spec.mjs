@@ -467,12 +467,56 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and ca
   await composer.fill(`${message} cancel`);
   await page.getByRole('button', { name: 'Schedule message' }).click();
   await page.getByLabel('Send date and time').fill(localFuture);
-  await page.locator('button[formaction^="/app/message/schedule"]').click();
+  await Promise.all([
+    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
+    page.locator('button[formaction^="/app/message/schedule"]').click(),
+  ]);
   const cancellable = page.locator('.scheduled-item', { hasText: `${message} cancel` });
   await cancellable.getByRole('button', { name: /Cancel scheduled message/ }).click();
   await expect(page.getByRole('status')).toHaveText('Scheduled message cancelled.');
   await expect(page.locator('.scheduled-item', { hasText: `${message} cancel` })).toHaveCount(0);
   await expect(page.getByText('You have no scheduled messages.')).toBeVisible();
+});
+
+test('[SCHED-01 SCHED-02 FILE-01 A11Y-01] a staged file remains private until one scheduled delivery', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  const stamp = Date.now();
+  const title = `Scheduled file ${stamp}`;
+  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
+  await page.getByLabel('Title (optional)').fill(title);
+  await page.locator('#upload-file').setInputFiles({
+    name: `scheduled-${stamp}.txt`,
+    mimeType: 'text/plain',
+    buffer: Buffer.from('scheduled browser file contents'),
+  });
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Schedule message' }).click();
+  const localFuture = await page.evaluate(() => {
+    const value = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const pad = (part) => String(part).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+  });
+  await page.getByLabel('Send date and time').fill(localFuture);
+  await Promise.all([
+    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
+    page.locator('button[formaction^="/app/message/schedule"]').click(),
+  ]);
+  await expect(page.getByRole('status')).toHaveText('Message scheduled.');
+  const scheduled = page.locator('.scheduled-item', { hasText: 'File attachment' });
+  await expect(scheduled).toContainText('1 attachment');
+  await expect(scheduled).toContainText('Attached files stay with this scheduled message.');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page.locator('.message-file', { hasText: title })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Drafts and sent' }).click();
+  await page.getByRole('link', { name: 'Scheduled', exact: true }).click();
+  await scheduled.getByRole('button', { name: 'Send now' }).click();
+  await expect(page.getByRole('status')).toHaveText('Scheduled message sent.');
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page.locator('.message-file', { hasText: title })).toBeVisible();
 });
 
 test('[DRAFT-01 DRAFT-02 A11Y-01] drafts persist on the server and Drafts & sent exposes all tabs', async ({ page, context }) => {

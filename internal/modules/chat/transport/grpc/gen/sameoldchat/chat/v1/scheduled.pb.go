@@ -22,27 +22,28 @@ const (
 )
 
 type ScheduledMessage struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Id             string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	ChannelId      string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	AuthorId       string                 `protobuf:"bytes,4,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
-	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
-	PostAt         int64                  `protobuf:"varint,6,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
-	CreatedAt      int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Blocks         string                 `protobuf:"bytes,8,opt,name=blocks,proto3" json:"blocks,omitempty"`
-	Attachments    string                 `protobuf:"bytes,9,opt,name=attachments,proto3" json:"attachments,omitempty"`
-	AppId          string                 `protobuf:"bytes,10,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	BotId          string                 `protobuf:"bytes,11,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
-	CredentialHash string                 `protobuf:"bytes,12,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
-	ThreadTs       string                 `protobuf:"bytes,13,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
-	DeliveredAt    int64                  `protobuf:"varint,14,opt,name=delivered_at,json=deliveredAt,proto3" json:"delivered_at,omitempty"`
-	FailedAt       int64                  `protobuf:"varint,15,opt,name=failed_at,json=failedAt,proto3" json:"failed_at,omitempty"`
-	FailureCode    string                 `protobuf:"bytes,16,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
-	Metadata       string                 `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"`
-	StreamState    string                 `protobuf:"bytes,18,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Id              string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	ChannelId       string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	AuthorId        string                 `protobuf:"bytes,4,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
+	Text            string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	PostAt          int64                  `protobuf:"varint,6,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
+	CreatedAt       int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Blocks          string                 `protobuf:"bytes,8,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments     string                 `protobuf:"bytes,9,opt,name=attachments,proto3" json:"attachments,omitempty"`
+	AppId           string                 `protobuf:"bytes,10,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	BotId           string                 `protobuf:"bytes,11,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	CredentialHash  string                 `protobuf:"bytes,12,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
+	ThreadTs        string                 `protobuf:"bytes,13,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	DeliveredAt     int64                  `protobuf:"varint,14,opt,name=delivered_at,json=deliveredAt,proto3" json:"delivered_at,omitempty"`
+	FailedAt        int64                  `protobuf:"varint,15,opt,name=failed_at,json=failedAt,proto3" json:"failed_at,omitempty"`
+	FailureCode     string                 `protobuf:"bytes,16,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	Metadata        string                 `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	StreamState     string                 `protobuf:"bytes,18,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
+	FileAttachments []*DraftAttachment     `protobuf:"bytes,19,rep,name=file_attachments,json=fileAttachments,proto3" json:"file_attachments,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ScheduledMessage) Reset() {
@@ -201,23 +202,31 @@ func (x *ScheduledMessage) GetStreamState() string {
 	return ""
 }
 
+func (x *ScheduledMessage) GetFileAttachments() []*DraftAttachment {
+	if x != nil {
+		return x.FileAttachments
+	}
+	return nil
+}
+
 type ScheduleMessageRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ChannelId      string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Text           string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
-	PostAt         int64                  `protobuf:"varint,5,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
-	Blocks         string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
-	Attachments    string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
-	AppId          string                 `protobuf:"bytes,8,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	BotId          string                 `protobuf:"bytes,9,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
-	CredentialHash string                 `protobuf:"bytes,10,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
-	ThreadTs       string                 `protobuf:"bytes,11,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
-	Metadata       string                 `protobuf:"bytes,12,opt,name=metadata,proto3" json:"metadata,omitempty"`
-	StreamState    string                 `protobuf:"bytes,13,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ChannelId       string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Text            string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	PostAt          int64                  `protobuf:"varint,5,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
+	Blocks          string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments     string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
+	AppId           string                 `protobuf:"bytes,8,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	BotId           string                 `protobuf:"bytes,9,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	CredentialHash  string                 `protobuf:"bytes,10,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
+	ThreadTs        string                 `protobuf:"bytes,11,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	Metadata        string                 `protobuf:"bytes,12,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	StreamState     string                 `protobuf:"bytes,13,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
+	FileAttachments []*DraftAttachment     `protobuf:"bytes,14,rep,name=file_attachments,json=fileAttachments,proto3" json:"file_attachments,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ScheduleMessageRequest) Reset() {
@@ -339,6 +348,13 @@ func (x *ScheduleMessageRequest) GetStreamState() string {
 		return x.StreamState
 	}
 	return ""
+}
+
+func (x *ScheduleMessageRequest) GetFileAttachments() []*DraftAttachment {
+	if x != nil {
+		return x.FileAttachments
+	}
+	return nil
 }
 
 type ScheduledMessagesRequest struct {
@@ -745,6 +761,58 @@ func (x *SendScheduledMessageNowRequest) GetScheduledMessageId() string {
 	return ""
 }
 
+type PostScheduledMessageRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId        string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ScheduledMessageId string                 `protobuf:"bytes,2,opt,name=scheduled_message_id,json=scheduledMessageId,proto3" json:"scheduled_message_id,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *PostScheduledMessageRequest) Reset() {
+	*x = PostScheduledMessageRequest{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PostScheduledMessageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PostScheduledMessageRequest) ProtoMessage() {}
+
+func (x *PostScheduledMessageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PostScheduledMessageRequest.ProtoReflect.Descriptor instead.
+func (*PostScheduledMessageRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PostScheduledMessageRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *PostScheduledMessageRequest) GetScheduledMessageId() string {
+	if x != nil {
+		return x.ScheduledMessageId
+	}
+	return ""
+}
+
 type ScheduledMessagePage struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	ScheduledMessages []*ScheduledMessage    `protobuf:"bytes,1,rep,name=scheduled_messages,json=scheduledMessages,proto3" json:"scheduled_messages,omitempty"`
@@ -756,7 +824,7 @@ type ScheduledMessagePage struct {
 
 func (x *ScheduledMessagePage) Reset() {
 	*x = ScheduledMessagePage{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +836,7 @@ func (x *ScheduledMessagePage) String() string {
 func (*ScheduledMessagePage) ProtoMessage() {}
 
 func (x *ScheduledMessagePage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +849,7 @@ func (x *ScheduledMessagePage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduledMessagePage.ProtoReflect.Descriptor instead.
 func (*ScheduledMessagePage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ScheduledMessagePage) GetScheduledMessages() []*ScheduledMessage {
@@ -820,7 +888,7 @@ type Draft struct {
 
 func (x *Draft) Reset() {
 	*x = Draft{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +900,7 @@ func (x *Draft) String() string {
 func (*Draft) ProtoMessage() {}
 
 func (x *Draft) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,7 +913,7 @@ func (x *Draft) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Draft.ProtoReflect.Descriptor instead.
 func (*Draft) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Draft) GetWorkspaceId() string {
@@ -910,7 +978,7 @@ type DraftAttachment struct {
 
 func (x *DraftAttachment) Reset() {
 	*x = DraftAttachment{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -922,7 +990,7 @@ func (x *DraftAttachment) String() string {
 func (*DraftAttachment) ProtoMessage() {}
 
 func (x *DraftAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -935,7 +1003,7 @@ func (x *DraftAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DraftAttachment.ProtoReflect.Descriptor instead.
 func (*DraftAttachment) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DraftAttachment) GetUploadId() string {
@@ -987,7 +1055,7 @@ type DraftRequest struct {
 
 func (x *DraftRequest) Reset() {
 	*x = DraftRequest{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +1067,7 @@ func (x *DraftRequest) String() string {
 func (*DraftRequest) ProtoMessage() {}
 
 func (x *DraftRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +1080,7 @@ func (x *DraftRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DraftRequest.ProtoReflect.Descriptor instead.
 func (*DraftRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DraftRequest) GetWorkspaceId() string {
@@ -1070,7 +1138,7 @@ type DraftsRequest struct {
 
 func (x *DraftsRequest) Reset() {
 	*x = DraftsRequest{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1082,7 +1150,7 @@ func (x *DraftsRequest) String() string {
 func (*DraftsRequest) ProtoMessage() {}
 
 func (x *DraftsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1095,7 +1163,7 @@ func (x *DraftsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DraftsRequest.ProtoReflect.Descriptor instead.
 func (*DraftsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{11}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DraftsRequest) GetWorkspaceId() string {
@@ -1144,7 +1212,7 @@ type DraftPage struct {
 
 func (x *DraftPage) Reset() {
 	*x = DraftPage{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1156,7 +1224,7 @@ func (x *DraftPage) String() string {
 func (*DraftPage) ProtoMessage() {}
 
 func (x *DraftPage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1237,7 @@ func (x *DraftPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DraftPage.ProtoReflect.Descriptor instead.
 func (*DraftPage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DraftPage) GetDrafts() []*Draft {
@@ -1206,7 +1274,7 @@ type SentMessagesRequest struct {
 
 func (x *SentMessagesRequest) Reset() {
 	*x = SentMessagesRequest{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1218,7 +1286,7 @@ func (x *SentMessagesRequest) String() string {
 func (*SentMessagesRequest) ProtoMessage() {}
 
 func (x *SentMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1231,7 +1299,7 @@ func (x *SentMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SentMessagesRequest.ProtoReflect.Descriptor instead.
 func (*SentMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SentMessagesRequest) GetWorkspaceId() string {
@@ -1273,7 +1341,7 @@ var File_sameoldchat_chat_v1_scheduled_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\n" +
-	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\"\x9d\x04\n" +
+	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\"\xee\x04\n" +
 	"\x10ScheduledMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1d\n" +
@@ -1295,7 +1363,8 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\tfailed_at\x18\x0f \x01(\x03R\bfailedAt\x12!\n" +
 	"\ffailure_code\x18\x10 \x01(\tR\vfailureCode\x12\x1a\n" +
 	"\bmetadata\x18\x11 \x01(\tR\bmetadata\x12!\n" +
-	"\fstream_state\x18\x12 \x01(\tR\vstreamState\"\x8d\x03\n" +
+	"\fstream_state\x18\x12 \x01(\tR\vstreamState\x12O\n" +
+	"\x10file_attachments\x18\x13 \x03(\v2$.sameoldchat.chat.v1.DraftAttachmentR\x0ffileAttachments\"\xde\x03\n" +
 	"\x16ScheduleMessageRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -1311,7 +1380,8 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	" \x01(\tR\x0ecredentialHash\x12\x1b\n" +
 	"\tthread_ts\x18\v \x01(\tR\bthreadTs\x12\x1a\n" +
 	"\bmetadata\x18\f \x01(\tR\bmetadata\x12!\n" +
-	"\fstream_state\x18\r \x01(\tR\vstreamState\"\xfc\x01\n" +
+	"\fstream_state\x18\r \x01(\tR\vstreamState\x12O\n" +
+	"\x10file_attachments\x18\x0e \x03(\v2$.sameoldchat.chat.v1.DraftAttachmentR\x0ffileAttachments\"\xfc\x01\n" +
 	"\x18ScheduledMessagesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -1349,7 +1419,10 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\x1eSendScheduledMessageNowRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x120\n" +
-	"\x14scheduled_message_id\x18\x03 \x01(\tR\x12scheduledMessageId\"\xa8\x01\n" +
+	"\x14scheduled_message_id\x18\x03 \x01(\tR\x12scheduledMessageId\"r\n" +
+	"\x1bPostScheduledMessageRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x120\n" +
+	"\x14scheduled_message_id\x18\x02 \x01(\tR\x12scheduledMessageId\"\xa8\x01\n" +
 	"\x14ScheduledMessagePage\x12T\n" +
 	"\x12scheduled_messages\x18\x01 \x03(\v2%.sameoldchat.chat.v1.ScheduledMessageR\x11scheduledMessages\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -1396,13 +1469,14 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
 	"\n" +
 	"descending\x18\x05 \x01(\bR\n" +
-	"descending2\xdd\b\n" +
+	"descending2\xc5\t\n" +
 	"\x18ScheduledMessagesService\x12e\n" +
 	"\x0fScheduleMessage\x12+.sameoldchat.chat.v1.ScheduleMessageRequest\x1a%.sameoldchat.chat.v1.ScheduledMessage\x12m\n" +
 	"\x11ScheduledMessages\x12-.sameoldchat.chat.v1.ScheduledMessagesRequest\x1a).sameoldchat.chat.v1.ScheduledMessagePage\x12y\n" +
 	"\x17ScheduledMessageHistory\x123.sameoldchat.chat.v1.ScheduledMessageHistoryRequest\x1a).sameoldchat.chat.v1.ScheduledMessagePage\x12s\n" +
 	"\x16UpdateScheduledMessage\x122.sameoldchat.chat.v1.UpdateScheduledMessageRequest\x1a%.sameoldchat.chat.v1.ScheduledMessage\x12l\n" +
-	"\x17SendScheduledMessageNow\x123.sameoldchat.chat.v1.SendScheduledMessageNowRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12s\n" +
+	"\x17SendScheduledMessageNow\x123.sameoldchat.chat.v1.SendScheduledMessageNowRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12f\n" +
+	"\x14PostScheduledMessage\x120.sameoldchat.chat.v1.PostScheduledMessageRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12s\n" +
 	"\x16DeleteScheduledMessage\x122.sameoldchat.chat.v1.DeleteScheduledMessageRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12J\n" +
 	"\tSaveDraft\x12!.sameoldchat.chat.v1.DraftRequest\x1a\x1a.sameoldchat.chat.v1.Draft\x12I\n" +
 	"\bGetDraft\x12!.sameoldchat.chat.v1.DraftRequest\x1a\x1a.sameoldchat.chat.v1.Draft\x12L\n" +
@@ -1422,7 +1496,7 @@ func file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_scheduled_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_scheduled_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_sameoldchat_chat_v1_scheduled_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_sameoldchat_chat_v1_scheduled_proto_goTypes = []any{
 	(*ScheduledMessage)(nil),               // 0: sameoldchat.chat.v1.ScheduledMessage
 	(*ScheduleMessageRequest)(nil),         // 1: sameoldchat.chat.v1.ScheduleMessageRequest
@@ -1431,49 +1505,54 @@ var file_sameoldchat_chat_v1_scheduled_proto_goTypes = []any{
 	(*ScheduledMessageHistoryRequest)(nil), // 4: sameoldchat.chat.v1.ScheduledMessageHistoryRequest
 	(*UpdateScheduledMessageRequest)(nil),  // 5: sameoldchat.chat.v1.UpdateScheduledMessageRequest
 	(*SendScheduledMessageNowRequest)(nil), // 6: sameoldchat.chat.v1.SendScheduledMessageNowRequest
-	(*ScheduledMessagePage)(nil),           // 7: sameoldchat.chat.v1.ScheduledMessagePage
-	(*Draft)(nil),                          // 8: sameoldchat.chat.v1.Draft
-	(*DraftAttachment)(nil),                // 9: sameoldchat.chat.v1.DraftAttachment
-	(*DraftRequest)(nil),                   // 10: sameoldchat.chat.v1.DraftRequest
-	(*DraftsRequest)(nil),                  // 11: sameoldchat.chat.v1.DraftsRequest
-	(*DraftPage)(nil),                      // 12: sameoldchat.chat.v1.DraftPage
-	(*SentMessagesRequest)(nil),            // 13: sameoldchat.chat.v1.SentMessagesRequest
-	(*Message)(nil),                        // 14: sameoldchat.chat.v1.Message
-	(*MutationResponse)(nil),               // 15: sameoldchat.chat.v1.MutationResponse
-	(*MessagePage)(nil),                    // 16: sameoldchat.chat.v1.MessagePage
+	(*PostScheduledMessageRequest)(nil),    // 7: sameoldchat.chat.v1.PostScheduledMessageRequest
+	(*ScheduledMessagePage)(nil),           // 8: sameoldchat.chat.v1.ScheduledMessagePage
+	(*Draft)(nil),                          // 9: sameoldchat.chat.v1.Draft
+	(*DraftAttachment)(nil),                // 10: sameoldchat.chat.v1.DraftAttachment
+	(*DraftRequest)(nil),                   // 11: sameoldchat.chat.v1.DraftRequest
+	(*DraftsRequest)(nil),                  // 12: sameoldchat.chat.v1.DraftsRequest
+	(*DraftPage)(nil),                      // 13: sameoldchat.chat.v1.DraftPage
+	(*SentMessagesRequest)(nil),            // 14: sameoldchat.chat.v1.SentMessagesRequest
+	(*Message)(nil),                        // 15: sameoldchat.chat.v1.Message
+	(*MutationResponse)(nil),               // 16: sameoldchat.chat.v1.MutationResponse
+	(*MessagePage)(nil),                    // 17: sameoldchat.chat.v1.MessagePage
 }
 var file_sameoldchat_chat_v1_scheduled_proto_depIdxs = []int32{
-	0,  // 0: sameoldchat.chat.v1.ScheduledMessagePage.scheduled_messages:type_name -> sameoldchat.chat.v1.ScheduledMessage
-	9,  // 1: sameoldchat.chat.v1.Draft.attachments:type_name -> sameoldchat.chat.v1.DraftAttachment
-	9,  // 2: sameoldchat.chat.v1.DraftRequest.attachments:type_name -> sameoldchat.chat.v1.DraftAttachment
-	8,  // 3: sameoldchat.chat.v1.DraftPage.drafts:type_name -> sameoldchat.chat.v1.Draft
-	1,  // 4: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:input_type -> sameoldchat.chat.v1.ScheduleMessageRequest
-	2,  // 5: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:input_type -> sameoldchat.chat.v1.ScheduledMessagesRequest
-	4,  // 6: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessageHistory:input_type -> sameoldchat.chat.v1.ScheduledMessageHistoryRequest
-	5,  // 7: sameoldchat.chat.v1.ScheduledMessagesService.UpdateScheduledMessage:input_type -> sameoldchat.chat.v1.UpdateScheduledMessageRequest
-	6,  // 8: sameoldchat.chat.v1.ScheduledMessagesService.SendScheduledMessageNow:input_type -> sameoldchat.chat.v1.SendScheduledMessageNowRequest
-	3,  // 9: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:input_type -> sameoldchat.chat.v1.DeleteScheduledMessageRequest
-	10, // 10: sameoldchat.chat.v1.ScheduledMessagesService.SaveDraft:input_type -> sameoldchat.chat.v1.DraftRequest
-	10, // 11: sameoldchat.chat.v1.ScheduledMessagesService.GetDraft:input_type -> sameoldchat.chat.v1.DraftRequest
-	11, // 12: sameoldchat.chat.v1.ScheduledMessagesService.Drafts:input_type -> sameoldchat.chat.v1.DraftsRequest
-	10, // 13: sameoldchat.chat.v1.ScheduledMessagesService.DeleteDraft:input_type -> sameoldchat.chat.v1.DraftRequest
-	13, // 14: sameoldchat.chat.v1.ScheduledMessagesService.SentMessages:input_type -> sameoldchat.chat.v1.SentMessagesRequest
-	0,  // 15: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:output_type -> sameoldchat.chat.v1.ScheduledMessage
-	7,  // 16: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:output_type -> sameoldchat.chat.v1.ScheduledMessagePage
-	7,  // 17: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessageHistory:output_type -> sameoldchat.chat.v1.ScheduledMessagePage
-	0,  // 18: sameoldchat.chat.v1.ScheduledMessagesService.UpdateScheduledMessage:output_type -> sameoldchat.chat.v1.ScheduledMessage
-	14, // 19: sameoldchat.chat.v1.ScheduledMessagesService.SendScheduledMessageNow:output_type -> sameoldchat.chat.v1.Message
-	15, // 20: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:output_type -> sameoldchat.chat.v1.MutationResponse
-	8,  // 21: sameoldchat.chat.v1.ScheduledMessagesService.SaveDraft:output_type -> sameoldchat.chat.v1.Draft
-	8,  // 22: sameoldchat.chat.v1.ScheduledMessagesService.GetDraft:output_type -> sameoldchat.chat.v1.Draft
-	12, // 23: sameoldchat.chat.v1.ScheduledMessagesService.Drafts:output_type -> sameoldchat.chat.v1.DraftPage
-	15, // 24: sameoldchat.chat.v1.ScheduledMessagesService.DeleteDraft:output_type -> sameoldchat.chat.v1.MutationResponse
-	16, // 25: sameoldchat.chat.v1.ScheduledMessagesService.SentMessages:output_type -> sameoldchat.chat.v1.MessagePage
-	15, // [15:26] is the sub-list for method output_type
-	4,  // [4:15] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	10, // 0: sameoldchat.chat.v1.ScheduledMessage.file_attachments:type_name -> sameoldchat.chat.v1.DraftAttachment
+	10, // 1: sameoldchat.chat.v1.ScheduleMessageRequest.file_attachments:type_name -> sameoldchat.chat.v1.DraftAttachment
+	0,  // 2: sameoldchat.chat.v1.ScheduledMessagePage.scheduled_messages:type_name -> sameoldchat.chat.v1.ScheduledMessage
+	10, // 3: sameoldchat.chat.v1.Draft.attachments:type_name -> sameoldchat.chat.v1.DraftAttachment
+	10, // 4: sameoldchat.chat.v1.DraftRequest.attachments:type_name -> sameoldchat.chat.v1.DraftAttachment
+	9,  // 5: sameoldchat.chat.v1.DraftPage.drafts:type_name -> sameoldchat.chat.v1.Draft
+	1,  // 6: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:input_type -> sameoldchat.chat.v1.ScheduleMessageRequest
+	2,  // 7: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:input_type -> sameoldchat.chat.v1.ScheduledMessagesRequest
+	4,  // 8: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessageHistory:input_type -> sameoldchat.chat.v1.ScheduledMessageHistoryRequest
+	5,  // 9: sameoldchat.chat.v1.ScheduledMessagesService.UpdateScheduledMessage:input_type -> sameoldchat.chat.v1.UpdateScheduledMessageRequest
+	6,  // 10: sameoldchat.chat.v1.ScheduledMessagesService.SendScheduledMessageNow:input_type -> sameoldchat.chat.v1.SendScheduledMessageNowRequest
+	7,  // 11: sameoldchat.chat.v1.ScheduledMessagesService.PostScheduledMessage:input_type -> sameoldchat.chat.v1.PostScheduledMessageRequest
+	3,  // 12: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:input_type -> sameoldchat.chat.v1.DeleteScheduledMessageRequest
+	11, // 13: sameoldchat.chat.v1.ScheduledMessagesService.SaveDraft:input_type -> sameoldchat.chat.v1.DraftRequest
+	11, // 14: sameoldchat.chat.v1.ScheduledMessagesService.GetDraft:input_type -> sameoldchat.chat.v1.DraftRequest
+	12, // 15: sameoldchat.chat.v1.ScheduledMessagesService.Drafts:input_type -> sameoldchat.chat.v1.DraftsRequest
+	11, // 16: sameoldchat.chat.v1.ScheduledMessagesService.DeleteDraft:input_type -> sameoldchat.chat.v1.DraftRequest
+	14, // 17: sameoldchat.chat.v1.ScheduledMessagesService.SentMessages:input_type -> sameoldchat.chat.v1.SentMessagesRequest
+	0,  // 18: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:output_type -> sameoldchat.chat.v1.ScheduledMessage
+	8,  // 19: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:output_type -> sameoldchat.chat.v1.ScheduledMessagePage
+	8,  // 20: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessageHistory:output_type -> sameoldchat.chat.v1.ScheduledMessagePage
+	0,  // 21: sameoldchat.chat.v1.ScheduledMessagesService.UpdateScheduledMessage:output_type -> sameoldchat.chat.v1.ScheduledMessage
+	15, // 22: sameoldchat.chat.v1.ScheduledMessagesService.SendScheduledMessageNow:output_type -> sameoldchat.chat.v1.Message
+	15, // 23: sameoldchat.chat.v1.ScheduledMessagesService.PostScheduledMessage:output_type -> sameoldchat.chat.v1.Message
+	16, // 24: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:output_type -> sameoldchat.chat.v1.MutationResponse
+	9,  // 25: sameoldchat.chat.v1.ScheduledMessagesService.SaveDraft:output_type -> sameoldchat.chat.v1.Draft
+	9,  // 26: sameoldchat.chat.v1.ScheduledMessagesService.GetDraft:output_type -> sameoldchat.chat.v1.Draft
+	13, // 27: sameoldchat.chat.v1.ScheduledMessagesService.Drafts:output_type -> sameoldchat.chat.v1.DraftPage
+	16, // 28: sameoldchat.chat.v1.ScheduledMessagesService.DeleteDraft:output_type -> sameoldchat.chat.v1.MutationResponse
+	17, // 29: sameoldchat.chat.v1.ScheduledMessagesService.SentMessages:output_type -> sameoldchat.chat.v1.MessagePage
+	18, // [18:30] is the sub-list for method output_type
+	6,  // [6:18] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_scheduled_proto_init() }
@@ -1489,7 +1568,7 @@ func file_sameoldchat_chat_v1_scheduled_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_scheduled_proto_rawDesc), len(file_sameoldchat_chat_v1_scheduled_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

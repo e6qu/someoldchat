@@ -107,11 +107,7 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 			return w.Source.RenewScheduledMessage(renewContext, w.Owner, item.ID, w.Lease)
 		},
 		func(postContext context.Context) error {
-			request, err := service.ScheduledMessagePostRequest(item)
-			if err != nil {
-				return err
-			}
-			_, err = w.Poster.PostMessageAs(postContext, item.WorkspaceID, item.Author, request)
+			_, err := w.Poster.PostScheduledMessage(postContext, item.WorkspaceID, item.ID)
 			return err
 		},
 	)

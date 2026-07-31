@@ -26,6 +26,7 @@ message ScheduledMessage {
   string failure_code = 16;
   string metadata = 17;
   string stream_state = 18;
+  repeated DraftAttachment file_attachments = 19;
 }
 
 message ScheduleMessageRequest {
@@ -42,6 +43,7 @@ message ScheduleMessageRequest {
   string thread_ts = 11;
   string metadata = 12;
   string stream_state = 13;
+  repeated DraftAttachment file_attachments = 14;
 }
 
 message ScheduledMessagesRequest {
@@ -85,6 +87,11 @@ message SendScheduledMessageNowRequest {
   string workspace_id = 1;
   string user_id = 2;
   string scheduled_message_id = 3;
+}
+
+message PostScheduledMessageRequest {
+  string workspace_id = 1;
+  string scheduled_message_id = 2;
 }
 
 message ScheduledMessagePage {
@@ -148,6 +155,8 @@ service ScheduledMessagesService {
   rpc ScheduledMessageHistory(ScheduledMessageHistoryRequest) returns (ScheduledMessagePage);
   rpc UpdateScheduledMessage(UpdateScheduledMessageRequest) returns (ScheduledMessage);
   rpc SendScheduledMessageNow(SendScheduledMessageNowRequest) returns (Message);
+  // Internal first-party/worker seam. This is not a Slack Web API method.
+  rpc PostScheduledMessage(PostScheduledMessageRequest) returns (Message);
   rpc DeleteScheduledMessage(DeleteScheduledMessageRequest) returns (MutationResponse);
   rpc SaveDraft(DraftRequest) returns (Draft);
   rpc GetDraft(DraftRequest) returns (Draft);

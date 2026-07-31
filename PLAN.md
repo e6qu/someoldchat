@@ -294,8 +294,12 @@ recovery, Drafts & sent counts, sidebar indicators, memory/portable-SQL
 persistence, generated-gRPC parity, and blob-reconciliation references share
 one contract. Sending promotes the staged blobs through the ordinary atomic
 multi-file share path and clears the draft only after the message commits.
-Scheduled attachment delivery, Slack's 1 GB per-file allowance versus this
-deployment's explicit 100 MiB request limit, Slack's suggested scheduling
+Scheduled attachment delivery now keeps the exact staged files private and
+blob-referenced after draft/upload-ticket expiry, carries them through the
+generated gRPC seam, exposes their count in Drafts & sent, and atomically
+promotes them through idempotent send-now/worker delivery. Slack's 1 GB
+per-file allowance versus this deployment's explicit 100 MiB request limit,
+Slack's suggested scheduling
 times, reminder dates/delivery, and Later reminder filtering remain part of the
 next stateful client review.
 

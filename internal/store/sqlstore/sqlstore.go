@@ -348,6 +348,12 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
 );
 CREATE INDEX IF NOT EXISTS scheduled_messages_owner ON scheduled_messages(workspace_id, author_id, post_at, id);
 CREATE INDEX IF NOT EXISTS scheduled_messages_credential ON scheduled_messages(workspace_id, credential_hash, post_at, id);
+CREATE TABLE IF NOT EXISTS scheduled_message_files (
+ scheduled_message_id TEXT NOT NULL REFERENCES scheduled_messages(id) ON DELETE CASCADE,
+ ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+ PRIMARY KEY (scheduled_message_id, ordinal), UNIQUE (upload_id)
+);
+CREATE INDEX IF NOT EXISTS scheduled_message_files_message ON scheduled_message_files(scheduled_message_id, ordinal);
 CREATE TABLE IF NOT EXISTS drafts (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  conversation_id TEXT NOT NULL REFERENCES conversations(id), thread_ts TEXT NOT NULL DEFAULT '',
@@ -412,7 +418,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 117
+const schemaVersion = 118
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2548,6 +2554,18 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index draft attachments: %w", err)
 		}
 	}
+	if version < 118 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS scheduled_message_files (
+			scheduled_message_id TEXT NOT NULL REFERENCES scheduled_messages(id) ON DELETE CASCADE,
+			ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+			PRIMARY KEY (scheduled_message_id, ordinal), UNIQUE (upload_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate scheduled message files: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS scheduled_message_files_message ON scheduled_message_files(scheduled_message_id, ordinal)`); err != nil {
+			return fmt.Errorf("index scheduled message files: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2818,7 +2836,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -7656,6 +7674,17 @@ func (s *Store) IsConversationMember(ctx context.Context, conversation domain.Co
 }
 
 func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	return s.createMessage(ctx, "", message, event, idempotencyKey)
+}
+
+func (s *Store) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
+	if id == "" {
+		return store.InvalidArgument("scheduled message post requires a schedule")
+	}
+	return s.createMessage(ctx, id, message, event, string(id))
+}
+
+func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledMessageID, message domain.Message, event events.Event, idempotencyKey string) error {
 	// A message may not be stored at a finer resolution than its own timestamp
 	// can express, or a read cursor built from that timestamp can never cover it
 	// — and it may not be stored at an instant another message in the same
@@ -7682,6 +7711,21 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 		return err
 	}
 	defer tx.Rollback()
+	if scheduledID != "" {
+		result, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET id = id
+			WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND delivered = 0`,
+			scheduledID, message.WorkspaceID, message.AuthorID, message.Conversation)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return store.ErrNotFound
+		}
+	}
 	if idempotencyKey != "" {
 		result, err := tx.ExecContext(ctx, `INSERT INTO idempotency (workspace_id, user_id, idempotency_key, message_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, idempotency_key) DO NOTHING`, message.WorkspaceID, message.AuthorID, idempotencyKey, message.ID, domain.NewStoredTime(time.Now()))
 		if err != nil {
@@ -9996,6 +10040,39 @@ func (s *Store) ReleaseLaterReminder(ctx context.Context, owner string, id domai
 	return nil
 }
 
+func insertScheduledMessageFiles(ctx context.Context, tx *sql.Tx, value domain.ScheduledMessage) error {
+	if len(value.FileAttachments) > 10 {
+		return store.InvalidArgument("scheduled message has too many file attachments")
+	}
+	seen := make(map[domain.ExternalUploadID]struct{}, len(value.FileAttachments))
+	for ordinal, attachment := range value.FileAttachments {
+		if attachment.UploadID == "" || attachment.Name == "" || attachment.MIMEType == "" || attachment.Size <= 0 {
+			return store.InvalidArgument("scheduled message file attachment is incomplete")
+		}
+		if _, duplicate := seen[attachment.UploadID]; duplicate {
+			return store.InvalidArgument("scheduled message file attachment is duplicated")
+		}
+		var uploadWorkspace domain.WorkspaceID
+		var uploader domain.UserID
+		var status domain.ExternalUploadStatus
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id, uploader_id, status FROM external_uploads WHERE id = ?`, attachment.UploadID).
+			Scan(&uploadWorkspace, &uploader, &status); errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if uploadWorkspace != value.WorkspaceID || uploader != value.Author || status != domain.ExternalUploadUploaded {
+			return store.InvalidArgument("scheduled message file attachment ownership is invalid")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_message_files(scheduled_message_id, ordinal, upload_id, title) VALUES (?, ?, ?, ?)`,
+			value.ID, ordinal, attachment.UploadID, attachment.Title); err != nil {
+			return classify(err)
+		}
+		seen[attachment.UploadID] = struct{}{}
+	}
+	return nil
+}
+
 func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.ScheduledMessage, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -10004,6 +10081,9 @@ func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.Schedul
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.Metadata, value.StreamState, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		return classify(err)
+	}
+	if err := insertScheduledMessageFiles(ctx, tx, value); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -10059,6 +10139,9 @@ func (s *Store) CreateScheduledMessageWithinLimit(ctx context.Context, value dom
 	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.Metadata, value.StreamState, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		return classify(err)
 	}
+	if err := insertScheduledMessageFiles(ctx, tx, value); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
@@ -10101,6 +10184,34 @@ func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
 
 const scheduledMessageColumns = `id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered_at, failed_at, failure_code`
 
+func loadScheduledMessageFiles(ctx context.Context, db queryExecutor, value *domain.ScheduledMessage) error {
+	rows, err := db.QueryContext(ctx, `SELECT f.upload_id, u.name, f.title, u.mime_type, u.size
+		FROM scheduled_message_files f JOIN external_uploads u ON u.id = f.upload_id
+		WHERE f.scheduled_message_id = ? ORDER BY f.ordinal`, value.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	value.FileAttachments = nil
+	for rows.Next() {
+		var attachment domain.DraftAttachment
+		if err := rows.Scan(&attachment.UploadID, &attachment.Name, &attachment.Title, &attachment.MIMEType, &attachment.Size); err != nil {
+			return err
+		}
+		value.FileAttachments = append(value.FileAttachments, attachment)
+	}
+	return rows.Err()
+}
+
+func loadScheduledMessagePageFiles(ctx context.Context, db queryExecutor, items []domain.ScheduledMessage) error {
+	for index := range items {
+		if err := loadScheduledMessageFiles(ctx, db, &items[index]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.ScheduledMessagePage{}, err
@@ -10135,6 +10246,12 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 		items = append(items, value)
 	}
 	if err := rows.Err(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, s.db, items); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
 	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > request.Limit}
@@ -10192,6 +10309,12 @@ func (s *Store) ListScheduledMessagesForCredential(ctx context.Context, workspac
 	if err := rows.Err(); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
+	if err := rows.Close(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, s.db, items); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
 	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > filter.Page.Limit}
 	if page.HasMore {
 		page.Items = page.Items[:filter.Page.Limit]
@@ -10246,6 +10369,12 @@ func (s *Store) ListScheduledMessageHistory(ctx context.Context, workspace domai
 	if err := rows.Err(); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
+	if err := rows.Close(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, s.db, items); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
 	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > request.Limit}
 	if page.HasMore {
 		page.Items = page.Items[:request.Limit]
@@ -10265,8 +10394,19 @@ func (s *Store) EarliestScheduledMessage(ctx context.Context, workspace domain.W
 	return time.Unix(postAt.Int64, 0).UTC(), nil
 }
 
+func (s *Store) GetScheduledMessage(ctx context.Context, workspace domain.WorkspaceID, id domain.ScheduledMessageID) (domain.ScheduledMessage, error) {
+	value, err := scanScheduledMessage(s.db.QueryRowContext(ctx, `SELECT `+scheduledMessageColumns+` FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND delivered = 0`, id, workspace))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	if err == nil {
+		err = loadScheduledMessageFiles(ctx, s.db, &value)
+	}
+	return value, err
+}
+
 func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update domain.ScheduledMessageUpdate, window time.Duration, limit int, event events.Event) (domain.ScheduledMessage, error) {
-	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.Text == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
+	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
 		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message update is incomplete")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -10308,7 +10448,13 @@ func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update do
 		return domain.ScheduledMessage{}, store.ErrScheduledMessageLimit
 	}
 	now := time.Now().UTC().Unix()
-	result, err = tx.ExecContext(ctx, `UPDATE scheduled_messages SET text = ?, post_at = ?, failed_at = 0, failure_code = '', next_attempt_at = 0 WHERE id = ? AND workspace_id = ? AND channel_id = ? AND credential_hash = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, update.Text, update.PostAt.UTC().Unix(), update.ID, update.WorkspaceID, update.Channel, update.CredentialHash, now)
+	result, err = tx.ExecContext(ctx, `UPDATE scheduled_messages SET text = ?, post_at = ?, failed_at = 0, failure_code = '', next_attempt_at = 0
+		WHERE id = ? AND workspace_id = ? AND channel_id = ? AND credential_hash = ? AND delivered = 0
+		AND (? <> '' OR blocks <> '' OR attachments <> '' OR EXISTS (
+			SELECT 1 FROM scheduled_message_files WHERE scheduled_message_id = scheduled_messages.id
+		))
+		AND (lease_until = 0 OR lease_until <= ?)`,
+		update.Text, update.PostAt.UTC().Unix(), update.ID, update.WorkspaceID, update.Channel, update.CredentialHash, update.Text, now)
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
@@ -10324,6 +10470,9 @@ func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update do
 	}
 	value, err := scanScheduledMessage(tx.QueryRowContext(ctx, `SELECT `+scheduledMessageColumns+` FROM scheduled_messages WHERE id = ?`, update.ID))
 	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if err := loadScheduledMessageFiles(ctx, tx, &value); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -10357,6 +10506,9 @@ func (s *Store) ClaimScheduledMessageForCredential(ctx context.Context, workspac
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
+	if err := loadScheduledMessageFiles(ctx, tx, &value); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
@@ -10370,7 +10522,15 @@ func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.Wor
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, user, channel, now.Unix())
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages
+		WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ?
+		AND (lease_until = 0 OR lease_until <= ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM idempotency i
+			WHERE i.workspace_id = scheduled_messages.workspace_id
+			AND i.user_id = scheduled_messages.author_id
+			AND i.idempotency_key = scheduled_messages.id
+		)`, id, workspace, user, channel, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -10397,7 +10557,15 @@ func (s *Store) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND channel_id = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, credentialHash, channel, now.Unix())
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages
+		WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND channel_id = ? AND delivered = 0
+		AND (lease_until = 0 OR lease_until <= ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM idempotency i
+			WHERE i.workspace_id = scheduled_messages.workspace_id
+			AND i.user_id = scheduled_messages.author_id
+			AND i.idempotency_key = scheduled_messages.id
+		)`, id, workspace, credentialHash, channel, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -10643,6 +10811,9 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 		return nil, err
 	}
 	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, tx, values); err != nil {
 		return nil, err
 	}
 	expires := scheduledUnixSecondCeil(now.Add(lease))
@@ -11180,9 +11351,16 @@ func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadI
 	return value, nil
 }
 
-func (s *Store) DraftAttachmentExists(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, upload domain.ExternalUploadID) (bool, error) {
+func (s *Store) PendingUploadReferenceExists(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, upload domain.ExternalUploadID) (bool, error) {
 	var exists int
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM draft_attachments WHERE workspace_id = ? AND user_id = ? AND upload_id = ?`, workspace, user, upload).Scan(&exists)
+	err := s.db.QueryRowContext(ctx, `SELECT 1
+		WHERE EXISTS (
+			SELECT 1 FROM draft_attachments WHERE workspace_id = ? AND user_id = ? AND upload_id = ?
+		) OR EXISTS (
+			SELECT 1 FROM scheduled_message_files f
+			JOIN scheduled_messages m ON m.id = f.scheduled_message_id
+			WHERE m.workspace_id = ? AND m.author_id = ? AND m.delivered = 0 AND f.upload_id = ?
+		)`, workspace, user, upload, workspace, user, upload).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -11655,6 +11833,33 @@ func (s *Store) collectBlobReferences(ctx context.Context, workspace domain.Work
 		if reference == "" {
 			rows.Close()
 			return nil, errors.New("database contains an empty draft attachment blob reference")
+		}
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT u.blob_key
+		FROM scheduled_message_files f
+		JOIN scheduled_messages m ON m.id = f.scheduled_message_id
+		JOIN external_uploads u ON u.id = f.upload_id
+		WHERE m.workspace_id = ? AND m.delivered = 0 AND u.status = ?`, workspace, domain.ExternalUploadUploaded)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var reference string
+		if err := rows.Scan(&reference); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if reference == "" {
+			rows.Close()
+			return nil, errors.New("database contains an empty scheduled attachment blob reference")
 		}
 		references = append(references, reference)
 	}
@@ -13275,14 +13480,87 @@ func (s *Store) listFileShares(ctx context.Context, workspace domain.WorkspaceID
 }
 
 func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
+	return s.completeExternalUploads(ctx, "", completions, files, channels, emitted, messages, messageEvents)
+}
+
+func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, message domain.Message, messageEvent events.Event) error {
+	if id == "" {
+		return store.InvalidArgument("scheduled external upload completion requires a schedule")
+	}
+	return s.completeExternalUploads(ctx, id, completions, files, channels, emitted, []domain.Message{message}, []events.Event{messageEvent})
+}
+
+func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
 	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
+	}
+	if scheduledID != "" && len(messages) != 1 {
+		return store.InvalidArgument("scheduled external upload completion requires one message")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	idempotencyKey := string(scheduledID)
+	if scheduledID != "" {
+		message := messages[0]
+		result, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET id = id
+			WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND delivered = 0`,
+			scheduledID, message.WorkspaceID, message.AuthorID, message.Conversation)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return store.ErrNotFound
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT upload_id FROM scheduled_message_files WHERE scheduled_message_id = ? ORDER BY ordinal`, scheduledID)
+		if err != nil {
+			return err
+		}
+		uploadIDs := make([]domain.ExternalUploadID, 0, len(completions))
+		for rows.Next() {
+			var uploadID domain.ExternalUploadID
+			if err := rows.Scan(&uploadID); err != nil {
+				rows.Close()
+				return err
+			}
+			uploadIDs = append(uploadIDs, uploadID)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(uploadIDs) != len(completions) {
+			return store.ErrNotFound
+		}
+		for index, uploadID := range uploadIDs {
+			if uploadID != completions[index].ID {
+				return store.ErrNotFound
+			}
+		}
+	}
+	if idempotencyKey != "" {
+		message := messages[0]
+		result, err := tx.ExecContext(ctx, `INSERT INTO idempotency (workspace_id, user_id, idempotency_key, message_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, idempotency_key) DO NOTHING`,
+			message.WorkspaceID, message.AuthorID, idempotencyKey, message.ID, domain.NewStoredTime(time.Now()))
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return store.ErrIdempotencyConflict
+		}
+	}
 	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(completions))
 	seenFiles := make(map[domain.FileID]struct{}, len(files))
 	now := domain.NewStoredTime(time.Now())
@@ -13296,9 +13574,17 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 		seenUploads[completion.ID] = struct{}{}
 		seenFiles[files[index].ID] = struct{}{}
 		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ?
-			WHERE id = ? AND status = ? AND (expires_at > ? OR EXISTS (SELECT 1 FROM draft_attachments WHERE upload_id = ?))`,
+			WHERE id = ? AND status = ? AND (
+				expires_at > ?
+				OR EXISTS (SELECT 1 FROM draft_attachments WHERE upload_id = ?)
+				OR EXISTS (
+					SELECT 1 FROM scheduled_message_files f
+					JOIN scheduled_messages m ON m.id = f.scheduled_message_id
+					WHERE f.upload_id = ? AND m.delivered = 0
+				)
+			)`,
 			domain.ExternalUploadCompleted, files[index].ID, domain.NewStoredTime(files[index].CreatedAt),
-			completion.ID, domain.ExternalUploadUploaded, now, completion.ID)
+			completion.ID, domain.ExternalUploadUploaded, now, completion.ID, completion.ID)
 		if err != nil {
 			return err
 		}

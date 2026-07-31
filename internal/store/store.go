@@ -480,6 +480,7 @@ type Store interface {
 	// the sentinel. A fixture that hands the repository two colliding instants is
 	// in the same position as one that hands it two identical identifiers.
 	CreateMessage(context.Context, domain.Message, events.Event, string) error
+	CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event) error
 	CreateEphemeralMessage(context.Context, domain.EphemeralMessage, events.Event) error
 	GetEphemeralMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
@@ -558,6 +559,7 @@ type Store interface {
 	ListScheduledMessagesForCredential(context.Context, domain.WorkspaceID, domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error)
 	ListScheduledMessageHistory(context.Context, domain.WorkspaceID, string, bool, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	EarliestScheduledMessage(context.Context, domain.WorkspaceID) (time.Time, error)
+	GetScheduledMessage(context.Context, domain.WorkspaceID, domain.ScheduledMessageID) (domain.ScheduledMessage, error)
 	UpdateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessageUpdate, time.Duration, int, events.Event) (domain.ScheduledMessage, error)
 	ClaimScheduledMessageForCredential(context.Context, domain.WorkspaceID, string, domain.ScheduledMessageID, string, time.Duration) (domain.ScheduledMessage, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID, events.Event) error
@@ -586,10 +588,11 @@ type Store interface {
 	CreateFile(context.Context, domain.File, events.Event) error
 	CreateExternalUpload(context.Context, domain.ExternalUpload) error
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)
-	DraftAttachmentExists(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID) (bool, error)
+	PendingUploadReferenceExists(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID) (bool, error)
 	MarkExternalUploadUploaded(context.Context, domain.ExternalUploadID, time.Time) error
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
 	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, []domain.Message, []events.Event) error
+	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, domain.Message, events.Event) error
 	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error

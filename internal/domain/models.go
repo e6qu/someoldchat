@@ -1167,6 +1167,7 @@ type ScheduledMessage struct {
 	DeliveredAt     time.Time
 	FailedAt        time.Time
 	FailureCode     string
+	FileAttachments []DraftAttachment
 }
 
 type ScheduledMessagePage struct {
@@ -1187,6 +1188,7 @@ type ScheduledMessageRequest struct {
 	AppID           AppID
 	BotID           BotID
 	CredentialHash  string
+	FileAttachments []DraftAttachment
 }
 
 type ScheduledMessageQuery struct {

@@ -2559,6 +2559,59 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 	}
 }
 
+func TestScheduledComposerAttachmentJourneyPersistsListsAndSendsFile(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	upload := domain.ExternalUpload{
+		ID: "scheduled-browser-upload", WorkspaceID: "T1", Uploader: "U1", Name: "launch.txt", Title: "launch.txt",
+		MIMEType: "text/plain", BlobKey: "T1/external/scheduled-browser-upload", Size: 6,
+		Status: domain.ExternalUploadUploaded, CreatedAt: now, ExpiresAt: now.Add(time.Hour), UploadedAt: now,
+	}
+	if err := s.CreateExternalUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := (service.Messages{Store: s}).SaveDraftWithAttachments(ctx, "T1", "U1", "Cdev", "", "", []domain.DraftAttachment{{
+		UploadID: upload.ID, Title: "Launch plan",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(newDraftAttachmentViews(draft.Attachments))
+	if err != nil {
+		t.Fatal(err)
+	}
+	postAt := now.Add(2 * time.Hour).Truncate(time.Second)
+	scheduledResponse := postForm(t, mux, "/app/message/schedule?channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"post_at":               {strconv.FormatInt(postAt.Unix(), 10)},
+		"draft_attachments":     {string(encoded)},
+	}.Encode(), false)
+	if scheduledResponse.Code != http.StatusSeeOther {
+		t.Fatalf("schedule status=%d body=%s", scheduledResponse.Code, scheduledResponse.Body)
+	}
+	page, err := (service.Messages{Store: s}).ScheduledMessages(ctx, "T1", "U1", "", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Items) != 1 || len(page.Items[0].FileAttachments) != 1 || page.Items[0].Text != "" {
+		t.Fatalf("scheduled page=%+v err=%v", page, err)
+	}
+	if _, err := s.GetDraft(ctx, "T1", "U1", "Cdev", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("scheduled attachment left draft: %v", err)
+	}
+	list := get(t, mux, scheduledResponse.Header().Get("Location"))
+	requireContains(t, "SCHED-ATTACH-01 scheduled list", list.Body.String(),
+		"File attachment", "1 attachment", "Attached files stay with this scheduled message.")
+	sendTarget := "/app/message/schedule/send-now?id=" + url.QueryEscape(string(page.Items[0].ID)) + "&return_channel=Cdev"
+	sent := postForm(t, mux, sendTarget, url.Values{auth.CSRFTokenFieldName: {auth.CSRFToken("session")}}.Encode(), false)
+	if sent.Code != http.StatusSeeOther {
+		t.Fatalf("send-now status=%d body=%s", sent.Code, sent.Body)
+	}
+	history, err := s.ListMessages(ctx, "Cdev", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || len(history.Messages[0].Files) != 1 ||
+		history.Messages[0].Files[0].ID != domain.FileID(upload.ID) {
+		t.Fatalf("sent history=%+v err=%v", history, err)
+	}
+}
+
 func TestDraftsAndSentPersistsDraftsAndShowsSentMessages(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	form := url.Values{

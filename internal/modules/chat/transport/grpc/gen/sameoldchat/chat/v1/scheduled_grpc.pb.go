@@ -24,6 +24,7 @@ const (
 	ScheduledMessagesService_ScheduledMessageHistory_FullMethodName = "/sameoldchat.chat.v1.ScheduledMessagesService/ScheduledMessageHistory"
 	ScheduledMessagesService_UpdateScheduledMessage_FullMethodName  = "/sameoldchat.chat.v1.ScheduledMessagesService/UpdateScheduledMessage"
 	ScheduledMessagesService_SendScheduledMessageNow_FullMethodName = "/sameoldchat.chat.v1.ScheduledMessagesService/SendScheduledMessageNow"
+	ScheduledMessagesService_PostScheduledMessage_FullMethodName    = "/sameoldchat.chat.v1.ScheduledMessagesService/PostScheduledMessage"
 	ScheduledMessagesService_DeleteScheduledMessage_FullMethodName  = "/sameoldchat.chat.v1.ScheduledMessagesService/DeleteScheduledMessage"
 	ScheduledMessagesService_SaveDraft_FullMethodName               = "/sameoldchat.chat.v1.ScheduledMessagesService/SaveDraft"
 	ScheduledMessagesService_GetDraft_FullMethodName                = "/sameoldchat.chat.v1.ScheduledMessagesService/GetDraft"
@@ -41,6 +42,8 @@ type ScheduledMessagesServiceClient interface {
 	ScheduledMessageHistory(ctx context.Context, in *ScheduledMessageHistoryRequest, opts ...grpc.CallOption) (*ScheduledMessagePage, error)
 	UpdateScheduledMessage(ctx context.Context, in *UpdateScheduledMessageRequest, opts ...grpc.CallOption) (*ScheduledMessage, error)
 	SendScheduledMessageNow(ctx context.Context, in *SendScheduledMessageNowRequest, opts ...grpc.CallOption) (*Message, error)
+	// Internal first-party/worker seam. This is not a Slack Web API method.
+	PostScheduledMessage(ctx context.Context, in *PostScheduledMessageRequest, opts ...grpc.CallOption) (*Message, error)
 	DeleteScheduledMessage(ctx context.Context, in *DeleteScheduledMessageRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SaveDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*Draft, error)
 	GetDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*Draft, error)
@@ -101,6 +104,16 @@ func (c *scheduledMessagesServiceClient) SendScheduledMessageNow(ctx context.Con
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Message)
 	err := c.cc.Invoke(ctx, ScheduledMessagesService_SendScheduledMessageNow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) PostScheduledMessage(ctx context.Context, in *PostScheduledMessageRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_PostScheduledMessage_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -176,6 +189,8 @@ type ScheduledMessagesServiceServer interface {
 	ScheduledMessageHistory(context.Context, *ScheduledMessageHistoryRequest) (*ScheduledMessagePage, error)
 	UpdateScheduledMessage(context.Context, *UpdateScheduledMessageRequest) (*ScheduledMessage, error)
 	SendScheduledMessageNow(context.Context, *SendScheduledMessageNowRequest) (*Message, error)
+	// Internal first-party/worker seam. This is not a Slack Web API method.
+	PostScheduledMessage(context.Context, *PostScheduledMessageRequest) (*Message, error)
 	DeleteScheduledMessage(context.Context, *DeleteScheduledMessageRequest) (*MutationResponse, error)
 	SaveDraft(context.Context, *DraftRequest) (*Draft, error)
 	GetDraft(context.Context, *DraftRequest) (*Draft, error)
@@ -205,6 +220,9 @@ func (UnimplementedScheduledMessagesServiceServer) UpdateScheduledMessage(contex
 }
 func (UnimplementedScheduledMessagesServiceServer) SendScheduledMessageNow(context.Context, *SendScheduledMessageNowRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendScheduledMessageNow not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) PostScheduledMessage(context.Context, *PostScheduledMessageRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method PostScheduledMessage not implemented")
 }
 func (UnimplementedScheduledMessagesServiceServer) DeleteScheduledMessage(context.Context, *DeleteScheduledMessageRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteScheduledMessage not implemented")
@@ -330,6 +348,24 @@ func _ScheduledMessagesService_SendScheduledMessageNow_Handler(srv interface{}, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ScheduledMessagesServiceServer).SendScheduledMessageNow(ctx, req.(*SendScheduledMessageNowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_PostScheduledMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PostScheduledMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).PostScheduledMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_PostScheduledMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).PostScheduledMessage(ctx, req.(*PostScheduledMessageRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -468,6 +504,10 @@ var ScheduledMessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendScheduledMessageNow",
 			Handler:    _ScheduledMessagesService_SendScheduledMessageNow_Handler,
+		},
+		{
+			MethodName: "PostScheduledMessage",
+			Handler:    _ScheduledMessagesService_PostScheduledMessage_Handler,
 		},
 		{
 			MethodName: "DeleteScheduledMessage",

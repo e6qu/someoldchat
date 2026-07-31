@@ -265,6 +265,7 @@ type Service interface {
 	ScheduleMessageWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageAs(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageRequest) (domain.ScheduledMessage, error)
+	PostScheduledMessage(context.Context, domain.WorkspaceID, domain.ScheduledMessageID) (domain.Message, error)
 	ScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	ScheduledMessagesForCredential(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error)
 	ScheduledMessageHistory(context.Context, domain.WorkspaceID, domain.UserID, bool, domain.PageRequest) (domain.ScheduledMessagePage, error)

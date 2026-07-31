@@ -573,6 +573,7 @@ type notificationsData struct {
 type scheduledMessageView struct {
 	ID              string
 	Text            string
+	DisplayText     string
 	MachineTime     string
 	DisplayTime     string
 	ChannelName     string
@@ -583,6 +584,7 @@ type scheduledMessageView struct {
 	SendNowURL      string
 	Status          string
 	Failure         string
+	AttachmentCount int
 }
 
 type draftView struct {
@@ -2048,7 +2050,7 @@ form.addEventListener('submit',setPostAt);setPostAt();
 </nav>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if eq .ActiveTab "drafts"}}<ul class="work-list" aria-label="Drafts">{{range .Drafts}}<li class="work-item"><div><div class="work-meta">{{if .OpenURL}}<a class="work-channel" href="{{.OpenURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>Updated <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .AttachmentCount}}<span>{{.AttachmentCount}} attachment{{if ne .AttachmentCount 1}}s{{end}}</span>{{end}}</div><p class="work-text">{{if .Text}}{{.Text}}{{else}}Attachment draft{{end}}</p></div><div class="work-actions">{{if .OpenURL}}<a href="{{.OpenURL}}">Continue</a>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit" aria-label="Delete draft in {{.ChannelName}}">Delete</button></form></div></li>{{else}}<li class="empty">You have no drafts.</li>{{end}}</ul>{{end}}
-{{if eq .ActiveTab "scheduled"}}<ul class="work-list" aria-label="Scheduled messages">{{range .Scheduled}}<li class="work-item scheduled-item"><div><div class="work-meta">{{if .ConversationURL}}<a class="work-channel" href="{{.ConversationURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>{{.Status}} for <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .Failure}}<span class="failed">{{.Failure}}</span>{{end}}</div><p class="work-text">{{.Text}}</p></div><div class="work-actions"><details><summary>Edit</summary><form class="edit-panel" method="post" action="{{.UpdateURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label>Message<textarea name="text" maxlength="40000" required>{{.Text}}</textarea></label><label>Send date and time<input type="datetime-local" name="schedule_at" data-schedule-at data-local-datetime="{{.MachineTime}}" required></label><input type="hidden" name="post_at"><button type="submit">Save changes</button></form></details><form method="post" action="{{.SendNowURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Send now</button></form><form method="post" action="{{.CancelURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit" aria-label="Cancel scheduled message in {{.ChannelName}}">Cancel message</button></form></div></li>{{else}}<li class="empty">You have no scheduled messages.</li>{{end}}</ul>{{end}}
+{{if eq .ActiveTab "scheduled"}}<ul class="work-list" aria-label="Scheduled messages">{{range .Scheduled}}<li class="work-item scheduled-item"><div><div class="work-meta">{{if .ConversationURL}}<a class="work-channel" href="{{.ConversationURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>{{.Status}} for <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .AttachmentCount}}<span>{{.AttachmentCount}} attachment{{if ne .AttachmentCount 1}}s{{end}}</span>{{end}}{{if .Failure}}<span class="failed">{{.Failure}}</span>{{end}}</div><p class="work-text">{{.DisplayText}}</p></div><div class="work-actions"><details><summary>Edit</summary><form class="edit-panel" method="post" action="{{.UpdateURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label>Message<textarea name="text" maxlength="40000" {{if not .AttachmentCount}}required{{end}}>{{.Text}}</textarea></label>{{if .AttachmentCount}}<p class="work-meta">Attached files stay with this scheduled message.</p>{{end}}<label>Send date and time<input type="datetime-local" name="schedule_at" data-schedule-at data-local-datetime="{{.MachineTime}}" required></label><input type="hidden" name="post_at"><button type="submit">Save changes</button></form></details><form method="post" action="{{.SendNowURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Send now</button></form><form method="post" action="{{.CancelURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit" aria-label="Cancel scheduled message in {{.ChannelName}}">Cancel message</button></form></div></li>{{else}}<li class="empty">You have no scheduled messages.</li>{{end}}</ul>{{end}}
 {{if eq .ActiveTab "sent"}}<ul class="work-list" aria-label="Sent messages">{{range .Sent}}<li class="work-item"><div><div class="work-meta">{{if .OpenURL}}<a class="work-channel" href="{{.OpenURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>Sent <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span></div><p class="work-text">{{.Text}}</p></div>{{if .OpenURL}}<div class="work-actions"><a href="{{.OpenURL}}">View conversation</a></div>{{end}}</li>{{else}}<li class="empty">You have no recently sent messages.</li>{{end}}</ul>{{end}}
 {{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">{{.MoreLabel}}</a></p>{{end}}
 </main>{{end}}`
@@ -4906,9 +4908,11 @@ func (h Handler) draftsAndSent(w http.ResponseWriter, r *http.Request) {
 		data.Scheduled = make([]scheduledMessageView, 0, len(page.Items))
 		for _, item := range page.Items {
 			name, prefix, conversationURL := conversationView(item.Channel, item.ThreadTimestamp)
-			text := item.Text
-			if strings.TrimSpace(text) == "" {
-				text = "Rich message"
+			displayText := item.Text
+			if strings.TrimSpace(displayText) == "" && len(item.FileAttachments) != 0 {
+				displayText = "File attachment"
+			} else if strings.TrimSpace(displayText) == "" {
+				displayText = "Rich message"
 			}
 			actionQuery := url.Values{
 				"channel": {string(item.Channel)}, "id": {string(item.ID)}, "return_channel": {channel},
@@ -4919,12 +4923,13 @@ func (h Handler) draftsAndSent(w http.ResponseWriter, r *http.Request) {
 				failure = scheduledFailureMessage(item.FailureCode)
 			}
 			data.Scheduled = append(data.Scheduled, scheduledMessageView{
-				ID: string(item.ID), Text: text, MachineTime: item.PostAt.UTC().Format(time.RFC3339Nano),
+				ID: string(item.ID), Text: item.Text, DisplayText: displayText, MachineTime: item.PostAt.UTC().Format(time.RFC3339Nano),
 				DisplayTime: formatTime(item.PostAt), ChannelName: name, ChannelPrefix: prefix,
 				ConversationURL: conversationURL, Status: status, Failure: failure,
-				CancelURL:  "/app/message/schedule/cancel?" + actionQuery.Encode(),
-				UpdateURL:  "/app/message/schedule/update?" + actionQuery.Encode(),
-				SendNowURL: "/app/message/schedule/send-now?" + actionQuery.Encode(),
+				AttachmentCount: len(item.FileAttachments),
+				CancelURL:       "/app/message/schedule/cancel?" + actionQuery.Encode(),
+				UpdateURL:       "/app/message/schedule/update?" + actionQuery.Encode(),
+				SendNowURL:      "/app/message/schedule/send-now?" + actionQuery.Encode(),
 			})
 		}
 		next, hasMore = page.NextCursor, page.HasMore
@@ -7153,10 +7158,6 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		h.writeScheduleMessageError(w, r, principal, fields["text"], nil, fields["schedule_at"], http.StatusBadRequest, "The staged files are no longer valid. Reload the conversation and stage them again.")
 		return
 	}
-	if len(attachments) > 0 {
-		h.writeScheduleMessageError(w, r, principal, fields["text"], attachments, fields["schedule_at"], http.StatusBadRequest, "Staged files cannot be scheduled yet. Send them now or remove them before scheduling; the draft was kept.")
-		return
-	}
 	postAtUnix, parseErr := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
 	if parseErr != nil || postAtUnix <= 0 {
 		h.writeScheduleMessageError(w, r, principal, fields["text"], attachments, fields["schedule_at"], http.StatusBadRequest, "Choose a delivery date and time in your browser before scheduling the message.")
@@ -7169,13 +7170,16 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		PostAt:          time.Unix(postAtUnix, 0).UTC(),
 		CredentialHash:  service.InternalScheduledCredential(principal.WorkspaceID, principal.UserID),
+		FileAttachments: attachments,
 	})
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		reason := "The message could not be scheduled because the workspace store is temporarily unavailable."
 		switch {
 		case errors.Is(err, service.ErrInvalidMessage):
-			status, reason = http.StatusBadRequest, "A scheduled message needs some text before it can be saved."
+			status, reason = http.StatusBadRequest, "A scheduled message needs text or a staged file before it can be saved."
+		case errors.Is(err, service.ErrInvalidExternalUpload):
+			status, reason = http.StatusBadRequest, "One or more staged files are no longer available. Remove them or stage the files again."
 		case errors.Is(err, service.ErrInvalidTimestamp):
 			status, reason = http.StatusBadRequest, "That thread is not a message in this conversation."
 		case errors.Is(err, service.ErrScheduledTimeInPast):

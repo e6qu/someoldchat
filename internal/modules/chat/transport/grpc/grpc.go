@@ -3166,6 +3166,16 @@ func (r Remote) SendScheduledMessageNow(ctx context.Context, workspaceID domain.
 	return decodeProtoMessage(out)
 }
 
+func (r Remote) PostScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, id domain.ScheduledMessageID) (domain.Message, error) {
+	out, err := r.scheduled.PostScheduledMessage(ctx, &chatv1.PostScheduledMessageRequest{
+		WorkspaceId: string(workspaceID), ScheduledMessageId: string(id),
+	})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
 func (r Remote) DeleteScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID) error {
 	return r.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, grpcScheduledCredential(workspaceID, userID), channel, id)
 }
@@ -5558,6 +5568,16 @@ func (s *Server) SendScheduledMessageNow(ctx context.Context, input *chatv1.Send
 	return encodeProtoMessage(value), nil
 }
 
+func (s *Server) PostScheduledMessage(ctx context.Context, input *chatv1.PostScheduledMessageRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.PostScheduledMessage(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.ScheduledMessageID(input.GetScheduledMessageId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
 func (s *Server) DeleteScheduledMessage(ctx context.Context, input *chatv1.DeleteScheduledMessageRequest) (*chatv1.MutationResponse, error) {
 	return s.deleteScheduledMessageProto(ctx, input)
 }
@@ -6551,6 +6571,7 @@ func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.Schedul
 		Attachments: input.GetAttachments(), AppID: domain.AppID(input.GetAppId()), BotID: domain.BotID(input.GetBotId()),
 		CredentialHash: credentialHash, ThreadTimestamp: domain.MessageTimestamp(input.GetThreadTs()),
 		Metadata: input.GetMetadata(), StreamState: input.GetStreamState(), PostAt: time.Unix(input.GetPostAt(), 0).UTC(),
+		FileAttachments: decodeProtoDraftAttachments(input.GetFileAttachments()),
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -7841,6 +7862,7 @@ func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.Schedule
 		AppId: string(value.AppID), BotId: string(value.BotID), CredentialHash: value.CredentialHash, ThreadTs: string(value.ThreadTimestamp),
 		Metadata: value.Metadata, StreamState: value.StreamState,
 		DeliveredAt: unixOrZero(value.DeliveredAt), FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
+		FileAttachments: encodeProtoDraftAttachments(value.FileAttachments),
 	}
 }
 
@@ -7863,7 +7885,7 @@ func timeFromUnix(value int64) time.Time {
 }
 
 func decodeProtoScheduledMessage(value *chatv1.ScheduledMessage) (domain.ScheduledMessage, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "") || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
+	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "" && len(value.GetFileAttachments()) == 0) || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
 		return domain.ScheduledMessage{}, errors.New("typed scheduled message is incomplete")
 	}
 	return domain.ScheduledMessage{
@@ -7874,6 +7896,7 @@ func decodeProtoScheduledMessage(value *chatv1.ScheduledMessage) (domain.Schedul
 		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), PostAt: time.Unix(value.GetPostAt(), 0).UTC(),
 		CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), DeliveredAt: timeFromUnix(value.GetDeliveredAt()),
 		FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
+		FileAttachments: decodeProtoDraftAttachments(value.GetFileAttachments()),
 	}, nil
 }
 
@@ -8450,6 +8473,7 @@ func (r Remote) ScheduleMessageAs(ctx context.Context, workspaceID domain.Worksp
 		Text: request.Text, Blocks: request.Blocks, Attachments: request.Attachments, PostAt: request.PostAt.Unix(),
 		AppId: string(request.AppID), BotId: string(request.BotID), CredentialHash: request.CredentialHash,
 		ThreadTs: string(request.ThreadTimestamp), Metadata: request.Metadata, StreamState: request.StreamState,
+		FileAttachments: encodeProtoDraftAttachments(request.FileAttachments),
 	})
 	if err != nil {
 		return domain.ScheduledMessage{}, err
