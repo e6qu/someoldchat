@@ -199,14 +199,15 @@ month-end day. A step can be gated by a condition over the run's inputs or an
 earlier step's outputs; each step's inputs can be mapped from those same
 variables; and form and button steps pause a run until a workspace member
 submits the form or clicks the confirmation, resuming through the same advance
-path as a function completion.
+path as a function completion. Run views are workspace-shareable so a member
+can open an interactive run; steps reorder in place; a workflow carries an icon
+through its revisions and views; a published workflow's trigger is locked to
+enable/disable; and the owner exports run history and submitted form fields as
+CSV.
 
 This is not full Slack Workflow Builder parity. Workflow managers, find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions,
-templates and AI creation,
-icons, drag reordering, trigger-change rules,
-async workflow
-and form-response CSV export,
+templates and AI creation, asynchronous CSV export at scale,
 enforcement of typed workflow/function input and output schemas, multi-org
 permissions, exact rate limits, and controlled live-Slack outcomes remain
 verified gaps. Current callback snapshots
