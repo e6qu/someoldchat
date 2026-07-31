@@ -2763,7 +2763,7 @@ func TestApplicationStartsShauthForUnauthenticatedDirectEntry(t *testing.T) {
 func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1"})
-	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "developer@example.test", Name: "developer"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "developer@example.test", Name: "local-seed", RealName: "Local Seed", Profile: domain.UserProfile{DisplayName: "developer"}})
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	if err := store.SeedSession(context.Background(), "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)

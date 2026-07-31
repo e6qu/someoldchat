@@ -768,13 +768,63 @@ func TestOIDCAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
 	// EmailVerified is deliberately false: the provider subject is already bound to
 	// a local user, so this path never links by email and must not demand a
 	// verification claim it has no use for.
-	user, role, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "oidc-subject", Email: "alice@example.com", Role: "developer"})
-	if err != nil || user.ID != "U2" || role != domain.WorkspaceRoleMember {
+	user, role, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "oidc-subject", Email: "alice@example.com", PreferredUsername: "alice-from-shauth", Role: "developer"})
+	if err != nil || user.ID != "U2" || user.Profile.DisplayName != "alice-from-shauth" || role != domain.WorkspaceRoleMember {
 		t.Fatalf("user=%+v role=%q err=%v", user, role, err)
 	}
 	membership, err := store.GetWorkspaceMembership(context.Background(), "T1", "U2")
 	if err != nil || membership.Role != domain.WorkspaceRoleMember {
 		t.Fatalf("membership=%+v err=%v", membership, err)
+	}
+	persisted, err := store.FindUserByEmail(context.Background(), "T1", "alice@example.com")
+	if err != nil || persisted.Profile.DisplayName != "alice-from-shauth" {
+		t.Fatalf("persisted user=%+v err=%v", persisted, err)
+	}
+}
+
+func TestOIDCAuthorizationSynchronizesVerifiedEmailLinkedBootstrapIdentity(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{
+		ID:          "Ubootstrap",
+		WorkspaceID: "T1",
+		Email:       "bootstrap-admin@example.com",
+		Name:        "sameoldchat",
+		RealName:    "SameOldChat",
+	})
+	handler, err := NewLoginHandler(
+		service.Messages{Store: store},
+		"T1",
+		"Ubootstrap",
+		"https://chat.example.test",
+		"",
+		[]byte(strings.Repeat("k", 32)),
+		[]ProviderConfig{{
+			Name: "oidc", ClientID: "sameoldchat", ClientSecret: "secret",
+			AuthorizeURL: "https://auth.example.test/oauth2/auth",
+			TokenURL:     "https://auth.example.test/oauth2/token",
+			UserInfoURL:  "https://auth.example.test/userinfo",
+			Scopes:       []string{"openid", "profile", "email"},
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	user, role, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{
+		Subject:           "shauth-bootstrap-subject",
+		Email:             "bootstrap-admin@example.com",
+		EmailVerified:     true,
+		Name:              "Bootstrap Administrator",
+		PreferredUsername: "bootstrap-admin",
+		Role:              "admin",
+	})
+	if err != nil || user.ID != "Ubootstrap" || user.Profile.DisplayName != "bootstrap-admin" || role != domain.WorkspaceRoleAdmin {
+		t.Fatalf("user=%+v role=%q err=%v", user, role, err)
+	}
+	link, err := store.GetExternalIdentity(context.Background(), "T1", "oidc", "shauth-bootstrap-subject")
+	if err != nil || link.UserID != "Ubootstrap" {
+		t.Fatalf("external identity=%+v err=%v", link, err)
 	}
 }
 

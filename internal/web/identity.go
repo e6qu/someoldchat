@@ -604,7 +604,7 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 		if lookupErr != nil {
 			return domain.User{}, "", lookupErr
 		}
-		return h.resolveWorkspaceRole(ctx, provider, identity.Role, user)
+		return h.resolveExternalUser(ctx, provider, identity, user)
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return domain.User{}, "", err
@@ -656,7 +656,34 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 	if err != nil {
 		return domain.User{}, "", err
 	}
-	return h.resolveWorkspaceRole(ctx, provider, identity.Role, user)
+	return h.resolveExternalUser(ctx, provider, identity, user)
+}
+
+// resolveExternalUser applies the provider assertions that remain
+// authoritative after an external subject has been linked. OpenID Connect
+// already writes its role claim through; its preferred_username must receive
+// the same treatment so linking a pre-existing local bootstrap account by
+// verified email cannot keep presenting that account's seed display name as
+// the Shauth identity.
+func (h LoginHandler) resolveExternalUser(ctx context.Context, provider string, identity externalIdentity, user domain.User) (domain.User, domain.WorkspaceRole, error) {
+	user, role, err := h.resolveWorkspaceRole(ctx, provider, identity.Role, user)
+	if err != nil || provider != "oidc" {
+		return user, role, err
+	}
+	username := strings.TrimSpace(identity.PreferredUsername)
+	if username == "" {
+		username = strings.TrimSpace(identity.Name)
+	}
+	if username == "" {
+		username = strings.TrimSpace(identity.Email)
+	}
+	if displayName(user) == username {
+		return user, role, nil
+	}
+	profile := user.Profile
+	profile.DisplayName = username
+	user, err = h.service.SetUserProfile(ctx, h.workspace, user.ID, profile)
+	return user, role, err
 }
 
 // resolveWorkspaceRole returns the durable workspace role that a session's
