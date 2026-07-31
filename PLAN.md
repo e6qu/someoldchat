@@ -405,9 +405,9 @@ API and Socket Mode.
 
 The same pass keeps the remaining boundary explicit. Workflow managers,
 find/use/copy permissions, plan and admin policy, built-in and connector
-functions, typed variable mapping, forms, buttons, branches, icons,
-copy/delete and drag reordering, trigger-change rules,
-activity dashboards, asynchronous CSV
+functions, icons,
+drag reordering, trigger-change rules,
+asynchronous CSV
 exports, multi-org permission
 semantics, typed workflow/function input and output enforcement, exact rate
 limits, and controlled live-Slack outcomes remain.
@@ -444,6 +444,33 @@ steps beneath the step list, so the owner sees exactly what publishing would
 change. A published head or a workflow with no published revision yields no
 changes, and the wire method is covered by the differential parity suite
 alongside every other chat operation.
+
+The builder-completion pass then closes the remaining Workflow Builder gaps a
+single feature slice at a time. A workflow can be copied into a new draft and
+deleted, with deletion cancelling every running execution in the same
+transaction that removes the workflow, its revisions, triggers, runs, steps,
+and featured entries. Scheduled triggers accept named weekdays (a weekly
+schedule fires on the days it names, anchored on the start's week) and an
+explicit day of the month that clamps to a shorter month's last day instead of
+drifting into the next one. The builder shows a per-workflow run activity
+dashboard — counts by status and the newest runs, newest first — to the owner.
+Steps carry a type and a unique id, so the per-step change diff compares whole
+definitions rather than only the callback, and the diff no longer phantom-flags
+a revision written before step types existed. A step can be gated by a
+condition comparing a variable (`inputs.<name>` or an earlier step's
+`steps.<id>.outputs.<name>`) with equals, not equals, contains, greater than,
+or less than; the run skips a step whose condition fails and completes when no
+remaining step's condition holds, and a run now starts from its pinned
+published revision even while staged edits diverge the head. Each step's inputs
+can be mapped from trigger inputs or earlier step outputs, keeping the value's
+type and dropping a key whose variable does not resolve. Form and button steps
+park a run waiting for a person to submit a form or click a confirmation, and
+any workspace member may respond; the run view renders the pending interaction
+and resumes on submit or click through the same advance path as a function
+completion. Each new operation crosses the gRPC seam with a differential parity
+case, and the workspace content security policy now allowlists the workflow
+pages' own inline scripts (a prior gap that had silently disabled their
+progressive enhancement).
 
 The trigger-worker pass then replaced the configuration-only scheduled,
 webhook, message, reaction, join, and list trigger types with durable

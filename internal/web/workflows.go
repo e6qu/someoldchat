@@ -68,15 +68,15 @@ type workflowDecodedStep struct {
 
 func decodeWorkflowSteps(raw string) []workflowDecodedStep {
 	var steps []struct {
-		Type       string                 `json:"type"`
-		FunctionID string                 `json:"function_id"`
-		InputMapping map[string]string    `json:"input_mapping"`
-		Condition  *struct {
+		Type         string            `json:"type"`
+		FunctionID   string            `json:"function_id"`
+		InputMapping map[string]string `json:"input_mapping"`
+		Condition    *struct {
 			Source   string `json:"source"`
 			Operator string `json:"operator"`
 			Value    string `json:"value"`
 		} `json:"condition"`
-		Form   *struct {
+		Form *struct {
 			Title       string            `json:"title"`
 			Description string            `json:"description"`
 			Inputs      map[string]string `json:"inputs"`
