@@ -430,6 +430,61 @@ func TestWorkflowBuilderShowsRunActivityToTheOwner(t *testing.T) {
 	requireContains(t, "cancelled activity", page.Body.String(), "<b>0</b> running", "<b>1</b> cancelled")
 }
 
+func TestWorkflowBuilderRunsFormAndButtonSteps(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Interactive"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	published := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Interactive"}, "input_schema": {`{}`},
+		"step_type_1": {"form"}, "form_1": {`{"title":"Intake","inputs":{"name":"Name"}}`},
+		"step_type_2": {"button"}, "button_label_2": {"Approve"},
+		"step_type_3": {"function"}, "step_3": {"notify"},
+		"action": {"publish"},
+	}.Encode(), false)
+	if published.Code != http.StatusSeeOther {
+		t.Fatalf("publish=%d: %s", published.Code, published.Body)
+	}
+	triggered := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Run"}, "type": {"link"},
+	}.Encode(), false)
+	page := get(t, mux, triggered.Header().Get("Location"))
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+	if len(trigger) != 2 || len(key) != 2 {
+		t.Fatalf("run form missing: %s", page.Body)
+	}
+	started := postForm(t, mux, workflowURL+"/triggers/"+trigger[1]+"/run", url.Values{
+		"_csrf": {csrf}, "idempotency_key": {key[1]},
+	}.Encode(), false)
+	runURL := started.Header().Get("Location")
+	runPage := get(t, mux, runURL)
+	requireContains(t, "form step", runPage.Body.String(), "Intake", `name="field_name"`, `name="step_id"`, "Submit")
+	stepID := regexp.MustCompile(`name="step_id" value="([^"]+)"`).FindStringSubmatch(runPage.Body.String())
+	if len(stepID) != 2 {
+		t.Fatalf("step id missing: %s", runPage.Body)
+	}
+
+	submitted := postForm(t, mux, "/app/workflows/runs/submit/"+strings.TrimPrefix(runURL, "/app/workflows/runs/"), url.Values{
+		"_csrf": {csrf}, "step_id": {stepID[1]}, "field_name": {"Ada"},
+	}.Encode(), false)
+	if submitted.Code != http.StatusSeeOther {
+		t.Fatalf("submit=%d: %s", submitted.Code, submitted.Body)
+	}
+	runPage = get(t, mux, runURL)
+	requireContains(t, "button step", runPage.Body.String(), "Approve", "Confirm")
+	buttonStep := regexp.MustCompile(`name="step_id" value="([^"]+)"`).FindStringSubmatch(runPage.Body.String())
+	clicked := postForm(t, mux, "/app/workflows/runs/click/"+strings.TrimPrefix(runURL, "/app/workflows/runs/"), url.Values{
+		"_csrf": {csrf}, "step_id": {buttonStep[1]},
+	}.Encode(), false)
+	if clicked.Code != http.StatusSeeOther {
+		t.Fatalf("click=%d: %s", clicked.Code, clicked.Body)
+	}
+	runPage = get(t, mux, runURL)
+	requireContains(t, "advanced run", runPage.Body.String(), "running", "An app function is running")
+}
+
 func TestWorkflowBuilderCopiesAndDeletesAWorkflow(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	created := postForm(t, mux, "/app/workflows/create", url.Values{

@@ -3282,6 +3282,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers/{triggerID}", h.updateWorkflowTrigger)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers/{triggerID}/run", h.runWorkflow)
 	mux.HandleFunc("GET /app/workflows/runs/{runID}", h.workflowRun)
+	mux.HandleFunc("POST /app/workflows/runs/submit/{runID}", h.submitWorkflowForm)
+	mux.HandleFunc("POST /app/workflows/runs/click/{runID}", h.completeWorkflowButton)
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
 	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
 	mux.HandleFunc("POST /app/apps/{appID}/action", h.appHomeAction)

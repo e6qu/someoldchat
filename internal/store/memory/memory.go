@@ -2939,7 +2939,8 @@ func (s *Store) CreateWorkflowRun(_ context.Context, value domain.WorkflowRun, f
 	}
 	if firstStep != nil {
 		if firstStep.ID == "" || firstStep.WorkflowRunID != value.ID || firstStep.WorkspaceID != value.WorkspaceID ||
-			firstStep.AppID == "" || firstStep.UserID == "" || firstStep.Status != domain.WorkflowStepExecuting ||
+			firstStep.AppID == "" || firstStep.UserID == "" ||
+			(firstStep.Status != domain.WorkflowStepExecuting && firstStep.Status != domain.WorkflowStepWaiting) ||
 			firstStep.CreatedAt.IsZero() || firstStep.UpdatedAt.IsZero() {
 			return store.InvalidArgument("invalid first workflow step")
 		}
@@ -2970,12 +2971,14 @@ func (s *Store) AdvanceWorkflowRun(_ context.Context, completed domain.WorkflowS
 		return store.ErrConflict
 	}
 	currentExecution, exists := s.workflowSteps[completed.ID]
-	if !exists || currentExecution.WorkflowRunID != value.ID || currentExecution.Status != domain.WorkflowStepExecuting {
+	if !exists || currentExecution.WorkflowRunID != value.ID ||
+		(currentExecution.Status != domain.WorkflowStepExecuting && currentExecution.Status != domain.WorkflowStepWaiting) {
 		return store.ErrConflict
 	}
 	if next != nil {
 		if next.ID == "" || next.WorkflowRunID != value.ID || next.WorkspaceID != value.WorkspaceID ||
-			next.AppID == "" || next.UserID == "" || next.Status != domain.WorkflowStepExecuting ||
+			next.AppID == "" || next.UserID == "" ||
+			(next.Status != domain.WorkflowStepExecuting && next.Status != domain.WorkflowStepWaiting) ||
 			next.CreatedAt.IsZero() || next.UpdatedAt.IsZero() {
 			return store.InvalidArgument("invalid next workflow step")
 		}

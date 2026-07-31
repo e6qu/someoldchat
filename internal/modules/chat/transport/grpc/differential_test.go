@@ -207,6 +207,46 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}}))
 }
 
+func seedFormParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedWorkflowParity(t, target)
+	now := time.Unix(1_700_000_200, 0).UTC()
+	workflow := domain.WorkflowDefinition{
+		ID: "WfForm", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "form-workflow",
+		Title: "Form workflow", InputSchema: `{}`,
+		Steps: `[
+			{"id":"intake","type":"form","form":{"title":"Intake","inputs":{"name":"Name"}}},
+			{"id":"approve","type":"button","button":{"label":"Approve"}},
+			{"id":"triage","type":"function","function_id":"triage","title":"Triage"}
+		]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflow(context.Background(), workflow, events.Event{
+		ID: "evt_form_workflow", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now,
+	}))
+	trigger := domain.WorkflowTrigger{
+		ID: "FtForm", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run form",
+		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+		ID: "evt_form_trigger", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
+	}))
+	run := domain.WorkflowRun{
+		ID: "WxForm", WorkflowID: workflow.ID, WorkflowVersion: 1, TriggerID: trigger.ID,
+		WorkspaceID: "T1", AppID: "A1", ActorID: "U1", ConversationID: "C1",
+		Status: domain.WorkflowRunRunning, Inputs: `{}`, Outputs: `{}`, CurrentStep: 0,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	waiting := domain.WorkflowStep{
+		ID: "FxForm", WorkflowRunID: run.ID, WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+		EditID: "intake", Status: domain.WorkflowStepWaiting, Inputs: `{}`, Outputs: `{}`,
+		StepName: "Intake", CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflowRun(context.Background(), run, &waiting, []events.Event{{
+		ID: "evt_form_run", WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now,
+	}}))
+}
+
 func seedBranchParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedWorkflowParity(t, target)
@@ -385,6 +425,48 @@ func parityCases() []parityCase {
 		return domain.NewMessageTimestamp(message.CreatedAt)
 	}
 	return []parityCase{
+		{
+			name: "form and button steps resume across the composition seam",
+			seed: seedFormParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// The run view reports the form the run is parked on.
+				before, err := chat.WorkflowRunInteraction(ctx, "T1", "U2", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				fieldNames := make([]string, 0, len(before.Fields))
+				for _, field := range before.Fields {
+					fieldNames = append(fieldNames, field.Name)
+				}
+				// A member submits it and the run advances to the approval
+				// button, which the same member then clicks to reach triage.
+				if err := chat.SubmitWorkflowForm(ctx, "T1", "U2", "WxForm", "FxForm", `{"name":"Ada"}`); err != nil {
+					return nil, err
+				}
+				button, err := chat.WorkflowRunInteraction(ctx, "T1", "U1", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CompleteWorkflowButton(ctx, "T1", "U2", "WxForm", button.StepID); err != nil {
+					return nil, err
+				}
+				run, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				// Once advanced past both interactive steps, the run no longer
+				// reports an interaction.
+				after, err := chat.WorkflowRunInteraction(ctx, "T1", "U1", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					before.Kind, before.Title, fieldNames, before.StepID,
+					button.Kind, button.Label,
+					run.Status, run.CurrentStep, after.Kind,
+				}, nil
+			},
+		},
 		{
 			name: "workflow branches route completed runs across the composition seam",
 			seed: seedBranchParity,

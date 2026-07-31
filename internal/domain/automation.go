@@ -84,6 +84,22 @@ type WorkflowActivity struct {
 	RecentRuns []WorkflowRun
 }
 
+// WorkflowInteraction describes the human input a running workflow is parked
+// on, if any. Kind is empty when the run is not waiting on a form or button.
+type WorkflowInteraction struct {
+	StepID WorkflowStepID
+	Kind   string
+	Title  string
+	Label  string
+	Fields []WorkflowInteractionField
+}
+
+// WorkflowInteractionField is one named input a form step collects.
+type WorkflowInteractionField struct {
+	Name  string
+	Label string
+}
+
 type WorkflowTriggerType string
 
 const (

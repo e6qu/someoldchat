@@ -6114,7 +6114,8 @@ func (s *Store) CreateWorkflowRun(ctx context.Context, value domain.WorkflowRun,
 		return store.ErrNotFound
 	}
 	if firstStep != nil && (firstStep.ID == "" || firstStep.WorkflowRunID != value.ID || firstStep.WorkspaceID != value.WorkspaceID ||
-		firstStep.AppID == "" || firstStep.UserID == "" || firstStep.Status != domain.WorkflowStepExecuting ||
+		firstStep.AppID == "" || firstStep.UserID == "" ||
+		(firstStep.Status != domain.WorkflowStepExecuting && firstStep.Status != domain.WorkflowStepWaiting) ||
 		firstStep.CreatedAt.IsZero() || firstStep.UpdatedAt.IsZero()) {
 		return store.InvalidArgument("invalid first workflow step")
 	}
@@ -6156,7 +6157,8 @@ func (s *Store) AdvanceWorkflowRun(ctx context.Context, completed domain.Workflo
 		return store.InvalidArgument("invalid workflow run advance")
 	}
 	if next != nil && (next.ID == "" || next.WorkflowRunID != value.ID || next.WorkspaceID != value.WorkspaceID ||
-		next.AppID == "" || next.UserID == "" || next.Status != domain.WorkflowStepExecuting ||
+		next.AppID == "" || next.UserID == "" ||
+		(next.Status != domain.WorkflowStepExecuting && next.Status != domain.WorkflowStepWaiting) ||
 		next.CreatedAt.IsZero() || next.UpdatedAt.IsZero()) {
 		return store.InvalidArgument("invalid next workflow step")
 	}
@@ -6168,10 +6170,10 @@ func (s *Store) AdvanceWorkflowRun(ctx context.Context, completed domain.Workflo
 	stepResult, err := tx.ExecContext(ctx, `UPDATE workflow_steps SET
 		app_id = ?, user_id = ?, function_id = ?, status = ?, inputs = ?, outputs = ?, error = ?,
 		step_name = ?, image_url = ?, updated_at = ?
-		WHERE id = ? AND workflow_run_id = ? AND workspace_id = ? AND status = ?`,
+		WHERE id = ? AND workflow_run_id = ? AND workspace_id = ? AND status IN (?, ?)`,
 		completed.AppID, completed.UserID, completed.FunctionID, completed.Status, completed.Inputs, completed.Outputs,
 		completed.Error, completed.StepName, completed.ImageURL, completed.UpdatedAt.UTC().UnixNano(),
-		completed.ID, value.ID, value.WorkspaceID, domain.WorkflowStepExecuting)
+		completed.ID, value.ID, value.WorkspaceID, domain.WorkflowStepExecuting, domain.WorkflowStepWaiting)
 	if err != nil {
 		return classify(err)
 	}

@@ -80,6 +80,34 @@ message WorkflowActivitySummary {
   repeated WorkflowRun recent_runs = 6;
 }
 
+message WorkflowFormSubmitRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string run_id = 3;
+  string step_id = 4;
+  string inputs = 5;
+}
+
+message WorkflowButtonRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string run_id = 3;
+  string step_id = 4;
+}
+
+message WorkflowInteractionField {
+  string name = 1;
+  string label = 2;
+}
+
+message WorkflowInteraction {
+  string step_id = 1;
+  string kind = 2;
+  string title = 3;
+  string label = 4;
+  repeated WorkflowInteractionField fields = 5;
+}
+
 message WorkflowStepChange {
   int32 position = 1;
   string function_id = 2;
@@ -303,6 +331,9 @@ service WorkflowsService {
   rpc DuplicateWorkflow(WorkflowGetRequest) returns (WorkflowDefinition);
   rpc DeleteWorkflow(WorkflowDeleteRequest) returns (WorkflowStepMutationResponse);
   rpc WorkflowActivity(WorkflowGetRequest) returns (WorkflowActivitySummary);
+  rpc SubmitWorkflowForm(WorkflowFormSubmitRequest) returns (WorkflowStepMutationResponse);
+  rpc CompleteWorkflowButton(WorkflowButtonRequest) returns (WorkflowStepMutationResponse);
+  rpc WorkflowRunInteraction(WorkflowRunGetRequest) returns (WorkflowInteraction);
   rpc UpdateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
   rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);

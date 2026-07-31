@@ -29,6 +29,9 @@ const (
 	WorkflowsService_DuplicateWorkflow_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/DuplicateWorkflow"
 	WorkflowsService_DeleteWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/DeleteWorkflow"
 	WorkflowsService_WorkflowActivity_FullMethodName              = "/sameoldchat.chat.v1.WorkflowsService/WorkflowActivity"
+	WorkflowsService_SubmitWorkflowForm_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/SubmitWorkflowForm"
+	WorkflowsService_CompleteWorkflowButton_FullMethodName        = "/sameoldchat.chat.v1.WorkflowsService/CompleteWorkflowButton"
+	WorkflowsService_WorkflowRunInteraction_FullMethodName        = "/sameoldchat.chat.v1.WorkflowsService/WorkflowRunInteraction"
 	WorkflowsService_UpdateWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/UpdateWorkflow"
 	WorkflowsService_ListWorkflows_FullMethodName                 = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflows"
 	WorkflowsService_SetWorkflowTrigger_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowTrigger"
@@ -63,6 +66,9 @@ type WorkflowsServiceClient interface {
 	DuplicateWorkflow(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
 	DeleteWorkflow(ctx context.Context, in *WorkflowDeleteRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	WorkflowActivity(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowActivitySummary, error)
+	SubmitWorkflowForm(ctx context.Context, in *WorkflowFormSubmitRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
+	CompleteWorkflowButton(ctx context.Context, in *WorkflowButtonRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
+	WorkflowRunInteraction(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowInteraction, error)
 	UpdateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
 	ListWorkflows(ctx context.Context, in *WorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error)
 	SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error)
@@ -185,6 +191,36 @@ func (c *workflowsServiceClient) WorkflowActivity(ctx context.Context, in *Workf
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkflowActivitySummary)
 	err := c.cc.Invoke(ctx, WorkflowsService_WorkflowActivity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) SubmitWorkflowForm(ctx context.Context, in *WorkflowFormSubmitRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowStepMutationResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_SubmitWorkflowForm_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) CompleteWorkflowButton(ctx context.Context, in *WorkflowButtonRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowStepMutationResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_CompleteWorkflowButton_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) WorkflowRunInteraction(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowInteraction, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowInteraction)
+	err := c.cc.Invoke(ctx, WorkflowsService_WorkflowRunInteraction_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +421,9 @@ type WorkflowsServiceServer interface {
 	DuplicateWorkflow(context.Context, *WorkflowGetRequest) (*WorkflowDefinition, error)
 	DeleteWorkflow(context.Context, *WorkflowDeleteRequest) (*WorkflowStepMutationResponse, error)
 	WorkflowActivity(context.Context, *WorkflowGetRequest) (*WorkflowActivitySummary, error)
+	SubmitWorkflowForm(context.Context, *WorkflowFormSubmitRequest) (*WorkflowStepMutationResponse, error)
+	CompleteWorkflowButton(context.Context, *WorkflowButtonRequest) (*WorkflowStepMutationResponse, error)
+	WorkflowRunInteraction(context.Context, *WorkflowRunGetRequest) (*WorkflowInteraction, error)
 	UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error)
 	ListWorkflows(context.Context, *WorkflowListRequest) (*WorkflowListResponse, error)
 	SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error)
@@ -441,6 +480,15 @@ func (UnimplementedWorkflowsServiceServer) DeleteWorkflow(context.Context, *Work
 }
 func (UnimplementedWorkflowsServiceServer) WorkflowActivity(context.Context, *WorkflowGetRequest) (*WorkflowActivitySummary, error) {
 	return nil, status.Error(codes.Unimplemented, "method WorkflowActivity not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) SubmitWorkflowForm(context.Context, *WorkflowFormSubmitRequest) (*WorkflowStepMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitWorkflowForm not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) CompleteWorkflowButton(context.Context, *WorkflowButtonRequest) (*WorkflowStepMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteWorkflowButton not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) WorkflowRunInteraction(context.Context, *WorkflowRunGetRequest) (*WorkflowInteraction, error) {
+	return nil, status.Error(codes.Unimplemented, "method WorkflowRunInteraction not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateWorkflow not implemented")
@@ -692,6 +740,60 @@ func _WorkflowsService_WorkflowActivity_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(WorkflowsServiceServer).WorkflowActivity(ctx, req.(*WorkflowGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_SubmitWorkflowForm_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowFormSubmitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).SubmitWorkflowForm(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_SubmitWorkflowForm_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).SubmitWorkflowForm(ctx, req.(*WorkflowFormSubmitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_CompleteWorkflowButton_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowButtonRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).CompleteWorkflowButton(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_CompleteWorkflowButton_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).CompleteWorkflowButton(ctx, req.(*WorkflowButtonRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_WorkflowRunInteraction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowRunGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).WorkflowRunInteraction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_WorkflowRunInteraction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).WorkflowRunInteraction(ctx, req.(*WorkflowRunGetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1066,6 +1168,18 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WorkflowActivity",
 			Handler:    _WorkflowsService_WorkflowActivity_Handler,
+		},
+		{
+			MethodName: "SubmitWorkflowForm",
+			Handler:    _WorkflowsService_SubmitWorkflowForm_Handler,
+		},
+		{
+			MethodName: "CompleteWorkflowButton",
+			Handler:    _WorkflowsService_CompleteWorkflowButton_Handler,
+		},
+		{
+			MethodName: "WorkflowRunInteraction",
+			Handler:    _WorkflowsService_WorkflowRunInteraction_Handler,
 		},
 		{
 			MethodName: "UpdateWorkflow",

@@ -2049,6 +2049,64 @@ test('[WORKFLOW-04] a step with a condition only runs when the condition holds',
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+test('[WORKFLOW-05] a form step pauses for input and a button step confirms', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/workflow-form-callback';
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name: `Form tools ${Date.now()}` },
+    oauth_config: {
+      redirect_urls: [redirectURI],
+      scopes: { bot: ['chat:write'] },
+    },
+    settings: { function_runtime: 'remote' },
+    functions: {
+      notify: {
+        title: 'Notify channel',
+        input_parameters: { properties: {}, required: [] },
+        output_parameters: { properties: {}, required: [] },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Workflows' }).click();
+  await page.getByText('Create a workflow').click();
+  await page.getByLabel('Name').fill(`Interactive workflow ${Date.now()}`);
+  await page.getByLabel('Owning app').selectOption(installed.appID);
+  await page.getByLabel('First step').selectOption('notify');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+
+  await page.getByLabel('Step 1 type').selectOption('form');
+  await page.getByLabel('Step 1 form definition').fill('{"title":"Intake","inputs":{"name":"Name"}}');
+  await page.locator('select[name="step_type_2"]').selectOption('button');
+  await page.getByLabel('Step 2 button label').fill('Approve');
+  await page.locator('select[name="step_type_3"]').selectOption('function');
+  await page.locator('select[name="step_3"]').selectOption('notify');
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
+
+  await page.getByLabel('Trigger name').fill('Run interactive');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+
+  // The form step parks the run; submit it and the run advances to the button.
+  await expect(page.getByRole('heading', { name: 'Intake' })).toBeVisible();
+  await page.getByLabel('Name').fill('Ada');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page).toHaveURL(/notice=/);
+  // Submitting the form advances the run to its button step.
+  await expect(page.getByText('Approve')).toBeVisible();
+
+  // The button step waits for confirmation; clicking it advances to the
+  // function step.
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expect(page.getByText('Confirmed')).toBeVisible();
+  await expect(page.getByText('running', { exact: true })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 // Sign-out must come last in this file. The suite runs with a single worker
 // against one server holding one static browser session, so revoking it ends
 // every session the remaining tests would use. Placing this earlier makes every

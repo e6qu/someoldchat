@@ -539,6 +539,90 @@ func TestNormalizeWorkflowStepsAssignsUniqueIDs(t *testing.T) {
 	}
 }
 
+func TestWorkflowFormAndButtonStepsPauseForHumanInput(t *testing.T) {
+	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Interactive", InputSchema: `{}`,
+		Steps: `[
+			{"type":"form","id":"intake","form":{"title":"Intake","inputs":{"name":"Name","urgency":"Urgency"}}},
+			{"type":"button","id":"approve","button":{"label":"Approve"}},
+			{"function_id":"notify","title":"Notify","input_mapping":{"name":"steps.intake.outputs.name","approved":"literal"}}
+		]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err = messages.UpdateWorkflow(ctx, "T1", "U1", workflow, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A form step parks the run waiting. A member (not the owner) can submit,
+	// the same audience Slack grants a form link.
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "interactive-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err := repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
+	if err != nil || len(executions) != 1 || executions[0].Status != domain.WorkflowStepWaiting {
+		t.Fatalf("waiting executions=%+v err=%v", executions, err)
+	}
+	formStep := executions[0]
+	if err := messages.SubmitWorkflowForm(ctx, "T1", "U2", run.ID, formStep.ID, `{"name":"Ada","urgency":"high"}`); err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
+	if err != nil || len(executions) != 2 || executions[1].Status != domain.WorkflowStepWaiting || executions[1].EditID != "approve" {
+		t.Fatalf("after form executions=%+v err=%v", executions, err)
+	}
+	if completed, err := repository.GetWorkflowStep(ctx, "T1", formStep.ID); err != nil ||
+		completed.Status != domain.WorkflowStepCompleted || completed.Outputs != `{"name":"Ada","urgency":"high"}` {
+		t.Fatalf("completed form step=%+v err=%v", completed, err)
+	}
+
+	// The button step waits, then completes to the final function step whose
+	// mapping pulled the form's output forward.
+	buttonStep := executions[1]
+	if err := messages.CompleteWorkflowButton(ctx, "T1", "U2", run.ID, buttonStep.ID); err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
+	if err != nil || len(executions) != 3 || executions[2].Status != domain.WorkflowStepExecuting || executions[2].EditID != "notify" {
+		t.Fatalf("after button executions=%+v err=%v", executions, err)
+	}
+	if executions[2].Inputs != `{"approved":"literal","name":"Ada"}` {
+		t.Fatalf("mapped notify inputs=%s", executions[2].Inputs)
+	}
+
+	// A waiting step rejects a duplicate submission once it has advanced.
+	if err := messages.SubmitWorkflowForm(ctx, "T1", "U1", run.ID, formStep.ID, `{}`); !errors.Is(err, ErrFunctionNotRunning) {
+		t.Fatalf("duplicate submit error=%v, want ErrFunctionNotRunning", err)
+	}
+	if err := messages.CompleteWorkflowButton(ctx, "T1", "U1", run.ID, "FxMissing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing button error=%v, want ErrNotFound", err)
+	}
+
+	// Validation rejects malformed interactive steps.
+	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Bad form", InputSchema: `{}`,
+		Steps: `[{"type":"form","id":"f","function_id":"triage","form":{"title":"X"}}]`,
+	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("form with function error=%v, want ErrInvalidWorkflowStep", err)
+	}
+	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Bad button", InputSchema: `{}`,
+		Steps: `[{"type":"button","id":"b","button":{}}]`,
+	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("button without label error=%v, want ErrInvalidWorkflowStep", err)
+	}
+}
+
 func TestWorkflowStepInputMappingResolvesVariables(t *testing.T) {
 	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
 	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{

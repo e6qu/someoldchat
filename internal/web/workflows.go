@@ -46,6 +46,9 @@ type workflowStepSlot struct {
 	Number            int
 	Selected          string
 	Change            string
+	Type              string
+	Form              string
+	ButtonLabel       string
 	Mapping           string
 	ConditionSource   string
 	ConditionOperator string
@@ -54,6 +57,9 @@ type workflowStepSlot struct {
 
 type workflowDecodedStep struct {
 	Callback          string
+	Type              string
+	Form              string
+	ButtonLabel       string
 	Mapping           string
 	ConditionSource   string
 	ConditionOperator string
@@ -62,20 +68,40 @@ type workflowDecodedStep struct {
 
 func decodeWorkflowSteps(raw string) []workflowDecodedStep {
 	var steps []struct {
-		FunctionID   string            `json:"function_id"`
-		InputMapping map[string]string `json:"input_mapping"`
-		Condition    *struct {
+		Type       string                 `json:"type"`
+		FunctionID string                 `json:"function_id"`
+		InputMapping map[string]string    `json:"input_mapping"`
+		Condition  *struct {
 			Source   string `json:"source"`
 			Operator string `json:"operator"`
 			Value    string `json:"value"`
 		} `json:"condition"`
+		Form   *struct {
+			Title       string            `json:"title"`
+			Description string            `json:"description"`
+			Inputs      map[string]string `json:"inputs"`
+		} `json:"form"`
+		Button *struct {
+			Label string `json:"label"`
+		} `json:"button"`
 	}
 	if json.Unmarshal([]byte(raw), &steps) != nil {
 		return nil
 	}
 	result := make([]workflowDecodedStep, 0, len(steps))
 	for _, step := range steps {
-		decoded := workflowDecodedStep{Callback: step.FunctionID}
+		decoded := workflowDecodedStep{Callback: step.FunctionID, Type: step.Type}
+		if step.Form != nil {
+			encoded, err := json.Marshal(map[string]any{
+				"title": step.Form.Title, "description": step.Form.Description, "inputs": step.Form.Inputs,
+			})
+			if err == nil {
+				decoded.Form = string(encoded)
+			}
+		}
+		if step.Button != nil {
+			decoded.ButtonLabel = step.Button.Label
+		}
 		if len(step.InputMapping) > 0 {
 			if encoded, err := json.Marshal(step.InputMapping); err == nil {
 				decoded.Mapping = string(encoded)
@@ -179,16 +205,33 @@ type workflowData struct {
 }
 
 type workflowRunData struct {
-	WorkflowID string
-	RunID      string
-	Status     string
-	Version    uint64
-	Inputs     string
-	Outputs    string
-	Error      string
-	CreatedAt  string
-	UpdatedAt  string
-	Completed  string
+	WorkflowID     string
+	RunID          string
+	Status         string
+	Version        uint64
+	Inputs         string
+	Outputs        string
+	Error          string
+	CreatedAt      string
+	UpdatedAt      string
+	Completed      string
+	CSRFToken      string
+	Notice         string
+	Interaction    workflowInteractionView
+	HasInteraction bool
+}
+
+type workflowInteractionView struct {
+	StepID string
+	Kind   string
+	Title  string
+	Label  string
+	Fields []workflowInteractionField
+}
+
+type workflowInteractionField struct {
+	Name  string
+	Label string
 }
 
 const workflowsMarkup = `{{define "title"}}Workflows · SameOldChat{{end}}
@@ -220,12 +263,13 @@ const workflowMarkup = `{{define "title"}}{{.Title}} · Workflow · SameOldChat{
 .activity-counts{display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 6px;color:var(--muted);font-size:13px}.activity-counts b{color:var(--text);font-size:16px}.activity-status{padding:3px 9px;border-radius:999px;background:var(--panel-strong);font-weight:800;text-transform:capitalize;font-size:12px}.run-link{color:var(--action);font-weight:800;text-decoration:none}
 .step-condition{display:flex;gap:6px;margin-top:5px}.step-condition input,.step-condition select{padding:6px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text);font-size:12px}.step-condition input{flex:1;min-width:0}
 .step-mapping{margin-top:5px;font-family:monospace;font-size:11px;padding:6px!important;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}
+.step-form,.step-button{margin-top:5px;font-family:monospace;font-size:11px;padding:6px!important;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}
 @media(max-width:650px){.fields{grid-template-columns:1fr}.fields .wide{grid-column:1}.trigger{grid-template-columns:1fr}.trigger-actions{flex-wrap:wrap}}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `<script>(function(){var type=document.getElementById('trigger-type');if(!type)return;var configs=document.querySelectorAll('[data-trigger-config]');function sync(){Array.prototype.forEach.call(configs,function(node){var show=node.getAttribute('data-trigger-config').split(' ').indexOf(type.value)!==-1;node.hidden=!show;node.disabled=!show;Array.prototype.forEach.call(node.querySelectorAll('[data-required]'),function(input){input.required=show})});}type.addEventListener('change',sync);sync()})();</script><script>(function(){var frequency=document.getElementById('schedule-frequency');if(!frequency)return;var configs=document.querySelectorAll('[data-frequency-config]');function sync(){Array.prototype.forEach.call(configs,function(node){var show=node.getAttribute('data-frequency-config')===frequency.value;node.hidden=!show;Array.prototype.forEach.call(node.querySelectorAll('input'),function(input){input.disabled=!show})});}frequency.addEventListener('change',sync);sync()})();</script>{{end}}
 {{define "content"}}<header class="bar"><a href="/app/workflows">← Workflows</a><h1>Workflow Builder</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="hero"><div><h2>{{.Title}}</h2><p>{{if .Description}}{{.Description}}{{else}}No description{{end}} · version {{.Version}}{{if .Published}}, published version {{.Published}}{{end}}{{if .StagedEdits}} · your staged changes are not yet published{{end}}</p></div><span class="status">{{.Status}}</span></div>
-{{if .Owned}}<section class="panel" aria-labelledby="builder-heading"><h3 id="builder-heading">Build workflow</h3><p>Steps run from top to bottom. Publishing makes the current version available to its enabled triggers; unpublished workflows can retain draft changes.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="step_count" value="{{.StepCount}}"><label>Name<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Workflow reference<input name="callback_id" maxlength="255" value="{{.CallbackID}}"></label><label class="wide">Description<textarea name="description" maxlength="2000">{{.Description}}</textarea></label><label class="wide">Input metadata (JSON object; syntax validation only)<textarea name="input_schema" spellcheck="false">{{.InputSchema}}</textarea></label><fieldset class="wide"><legend>Steps</legend><div class="step-list">{{range .StepSlots}}{{$slot := .}}<label class="step"><b aria-hidden="true">{{.Number}}</b><span><span class="visually-hidden">Step {{.Number}}{{if .Change}} · {{.Change}}{{end}}</span><select name="step_{{.Number}}"{{if eq .Number 1}} required{{end}}><option value="">{{if eq .Number 1}}Choose a function{{else}}No step{{end}}</option>{{range $.Functions}}<option value="{{.CallbackID}}"{{if eq .CallbackID $slot.Selected}} selected{{end}}>{{.Title}} · {{.CallbackID}}</option>{{end}}</select><input class="step-mapping" name="mapping_{{.Number}}" value="{{.Mapping}}" maxlength="2000" spellcheck="false" placeholder="Input mapping: {&quot;item&quot;:&quot;inputs.item&quot;,&quot;prev&quot;:&quot;steps.id.outputs.x&quot;}" aria-label="Step {{.Number}} input mapping">{{if .Change}}<span class="step-change" data-step-change="{{.Number}}" aria-label="Step {{.Number}} {{.Change}}">{{.Change}}</span>{{end}}</span><span class="step-condition"><span class="visually-hidden">Step {{.Number}} condition</span><input name="condition_source_{{.Number}}" value="{{.ConditionSource}}" maxlength="255" placeholder="Only run if: inputs.flag or steps.id.outputs.name" aria-label="Step {{.Number}} condition source"><select name="condition_operator_{{.Number}}" aria-label="Step {{.Number}} condition operator"><option value="">always runs</option><option value="equals"{{if eq .ConditionOperator "equals"}} selected{{end}}>equals</option><option value="not_equals"{{if eq .ConditionOperator "not_equals"}} selected{{end}}>does not equal</option><option value="contains"{{if eq .ConditionOperator "contains"}} selected{{end}}>contains</option><option value="greater_than"{{if eq .ConditionOperator "greater_than"}} selected{{end}}>is greater than</option><option value="less_than"{{if eq .ConditionOperator "less_than"}} selected{{end}}>is less than</option></select><input name="condition_value_{{.Number}}" value="{{.ConditionValue}}" maxlength="255" placeholder="value" aria-label="Step {{.Number}} condition value"></span></label>{{end}}</div>{{if .RemovedSteps}}<div class="removed-steps"><strong>Removed from the published version</strong>{{range .RemovedSteps}}<span class="removed-step" data-removed-step="{{.Position}}">{{.Title}} · {{.FunctionID}}</span>{{end}}</div>{{end}}</fieldset><div class="actions">{{if .PublishedStatus}}{{if .StagedEdits}}<button class="secondary" name="action" value="discard" type="submit">Discard changes</button>{{end}}<button name="action" value="save" type="submit">Save staged changes</button><button name="action" value="publish" type="submit">Publish changes</button><button class="secondary" name="action" value="unpublish" type="submit">Unpublish</button>{{else}}<button name="action" value="save" type="submit">Save draft</button><button name="action" value="publish" type="submit">Publish</button>{{end}}</div></form><div class="actions"><form method="post" action="/app/workflows/{{.ID}}/copy"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="secondary" type="submit">Copy workflow</button></form><form method="post" action="/app/workflows/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><button class="secondary" type="submit">Delete workflow</button></form></div></section>
+{{if .Owned}}<section class="panel" aria-labelledby="builder-heading"><h3 id="builder-heading">Build workflow</h3><p>Steps run from top to bottom. Publishing makes the current version available to its enabled triggers; unpublished workflows can retain draft changes.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="step_count" value="{{.StepCount}}"><label>Name<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Workflow reference<input name="callback_id" maxlength="255" value="{{.CallbackID}}"></label><label class="wide">Description<textarea name="description" maxlength="2000">{{.Description}}</textarea></label><label class="wide">Input metadata (JSON object; syntax validation only)<textarea name="input_schema" spellcheck="false">{{.InputSchema}}</textarea></label><fieldset class="wide"><legend>Steps</legend><div class="step-list">{{range .StepSlots}}{{$slot := .}}<label class="step"><b aria-hidden="true">{{.Number}}</b><span><span class="visually-hidden">Step {{.Number}}{{if .Change}} · {{.Change}}{{end}}</span><select name="step_type_{{.Number}}" aria-label="Step {{.Number}} type"><option value="function"{{if or (eq .Type "") (eq .Type "function")}} selected{{end}}>Function</option><option value="form"{{if eq .Type "form"}} selected{{end}}>Form</option><option value="button"{{if eq .Type "button"}} selected{{end}}>Button</option></select><select name="step_{{.Number}}"><option value="">{{if eq .Number 1}}Choose a function{{else}}No step{{end}}</option>{{range $.Functions}}<option value="{{.CallbackID}}"{{if eq .CallbackID $slot.Selected}} selected{{end}}>{{.Title}} · {{.CallbackID}}</option>{{end}}</select><input class="step-mapping" name="mapping_{{.Number}}" value="{{.Mapping}}" maxlength="2000" spellcheck="false" placeholder="Input mapping: {&quot;item&quot;:&quot;inputs.item&quot;,&quot;prev&quot;:&quot;steps.id.outputs.x&quot;}" aria-label="Step {{.Number}} input mapping"><input class="step-form" name="form_{{.Number}}" value="{{.Form}}" maxlength="2000" spellcheck="false" placeholder="Form definition: {&quot;title&quot;:&quot;Intake&quot;,&quot;inputs&quot;:{&quot;name&quot;:&quot;Name&quot;}}" aria-label="Step {{.Number}} form definition"><input class="step-button" name="button_label_{{.Number}}" value="{{.ButtonLabel}}" maxlength="255" placeholder="Button label" aria-label="Step {{.Number}} button label">{{if .Change}}<span class="step-change" data-step-change="{{.Number}}" aria-label="Step {{.Number}} {{.Change}}">{{.Change}}</span>{{end}}</span><span class="step-condition"><span class="visually-hidden">Step {{.Number}} condition</span><input name="condition_source_{{.Number}}" value="{{.ConditionSource}}" maxlength="255" placeholder="Only run if: inputs.flag or steps.id.outputs.name" aria-label="Step {{.Number}} condition source"><select name="condition_operator_{{.Number}}" aria-label="Step {{.Number}} condition operator"><option value="">always runs</option><option value="equals"{{if eq .ConditionOperator "equals"}} selected{{end}}>equals</option><option value="not_equals"{{if eq .ConditionOperator "not_equals"}} selected{{end}}>does not equal</option><option value="contains"{{if eq .ConditionOperator "contains"}} selected{{end}}>contains</option><option value="greater_than"{{if eq .ConditionOperator "greater_than"}} selected{{end}}>is greater than</option><option value="less_than"{{if eq .ConditionOperator "less_than"}} selected{{end}}>is less than</option></select><input name="condition_value_{{.Number}}" value="{{.ConditionValue}}" maxlength="255" placeholder="value" aria-label="Step {{.Number}} condition value"></span></label>{{end}}</div>{{if .RemovedSteps}}<div class="removed-steps"><strong>Removed from the published version</strong>{{range .RemovedSteps}}<span class="removed-step" data-removed-step="{{.Position}}">{{.Title}} · {{.FunctionID}}</span>{{end}}</div>{{end}}</fieldset><div class="actions">{{if .PublishedStatus}}{{if .StagedEdits}}<button class="secondary" name="action" value="discard" type="submit">Discard changes</button>{{end}}<button name="action" value="save" type="submit">Save staged changes</button><button name="action" value="publish" type="submit">Publish changes</button><button class="secondary" name="action" value="unpublish" type="submit">Unpublish</button>{{else}}<button name="action" value="save" type="submit">Save draft</button><button name="action" value="publish" type="submit">Publish</button>{{end}}</div></form><div class="actions"><form method="post" action="/app/workflows/{{.ID}}/copy"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="secondary" type="submit">Copy workflow</button></form><form method="post" action="/app/workflows/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><button class="secondary" type="submit">Delete workflow</button></form></div></section>
  <section class="panel" aria-labelledby="trigger-heading"><h3 id="trigger-heading">Triggers</h3><p>Link and shortcut triggers start from a conversation. Scheduled, webhook, message, reaction, join, and list triggers start from their configured condition once the workflow is published.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/triggers"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Trigger name<input name="title" maxlength="255" required></label><label>Trigger type<select id="trigger-type" name="type"><option value="link">Link</option><option value="shortcut">Shortcut</option><option value="scheduled">On a schedule</option><option value="webhook">From a webhook</option><option value="message">When a message is posted</option><option value="reaction">When an emoji reaction is used</option><option value="join">When a person joins a channel</option>{{if .Lists}}<option value="list">When a list record changes</option>{{end}}</select></label><fieldset class="wide trigger-config" data-trigger-config="scheduled"><legend>Schedule</legend><div class="fields"><label>Starts at<input type="datetime-local" name="schedule_start" step="60" data-required></label><label>Time zone<input name="schedule_timezone" maxlength="64" value="UTC"></label><label>Repeats<select id="schedule-frequency" name="schedule_frequency"><option value="hourly">Hourly</option><option value="daily" selected>Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Every<input type="number" name="schedule_interval" min="1" max="366" value="1"></label></div><div data-frequency-config="weekly"><p>On days (leave every day unchecked to repeat on the start day)</p><div class="weekdays"><label class="weekday"><input type="checkbox" name="schedule_weekday_mon" value="1"> Mon</label><label class="weekday"><input type="checkbox" name="schedule_weekday_tue" value="1"> Tue</label><label class="weekday"><input type="checkbox" name="schedule_weekday_wed" value="1"> Wed</label><label class="weekday"><input type="checkbox" name="schedule_weekday_thu" value="1"> Thu</label><label class="weekday"><input type="checkbox" name="schedule_weekday_fri" value="1"> Fri</label><label class="weekday"><input type="checkbox" name="schedule_weekday_sat" value="1"> Sat</label><label class="weekday"><input type="checkbox" name="schedule_weekday_sun" value="1"> Sun</label></div></div><div data-frequency-config="monthly"><label>Day of month (optional; shorter months fire on their last day)<input type="number" name="schedule_day" min="1" max="31"></label></div></fieldset><fieldset class="wide trigger-config" data-trigger-config="webhook"><legend>Webhook</legend><p>Create the trigger to generate its POST URL. The URL is revealed here to the workflow owner.</p></fieldset><fieldset class="wide trigger-config" data-trigger-config="message"><legend>Message event</legend><div class="fields"><label>Channel<select name="event_channel">{{range .Channels}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label><label>Keyword (optional)<input name="event_keyword" maxlength="255"></label></div></fieldset><fieldset class="wide trigger-config" data-trigger-config="reaction"><legend>Reaction event</legend><div class="fields"><label>Channel<select name="event_channel_reaction">{{range .Channels}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label><label>Emoji name (optional)<input name="event_reaction" maxlength="255" placeholder="eyes"></label></div></fieldset><fieldset class="wide trigger-config" data-trigger-config="join"><legend>Join event</legend><div class="fields"><label>Channel<select name="event_channel_join">{{range .Channels}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label></div></fieldset>{{if .Lists}}<fieldset class="wide trigger-config" data-trigger-config="list"><legend>List record event</legend><div class="fields"><label>List<select name="list_id">{{range .Lists}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select></label><label>Fires when<select name="list_event"><option value="created">A record is created</option><option value="updated">A record is updated</option></select></label></div></fieldset>{{end}}<button type="submit">Create trigger</button></form></section>{{end}}
   <section class="panel" aria-labelledby="available-heading"><h3 id="available-heading">Available triggers</h3><div class="trigger-list">{{range .Triggers}}<article class="trigger"><div><h4>{{.Title}}</h4><p>{{.Type}} · {{if .Enabled}}enabled{{else}}disabled{{end}} · workflow v{{.WorkflowVersion}}</p>{{if .Summary}}<p>{{.Summary}}</p>{{end}}{{if .NextRun}}<p>Next run <time datetime="{{.NextRun}}">{{.NextRun}}</time></p>{{end}}{{if .WebhookURL}}<p>Webhook URL <code>{{.WebhookURL}}</code></p>{{end}}</div><div class="trigger-actions">{{if .CanRun}}<form class="run" method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}/run"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">{{if $.HasInputSchema}}<label>Inputs (JSON)<textarea name="inputs">{}</textarea></label>{{end}}<button type="submit">Run</button></form>{{end}}{{if .CanManage}}<form method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="type" value="{{.Type}}"><input type="hidden" name="config" value="{{.Config}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div></article>{{else}}<p class="empty">No triggers have been configured.</p>{{end}}</div></section>
   {{if .HasActivity}}<section class="panel" aria-labelledby="activity-heading"><h3 id="activity-heading">Run activity</h3><div class="activity-counts">{{if .Activity.Queued}}<span><b>{{.Activity.Queued}}</b> queued</span>{{end}}<span><b>{{.Activity.Running}}</b> running</span><span><b>{{.Activity.Completed}}</b> completed</span><span><b>{{.Activity.Failed}}</b> failed</span><span><b>{{.Activity.Cancelled}}</b> cancelled</span></div>{{if .Activity.Runs}}<div class="trigger-list">{{range .Activity.Runs}}<article class="trigger" data-activity-run><div><h4>{{.Trigger}}</h4><p>Started <time datetime="{{.Started}}">{{.Started}}</time>{{if .Completed}} · completed <time datetime="{{.Completed}}">{{.Completed}}</time>{{end}}</p></div><div class="trigger-actions"><span class="activity-status">{{.Status}}</span><a class="run-link" href="/app/workflows/runs/{{.RunID}}">View</a></div></article>{{end}}</div>{{else}}<p class="empty">No runs yet.</p>{{end}}</section>{{end}}
@@ -234,9 +278,9 @@ const workflowMarkup = `{{define "title"}}{{.Title}} · Workflow · SameOldChat{
 var workflowTemplate = mustPage(workflowMarkup)
 
 const workflowRunMarkup = `{{define "title"}}Workflow run · SameOldChat{{end}}
-{{define "styles"}}<style>.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}.layout{width:min(760px,calc(100% - 32px));margin:32px auto}.card{padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.card h2{margin-top:0}.status{font-weight:800;text-transform:capitalize}.facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:9px 16px}.facts dt{font-weight:800}.facts dd{margin:0;overflow-wrap:anywhere}.facts pre{white-space:pre-wrap;margin:0}.error{color:var(--danger)}</style>{{end}}
+{{define "styles"}}<style>.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}.layout{width:min(760px,calc(100% - 32px));margin:32px auto}.card{padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.card h2{margin-top:0}.status{font-weight:800;text-transform:capitalize}.facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:9px 16px}.facts dt{font-weight:800}.facts dd{margin:0;overflow-wrap:anywhere}.facts pre{white-space:pre-wrap;margin:0}.error{color:var(--danger)}.notice{padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);margin-bottom:16px}.interaction{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:grid;gap:10px}.interaction h3,.interaction p{margin:0}.interaction label{display:grid;gap:4px;font-weight:700}.interaction input{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text);font-weight:400}.interaction button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}</style>{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app/workflows/{{.WorkflowID}}">← Workflow</a><h1>Run activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout"><article class="card"><h2>Workflow run</h2><p class="status">{{.Status}}</p><dl class="facts"><dt>Execution</dt><dd><code>{{.RunID}}</code></dd><dt>Version</dt><dd>{{.Version}}</dd><dt>Started</dt><dd><time datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></dd><dt>Updated</dt><dd><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></dd>{{if .Completed}}<dt>Completed</dt><dd><time datetime="{{.Completed}}">{{.Completed}}</time></dd>{{end}}<dt>Inputs</dt><dd><pre>{{.Inputs}}</pre></dd><dt>Outputs</dt><dd><pre>{{.Outputs}}</pre></dd>{{if .Error}}<dt>Error</dt><dd class="error">{{.Error}}</dd>{{end}}</dl>{{if eq .Status "running"}}<p role="status">An app function is running. Reload to see its latest durable state.</p>{{end}}</article></main>{{end}}`
+{{define "content"}}<header class="bar"><a href="/app/workflows/{{.WorkflowID}}">← Workflow</a><h1>Run activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="card"><h2>Workflow run</h2><p class="status">{{.Status}}</p><dl class="facts"><dt>Execution</dt><dd><code>{{.RunID}}</code></dd><dt>Version</dt><dd>{{.Version}}</dd><dt>Started</dt><dd><time datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></dd><dt>Updated</dt><dd><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></dd>{{if .Completed}}<dt>Completed</dt><dd><time datetime="{{.Completed}}">{{.Completed}}</time></dd>{{end}}<dt>Inputs</dt><dd><pre>{{.Inputs}}</pre></dd><dt>Outputs</dt><dd><pre>{{.Outputs}}</pre></dd>{{if .Error}}<dt>Error</dt><dd class="error">{{.Error}}</dd>{{end}}</dl>{{if eq .Status "running"}}<p role="status">An app function is running. Reload to see its latest durable state.</p>{{end}}{{if .HasInteraction}}{{if eq .Interaction.Kind "form"}}<form class="interaction" method="post" action="/app/workflows/runs/submit/{{.RunID}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="step_id" value="{{.Interaction.StepID}}"><h3>{{if .Interaction.Title}}{{.Interaction.Title}}{{else}}Complete the form{{end}}</h3>{{range .Interaction.Fields}}<label>{{.Label}}<input name="field_{{.Name}}"></label>{{end}}<button type="submit">Submit</button></form>{{else if eq .Interaction.Kind "button"}}<form class="interaction" method="post" action="/app/workflows/runs/click/{{.RunID}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="step_id" value="{{.Interaction.StepID}}"><p>{{if .Interaction.Label}}{{.Interaction.Label}}{{else}}Confirm to continue{{end}}</p><button type="submit">Confirm</button></form>{{end}}{{end}}</article></main>{{end}}`
 
 var workflowRunTemplate = mustPage(workflowRunMarkup)
 
@@ -381,6 +425,9 @@ func workflowSlots(steps []workflowDecodedStep) []workflowStepSlot {
 		result[index].Number = index + 1
 		if index < len(steps) {
 			result[index].Selected = steps[index].Callback
+			result[index].Type = steps[index].Type
+			result[index].Form = steps[index].Form
+			result[index].ButtonLabel = steps[index].ButtonLabel
 			result[index].Mapping = steps[index].Mapping
 			result[index].ConditionSource = steps[index].ConditionSource
 			result[index].ConditionOperator = steps[index].ConditionOperator
@@ -685,14 +732,34 @@ func encodeWorkflowSteps(fields map[string]string, options []workflowFunctionOpt
 	}
 	steps := make([]map[string]any, 0, count)
 	for index := 1; index <= count; index++ {
-		callback := strings.TrimSpace(fields[fmt.Sprintf("step_%d", index)])
-		if callback == "" {
-			continue
+		stepType := strings.TrimSpace(fields[fmt.Sprintf("step_type_%d", index)])
+		if stepType == "" {
+			stepType = "function"
 		}
-		if !workflowFunctionExists(options, appID, callback) {
-			return "", errors.New("function is not part of the workflow app")
+		var step map[string]any
+		switch stepType {
+		case "form":
+			form, err := decodeWorkflowFormDefinition(strings.TrimSpace(fields[fmt.Sprintf("form_%d", index)]))
+			if err != nil {
+				return "", fmt.Errorf("step %d form definition is invalid: %s", index, err.Error())
+			}
+			step = map[string]any{"type": "form", "form": form}
+		case "button":
+			label := strings.TrimSpace(fields[fmt.Sprintf("button_label_%d", index)])
+			if label == "" {
+				return "", fmt.Errorf("step %d button needs a label", index)
+			}
+			step = map[string]any{"type": "button", "button": map[string]string{"label": label}}
+		default:
+			callback := strings.TrimSpace(fields[fmt.Sprintf("step_%d", index)])
+			if callback == "" {
+				continue
+			}
+			if !workflowFunctionExists(options, appID, callback) {
+				return "", errors.New("function is not part of the workflow app")
+			}
+			step = map[string]any{"function_id": callback, "title": workflowFunctionTitle(options, callback)}
 		}
-		step := map[string]any{"function_id": callback, "title": workflowFunctionTitle(options, callback)}
 		if raw := strings.TrimSpace(fields[fmt.Sprintf("mapping_%d", index)]); raw != "" {
 			var mapping map[string]string
 			if json.Unmarshal([]byte(raw), &mapping) != nil || mapping == nil {
@@ -724,6 +791,38 @@ func encodeWorkflowSteps(fields map[string]string, options []workflowFunctionOpt
 	}
 	encoded, err := json.Marshal(steps)
 	return string(encoded), err
+}
+
+func decodeWorkflowFormDefinition(raw string) (map[string]any, error) {
+	if raw == "" {
+		return nil, errors.New("a form step needs a title")
+	}
+	var form struct {
+		Title       string            `json:"title"`
+		Description string            `json:"description"`
+		Inputs      map[string]string `json:"inputs"`
+	}
+	if json.Unmarshal([]byte(raw), &form) != nil {
+		return nil, errors.New("form definition must be a JSON object")
+	}
+	if strings.TrimSpace(form.Title) == "" {
+		return nil, errors.New("a form step needs a title")
+	}
+	definition := map[string]any{"title": strings.TrimSpace(form.Title)}
+	if strings.TrimSpace(form.Description) != "" {
+		definition["description"] = strings.TrimSpace(form.Description)
+	}
+	if len(form.Inputs) > 0 {
+		inputs := make(map[string]string, len(form.Inputs))
+		for name, label := range form.Inputs {
+			if strings.TrimSpace(name) == "" || strings.TrimSpace(label) == "" {
+				return nil, errors.New("form fields need a name and a label")
+			}
+			inputs[strings.TrimSpace(name)] = strings.TrimSpace(label)
+		}
+		definition["inputs"] = inputs
+	}
+	return definition, nil
 }
 
 func (h Handler) updateWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -1029,7 +1128,7 @@ func (h Handler) runWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) workflowRun(w http.ResponseWriter, r *http.Request) {
-	principal, _, ok := h.workflowPrincipal(w, r)
+	principal, csrf, ok := h.workflowPrincipal(w, r)
 	if !ok {
 		return
 	}
@@ -1042,12 +1141,70 @@ func (h Handler) workflowRun(w http.ResponseWriter, r *http.Request) {
 	if !run.CompletedAt.IsZero() {
 		completed = run.CompletedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 	}
+	interaction, err := h.Messages.WorkflowRunInteraction(r.Context(), principal.WorkspaceID, principal.UserID, run.ID)
+	if err != nil {
+		h.writeStoreError(w, err, "That workflow run is not available.")
+		return
+	}
+	view := workflowInteractionView{StepID: string(interaction.StepID), Kind: interaction.Kind, Title: interaction.Title, Label: interaction.Label}
+	for _, field := range interaction.Fields {
+		view.Fields = append(view.Fields, workflowInteractionField{Name: field.Name, Label: field.Label})
+	}
 	h.writeHTML(w, workflowRunTemplate, workflowRunData{
 		WorkflowID: string(run.WorkflowID), RunID: string(run.ID), Status: string(run.Status),
 		Version: run.WorkflowVersion, Inputs: run.Inputs, Outputs: run.Outputs, Error: run.Error,
 		CreatedAt: run.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 		UpdatedAt: run.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"), Completed: completed,
+		CSRFToken: csrf, Notice: strings.TrimSpace(r.URL.Query().Get("notice")),
+		Interaction: view, HasInteraction: view.Kind != "",
 	}, http.StatusOK, "workflow run rendering unavailable")
+}
+
+func (h Handler) submitWorkflowForm(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the run and try again.")
+	if !ok {
+		return
+	}
+	runID := domain.WorkflowRunID(strings.TrimSpace(r.PathValue("runID")))
+	stepID := domain.WorkflowStepID(strings.TrimSpace(fields["step_id"]))
+	inputs := map[string]string{}
+	for name, value := range fields {
+		if strings.HasPrefix(name, "field_") {
+			inputs[strings.TrimPrefix(name, "field_")] = value
+		}
+	}
+	encoded, err := json.Marshal(inputs)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The form was not submitted", "Check the form fields and try again.")
+		return
+	}
+	if err := h.Messages.SubmitWorkflowForm(r.Context(), principal.WorkspaceID, principal.UserID, runID, stepID, string(encoded)); err != nil {
+		h.writeWorkflowMutationError(w, r, "The form was not submitted", err)
+		return
+	}
+	h.redirectMutation(w, r, "/app/workflows/runs/"+url.PathEscape(string(runID))+"?notice="+url.QueryEscape("Form submitted"))
+}
+
+func (h Handler) completeWorkflowButton(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the run and try again.")
+	if !ok {
+		return
+	}
+	runID := domain.WorkflowRunID(strings.TrimSpace(r.PathValue("runID")))
+	stepID := domain.WorkflowStepID(strings.TrimSpace(fields["step_id"]))
+	if err := h.Messages.CompleteWorkflowButton(r.Context(), principal.WorkspaceID, principal.UserID, runID, stepID); err != nil {
+		h.writeWorkflowMutationError(w, r, "The button was not confirmed", err)
+		return
+	}
+	h.redirectMutation(w, r, "/app/workflows/runs/"+url.PathEscape(string(runID))+"?notice="+url.QueryEscape("Confirmed"))
 }
 
 func (h Handler) writeWorkflowMutationError(w http.ResponseWriter, r *http.Request, title string, err error) {

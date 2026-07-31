@@ -26,6 +26,22 @@ type workflowFunctionDefinition struct {
 	Inputs       any                    `json:"inputs,omitempty"`
 	InputMapping map[string]string      `json:"input_mapping,omitempty"`
 	Condition    *workflowStepCondition `json:"condition,omitempty"`
+	Form         *workflowFormStep      `json:"form,omitempty"`
+	Button       *workflowButtonStep    `json:"button,omitempty"`
+}
+
+// workflowFormStep describes a step that pauses the run until someone fills in
+// and submits a form. Slack's built-in form step collects named fields.
+type workflowFormStep struct {
+	Title       string            `json:"title"`
+	Description string            `json:"description,omitempty"`
+	Inputs      map[string]string `json:"inputs,omitempty"`
+}
+
+// workflowButtonStep describes a step that pauses the run until someone clicks
+// a confirmation button, Slack's built-in approval step.
+type workflowButtonStep struct {
+	Label string `json:"label"`
 }
 
 // workflowStepCondition gates one step on a variable comparison, Slack's
@@ -40,6 +56,11 @@ type workflowStepCondition struct {
 // workflowStepTypeFunction is the default step kind: an app function callback.
 // Form and button steps are additional kinds with their own execution model.
 const workflowStepTypeFunction = "function"
+
+const (
+	workflowStepTypeForm   = "form"
+	workflowStepTypeButton = "button"
+)
 
 // workflowConditionOperators are the comparisons a step condition supports,
 // matching the operators Slack's conditional branch editor offers.
@@ -104,10 +125,29 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 		if values[index].Type == "" {
 			values[index].Type = workflowStepTypeFunction
 		}
-		if values[index].Type != workflowStepTypeFunction {
-			return "", nil, ErrInvalidWorkflowStep
-		}
-		if values[index].FunctionID == "" {
+		switch values[index].Type {
+		case workflowStepTypeFunction:
+			if values[index].FunctionID == "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+		case workflowStepTypeForm:
+			if values[index].Form == nil || strings.TrimSpace(values[index].Form.Title) == "" || values[index].FunctionID != "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+			values[index].Form.Title = strings.TrimSpace(values[index].Form.Title)
+			values[index].Form.Description = strings.TrimSpace(values[index].Form.Description)
+			for name, label := range values[index].Form.Inputs {
+				if strings.TrimSpace(name) == "" || strings.TrimSpace(label) == "" {
+					return "", nil, ErrInvalidWorkflowStep
+				}
+				values[index].Form.Inputs[name] = strings.TrimSpace(label)
+			}
+		case workflowStepTypeButton:
+			if values[index].Button == nil || strings.TrimSpace(values[index].Button.Label) == "" || values[index].FunctionID != "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+			values[index].Button.Label = strings.TrimSpace(values[index].Button.Label)
+		default:
 			return "", nil, ErrInvalidWorkflowStep
 		}
 		// Step ids route branches and variable references, so they must be
@@ -932,6 +972,9 @@ func (m Messages) workflowFunctionSnapshot(ctx context.Context, appID domain.App
 
 func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.AppID, steps []workflowFunctionDefinition) error {
 	for _, step := range steps {
+		if step.Type != workflowStepTypeFunction {
+			continue
+		}
 		stepAppID := step.AppID
 		if stepAppID == "" {
 			stepAppID = appID
@@ -950,7 +993,38 @@ func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.Ap
 	return nil
 }
 
-func (m Messages) newFunctionExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time, stepOutputs map[string]map[string]any) (domain.WorkflowStep, events.Event, error) {
+// newWorkflowStepExecution creates the execution record for the next step a run
+// reaches. A function step dispatches to its app and emits function_executed;
+// a form or button step parks the run waiting for a person to submit or click,
+// emitting workflow.step_waiting instead. The caller resolves stepOutputs once
+// and passes it in so both input mapping and the advance reuse it.
+func (m Messages) newWorkflowStepExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time, stepOutputs map[string]map[string]any) (domain.WorkflowStep, events.Event, error) {
+	if step.Type == workflowStepTypeForm || step.Type == workflowStepTypeButton {
+		executionID, err := domain.NewFunctionExecutionID()
+		if err != nil {
+			return domain.WorkflowStep{}, events.Event{}, err
+		}
+		stepName := step.Title
+		if stepName == "" && step.Button != nil {
+			stepName = step.Button.Label
+		}
+		execution := domain.WorkflowStep{
+			ID: executionID, WorkflowRunID: run.ID, WorkspaceID: run.WorkspaceID, AppID: defaultApp, UserID: actor,
+			EditID: step.ID, Status: domain.WorkflowStepWaiting, Inputs: "{}", Outputs: "{}",
+			StepName: stepName, CreatedAt: now, UpdatedAt: now,
+		}
+		topic := "workflow.step_waiting"
+		event, err := newEvent(run.WorkspaceID, actor, events.NewPayload(topic,
+			events.String("workflow_run_id", string(run.ID)),
+			events.String("step_id", step.ID),
+			events.String("step_type", step.Type),
+			events.String("function_execution_id", string(execution.ID)),
+		), now)
+		if err != nil {
+			return domain.WorkflowStep{}, events.Event{}, err
+		}
+		return execution, event, nil
+	}
 	appID := step.AppID
 	if appID == "" {
 		appID = defaultApp
@@ -1099,7 +1173,7 @@ func (m Messages) runWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 		run.CompletedAt = now
 	} else {
 		run.CurrentStep = firstIndex
-		execution, executionEvent, executionErr := m.newFunctionExecution(ctx, run, steps[firstIndex], workflow.AppID, actor, now, nil)
+		execution, executionEvent, executionErr := m.newWorkflowStepExecution(ctx, run, steps[firstIndex], workflow.AppID, actor, now, nil)
 		if executionErr != nil {
 			return domain.WorkflowRun{}, executionErr
 		}
@@ -1182,6 +1256,128 @@ func (m Messages) CompleteFunction(ctx context.Context, workspaceID domain.Works
 	if execution.Status != domain.WorkflowStepExecuting {
 		return ErrFunctionNotRunning
 	}
+	return m.advanceStep(ctx, workspaceID, actor, execution, outputs, failure)
+}
+
+// SubmitWorkflowForm completes a waiting form step with the submitted inputs.
+// Any workspace member may submit, the same audience Slack grants a form link.
+func (m Messages) SubmitWorkflowForm(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, runID domain.WorkflowRunID, stepID domain.WorkflowStepID, inputs string) error {
+	execution, step, err := m.loadWaitingStep(ctx, workspaceID, actor, runID, stepID)
+	if err != nil {
+		return err
+	}
+	if step.Type != workflowStepTypeForm {
+		return ErrFunctionNotRunning
+	}
+	return m.advanceStep(ctx, workspaceID, actor, execution, inputs, "")
+}
+
+// CompleteWorkflowButton completes a waiting button step. Any workspace member
+// may click, matching Slack's approval step.
+func (m Messages) CompleteWorkflowButton(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, runID domain.WorkflowRunID, stepID domain.WorkflowStepID) error {
+	execution, step, err := m.loadWaitingStep(ctx, workspaceID, actor, runID, stepID)
+	if err != nil {
+		return err
+	}
+	if step.Type != workflowStepTypeButton {
+		return ErrFunctionNotRunning
+	}
+	return m.advanceStep(ctx, workspaceID, actor, execution, "{}", "")
+}
+
+// loadWaitingStep fetches a run's current execution, checks it is still waiting
+// for human input, and resolves the workflow step definition it corresponds to.
+func (m Messages) loadWaitingStep(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, runID domain.WorkflowRunID, stepID domain.WorkflowStepID) (domain.WorkflowStep, workflowFunctionDefinition, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, err
+	}
+	execution, err := m.Store.GetWorkflowStep(ctx, workspaceID, stepID)
+	if err != nil {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, err
+	}
+	if execution.WorkflowRunID != runID || execution.Status != domain.WorkflowStepWaiting {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, ErrFunctionNotRunning
+	}
+	run, err := m.Store.GetWorkflowRun(ctx, workspaceID, runID)
+	if err != nil {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, err
+	}
+	if run.Status != domain.WorkflowRunRunning {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, ErrFunctionNotRunning
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, run.WorkflowID)
+	if err != nil {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, err
+	}
+	steps, err := m.workflowStepsAtVersion(ctx, workflow, run.WorkflowVersion)
+	if err != nil {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, err
+	}
+	if run.CurrentStep < 0 || run.CurrentStep >= len(steps) || steps[run.CurrentStep].ID != execution.EditID {
+		return domain.WorkflowStep{}, workflowFunctionDefinition{}, ErrFunctionNotRunning
+	}
+	return execution, steps[run.CurrentStep], nil
+}
+
+// WorkflowRunInteraction reports the human input a running workflow is waiting
+// on — a form to fill or a button to click — so a run view can render it. Any
+// workspace member may read the interaction, matching the audience that may
+// submit it.
+func (m Messages) WorkflowRunInteraction(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, runID domain.WorkflowRunID) (domain.WorkflowInteraction, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.WorkflowInteraction{}, err
+	}
+	run, err := m.Store.GetWorkflowRun(ctx, workspaceID, runID)
+	if err != nil {
+		return domain.WorkflowInteraction{}, err
+	}
+	if run.Status != domain.WorkflowRunRunning {
+		return domain.WorkflowInteraction{}, nil
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, run.WorkflowID)
+	if err != nil {
+		return domain.WorkflowInteraction{}, err
+	}
+	steps, err := m.workflowStepsAtVersion(ctx, workflow, run.WorkflowVersion)
+	if err != nil {
+		return domain.WorkflowInteraction{}, err
+	}
+	if run.CurrentStep < 0 || run.CurrentStep >= len(steps) {
+		return domain.WorkflowInteraction{}, nil
+	}
+	step := steps[run.CurrentStep]
+	if step.Type != workflowStepTypeForm && step.Type != workflowStepTypeButton {
+		return domain.WorkflowInteraction{}, nil
+	}
+	executions, err := m.Store.ListWorkflowRunSteps(ctx, workspaceID, runID)
+	if err != nil {
+		return domain.WorkflowInteraction{}, err
+	}
+	for _, execution := range executions {
+		if execution.Status == domain.WorkflowStepWaiting && execution.EditID == step.ID {
+			interaction := domain.WorkflowInteraction{StepID: execution.ID, Kind: step.Type}
+			if step.Form != nil {
+				interaction.Title = step.Form.Title
+				for name, label := range step.Form.Inputs {
+					interaction.Fields = append(interaction.Fields, domain.WorkflowInteractionField{Name: name, Label: label})
+				}
+				slices.SortFunc(interaction.Fields, func(a, b domain.WorkflowInteractionField) int {
+					return strings.Compare(a.Name, b.Name)
+				})
+			}
+			if step.Button != nil {
+				interaction.Label = step.Button.Label
+			}
+			return interaction, nil
+		}
+	}
+	return domain.WorkflowInteraction{}, nil
+}
+
+// advanceStep marks one step complete (or failed) and advances the run to the
+// next step whose condition holds. It is the shared tail of function
+// completion, form submission, and button clicks.
+func (m Messages) advanceStep(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, execution domain.WorkflowStep, outputs, failure string) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
@@ -1237,7 +1433,7 @@ func (m Messages) CompleteFunction(ctx context.Context, workspaceID domain.Works
 			run.Status = domain.WorkflowRunCompleted
 			run.CompletedAt = now
 		} else {
-			nextValue, nextEvent, nextErr := m.newFunctionExecution(ctx, run, steps[nextIndex], workflow.AppID, run.ActorID, now, stepOutputs)
+			nextValue, nextEvent, nextErr := m.newWorkflowStepExecution(ctx, run, steps[nextIndex], workflow.AppID, run.ActorID, now, stepOutputs)
 			if nextErr != nil {
 				return nextErr
 			}
