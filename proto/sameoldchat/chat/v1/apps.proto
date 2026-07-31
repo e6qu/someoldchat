@@ -95,6 +95,23 @@ message AppTokenCredentials {
   repeated string scopes = 3;
 }
 
+message AppDeliveryHealth {
+  string app_id = 1;
+  string surface = 2;
+  string endpoint = 3;
+  bool configured = 4;
+  bool installed = 5;
+  uint64 acknowledged_sequence = 6;
+  uint64 in_flight_sequence = 7;
+  string in_flight_until = 8;
+  string retry_at = 9;
+  int32 retry_count = 10;
+  string retry_reason = 11;
+  bool pending_evaluation = 12;
+  string next_event_topic = 13;
+  string next_event_at = 14;
+}
+
 message AppListResponse {
   repeated DeveloperApp apps = 1;
 }
@@ -122,10 +139,18 @@ message AppDatastoreRequest {
   repeated string items = 5;
   repeated string ids = 6;
   bool merge = 7;
+  string expression = 8;
+  string expression_attributes = 9;
+  string expression_values = 10;
+  int32 limit = 11;
+  string cursor = 12;
 }
 
 message AppDatastoreResponse {
   repeated string items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+  int64 count = 4;
 }
 
 message AppMutationResponse {
@@ -174,8 +199,11 @@ service AppsService {
   rpc ListWorkspaceApps(AppListRequest) returns (InstalledAppListResponse);
   rpc PutAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc GetAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
+  rpc QueryAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
+  rpc CountAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc DeleteAppDatastoreItems(AppDatastoreRequest) returns (AppMutationResponse);
   rpc GetDeveloperApp(AppGetRequest) returns (AppExportResponse);
+  rpc GetDeveloperAppDeliveryHealth(AppGetRequest) returns (AppDeliveryHealth);
   rpc IssueDeveloperAppToken(AppTokenIssueRequest) returns (AppTokenCredentials);
   rpc InspectOAuthAuthorization(OAuthAuthorizationRequest) returns (OAuthAuthorization);
   rpc AuthorizeOAuth(OAuthAuthorizationRequest) returns (OAuthAuthorization);

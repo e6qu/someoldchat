@@ -109,11 +109,14 @@ func TestRemoteScheduledMessagesPreserveCredentialRangeThreadAndAttribution(t *t
 		Channel: "C1", Text: "credential-owned", PostAt: postAt,
 		ThreadTimestamp: domain.NewMessageTimestamp(parent.CreatedAt),
 		AppID:           "A1", BotID: "B1", CredentialHash: "credential-one",
+		Metadata:    `{"event_type":"remote","event_payload":{"id":"1"}}`,
+		StreamState: `{"reply_broadcast":true,"parse":"none","unfurl_links":false}`,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scheduled.AppID != "A1" || scheduled.BotID != "B1" || scheduled.CredentialHash != "credential-one" || scheduled.ThreadTimestamp == "" {
+	if scheduled.AppID != "A1" || scheduled.BotID != "B1" || scheduled.CredentialHash != "credential-one" || scheduled.ThreadTimestamp == "" ||
+		scheduled.Metadata == "" || scheduled.StreamState == "" {
 		t.Fatalf("scheduled message lost transport fields: %+v", scheduled)
 	}
 	other, err := remote.ScheduledMessagesForCredential(ctx, "T1", "U1", domain.ScheduledMessageQuery{
@@ -135,6 +138,47 @@ func TestRemoteScheduledMessagesPreserveCredentialRangeThreadAndAttribution(t *t
 	}
 	if err := remote.DeleteScheduledMessageForCredential(ctx, "T1", "U1", "credential-one", "C1", scheduled.ID); err != nil {
 		t.Fatalf("owner delete: %v", err)
+	}
+}
+
+func TestRemotePostsScheduledFilesAtomicallyAndIdempotently(t *testing.T) {
+	target := memory.New()
+	target.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	target.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	target.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	target.SeedConversationMember("C1", "U1")
+	now := time.Now().UTC()
+	if err := target.CreateExternalUpload(context.Background(), domain.ExternalUpload{
+		ID: "scheduled-upload", WorkspaceID: "T1", Uploader: "U1", Name: "evidence.txt", Title: "evidence.txt",
+		MIMEType: "text/plain", BlobKey: "T1/external/scheduled-upload", Size: 8,
+		Status: domain.ExternalUploadUploaded, CreatedAt: now, ExpiresAt: now.Add(time.Hour), UploadedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	remote := servedRemote(t, service.Messages{Store: target}, target)
+	scheduled, err := remote.ScheduleMessageAs(context.Background(), "T1", "U1", domain.ScheduledMessageRequest{
+		Channel: "C1", Text: "scheduled evidence", PostAt: now.Add(time.Hour),
+		CredentialHash:  service.InternalScheduledCredential("T1", "U1"),
+		FileAttachments: []domain.DraftAttachment{{UploadID: "scheduled-upload", Title: "Evidence"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := remote.PostScheduledMessage(context.Background(), "T1", scheduled.ID)
+	if err != nil || len(first.Files) != 1 || first.Files[0].Title != "Evidence" {
+		t.Fatalf("first post=%+v err=%v", first, err)
+	}
+	second, err := remote.PostScheduledMessage(context.Background(), "T1", scheduled.ID)
+	if err != nil || second.ID != first.ID || len(second.Files) != 1 {
+		t.Fatalf("retry post=%+v err=%v", second, err)
+	}
+	upload, err := target.GetExternalUpload(context.Background(), "scheduled-upload")
+	if err != nil || upload.Status != domain.ExternalUploadCompleted {
+		t.Fatalf("completed upload=%+v err=%v", upload, err)
+	}
+	history, err := target.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != first.ID {
+		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }
 

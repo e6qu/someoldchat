@@ -341,12 +341,19 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), channel_id TEXT NOT NULL REFERENCES conversations(id),
  author_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL DEFAULT '', bot_id TEXT NOT NULL DEFAULT '',
  credential_hash TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', attachments TEXT NOT NULL DEFAULT '',
+ metadata TEXT NOT NULL DEFAULT '', stream_state TEXT NOT NULL DEFAULT '',
  thread_ts TEXT NOT NULL DEFAULT '', post_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
  delivered INTEGER NOT NULL DEFAULT 0, delivered_at INTEGER NOT NULL DEFAULT 0, failed_at INTEGER NOT NULL DEFAULT 0,
  failure_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS scheduled_messages_owner ON scheduled_messages(workspace_id, author_id, post_at, id);
 CREATE INDEX IF NOT EXISTS scheduled_messages_credential ON scheduled_messages(workspace_id, credential_hash, post_at, id);
+CREATE TABLE IF NOT EXISTS scheduled_message_files (
+ scheduled_message_id TEXT NOT NULL REFERENCES scheduled_messages(id) ON DELETE CASCADE,
+ ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+ PRIMARY KEY (scheduled_message_id, ordinal), UNIQUE (upload_id)
+);
+CREATE INDEX IF NOT EXISTS scheduled_message_files_message ON scheduled_message_files(scheduled_message_id, ordinal);
 CREATE TABLE IF NOT EXISTS drafts (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  conversation_id TEXT NOT NULL REFERENCES conversations(id), thread_ts TEXT NOT NULL DEFAULT '',
@@ -354,6 +361,15 @@ CREATE TABLE IF NOT EXISTS drafts (
  PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts)
 );
 CREATE INDEX IF NOT EXISTS drafts_owner_updated ON drafts(workspace_id, user_id, updated_at, conversation_id, thread_ts);
+CREATE TABLE IF NOT EXISTS draft_attachments (
+ workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, thread_ts TEXT NOT NULL DEFAULT '',
+ ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts, ordinal),
+ UNIQUE (upload_id),
+ FOREIGN KEY (workspace_id, user_id, conversation_id, thread_ts)
+  REFERENCES drafts(workspace_id, user_id, conversation_id, thread_ts) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS draft_attachments_owner ON draft_attachments(workspace_id, user_id, conversation_id, thread_ts);
 CREATE TABLE IF NOT EXISTS user_groups (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, handle TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', creator_id TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
@@ -384,12 +400,12 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 CREATE TABLE IF NOT EXISTS lists (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
  name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0,
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+ version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS list_items (
  id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS list_items_list_id ON list_items(list_id, id);
 CREATE TABLE IF NOT EXISTS list_access (
@@ -402,7 +418,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 114
+const schemaVersion = 118
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1818,7 +1834,7 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 66 {
-		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvases (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, document_content TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvases (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, document_content TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
 			return fmt.Errorf("migrate canvases: %w", err)
 		}
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvas_access (canvas_id TEXT NOT NULL REFERENCES canvases(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL, PRIMARY KEY (canvas_id, entity_type, entity_id))`); err != nil {
@@ -1830,8 +1846,8 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 	}
 	if version < 67 {
 		for _, statement := range []string{
-			`CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
-			`CREATE TABLE IF NOT EXISTS list_items (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)`,
+			`CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+			`CREATE TABLE IF NOT EXISTS list_items (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1)`,
 			`CREATE INDEX IF NOT EXISTS list_items_list_id ON list_items(list_id, id)`,
 			`CREATE TABLE IF NOT EXISTS list_access (list_id TEXT NOT NULL REFERENCES lists(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL, PRIMARY KEY (list_id, entity_type, entity_id))`,
 			`CREATE TABLE IF NOT EXISTS list_downloads (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', include_archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
@@ -2492,6 +2508,64 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index recent searches: %w", err)
 		}
 	}
+	if version < 115 {
+		for _, table := range []string{"canvases", "lists", "list_items"} {
+			existing, err := s.tableColumns(ctx, db, table)
+			if err != nil {
+				return err
+			}
+			if !existing["version"] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN version INTEGER NOT NULL DEFAULT 1`); err != nil {
+					return fmt.Errorf("migrate %s optimistic revision: %w", table, err)
+				}
+			}
+		}
+	}
+	if version < 116 {
+		columns, err := s.tableColumns(ctx, db, "scheduled_messages")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"metadata TEXT NOT NULL DEFAULT ''",
+			"stream_state TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate scheduled message field %s: %w", name, err)
+			}
+		}
+	}
+	if version < 117 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS draft_attachments (
+			workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, thread_ts TEXT NOT NULL DEFAULT '',
+			ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts, ordinal),
+			UNIQUE (upload_id),
+			FOREIGN KEY (workspace_id, user_id, conversation_id, thread_ts)
+			 REFERENCES drafts(workspace_id, user_id, conversation_id, thread_ts) ON DELETE CASCADE
+		)`); err != nil {
+			return fmt.Errorf("migrate draft attachments: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS draft_attachments_owner ON draft_attachments(workspace_id, user_id, conversation_id, thread_ts)`); err != nil {
+			return fmt.Errorf("index draft attachments: %w", err)
+		}
+	}
+	if version < 118 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS scheduled_message_files (
+			scheduled_message_id TEXT NOT NULL REFERENCES scheduled_messages(id) ON DELETE CASCADE,
+			ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+			PRIMARY KEY (scheduled_message_id, ordinal), UNIQUE (upload_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate scheduled message files: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS scheduled_message_files_message ON scheduled_message_files(scheduled_message_id, ordinal)`); err != nil {
+			return fmt.Errorf("index scheduled message files: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2762,7 +2836,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -6912,16 +6986,18 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 	}
 	defer tx.Rollback()
 	var workspace domain.WorkspaceID
-	var private int
-	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, is_private FROM conversations WHERE id = ?`, conversation).Scan(&workspace, &private); errors.Is(err, sql.ErrNoRows) {
+	var direct, groupDirect, archived int
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, is_direct, is_group_direct, archived FROM conversations WHERE id = ?`, conversation).Scan(&workspace, &direct, &groupDirect, &archived); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
 	} else if err != nil {
 		return err
-	} else if private != 0 {
-		return store.ErrNotFound
+	} else if direct != 0 || groupDirect != 0 || archived != 0 {
+		return store.ErrInvalidConversationType
 	}
+	added := make([]domain.UserID, 0, len(users))
 	for _, user := range users {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(conversation_id, user_id) DO NOTHING`, conversation, user, workspace); err != nil {
+		result, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(conversation_id, user_id) DO NOTHING`, conversation, user, workspace)
+		if err != nil {
 			return err
 		}
 		var count int
@@ -6930,6 +7006,29 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 		}
 		if count != 1 {
 			return store.ErrNotFound
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 0 {
+			added = append(added, user)
+		}
+	}
+	if len(added) == 0 {
+		return store.ErrAlreadyExists
+	}
+	for _, user := range added {
+		if user == event.ActorID {
+			continue
+		}
+		id := domain.ActivityIDFor(user, "conversation_invitation:"+string(conversation)+":"+string(event.ID))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			id, workspace, user, event.ActorID, conversation, event.CreatedAt.UTC().UnixNano()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {
+			return err
 		}
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -7280,6 +7379,13 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 				}
 			}
 		}
+		if item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+			visible, visibilityErr := s.activitySourceVisible(ctx, workspace, user, item.Conversation)
+			if visibilityErr != nil {
+				return domain.ActivityPage{}, visibilityErr
+			}
+			item.SourceAvailable = visible
+		}
 	}
 	return page, nil
 }
@@ -7568,6 +7674,17 @@ func (s *Store) IsConversationMember(ctx context.Context, conversation domain.Co
 }
 
 func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	return s.createMessage(ctx, "", message, event, idempotencyKey)
+}
+
+func (s *Store) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
+	if id == "" {
+		return store.InvalidArgument("scheduled message post requires a schedule")
+	}
+	return s.createMessage(ctx, id, message, event, string(id))
+}
+
+func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledMessageID, message domain.Message, event events.Event, idempotencyKey string) error {
 	// A message may not be stored at a finer resolution than its own timestamp
 	// can express, or a read cursor built from that timestamp can never cover it
 	// — and it may not be stored at an instant another message in the same
@@ -7594,6 +7711,21 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 		return err
 	}
 	defer tx.Rollback()
+	if scheduledID != "" {
+		result, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET id = id
+			WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND delivered = 0`,
+			scheduledID, message.WorkspaceID, message.AuthorID, message.Conversation)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return store.ErrNotFound
+		}
+	}
 	if idempotencyKey != "" {
 		result, err := tx.ExecContext(ctx, `INSERT INTO idempotency (workspace_id, user_id, idempotency_key, message_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, idempotency_key) DO NOTHING`, message.WorkspaceID, message.AuthorID, idempotencyKey, message.ID, domain.NewStoredTime(time.Now()))
 		if err != nil {
@@ -9009,7 +9141,10 @@ func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
 	if err != nil {
 		return classify(err)
 	}
@@ -9019,10 +9154,94 @@ func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 	return tx.Commit()
 }
 
+func (s *Store) CreateCanvasWithAccess(ctx context.Context, canvas domain.Canvas, event events.Event, access domain.CanvasAccess, accessEvent events.Event) error {
+	if access.CanvasID != canvas.ID || access.EntityType == "" || access.EntityID == "" || access.Access == "" {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?)`, access.CanvasID, access.EntityType, access.EntityID, access.Access); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, accessEvent); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateChannelCanvas(ctx context.Context, canvas domain.Canvas, event events.Event, channel domain.ConversationID, accessEvent events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE conversations SET id = id WHERE id = ? AND workspace_id = ?`, channel, canvas.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrNotFound
+	}
+	var existing string
+	err = tx.QueryRowContext(ctx, `SELECT canvas_id FROM canvas_access WHERE entity_type = 'channel_canvas' AND entity_id = ? LIMIT 1`, channel).Scan(&existing)
+	if err == nil {
+		return store.ErrAlreadyExists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, 'channel_canvas', ?, ?)`, canvas.ID, channel, store.AccessWrite); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, accessEvent); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetChannelCanvas(ctx context.Context, workspace domain.WorkspaceID, channel domain.ConversationID) (domain.Canvas, error) {
+	var canvas domain.Canvas
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT c.id, c.workspace_id, c.owner_id, c.title, c.document_content, c.version, c.created_at, c.updated_at
+		FROM canvases c JOIN canvas_access a ON a.canvas_id = c.id
+		JOIN conversations ch ON ch.id = a.entity_id
+		WHERE a.entity_type = 'channel_canvas' AND a.entity_id = ? AND c.workspace_id = ? AND ch.workspace_id = c.workspace_id
+		LIMIT 1`, channel, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.Version, &createdAt, &updatedAt)
+	if err != nil {
+		return domain.Canvas{}, translateNotFound(err)
+	}
+	canvas.CreatedAt = time.Unix(createdAt, 0).UTC()
+	canvas.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	return canvas, nil
+}
+
 func (s *Store) GetCanvas(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID) (domain.Canvas, error) {
 	var canvas domain.Canvas
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, title, document_content, created_at, updated_at FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &created, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, title, document_content, version, created_at, updated_at FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.Version, &created, &updated)
 	if err := translateNotFound(err); err != nil {
 		return domain.Canvas{}, err
 	}
@@ -9031,13 +9250,60 @@ func (s *Store) GetCanvas(ctx context.Context, workspace domain.WorkspaceID, id 
 	return canvas, nil
 }
 
+func (s *Store) ListCanvases(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.CanvasPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT d.id, d.workspace_id, d.owner_id, d.title, d.document_content, d.version, d.created_at, d.updated_at
+		FROM canvases d
+		WHERE d.workspace_id = ? AND d.id > ?
+		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
+		  AND (d.owner_id = ? OR EXISTS (
+		    SELECT 1 FROM canvas_access a WHERE a.canvas_id = d.id
+		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
+		        OR (a.entity_type IN ('channel', 'channel_canvas') AND EXISTS (
+		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
+		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))
+		ORDER BY d.id LIMIT ?`, workspace, after, userID, userID, userID, userID, request.Limit+1)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.Canvas, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.Canvas
+		var created, updated int64
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Title, &value.DocumentContent, &value.Version, &created, &updated); err != nil {
+			return domain.CanvasPage{}, err
+		}
+		value.CreatedAt, value.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.CanvasPage{Canvases: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, canvas.Title, canvas.DocumentContent, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID, canvas.Version-1)
 	if err != nil {
 		return err
 	}
@@ -9046,6 +9312,13 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		return err
 	}
 	if changed != 1 {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM canvases WHERE id = ? AND workspace_id = ?)`, canvas.ID, canvas.WorkspaceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return store.ErrConflict
+		}
 		return store.ErrNotFound
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -9151,7 +9424,7 @@ func (s *Store) resolveAccess(ctx context.Context, scope accessScope, id string,
 	if owner == userID {
 		bestType, bestID, bestLevel = "user", string(userID), store.AccessOwner
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT a.entity_type, a.entity_id, a.access_level FROM `+scope.accessTable+` a JOIN `+scope.documentTable+` d ON d.id = a.`+scope.keyColumn+` WHERE a.`+scope.keyColumn+` = ? AND ((a.entity_type = 'user' AND a.entity_id = ?) OR (a.entity_type = 'channel' AND EXISTS (SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))`, id, string(userID), userID)
+	rows, err := s.db.QueryContext(ctx, `SELECT a.entity_type, a.entity_id, a.access_level FROM `+scope.accessTable+` a JOIN `+scope.documentTable+` d ON d.id = a.`+scope.keyColumn+` WHERE a.`+scope.keyColumn+` = ? AND ((a.entity_type = 'user' AND a.entity_id = ?) OR (a.entity_type IN ('channel', 'channel_canvas') AND EXISTS (SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))`, id, string(userID), userID)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -9767,14 +10040,50 @@ func (s *Store) ReleaseLaterReminder(ctx context.Context, owner string, id domai
 	return nil
 }
 
+func insertScheduledMessageFiles(ctx context.Context, tx *sql.Tx, value domain.ScheduledMessage) error {
+	if len(value.FileAttachments) > 10 {
+		return store.InvalidArgument("scheduled message has too many file attachments")
+	}
+	seen := make(map[domain.ExternalUploadID]struct{}, len(value.FileAttachments))
+	for ordinal, attachment := range value.FileAttachments {
+		if attachment.UploadID == "" || attachment.Name == "" || attachment.MIMEType == "" || attachment.Size <= 0 {
+			return store.InvalidArgument("scheduled message file attachment is incomplete")
+		}
+		if _, duplicate := seen[attachment.UploadID]; duplicate {
+			return store.InvalidArgument("scheduled message file attachment is duplicated")
+		}
+		var uploadWorkspace domain.WorkspaceID
+		var uploader domain.UserID
+		var status domain.ExternalUploadStatus
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id, uploader_id, status FROM external_uploads WHERE id = ?`, attachment.UploadID).
+			Scan(&uploadWorkspace, &uploader, &status); errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if uploadWorkspace != value.WorkspaceID || uploader != value.Author || status != domain.ExternalUploadUploaded {
+			return store.InvalidArgument("scheduled message file attachment ownership is invalid")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_message_files(scheduled_message_id, ordinal, upload_id, title) VALUES (?, ?, ?, ?)`,
+			value.ID, ordinal, attachment.UploadID, attachment.Title); err != nil {
+			return classify(err)
+		}
+		seen[attachment.UploadID] = struct{}{}
+	}
+	return nil
+}
+
 func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.ScheduledMessage, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.Metadata, value.StreamState, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		return classify(err)
+	}
+	if err := insertScheduledMessageFiles(ctx, tx, value); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -9827,8 +10136,11 @@ func (s *Store) CreateScheduledMessageWithinLimit(ctx context.Context, value dom
 	if store.ScheduledMessageLimitExceeded(nearby, value.PostAt, window, limit) {
 		return store.ErrScheduledMessageLimit
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.Metadata, value.StreamState, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		return classify(err)
+	}
+	if err := insertScheduledMessageFiles(ctx, tx, value); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -9853,7 +10165,7 @@ func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
 	var postAt, createdAt, deliveredAt, failedAt int64
 	err := row.Scan(
 		&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.AppID, &value.BotID,
-		&value.CredentialHash, &value.Text, &value.Blocks, &value.Attachments, &value.ThreadTimestamp,
+		&value.CredentialHash, &value.Text, &value.Blocks, &value.Attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp,
 		&postAt, &createdAt, &deliveredAt, &failedAt, &value.FailureCode,
 	)
 	if err != nil {
@@ -9870,7 +10182,35 @@ func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
 	return value, nil
 }
 
-const scheduledMessageColumns = `id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered_at, failed_at, failure_code`
+const scheduledMessageColumns = `id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered_at, failed_at, failure_code`
+
+func loadScheduledMessageFiles(ctx context.Context, db queryExecutor, value *domain.ScheduledMessage) error {
+	rows, err := db.QueryContext(ctx, `SELECT f.upload_id, u.name, f.title, u.mime_type, u.size
+		FROM scheduled_message_files f JOIN external_uploads u ON u.id = f.upload_id
+		WHERE f.scheduled_message_id = ? ORDER BY f.ordinal`, value.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	value.FileAttachments = nil
+	for rows.Next() {
+		var attachment domain.DraftAttachment
+		if err := rows.Scan(&attachment.UploadID, &attachment.Name, &attachment.Title, &attachment.MIMEType, &attachment.Size); err != nil {
+			return err
+		}
+		value.FileAttachments = append(value.FileAttachments, attachment)
+	}
+	return rows.Err()
+}
+
+func loadScheduledMessagePageFiles(ctx context.Context, db queryExecutor, items []domain.ScheduledMessage) error {
+	for index := range items {
+		if err := loadScheduledMessageFiles(ctx, db, &items[index]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
@@ -9906,6 +10246,12 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 		items = append(items, value)
 	}
 	if err := rows.Err(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, s.db, items); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
 	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > request.Limit}
@@ -9963,6 +10309,12 @@ func (s *Store) ListScheduledMessagesForCredential(ctx context.Context, workspac
 	if err := rows.Err(); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
+	if err := rows.Close(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, s.db, items); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
 	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > filter.Page.Limit}
 	if page.HasMore {
 		page.Items = page.Items[:filter.Page.Limit]
@@ -10017,6 +10369,12 @@ func (s *Store) ListScheduledMessageHistory(ctx context.Context, workspace domai
 	if err := rows.Err(); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
+	if err := rows.Close(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, s.db, items); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
 	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > request.Limit}
 	if page.HasMore {
 		page.Items = page.Items[:request.Limit]
@@ -10036,8 +10394,19 @@ func (s *Store) EarliestScheduledMessage(ctx context.Context, workspace domain.W
 	return time.Unix(postAt.Int64, 0).UTC(), nil
 }
 
+func (s *Store) GetScheduledMessage(ctx context.Context, workspace domain.WorkspaceID, id domain.ScheduledMessageID) (domain.ScheduledMessage, error) {
+	value, err := scanScheduledMessage(s.db.QueryRowContext(ctx, `SELECT `+scheduledMessageColumns+` FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND delivered = 0`, id, workspace))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	if err == nil {
+		err = loadScheduledMessageFiles(ctx, s.db, &value)
+	}
+	return value, err
+}
+
 func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update domain.ScheduledMessageUpdate, window time.Duration, limit int, event events.Event) (domain.ScheduledMessage, error) {
-	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.Text == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
+	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
 		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message update is incomplete")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -10079,7 +10448,13 @@ func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update do
 		return domain.ScheduledMessage{}, store.ErrScheduledMessageLimit
 	}
 	now := time.Now().UTC().Unix()
-	result, err = tx.ExecContext(ctx, `UPDATE scheduled_messages SET text = ?, post_at = ?, failed_at = 0, failure_code = '', next_attempt_at = 0 WHERE id = ? AND workspace_id = ? AND channel_id = ? AND credential_hash = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, update.Text, update.PostAt.UTC().Unix(), update.ID, update.WorkspaceID, update.Channel, update.CredentialHash, now)
+	result, err = tx.ExecContext(ctx, `UPDATE scheduled_messages SET text = ?, post_at = ?, failed_at = 0, failure_code = '', next_attempt_at = 0
+		WHERE id = ? AND workspace_id = ? AND channel_id = ? AND credential_hash = ? AND delivered = 0
+		AND (? <> '' OR blocks <> '' OR attachments <> '' OR EXISTS (
+			SELECT 1 FROM scheduled_message_files WHERE scheduled_message_id = scheduled_messages.id
+		))
+		AND (lease_until = 0 OR lease_until <= ?)`,
+		update.Text, update.PostAt.UTC().Unix(), update.ID, update.WorkspaceID, update.Channel, update.CredentialHash, update.Text, now)
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
@@ -10095,6 +10470,9 @@ func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update do
 	}
 	value, err := scanScheduledMessage(tx.QueryRowContext(ctx, `SELECT `+scheduledMessageColumns+` FROM scheduled_messages WHERE id = ?`, update.ID))
 	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if err := loadScheduledMessageFiles(ctx, tx, &value); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -10128,6 +10506,9 @@ func (s *Store) ClaimScheduledMessageForCredential(ctx context.Context, workspac
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
+	if err := loadScheduledMessageFiles(ctx, tx, &value); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
@@ -10141,7 +10522,15 @@ func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.Wor
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, user, channel, now.Unix())
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages
+		WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ?
+		AND (lease_until = 0 OR lease_until <= ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM idempotency i
+			WHERE i.workspace_id = scheduled_messages.workspace_id
+			AND i.user_id = scheduled_messages.author_id
+			AND i.idempotency_key = scheduled_messages.id
+		)`, id, workspace, user, channel, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -10168,7 +10557,15 @@ func (s *Store) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND channel_id = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, credentialHash, channel, now.Unix())
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages
+		WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND channel_id = ? AND delivered = 0
+		AND (lease_until = 0 OR lease_until <= ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM idempotency i
+			WHERE i.workspace_id = scheduled_messages.workspace_id
+			AND i.user_id = scheduled_messages.author_id
+			AND i.idempotency_key = scheduled_messages.id
+		)`, id, workspace, credentialHash, channel, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -10218,7 +10615,8 @@ func parseDraftCursor(cursor domain.Cursor) (string, domain.ConversationID, doma
 }
 
 func (s *Store) UpsertDraft(ctx context.Context, value domain.Draft, event events.Event) (domain.Draft, error) {
-	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" || strings.TrimSpace(value.Text) == "" || value.UpdatedAt.IsZero() {
+	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" ||
+		(strings.TrimSpace(value.Text) == "" && len(value.Attachments) == 0) || len(value.Attachments) > 10 || value.UpdatedAt.IsZero() {
 		return domain.Draft{}, store.InvalidArgument("draft is incomplete")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -10239,6 +10637,32 @@ func (s *Store) UpsertDraft(ctx context.Context, value domain.Draft, event event
 	if changed != 1 {
 		return domain.Draft{}, store.ErrNotFound
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM draft_attachments WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND thread_ts = ?`,
+		value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp); err != nil {
+		return domain.Draft{}, err
+	}
+	for ordinal, attachment := range value.Attachments {
+		if attachment.UploadID == "" || attachment.Name == "" || attachment.MIMEType == "" || attachment.Size <= 0 {
+			return domain.Draft{}, store.InvalidArgument("draft attachment is incomplete")
+		}
+		var uploadWorkspace domain.WorkspaceID
+		var uploader domain.UserID
+		var status domain.ExternalUploadStatus
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id, uploader_id, status FROM external_uploads WHERE id = ?`, attachment.UploadID).
+			Scan(&uploadWorkspace, &uploader, &status); errors.Is(err, sql.ErrNoRows) {
+			return domain.Draft{}, store.ErrNotFound
+		} else if err != nil {
+			return domain.Draft{}, err
+		}
+		if uploadWorkspace != value.WorkspaceID || uploader != value.UserID || status != domain.ExternalUploadUploaded {
+			return domain.Draft{}, store.InvalidArgument("draft attachment ownership is invalid")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO draft_attachments(workspace_id, user_id, conversation_id, thread_ts, ordinal, upload_id, title)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp, ordinal, attachment.UploadID, attachment.Title); err != nil {
+			return domain.Draft{}, classify(err)
+		}
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.Draft{}, err
 	}
@@ -10254,7 +10678,31 @@ func (s *Store) GetDraft(ctx context.Context, workspace domain.WorkspaceID, user
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Draft{}, store.ErrNotFound
 	}
+	if err == nil {
+		err = s.loadDraftAttachments(ctx, &value)
+	}
 	return value, err
+}
+
+func (s *Store) loadDraftAttachments(ctx context.Context, value *domain.Draft) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.upload_id, u.name, a.title, u.mime_type, u.size
+		FROM draft_attachments a JOIN external_uploads u ON u.id = a.upload_id
+		WHERE a.workspace_id = ? AND a.user_id = ? AND a.conversation_id = ? AND a.thread_ts = ?
+		ORDER BY a.ordinal`,
+		value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	value.Attachments = nil
+	for rows.Next() {
+		var attachment domain.DraftAttachment
+		if err := rows.Scan(&attachment.UploadID, &attachment.Name, &attachment.Title, &attachment.MIMEType, &attachment.Size); err != nil {
+			return err
+		}
+		value.Attachments = append(value.Attachments, attachment)
+	}
+	return rows.Err()
 }
 
 func (s *Store) ListDrafts(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
@@ -10296,6 +10744,14 @@ func (s *Store) ListDrafts(ctx context.Context, workspace domain.WorkspaceID, us
 	}
 	if err := rows.Err(); err != nil {
 		return domain.DraftPage{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return domain.DraftPage{}, err
+	}
+	for index := range items {
+		if err := s.loadDraftAttachments(ctx, &items[index]); err != nil {
+			return domain.DraftPage{}, err
+		}
 	}
 	page := domain.DraftPage{Items: items, HasMore: len(items) > request.Limit}
 	if page.HasMore {
@@ -10355,6 +10811,9 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 		return nil, err
 	}
 	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := loadScheduledMessagePageFiles(ctx, tx, values); err != nil {
 		return nil, err
 	}
 	expires := scheduledUnixSecondCeil(now.Add(lease))
@@ -10892,6 +11351,22 @@ func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadI
 	return value, nil
 }
 
+func (s *Store) PendingUploadReferenceExists(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, upload domain.ExternalUploadID) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1
+		WHERE EXISTS (
+			SELECT 1 FROM draft_attachments WHERE workspace_id = ? AND user_id = ? AND upload_id = ?
+		) OR EXISTS (
+			SELECT 1 FROM scheduled_message_files f
+			JOIN scheduled_messages m ON m.id = f.scheduled_message_id
+			WHERE m.workspace_id = ? AND m.author_id = ? AND m.delivered = 0 AND f.upload_id = ?
+		)`, workspace, user, upload, workspace, user, upload).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.ExternalUploadID, uploadedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE external_uploads SET status = ?, uploaded_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadUploaded, domain.NewStoredTime(uploadedAt), id, domain.ExternalUploadPending, domain.NewStoredTime(time.Now()))
 	if err != nil {
@@ -11332,6 +11807,59 @@ func (s *Store) collectBlobReferences(ctx context.Context, workspace domain.Work
 		if reference == "" {
 			rows.Close()
 			return nil, errors.New("database contains an empty blob reference")
+		}
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT u.blob_key
+		FROM draft_attachments a
+		JOIN external_uploads u ON u.id = a.upload_id
+		WHERE a.workspace_id = ? AND u.status = ?`, workspace, domain.ExternalUploadUploaded)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var reference string
+		if err := rows.Scan(&reference); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if reference == "" {
+			rows.Close()
+			return nil, errors.New("database contains an empty draft attachment blob reference")
+		}
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT u.blob_key
+		FROM scheduled_message_files f
+		JOIN scheduled_messages m ON m.id = f.scheduled_message_id
+		JOIN external_uploads u ON u.id = f.upload_id
+		WHERE m.workspace_id = ? AND m.delivered = 0 AND u.status = ?`, workspace, domain.ExternalUploadUploaded)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var reference string
+		if err := rows.Scan(&reference); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if reference == "" {
+			rows.Close()
+			return nil, errors.New("database contains an empty scheduled attachment blob reference")
 		}
 		references = append(references, reference)
 	}
@@ -12044,6 +12572,26 @@ func (s *Store) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface
 	return s.appEventLeaseError(ctx, appID, surface, owner, sequence, now)
 }
 
+func (s *Store) GetAppEventCursor(ctx context.Context, appID domain.AppID, surface string) (domain.AppEventCursor, error) {
+	if appID == "" || !validAppEventSurface(surface) {
+		return domain.AppEventCursor{}, store.InvalidArgument("app ID and event surface are required")
+	}
+	value := domain.AppEventCursor{AppID: appID, Surface: surface}
+	var inFlightUntil, retryAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT sequence, leased_sequence, lease_until, retry_at, retry_count, retry_reason FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).
+		Scan(&value.AcknowledgedSequence, &value.InFlightSequence, &inFlightUntil, &retryAt, &value.RetryCount, &value.RetryReason)
+	if err := translateNotFound(err); err != nil {
+		return domain.AppEventCursor{}, err
+	}
+	if inFlightUntil > 0 {
+		value.InFlightUntil = time.Unix(0, inFlightUntil).UTC()
+	}
+	if retryAt > 0 {
+		value.RetryAt = time.Unix(0, retryAt).UTC()
+	}
+	return value, nil
+}
+
 func (s *Store) appEventLeaseError(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, now int64) error {
 	var leasedSequence uint64
 	var leaseOwner string
@@ -12364,7 +12912,10 @@ func (s *Store) CreateListWithItems(ctx context.Context, value domain.List, even
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt))
+	if value.Version == 0 {
+		value.Version = 1
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt))
 	if err != nil {
 		return classify(err)
 	}
@@ -12386,7 +12937,7 @@ func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id do
 	var value domain.List
 	var createdAt, updatedAt string
 	var todoMode int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at FROM lists WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todoMode, &createdAt, &updatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, version, created_at, updated_at FROM lists WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todoMode, &value.Version, &createdAt, &updatedAt)
 	if err != nil {
 		return domain.List{}, translateNotFound(err)
 	}
@@ -12402,19 +12953,82 @@ func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id do
 	return value, nil
 }
 
+func (s *Store) ListLists(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ListPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT d.id, d.workspace_id, d.owner_id, d.name, d.description_blocks, d.schema_json, d.todo_mode, d.version, d.created_at, d.updated_at
+		FROM lists d
+		WHERE d.workspace_id = ? AND d.id > ?
+		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
+		  AND (d.owner_id = ? OR EXISTS (
+		    SELECT 1 FROM list_access a WHERE a.list_id = d.id
+		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
+		        OR (a.entity_type = 'channel' AND EXISTS (
+		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
+		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))
+		ORDER BY d.id LIMIT ?`, workspace, after, userID, userID, userID, userID, request.Limit+1)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.List, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.List
+		var todo int
+		var created, updated string
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todo, &value.Version, &created, &updated); err != nil {
+			return domain.ListPage{}, err
+		}
+		value.TodoMode = todo != 0
+		value.CreatedAt, err = domain.ParseStoredTime(created)
+		if err != nil {
+			return domain.ListPage{}, err
+		}
+		value.UpdatedAt, err = domain.ParseStoredTime(updated)
+		if err != nil {
+			return domain.ListPage{}, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ListPage{}, err
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.ListPage{Lists: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), domain.NewStoredTime(value.UpdatedAt), value.ID, value.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.UpdatedAt), value.ID, value.WorkspaceID, value.Version-1)
 	if err != nil {
 		return err
 	}
 	if count, err := result.RowsAffected(); err != nil || count != 1 {
 		if err != nil {
 			return err
+		}
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM lists WHERE id = ? AND workspace_id = ?)`, value.ID, value.WorkspaceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return store.ErrConflict
 		}
 		return store.ErrNotFound
 	}
@@ -12448,7 +13062,10 @@ func insertListItem(ctx context.Context, tx *sql.Tx, value domain.ListItem) erro
 			return translateNotFound(err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived)); err != nil {
+	if value.Version == 0 {
+		value.Version = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version); err != nil {
 		return classify(err)
 	}
 	return nil
@@ -12458,7 +13075,7 @@ func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, err
 	var value domain.ListItem
 	var createdAt, updatedAt string
 	var archived int
-	if err := scanner.Scan(&value.ID, &value.ListID, &value.ParentItemID, &value.WorkspaceID, &value.Fields, &value.CreatedBy, &value.UpdatedBy, &createdAt, &updatedAt, &archived); err != nil {
+	if err := scanner.Scan(&value.ID, &value.ListID, &value.ParentItemID, &value.WorkspaceID, &value.Fields, &value.CreatedBy, &value.UpdatedBy, &createdAt, &updatedAt, &archived, &value.Version); err != nil {
 		return domain.ListItem{}, err
 	}
 	var err error
@@ -12475,7 +13092,7 @@ func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, err
 }
 
 func (s *Store) GetListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID) (domain.ListItem, error) {
-	value, err := scanListItem(s.db.QueryRowContext(ctx, `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace))
+	value, err := scanListItem(s.db.QueryRowContext(ctx, `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace))
 	if err != nil {
 		return domain.ListItem{}, translateNotFound(err)
 	}
@@ -12490,7 +13107,7 @@ func (s *Store) ListItems(ctx context.Context, workspace domain.WorkspaceID, lis
 	if err != nil {
 		return domain.ListItemPage{}, err
 	}
-	query := `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived FROM list_items WHERE list_id = ? AND workspace_id = ? AND id > ?`
+	query := `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version FROM list_items WHERE list_id = ? AND workspace_id = ? AND id > ?`
 	args := []any{listID, workspace, after}
 	if !archived {
 		query += ` AND archived = 0`
@@ -12528,25 +13145,50 @@ func (s *Store) ListItems(ctx context.Context, workspace domain.WorkspaceID, lis
 }
 
 func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
+	return s.UpdateListItems(ctx, []domain.ListItem{value}, []events.Event{event})
+}
+
+func (s *Store) UpdateListItems(ctx context.Context, values []domain.ListItem, records []events.Event) error {
+	if len(values) == 0 || len(values) != len(records) {
+		return store.ErrInvalidArgument
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ? WHERE id = ? AND list_id = ? AND workspace_id = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.ID, value.ListID, value.WorkspaceID)
-	if err != nil {
-		return err
-	}
-	if count, err := result.RowsAffected(); err != nil || count != 1 {
-		if err != nil {
+	seen := make(map[domain.ListItemID]struct{}, len(values))
+	for index, value := range values {
+		if _, duplicate := seen[value.ID]; duplicate {
+			return store.ErrInvalidArgument
+		}
+		seen[value.ID] = struct{}{}
+		result, updateErr := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ?, version = ? WHERE id = ? AND list_id = ? AND workspace_id = ? AND version = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version, value.ID, value.ListID, value.WorkspaceID, value.Version-1)
+		if updateErr != nil {
+			return updateErr
+		}
+		count, countErr := result.RowsAffected()
+		if countErr != nil {
+			return countErr
+		}
+		if count != 1 {
+			var exists bool
+			if existsErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?)`, value.ID, value.ListID, value.WorkspaceID).Scan(&exists); existsErr != nil {
+				return existsErr
+			}
+			if exists {
+				return store.ErrConflict
+			}
+			return store.ErrNotFound
+		}
+		if err := insertOutbox(ctx, tx, records[index]); err != nil {
 			return err
 		}
-		return store.ErrNotFound
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) DeleteListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID, event events.Event) error {
@@ -12838,14 +13480,87 @@ func (s *Store) listFileShares(ctx context.Context, workspace domain.WorkspaceID
 }
 
 func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
+	return s.completeExternalUploads(ctx, "", completions, files, channels, emitted, messages, messageEvents)
+}
+
+func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, message domain.Message, messageEvent events.Event) error {
+	if id == "" {
+		return store.InvalidArgument("scheduled external upload completion requires a schedule")
+	}
+	return s.completeExternalUploads(ctx, id, completions, files, channels, emitted, []domain.Message{message}, []events.Event{messageEvent})
+}
+
+func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
 	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
+	}
+	if scheduledID != "" && len(messages) != 1 {
+		return store.InvalidArgument("scheduled external upload completion requires one message")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	idempotencyKey := string(scheduledID)
+	if scheduledID != "" {
+		message := messages[0]
+		result, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET id = id
+			WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND delivered = 0`,
+			scheduledID, message.WorkspaceID, message.AuthorID, message.Conversation)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return store.ErrNotFound
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT upload_id FROM scheduled_message_files WHERE scheduled_message_id = ? ORDER BY ordinal`, scheduledID)
+		if err != nil {
+			return err
+		}
+		uploadIDs := make([]domain.ExternalUploadID, 0, len(completions))
+		for rows.Next() {
+			var uploadID domain.ExternalUploadID
+			if err := rows.Scan(&uploadID); err != nil {
+				rows.Close()
+				return err
+			}
+			uploadIDs = append(uploadIDs, uploadID)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(uploadIDs) != len(completions) {
+			return store.ErrNotFound
+		}
+		for index, uploadID := range uploadIDs {
+			if uploadID != completions[index].ID {
+				return store.ErrNotFound
+			}
+		}
+	}
+	if idempotencyKey != "" {
+		message := messages[0]
+		result, err := tx.ExecContext(ctx, `INSERT INTO idempotency (workspace_id, user_id, idempotency_key, message_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, idempotency_key) DO NOTHING`,
+			message.WorkspaceID, message.AuthorID, idempotencyKey, message.ID, domain.NewStoredTime(time.Now()))
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return store.ErrIdempotencyConflict
+		}
+	}
 	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(completions))
 	seenFiles := make(map[domain.FileID]struct{}, len(files))
 	now := domain.NewStoredTime(time.Now())
@@ -12858,7 +13573,18 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 		}
 		seenUploads[completion.ID] = struct{}{}
 		seenFiles[files[index].ID] = struct{}{}
-		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, files[index].ID, domain.NewStoredTime(files[index].CreatedAt), completion.ID, domain.ExternalUploadUploaded, now)
+		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ?
+			WHERE id = ? AND status = ? AND (
+				expires_at > ?
+				OR EXISTS (SELECT 1 FROM draft_attachments WHERE upload_id = ?)
+				OR EXISTS (
+					SELECT 1 FROM scheduled_message_files f
+					JOIN scheduled_messages m ON m.id = f.scheduled_message_id
+					WHERE f.upload_id = ? AND m.delivered = 0
+				)
+			)`,
+			domain.ExternalUploadCompleted, files[index].ID, domain.NewStoredTime(files[index].CreatedAt),
+			completion.ID, domain.ExternalUploadUploaded, now, completion.ID, completion.ID)
 		if err != nil {
 			return err
 		}

@@ -9,12 +9,14 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 fetch() {
+	raw="$2.raw"
 	curl --fail --silent --show-error --location --compressed \
 		--retry 4 --retry-all-errors --connect-timeout 15 --max-time 45 \
-		--user-agent 'sameoldchat-contract-qualification/1.0' "$1" |
-		sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&#160;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' |
+		--user-agent 'sameoldchat-contract-qualification/1.0' --output "$raw" "$1"
+	sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&#160;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' "$raw" |
 		tr '\n\r\t\302\240' '     ' |
 		sed -e 's/  */ /g' >"$2"
+	rm -f "$raw"
 }
 
 assert_contains() {
@@ -35,6 +37,7 @@ add_dm_url='https://slack.com/help/articles/1500002969782-Add-people-to-a-direct
 convert_dm_url='https://slack.com/help/articles/217555437-Convert-a-group-direct-message-to-a-private-channel'
 close_dm_api_url='https://docs.slack.dev/reference/methods/conversations.close/'
 message_url='https://slack.com/help/articles/201457107-Send-and-read-messages'
+clip_url='https://slack.com/help/articles/4406235165587-Record-audio-and-video-clips-in-Slack'
 mention_url='https://slack.com/help/articles/205240127-Use-mentions-in-Slack'
 user_group_url='https://slack.com/help/articles/212906697-Create-and-edit-user-groups'
 user_group_object_url='https://docs.slack.dev/reference/objects/usergroup-object'
@@ -58,6 +61,9 @@ conversation_notification_url='https://slack.com/help/articles/360056534254-Mana
 dnd_url='https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb'
 huddle_url='https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack'
 canvas_url='https://slack.com/help/articles/203950418-Use-a-canvas-in-Slack'
+conversation_canvas_api_url='https://docs.slack.dev/reference/methods/conversations.canvases.create/'
+datastore_query_url='https://docs.slack.dev/tools/deno-slack-sdk/guides/retrieving-items-from-a-datastore/'
+events_api_url='https://docs.slack.dev/apis/events-api/'
 list_url='https://slack.com/help/articles/27452748828179-Use-lists-in-Slack'
 workflow_url='https://slack.com/help/articles/360035692513-Guide-to-Workflow-Builder'
 roles_url='https://slack.com/help/articles/360018112273-Roles-in-Slack'
@@ -67,10 +73,15 @@ screen_reader_url='https://slack.com/help/articles/360000411963-Use-Slack-with-a
 reminder_help_url='https://slack.com/help/articles/208423427-Set-a-reminder'
 later_help_url='https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later'
 activity_help_url='https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack'
+activity_work_url='https://slack.com/help/articles/19693583638803-Get-your-work-done-from-the-Activity-view'
 reminder_api_url='https://docs.slack.dev/reference/methods/reminders.add/'
 later_api_url='https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/'
 conversation_join_url='https://docs.slack.dev/reference/methods/conversations.join/'
+conversation_invite_url='https://docs.slack.dev/reference/methods/conversations.invite/'
 schedule_api_url='https://docs.slack.dev/messaging/sending-and-scheduling-messages/'
+rtm_start_url='https://docs.slack.dev/reference/methods/rtm.start/'
+team_preferences_url='https://docs.slack.dev/reference/methods/team.preferences.list/'
+auth_teams_url='https://docs.slack.dev/reference/methods/auth.teams.list/'
 
 fetch "$sign_in_url" "$work/sign-in.html"
 fetch "$keyboard_url" "$work/keyboard.html"
@@ -80,6 +91,7 @@ fetch "$add_dm_url" "$work/add-dm.html"
 fetch "$convert_dm_url" "$work/convert-dm.html"
 fetch "$close_dm_api_url" "$work/conversations-close.html"
 fetch "$message_url" "$work/messages.html"
+fetch "$clip_url" "$work/clips.html"
 fetch "$mention_url" "$work/mentions.html"
 fetch "$user_group_url" "$work/user-groups.html"
 fetch "$user_group_object_url" "$work/user-group-object.html"
@@ -103,6 +115,9 @@ fetch "$conversation_notification_url" "$work/conversation-notifications.html"
 fetch "$dnd_url" "$work/dnd.html"
 fetch "$huddle_url" "$work/huddles.html"
 fetch "$canvas_url" "$work/canvas.html"
+fetch "$conversation_canvas_api_url" "$work/conversation-canvas-api.html"
+fetch "$datastore_query_url" "$work/datastore-query.html"
+fetch "$events_api_url" "$work/events-api.html"
 fetch "$list_url" "$work/list.html"
 fetch "$workflow_url" "$work/workflow.html"
 fetch "$roles_url" "$work/roles.html"
@@ -112,10 +127,15 @@ fetch "$screen_reader_url" "$work/screen-reader.html"
 fetch "$reminder_help_url" "$work/reminders.html"
 fetch "$later_help_url" "$work/later.html"
 fetch "$activity_help_url" "$work/activity.html"
+fetch "$activity_work_url" "$work/activity-work.html"
 fetch "$reminder_api_url" "$work/reminders-add.html"
 fetch "$later_api_url" "$work/later-api.html"
 fetch "$conversation_join_url" "$work/conversations-join.html"
+fetch "$conversation_invite_url" "$work/conversations-invite.html"
 fetch "$schedule_api_url" "$work/scheduling-api.html"
+fetch "$rtm_start_url" "$work/rtm-start.html"
+fetch "$team_preferences_url" "$work/team-preferences.html"
+fetch "$auth_teams_url" "$work/auth-teams.html"
 
 assert_contains "$work/sign-in.html" 'Sign in to your workspace' \
 	'[AUTH-01] workspace sign-in is an explicit first-party journey' "$sign_in_url"
@@ -163,10 +183,22 @@ assert_contains "$work/conversations-close.html" 'already_closed properties' \
 	'[DM-04] a repeated conversations.close reports already_closed' "$close_dm_api_url"
 assert_contains "$work/messages.html" 'automatically save as a draft' \
 	'[DRAFT-01] unfinished composer text is saved as a draft' "$message_url"
+assert_contains "$work/messages.html" 'add any attachments, emoji, mentions, or formatting' \
+	'[DRAFT-01 COMP-01] the draft-capable composer includes attachments' "$message_url"
+assert_contains "$work/messages.html" 'to schedule it for later' \
+	'[SCHED-01] the attachment-capable first-party composer proceeds to the schedule action' "$message_url"
+assert_contains "$work/files.html" 'Drag and drop up to 10 files into the Slack message field' \
+	'[DRAFT-01 FILE-01] Slack stages up to ten files in the message field before send' "$file_url"
 assert_contains "$work/messages.html" 'Manage draft, scheduled, and sent messages' \
 	'[DRAFT-02] Drafts and sent is the current aggregate work surface' "$message_url"
 assert_contains "$work/messages.html" 'edit, reschedule, send, cancel, or delete it' \
 	'[SCHED-02] scheduled items expose the current management actions' "$message_url"
+assert_contains "$work/clips.html" 'up to five minutes long' \
+	'[COMP-01] audio and video clips have a five-minute limit' "$clip_url"
+assert_contains "$work/clips.html" "add a message if you'd like" \
+	'[COMP-01] a recorded clip may be staged with composer text before send' "$clip_url"
+assert_contains "$work/clips.html" 'same retention policy as other files' \
+	'[COMP-01] clips use the ordinary durable file lifecycle' "$clip_url"
 assert_contains "$work/user-groups.html" "you'll notify everyone in the group" \
 	'[COMP-03 ACTIVITY-01] a user-group handle notifies every eligible member' "$user_group_url"
 assert_contains "$work/user-groups.html" 'unable to mention its handle' \
@@ -195,6 +227,18 @@ assert_contains "$work/scheduling-api.html" 'delete the old message and then' \
 	'[SCHED-02] the public Web API updates by delete plus schedule rather than an invented update method' "$schedule_api_url"
 assert_contains "$work/scheduling-api.html" 'Messages can only be scheduled up to 120 days in advance' \
 	'[SCHED-01] the public scheduling window is 120 days' "$schedule_api_url"
+assert_contains "$work/rtm-start.html" 'after September 27, 2022 now get the response from that method instead' \
+	'[API] current rtm.start is the deprecated rtm.connect-compatible alias' "$rtm_start_url"
+assert_contains "$work/team-preferences.html" 'display_real_names' \
+	'[API] team.preferences.list returns workspace policy fields' "$team_preferences_url"
+assert_contains "$work/team-preferences.html" 'disable_file_uploads' \
+	'[API] team.preferences.list exposes the file-upload policy' "$team_preferences_url"
+assert_contains "$work/auth-teams.html" 'full list of workspaces your org-wide app has been approved for' \
+	'[API] auth.teams.list is scoped to the authenticated app approvals' "$auth_teams_url"
+assert_contains "$work/auth-teams.html" 'positive integer no larger than 1000' \
+	'[API] auth.teams.list enforces the published page bound' "$auth_teams_url"
+assert_contains "$work/auth-teams.html" 'include_icon' \
+	'[API] auth.teams.list can project persisted workspace icons' "$auth_teams_url"
 assert_contains "$work/search.html" 'switch between result types' \
 	'[SEARCH-01] desktop search result types' "$search_url"
 assert_contains "$work/search.html" 'select a recent search if you' \
@@ -277,6 +321,26 @@ assert_contains "$work/huddles.html" 'Google Chrome' \
 	'[HUDDLE-01] huddle browser support is explicitly bounded' "$huddle_url"
 assert_contains "$work/canvas.html" 'Add a canvas as a tab' \
 	'[CANVAS-01] conversations add an existing or newly created canvas as a tab' "$canvas_url"
+assert_contains "$work/conversation-canvas-api.html" 'channel.properties.canvas' \
+	'[CANVAS-01] a singular channel canvas is projected by conversations.info' "$conversation_canvas_api_url"
+assert_contains "$work/conversation-canvas-api.html" 'Access is tied to channel access.' \
+	'[CANVAS-01] channel-canvas access inherits channel access' "$conversation_canvas_api_url"
+assert_contains "$work/datastore-query.html" 'maximum number of entries to return, 1-1000' \
+	'[WORKFLOW-02] hosted datastore query evaluates bounded pages' "$datastore_query_url"
+assert_contains "$work/datastore-query.html" 'filters are applied post-hoc' \
+	'[WORKFLOW-02] hosted datastore query filters after scan evaluation' "$datastore_query_url"
+assert_contains "$work/datastore-query.html" 'BETWEEN ... AND' \
+	'[WORKFLOW-02] hosted datastore query supports the documented comparison grammar' "$datastore_query_url"
+assert_contains "$work/datastore-query.html" 'paginate through your datastore and sum up the count' \
+	'[WORKFLOW-02] hosted datastore count spans every scan page' "$datastore_query_url"
+assert_contains "$work/datastore-query.html" 'filters are applied post-hoc' \
+	'[ADMIN-04] app administration exposes persisted hosted data without changing Slack query semantics' "$datastore_query_url"
+assert_contains "$work/events-api.html" 'retrying a failed request up to 3 times' \
+	'[APP-08] Events API delivery has a bounded retry lifecycle' "$events_api_url"
+assert_contains "$work/events-api.html" 'second retry will be attempted after 1 minute' \
+	'[APP-08] Events API retry state records the one-minute backoff' "$events_api_url"
+assert_contains "$work/events-api.html" 'third and final retry will be sent after 5 minutes' \
+	'[APP-08] Events API retry state records the five-minute final backoff' "$events_api_url"
 assert_contains "$work/list.html" 'create a list' \
 	'[LIST-01] lists have a current first-party creation journey' "$list_url"
 assert_contains "$work/workflow.html" 'Workflow Builder' \
@@ -322,6 +386,22 @@ assert_contains "$work/activity.html" 'there’ll always be a record in the Clea
 	'[ACTIVITY-03] cleared notifications remain recoverable' "$activity_help_url"
 assert_contains "$work/activity.html" 'DMs Mentions Threads Channels Reactions Invitations Apps Reminders VIP' \
 	'[ACTIVITY-02] current Activity notification-type filters' "$activity_help_url"
+assert_contains "$work/activity-work.html" 'Notifications about channels you’re added to and new Slack Connect invitations' \
+	'[ACTIVITY-01 ACTIVITY-02 CONV-03] channel additions belong in the Invitations Activity filter' "$activity_work_url"
+assert_contains "$work/conversations-invite.html" 'public or private channel' \
+	'[CONV-03] conversations.invite supports public and private channels' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'already_in_channel' \
+	'[CONV-03] duplicate conversations.invite has a named Slack error' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'channels:manage channels:write.invites groups:write groups:write.invites im:write mpim:write' \
+	'[CONV-03] conversations.invite bot scope alternatives match the current contract' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'channels:write channels:write.invites groups:write groups:write.invites im:write mpim:write' \
+	'[CONV-03] conversations.invite user scope alternatives match the current contract' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'Up to 100 users may be listed' \
+	'[CONV-03] conversations.invite enforces the formal current user limit' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'continue inviting the valid ones while disregarding invalid IDs' \
+	'[CONV-03] conversations.invite force supports partial success' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'users cannot be invited for differing reasons' \
+	'[CONV-03] conversations.invite reports per-user failures' "$conversation_invite_url"
 assert_contains "$work/keyboard-navigation.html" 'Enter to reply to a message' \
 	'[ACTIVITY-03] Activity Enter replies rather than merely opening an item' "$keyboard_navigation_url"
 assert_contains "$work/keyboard-navigation.html" 'X to select or un-select an item' \

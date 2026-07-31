@@ -49,6 +49,48 @@ func TestWorkerPostsDueMessageExactlyOnceAcrossClaimReplay(t *testing.T) {
 	}
 }
 
+func TestWorkerDeliversScheduledFileOnlyMessageAfterUploadTicketExpiry(t *testing.T) {
+	ctx := context.Background()
+	target := memory.New()
+	target.SeedWorkspace(domain.Workspace{ID: "T1"})
+	target.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	target.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	target.SeedConversationMember("C1", "U1")
+	now := time.Now().UTC()
+	upload := domain.ExternalUpload{
+		ID: "scheduled-upload", WorkspaceID: "T1", Uploader: "U1", Name: "evidence.txt", Title: "evidence.txt",
+		MIMEType: "text/plain", BlobKey: "T1/external/scheduled-upload", Size: 8,
+		Status: domain.ExternalUploadUploaded, CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute), UploadedAt: now.Add(-time.Hour),
+	}
+	if err := target.CreateExternalUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	scheduled := domain.ScheduledMessage{
+		WorkspaceID: "T1", ID: "Q-file", Channel: "C1", Author: "U1", PostAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Hour),
+		FileAttachments: []domain.DraftAttachment{{
+			UploadID: upload.ID, Name: upload.Name, Title: "Evidence", MIMEType: upload.MIMEType, Size: upload.Size,
+		}},
+	}
+	if err := target.CreateScheduledMessage(ctx, scheduled, events.Event{ID: "scheduled-file", WorkspaceID: "T1", Topic: "message.scheduled", CreatedAt: scheduled.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := NewWorker(target, service.Messages{Store: target}, "file-worker", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 1 {
+		t.Fatalf("run count=%d err=%v", count, err)
+	}
+	history, err := target.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].Text != "" ||
+		len(history.Messages[0].Files) != 1 || history.Messages[0].Files[0].ID != domain.FileID(upload.ID) {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 0 {
+		t.Fatalf("replay count=%d err=%v", count, err)
+	}
+}
+
 func TestWorkerExecutesEveryWorkspaceAndPreservesThreadAndAppAttribution(t *testing.T) {
 	ctx := context.Background()
 	source := memory.New()
@@ -99,11 +141,16 @@ func TestWorkerReportsRenewalFailureThatArrivesAfterPosting(t *testing.T) {
 	source.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	source.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	source.SeedConversationMember("C1", "U1")
+	item := domain.ScheduledMessage{WorkspaceID: "T1", ID: "Q1", Channel: "C1", Author: "U1", Text: "scheduled", PostAt: time.Now().UTC()}
+	if err := source.CreateScheduledMessage(context.Background(), item, events.Event{
+		ID: "event-Q1", WorkspaceID: "T1", Topic: "message.scheduled", Payload: "Q1", CreatedAt: item.PostAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	worker, err := NewWorker(source, service.Messages{Store: source}, "worker-1", 1, 3*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := domain.ScheduledMessage{WorkspaceID: "T1", ID: "Q1", Channel: "C1", Author: "U1", Text: "scheduled", PostAt: time.Now().UTC()}
 	result := make(chan error, 1)
 	go func() { result <- worker.postWithLease(context.Background(), item) }()
 	<-source.postingReturned
@@ -122,8 +169,8 @@ type lateRenewalFailureSource struct {
 	releaseRenewal  chan struct{}
 }
 
-func (s *lateRenewalFailureSource) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
-	err := s.Store.CreateMessage(ctx, message, event, idempotencyKey)
+func (s *lateRenewalFailureSource) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
+	err := s.Store.CreateScheduledMessagePost(ctx, id, message, event)
 	<-s.renewStarted
 	close(s.postingReturned)
 	return err
@@ -270,11 +317,16 @@ func TestWorkerReportsALostLeaseEvenWhenThePostAlsoFailed(t *testing.T) {
 	source.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	source.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	source.SeedConversationMember("C1", "U1")
+	item := domain.ScheduledMessage{WorkspaceID: "T1", ID: "Q1", Channel: "C1", Author: "U1", Text: "scheduled", PostAt: time.Now().UTC()}
+	if err := source.CreateScheduledMessage(context.Background(), item, events.Event{
+		ID: "event-Q1", WorkspaceID: "T1", Topic: "message.scheduled", Payload: "Q1", CreatedAt: item.PostAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	worker, err := NewWorker(source, service.Messages{Store: source}, "worker-1", 1, 3*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := domain.ScheduledMessage{WorkspaceID: "T1", ID: "Q1", Channel: "C1", Author: "U1", Text: "scheduled", PostAt: time.Now().UTC()}
 	result := make(chan error, 1)
 	go func() { result <- worker.postWithLease(context.Background(), item) }()
 	<-source.postingReturned
@@ -294,7 +346,7 @@ type failingPostLateRenewalSource struct {
 	releaseRenewal  chan struct{}
 }
 
-func (s *failingPostLateRenewalSource) CreateMessage(context.Context, domain.Message, events.Event, string) error {
+func (s *failingPostLateRenewalSource) CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event) error {
 	<-s.renewStarted
 	close(s.postingReturned)
 	return errScheduledPostFailed

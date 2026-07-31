@@ -101,9 +101,9 @@ operations:
     reference: https://docs.slack.dev/reference/methods/chat.postMessage/
     deviations:
       - >-
-        The registered handler does not yet implement every current message
-        argument, including metadata, markdown_text, parse, reply_broadcast,
-        unfurl controls, and message-author customization.
+        The full current payload is validated and persisted, but link-name
+        expansion and external media unfurl fetching have not been qualified
+        against live Slack outcomes.
       - The Web API tier does not yet enforce Slack's per-method posting rate limits.
     audit:
       downgraded_from: behavior-compatible
@@ -242,8 +242,26 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.invite
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/conversations.invite/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - tests/external-contract-qualification/qualify.sh
+      - specs/journeys/02-conversations-and-direct-messages.md
+      - specs/journeys/05-search-and-activity.md
+    deviations:
+      - Workspace guest/channel-limit and Slack Connect invitation policy errors remain unqualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: Public/private membership, current scope alternatives, atomic default invitation, force partial success, per-user errors, duplicate rejection, Activity projection, and current SDK response decoding are qualified. Guest limits and Slack Connect policy remain intentionally outside the claim.
+      evidence:
+        - https://docs.slack.dev/reference/methods/conversations.invite/
+        - internal/api/slack/handler.go
+        - internal/store/memory/memory.go
+        - internal/store/sqlstore/sqlstore.go
   - method: conversations.leave
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -732,10 +750,21 @@ operations:
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.exchange/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - internal/api/slack/handler_test.go
+    deviations:
+      - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack rotation outcomes remain unqualified.
   - method: oauth.v2.user.access
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.user.access/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - internal/api/slack/handler_test.go
+    deviations:
+      - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack user-only grant outcomes remain unqualified.
   - method: reminders.add
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -1181,9 +1210,16 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.bulkPut/
   - method: apps.datastore.count
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.count/
+    evidence:
+      - internal/api/slack/apps_datastore_test.go
+      - internal/service/app_datastores_test.go
+      - internal/modules/chat/transport/grpc/differential_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Rate limits, paid-plan enforcement, and controlled live-Slack outcomes remain unqualified.
   - method: apps.datastore.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -1197,9 +1233,16 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.put/
   - method: apps.datastore.query
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.query/
+    evidence:
+      - internal/api/slack/apps_datastore_test.go
+      - internal/service/app_datastores_test.go
+      - internal/modules/chat/transport/grpc/differential_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Rate limits, paid-plan enforcement, and controlled live-Slack outcomes remain unqualified.
   - method: apps.datastore.update
     status: behavior-compatible
     provenance: slack-reference
@@ -1233,13 +1276,23 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setTitle/
   - method: auth.teams.list
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/auth.teams.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - internal/modules/chat/transport/grpc/differential_test.go
+    deviations:
+      - Enabled per-app workspace installations, deterministic cursor paging, and optional persisted icons are supported, but SameOldChat does not yet model Slack Enterprise organization-ready approval policy or the Tier 2 rate limit.
   - method: blocks.validate
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/blocks.validate/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - internal/api/slack/handler_test.go
+    deviations:
+      - SameOldChat validates the current catalog it renders, but exact Slack validation messages, production rate limits, and controlled live-Slack outcomes remain unqualified.
   - method: chat.appendStream
     status: behavior-compatible
     provenance: slack-reference
@@ -1261,9 +1314,16 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.approveSharedInvite/
   - method: conversations.canvases.create
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.canvases.create/
+    evidence:
+      - internal/api/slack/handler_test.go
+      - internal/service/canvases_test.go
+      - internal/modules/chat/transport/grpc/grpc_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.declineSharedInvite
     status: unimplemented
     provenance: slack-reference
@@ -1317,9 +1377,13 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.responses.export/
   - method: rtm.start
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/rtm.start/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - SameOldChat follows Slack's post-2022 rtm.connect response contract; the retired pre-2022 bootstrap snapshot is intentionally not reproduced.
   - method: search.all
     status: sdk-compatible
     provenance: slack-reference
@@ -1355,9 +1419,13 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.externalTeams.list/
   - method: team.preferences.list
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.preferences.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - SameOldChat returns its enforced workspace-wide product policies; it does not yet model administrator-configurable variants of those policies or Slack's Tier 3 rate limit.
   - method: tooling.tokens.rotate
     status: behavior-compatible
     provenance: slack-reference

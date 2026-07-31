@@ -43,6 +43,19 @@ message PostWithBlocksRequest {
   string thread_timestamp = 6;
   string idempotency_key = 7;
   string app_id = 9;
+  string metadata = 10;
+  bool markdown_text = 11;
+  bool reply_broadcast = 12;
+  string parse = 13;
+  bool mrkdwn_disabled = 14;
+  bool link_names = 15;
+  bool unfurl_links = 16;
+  bool unfurl_links_set = 17;
+  bool unfurl_media = 18;
+  bool unfurl_media_set = 19;
+  string username = 20;
+  string icon_emoji = 21;
+  string icon_url = 22;
 }
 
 message ShareFileRequest {

@@ -201,9 +201,83 @@ func (s *Store) CreateCanvas(_ context.Context, canvas domain.Canvas, event even
 	if _, exists := s.canvases[canvas.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
 	s.canvases[canvas.ID] = canvas
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) CreateCanvasWithAccess(_ context.Context, canvas domain.Canvas, event events.Event, access domain.CanvasAccess, accessEvent events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.workspaces[canvas.WorkspaceID]; !ok {
+		return store.ErrNotFound
+	}
+	if user, ok := s.users[canvas.OwnerID]; !ok || user.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.canvases[canvas.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if access.CanvasID != canvas.ID || access.EntityType == "" || access.EntityID == "" || access.Access == "" {
+		return store.ErrInvalidArgument
+	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	s.canvases[canvas.ID] = canvas
+	s.canvasAccess[canvasAccessKey(access)] = access
+	s.outbox = append(s.outbox, event, accessEvent)
+	return nil
+}
+
+func (s *Store) CreateChannelCanvas(_ context.Context, canvas domain.Canvas, event events.Event, channel domain.ConversationID, accessEvent events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conversation, ok := s.conversations[channel]
+	if !ok || conversation.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	for _, existing := range s.canvasAccess {
+		if existing.EntityType == "channel_canvas" && existing.EntityID == string(channel) {
+			return store.ErrAlreadyExists
+		}
+	}
+	if _, exists := s.canvases[canvas.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if user, ok := s.users[canvas.OwnerID]; !ok || user.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	access := domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "channel_canvas", EntityID: string(channel), Access: store.AccessWrite}
+	s.canvases[canvas.ID] = canvas
+	s.canvasAccess[canvasAccessKey(access)] = access
+	s.outbox = append(s.outbox, event, accessEvent)
+	return nil
+}
+
+func (s *Store) GetChannelCanvas(_ context.Context, workspace domain.WorkspaceID, channel domain.ConversationID) (domain.Canvas, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	conversation, ok := s.conversations[channel]
+	if !ok || conversation.WorkspaceID != workspace {
+		return domain.Canvas{}, store.ErrNotFound
+	}
+	for _, access := range s.canvasAccess {
+		if access.EntityType != "channel_canvas" || access.EntityID != string(channel) {
+			continue
+		}
+		canvas, exists := s.canvases[access.CanvasID]
+		if exists && canvas.WorkspaceID == workspace {
+			return canvas, nil
+		}
+	}
+	return domain.Canvas{}, store.ErrNotFound
 }
 
 func (s *Store) GetCanvas(_ context.Context, workspace domain.WorkspaceID, id domain.CanvasID) (domain.Canvas, error) {
@@ -216,12 +290,53 @@ func (s *Store) GetCanvas(_ context.Context, workspace domain.WorkspaceID, id do
 	return canvas, nil
 }
 
+func (s *Store) ListCanvases(_ context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.CanvasPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.Canvas, 0, request.Limit+1)
+	for _, canvas := range s.canvases {
+		if canvas.WorkspaceID != workspace || (after != "" && string(canvas.ID) <= after) {
+			continue
+		}
+		_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, userID, func(visit func(string, string, string)) {
+			for _, grant := range s.canvasAccess {
+				if grant.CanvasID == canvas.ID {
+					visit(grant.EntityType, grant.EntityID, grant.Access)
+				}
+			}
+		})
+		if allowed {
+			values = append(values, canvas)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.CanvasPage{Canvases: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateCanvas(_ context.Context, canvas domain.Canvas, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, ok := s.canvases[canvas.ID]
 	if !ok || current.WorkspaceID != canvas.WorkspaceID {
 		return store.ErrNotFound
+	}
+	if canvas.Version != current.Version+1 {
+		return store.ErrConflict
 	}
 	canvas.CreatedAt = current.CreatedAt
 	s.canvases[canvas.ID] = canvas
@@ -3364,8 +3479,11 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
-	if !ok || value.IsPrivate {
+	if !ok {
 		return store.ErrNotFound
+	}
+	if value.IsDirect || value.IsGroupDirect || value.Archived {
+		return store.ErrInvalidConversationType
 	}
 	for _, user := range users {
 		member, exists := s.users[user]
@@ -3376,8 +3494,27 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 	if s.memberships[conversation] == nil {
 		s.memberships[conversation] = make(map[domain.UserID]struct{})
 	}
+	added := make([]domain.UserID, 0, len(users))
 	for _, user := range users {
+		if _, exists := s.memberships[conversation][user]; exists {
+			continue
+		}
 		s.memberships[conversation][user] = struct{}{}
+		added = append(added, user)
+	}
+	if len(added) == 0 {
+		return store.ErrAlreadyExists
+	}
+	for _, user := range added {
+		if user == event.ActorID {
+			continue
+		}
+		id := domain.ActivityIDFor(user, "conversation_invitation:"+string(conversation)+":"+string(event.ID))
+		s.activityItems[id] = domain.ActivityItem{
+			ID: id, WorkspaceID: value.WorkspaceID, UserID: user,
+			Kinds: []domain.ActivityKind{domain.ActivityInvitation}, ActorID: event.ActorID,
+			Conversation: conversation, OccurredAt: event.CreatedAt.UTC(),
+		}
 	}
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -3619,6 +3756,11 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = true
 			}
 		}
+		if item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+			if conversation, ok := s.conversations[item.Conversation]; ok && s.canViewActivitySourceLocked(workspace, user, conversation) {
+				item.SourceAvailable = true
+			}
+		}
 		values = appendSorted(values, item, query.Page.Limit+1, func(left, right domain.ActivityItem) bool {
 			return activityCursorKey(left) > activityCursorKey(right)
 		})
@@ -3826,6 +3968,21 @@ func (s *Store) CreateMessage(_ context.Context, message domain.Message, event e
 	return s.createMessageLocked(message, event, idempotencyKey)
 }
 
+func (s *Store) CreateScheduledMessagePost(_ context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
+	message, err := normalizeMessage(message)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	scheduled, exists := s.scheduled[id]
+	if id == "" || !exists || s.scheduledDelivered[id] ||
+		scheduled.WorkspaceID != message.WorkspaceID || scheduled.Author != message.AuthorID || scheduled.Channel != message.Conversation {
+		return store.ErrNotFound
+	}
+	return s.createMessageLocked(message, event, string(id))
+}
+
 func normalizeMessage(message domain.Message) (domain.Message, error) {
 	// Matches the SQL backends: see the note there on why a message instant is
 	// held to the resolution of its own timestamp.
@@ -3852,21 +4009,30 @@ func normalizeMessage(message domain.Message) (domain.Message, error) {
 }
 
 func (s *Store) createMessageLocked(message domain.Message, event events.Event, idempotencyKey string) error {
+	message, err := s.prepareMessageLocked(message, idempotencyKey)
+	if err != nil {
+		return err
+	}
+	s.commitMessageLocked(message, event, idempotencyKey)
+	return nil
+}
+
+func (s *Store) prepareMessageLocked(message domain.Message, idempotencyKey string) (domain.Message, error) {
 	if _, exists := s.conversations[message.Conversation]; !exists {
-		return store.ErrNotFound
+		return domain.Message{}, store.ErrNotFound
 	}
 	files := make([]domain.File, 0, len(message.Files))
 	seenFiles := make(map[domain.FileID]struct{}, len(message.Files))
 	for _, requested := range message.Files {
 		if requested.ID == "" {
-			return store.InvalidArgument("message file id is required")
+			return domain.Message{}, store.InvalidArgument("message file id is required")
 		}
 		if _, duplicate := seenFiles[requested.ID]; duplicate {
-			return store.InvalidArgument("message file ids must be unique")
+			return domain.Message{}, store.InvalidArgument("message file ids must be unique")
 		}
 		file, exists := s.files[requested.ID]
 		if !exists || file.Deleted || file.WorkspaceID != message.WorkspaceID || !slices.Contains(s.fileShares[requested.ID], message.Conversation) {
-			return store.ErrNotFound
+			return domain.Message{}, store.ErrNotFound
 		}
 		seenFiles[requested.ID] = struct{}{}
 		file.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[requested.ID]...)
@@ -3874,12 +4040,12 @@ func (s *Store) createMessageLocked(message domain.Message, event events.Event, 
 	}
 	message.Files = files
 	if _, exists := s.messageLocked(message.ID); exists == nil {
-		return store.ErrAlreadyExists
+		return domain.Message{}, store.ErrAlreadyExists
 	}
 	key := idempotencyKeyFor(message.WorkspaceID, message.AuthorID, idempotencyKey)
 	if idempotencyKey != "" {
 		if _, exists := s.idempotency[key]; exists {
-			return store.ErrIdempotencyConflict
+			return domain.Message{}, store.ErrIdempotencyConflict
 		}
 	}
 	// A message's timestamp is its public identifier, so two messages in one
@@ -3891,9 +4057,13 @@ func (s *Store) createMessageLocked(message domain.Message, event events.Event, 
 	// retried a whole request is told that and not this.
 	for _, existing := range s.messages[message.Conversation] {
 		if existing.CreatedAt.Equal(message.CreatedAt) {
-			return store.ErrMessageTimestampTaken
+			return domain.Message{}, store.ErrMessageTimestampTaken
 		}
 	}
+	return message, nil
+}
+
+func (s *Store) commitMessageLocked(message domain.Message, event events.Event, idempotencyKey string) {
 	values := s.messages[message.Conversation]
 	index := sort.Search(len(values), func(index int) bool {
 		current := values[index]
@@ -3912,9 +4082,9 @@ func (s *Store) createMessageLocked(message domain.Message, event events.Event, 
 	s.createMessageActivityLocked(message)
 	s.outbox = append(s.outbox, event)
 	if idempotencyKey != "" {
+		key := idempotencyKeyFor(message.WorkspaceID, message.AuthorID, idempotencyKey)
 		s.idempotency[key] = message.ID
 	}
-	return nil
 }
 
 func (s *Store) createMessageActivityLocked(message domain.Message) {
@@ -5113,6 +5283,41 @@ func memoryMessageByID(messages []domain.Message, id domain.MessageID) (domain.M
 	return domain.Message{}, false
 }
 
+func cloneScheduledMessage(value domain.ScheduledMessage) domain.ScheduledMessage {
+	value.FileAttachments = append([]domain.DraftAttachment(nil), value.FileAttachments...)
+	return value
+}
+
+func (s *Store) validateScheduledAttachmentsLocked(value domain.ScheduledMessage) error {
+	if len(value.FileAttachments) > 10 {
+		return store.InvalidArgument("scheduled message has too many file attachments")
+	}
+	seen := make(map[domain.ExternalUploadID]struct{}, len(value.FileAttachments))
+	for _, attachment := range value.FileAttachments {
+		upload, exists := s.externalUploads[attachment.UploadID]
+		if attachment.UploadID == "" || attachment.Name == "" || attachment.MIMEType == "" || attachment.Size <= 0 ||
+			!exists || upload.WorkspaceID != value.WorkspaceID || upload.Uploader != value.Author ||
+			upload.Status != domain.ExternalUploadUploaded {
+			return store.InvalidArgument("scheduled message file attachment is incomplete")
+		}
+		if _, duplicate := seen[attachment.UploadID]; duplicate {
+			return store.InvalidArgument("scheduled message file attachment is duplicated")
+		}
+		for id, scheduled := range s.scheduled {
+			if id == value.ID || s.scheduledDelivered[id] {
+				continue
+			}
+			for _, existing := range scheduled.FileAttachments {
+				if existing.UploadID == attachment.UploadID {
+					return store.ErrAlreadyExists
+				}
+			}
+		}
+		seen[attachment.UploadID] = struct{}{}
+	}
+	return nil
+}
+
 func (s *Store) CreateScheduledMessage(_ context.Context, value domain.ScheduledMessage, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -5126,7 +5331,10 @@ func (s *Store) CreateScheduledMessage(_ context.Context, value domain.Scheduled
 	if _, exists := s.scheduled[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	s.scheduled[value.ID] = value
+	if err := s.validateScheduledAttachmentsLocked(value); err != nil {
+		return err
+	}
+	s.scheduled[value.ID] = cloneScheduledMessage(value)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -5147,6 +5355,9 @@ func (s *Store) CreateScheduledMessageWithinLimit(_ context.Context, value domai
 	if _, exists := s.scheduled[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	if err := s.validateScheduledAttachmentsLocked(value); err != nil {
+		return err
+	}
 	nearby := make([]time.Time, 0, limit)
 	for id, scheduled := range s.scheduled {
 		if scheduled.WorkspaceID == value.WorkspaceID && scheduled.Channel == value.Channel &&
@@ -5158,7 +5369,7 @@ func (s *Store) CreateScheduledMessageWithinLimit(_ context.Context, value domai
 	if store.ScheduledMessageLimitExceeded(nearby, value.PostAt, window, limit) {
 		return store.ErrScheduledMessageLimit
 	}
-	s.scheduled[value.ID] = value
+	s.scheduled[value.ID] = cloneScheduledMessage(value)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -5178,7 +5389,7 @@ func (s *Store) ListScheduledMessages(_ context.Context, workspace domain.Worksp
 		if value.WorkspaceID != workspace || value.Author != user || s.scheduledDelivered[value.ID] || !value.FailedAt.IsZero() || (channel != "" && value.Channel != channel) || (after != "" && string(value.ID) <= after) {
 			continue
 		}
-		values = appendSorted(values, value, request.Limit+1, func(left, right domain.ScheduledMessage) bool { return left.ID < right.ID })
+		values = appendSorted(values, cloneScheduledMessage(value), request.Limit+1, func(left, right domain.ScheduledMessage) bool { return left.ID < right.ID })
 	}
 	hasMore := len(values) > request.Limit
 	if hasMore {
@@ -5214,7 +5425,7 @@ func (s *Store) ListScheduledMessagesForCredential(_ context.Context, workspace 
 			(!afterTime.IsZero() && (value.PostAt.Before(afterTime) || (value.PostAt.Equal(afterTime) && value.ID <= afterID))) {
 			continue
 		}
-		values = appendSorted(values, value, query.Page.Limit+1, func(left, right domain.ScheduledMessage) bool {
+		values = appendSorted(values, cloneScheduledMessage(value), query.Page.Limit+1, func(left, right domain.ScheduledMessage) bool {
 			return left.PostAt.Before(right.PostAt) || (left.PostAt.Equal(right.PostAt) && left.ID < right.ID)
 		})
 	}
@@ -5263,7 +5474,7 @@ func (s *Store) ListScheduledMessageHistory(_ context.Context, workspace domain.
 				return left.PostAt.After(right.PostAt) || (left.PostAt.Equal(right.PostAt) && left.ID > right.ID)
 			}
 		}
-		values = appendSorted(values, value, request.Limit+1, less)
+		values = appendSorted(values, cloneScheduledMessage(value), request.Limit+1, less)
 	}
 	hasMore := len(values) > request.Limit
 	if hasMore {
@@ -5295,8 +5506,18 @@ func (s *Store) EarliestScheduledMessage(_ context.Context, workspace domain.Wor
 	return earliest, nil
 }
 
+func (s *Store) GetScheduledMessage(_ context.Context, workspace domain.WorkspaceID, id domain.ScheduledMessageID) (domain.ScheduledMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.scheduled[id]
+	if !exists || value.WorkspaceID != workspace || s.scheduledDelivered[id] {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	return cloneScheduledMessage(value), nil
+}
+
 func (s *Store) UpdateScheduledMessageWithinLimit(_ context.Context, update domain.ScheduledMessageUpdate, window time.Duration, limit int, event events.Event) (domain.ScheduledMessage, error) {
-	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.Text == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
+	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
 		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message update is incomplete")
 	}
 	now := time.Now().UTC()
@@ -5307,6 +5528,9 @@ func (s *Store) UpdateScheduledMessageWithinLimit(_ context.Context, update doma
 	if !ok || value.WorkspaceID != update.WorkspaceID || value.Channel != update.Channel || value.CredentialHash != update.CredentialHash ||
 		s.scheduledDelivered[update.ID] || (leased && lease.Expires.After(now)) {
 		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	if strings.TrimSpace(update.Text) == "" && value.Blocks == "" && value.Attachments == "" && len(value.FileAttachments) == 0 {
+		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled message would be empty")
 	}
 	nearby := make([]time.Time, 0, limit)
 	for id, scheduled := range s.scheduled {
@@ -5329,7 +5553,7 @@ func (s *Store) UpdateScheduledMessageWithinLimit(_ context.Context, update doma
 	s.scheduled[update.ID] = value
 	delete(s.scheduledNextAttempt, update.ID)
 	s.outbox = append(s.outbox, event)
-	return value, nil
+	return cloneScheduledMessage(value), nil
 }
 
 func (s *Store) ClaimScheduledMessageForCredential(_ context.Context, workspace domain.WorkspaceID, credentialHash string, id domain.ScheduledMessageID, owner string, lease time.Duration) (domain.ScheduledMessage, error) {
@@ -5346,7 +5570,7 @@ func (s *Store) ClaimScheduledMessageForCredential(_ context.Context, workspace 
 		return domain.ScheduledMessage{}, store.ErrNotFound
 	}
 	s.scheduledLeases[id] = memoryLease{Owner: owner, Expires: now.Add(lease)}
-	return value, nil
+	return cloneScheduledMessage(value), nil
 }
 
 func (s *Store) DeleteScheduledMessage(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {
@@ -5354,7 +5578,8 @@ func (s *Store) DeleteScheduledMessage(_ context.Context, workspace domain.Works
 	defer s.mu.Unlock()
 	value, ok := s.scheduled[id]
 	lease, leased := s.scheduledLeases[id]
-	if !ok || value.WorkspaceID != workspace || value.Author != user || value.Channel != channel || (leased && lease.Expires.After(time.Now().UTC())) {
+	_, posted := s.idempotency[idempotencyKeyFor(workspace, user, string(id))]
+	if !ok || posted || value.WorkspaceID != workspace || value.Author != user || value.Channel != channel || (leased && lease.Expires.After(time.Now().UTC())) {
 		return store.ErrNotFound
 	}
 	delete(s.scheduled, id)
@@ -5367,8 +5592,9 @@ func (s *Store) DeleteScheduledMessageForCredential(_ context.Context, workspace
 	defer s.mu.Unlock()
 	value, ok := s.scheduled[id]
 	lease, leased := s.scheduledLeases[id]
+	_, posted := s.idempotency[idempotencyKeyFor(value.WorkspaceID, value.Author, string(id))]
 	if credentialHash == "" || !ok || value.WorkspaceID != workspace || value.CredentialHash != credentialHash || value.Channel != channel ||
-		s.scheduledDelivered[id] || (leased && lease.Expires.After(time.Now().UTC())) {
+		posted || s.scheduledDelivered[id] || (leased && lease.Expires.After(time.Now().UTC())) {
 		return store.ErrNotFound
 	}
 	delete(s.scheduled, id)
@@ -5386,7 +5612,8 @@ func draftCursorKey(value domain.Draft) string {
 }
 
 func (s *Store) UpsertDraft(_ context.Context, value domain.Draft, event events.Event) (domain.Draft, error) {
-	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" || strings.TrimSpace(value.Text) == "" || value.UpdatedAt.IsZero() {
+	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" ||
+		(strings.TrimSpace(value.Text) == "" && len(value.Attachments) == 0) || len(value.Attachments) > 10 || value.UpdatedAt.IsZero() {
 		return domain.Draft{}, store.InvalidArgument("draft is incomplete")
 	}
 	s.mu.Lock()
@@ -5396,10 +5623,28 @@ func (s *Store) UpsertDraft(_ context.Context, value domain.Draft, event events.
 	if !userExists || user.WorkspaceID != value.WorkspaceID || user.Deleted || !conversationExists || conversation.WorkspaceID != value.WorkspaceID {
 		return domain.Draft{}, store.ErrNotFound
 	}
+	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(value.Attachments))
+	for _, attachment := range value.Attachments {
+		upload, exists := s.externalUploads[attachment.UploadID]
+		if attachment.UploadID == "" || attachment.Name == "" || attachment.MIMEType == "" || attachment.Size <= 0 ||
+			!exists || upload.WorkspaceID != value.WorkspaceID || upload.Uploader != value.UserID || upload.Status != domain.ExternalUploadUploaded {
+			return domain.Draft{}, store.InvalidArgument("draft attachment is incomplete")
+		}
+		if _, duplicate := seenUploads[attachment.UploadID]; duplicate {
+			return domain.Draft{}, store.InvalidArgument("draft attachment is duplicated")
+		}
+		seenUploads[attachment.UploadID] = struct{}{}
+	}
 	value.UpdatedAt = value.UpdatedAt.UTC()
+	value.Attachments = append([]domain.DraftAttachment(nil), value.Attachments...)
 	s.drafts[draftKey(value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp)] = value
 	s.outbox = append(s.outbox, event)
-	return value, nil
+	return cloneDraft(value), nil
+}
+
+func cloneDraft(value domain.Draft) domain.Draft {
+	value.Attachments = append([]domain.DraftAttachment(nil), value.Attachments...)
+	return value
 }
 
 func (s *Store) GetDraft(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.Draft, error) {
@@ -5409,7 +5654,7 @@ func (s *Store) GetDraft(_ context.Context, workspace domain.WorkspaceID, user d
 	if !ok {
 		return domain.Draft{}, store.ErrNotFound
 	}
-	return value, nil
+	return cloneDraft(value), nil
 }
 
 func (s *Store) ListDrafts(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
@@ -5435,7 +5680,7 @@ func (s *Store) ListDrafts(_ context.Context, workspace domain.WorkspaceID, user
 		if request.Descending {
 			less = func(left, right domain.Draft) bool { return draftCursorKey(left) > draftCursorKey(right) }
 		}
-		values = appendSorted(values, value, request.Limit+1, less)
+		values = appendSorted(values, cloneDraft(value), request.Limit+1, less)
 	}
 	hasMore := len(values) > request.Limit
 	if hasMore {
@@ -5476,7 +5721,7 @@ func (s *Store) ClaimScheduledMessages(_ context.Context, workspace domain.Works
 		if exists && active.Expires.After(now) {
 			continue
 		}
-		values = append(values, value)
+		values = append(values, cloneScheduledMessage(value))
 	}
 	sort.Slice(values, func(left, right int) bool {
 		return values[left].PostAt.Before(values[right].PostAt) ||
@@ -6115,6 +6360,26 @@ func (s *Store) blobReferences(workspace domain.WorkspaceID) []string {
 			references = append(references, file.BlobKey)
 		}
 	}
+	for _, draft := range s.drafts {
+		if draft.WorkspaceID != workspace {
+			continue
+		}
+		for _, attachment := range draft.Attachments {
+			if upload, ok := s.externalUploads[attachment.UploadID]; ok && upload.Status == domain.ExternalUploadUploaded {
+				references = append(references, upload.BlobKey)
+			}
+		}
+	}
+	for id, scheduled := range s.scheduled {
+		if scheduled.WorkspaceID != workspace || s.scheduledDelivered[id] {
+			continue
+		}
+		for _, attachment := range scheduled.FileAttachments {
+			if upload, ok := s.externalUploads[attachment.UploadID]; ok && upload.Status == domain.ExternalUploadUploaded {
+				references = append(references, upload.BlobKey)
+			}
+		}
+	}
 	for _, user := range s.users {
 		if user.WorkspaceID != workspace || user.Deleted {
 			continue
@@ -6452,6 +6717,23 @@ func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, 
 	cursor.RetryReason = strings.TrimSpace(reason)
 	s.appEventCursors[key] = cursor
 	return nil
+}
+
+func (s *Store) GetAppEventCursor(_ context.Context, appID domain.AppID, surface string) (domain.AppEventCursor, error) {
+	if appID == "" || !validAppEventSurface(surface) {
+		return domain.AppEventCursor{}, store.InvalidArgument("app ID and event surface are required")
+	}
+	s.mu.RLock()
+	cursor, exists := s.appEventCursors[appEventCursorKey(appID, surface)]
+	s.mu.RUnlock()
+	if !exists {
+		return domain.AppEventCursor{}, store.ErrNotFound
+	}
+	return domain.AppEventCursor{
+		AppID: appID, Surface: surface, AcknowledgedSequence: cursor.Sequence,
+		InFlightSequence: cursor.LeasedSequence, InFlightUntil: cursor.LeaseUntil,
+		RetryAt: cursor.RetryAt, RetryCount: cursor.RetryCount, RetryReason: cursor.RetryReason,
+	}, nil
 }
 
 func (s *Store) ClaimEvents(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]events.Record, error) {
@@ -6863,7 +7145,14 @@ func (s *Store) CreateListWithItems(_ context.Context, value domain.List, event 
 				return store.ErrNotFound
 			}
 		}
-		created[creation.Item.ID] = creation.Item
+		item := creation.Item
+		if item.Version == 0 {
+			item.Version = 1
+		}
+		created[item.ID] = item
+	}
+	if value.Version == 0 {
+		value.Version = 1
 	}
 	s.lists[value.ID] = value
 	s.listItems[value.ID] = created
@@ -6884,12 +7173,53 @@ func (s *Store) GetList(_ context.Context, workspace domain.WorkspaceID, id doma
 	return value, nil
 }
 
+func (s *Store) ListLists(_ context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ListPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.List, 0, request.Limit+1)
+	for _, list := range s.lists {
+		if list.WorkspaceID != workspace || (after != "" && string(list.ID) <= after) {
+			continue
+		}
+		_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, userID, func(visit func(string, string, string)) {
+			for _, grant := range s.listAccess {
+				if grant.ListID == list.ID {
+					visit(grant.EntityType, grant.EntityID, grant.Access)
+				}
+			}
+		})
+		if allowed {
+			values = append(values, list)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.ListPage{Lists: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateList(_ context.Context, value domain.List, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous, exists := s.lists[value.ID]
 	if !exists || previous.WorkspaceID != value.WorkspaceID {
 		return store.ErrNotFound
+	}
+	if value.Version != previous.Version+1 {
+		return store.ErrConflict
 	}
 	value.CreatedAt = previous.CreatedAt
 	s.lists[value.ID] = value
@@ -6911,6 +7241,9 @@ func (s *Store) CreateListItem(_ context.Context, value domain.ListItem, event e
 	}
 	if _, exists := s.listItems[value.ListID][value.ID]; exists {
 		return store.ErrAlreadyExists
+	}
+	if value.Version == 0 {
+		value.Version = 1
 	}
 	s.listItems[value.ListID][value.ID] = value
 	s.outbox = append(s.outbox, event)
@@ -6967,21 +7300,41 @@ func (s *Store) ListItems(_ context.Context, workspace domain.WorkspaceID, listI
 	return page, nil
 }
 
-func (s *Store) UpdateListItem(_ context.Context, value domain.ListItem, event events.Event) error {
+func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
+	return s.UpdateListItems(ctx, []domain.ListItem{value}, []events.Event{event})
+}
+
+func (s *Store) UpdateListItems(_ context.Context, values []domain.ListItem, records []events.Event) error {
+	if len(values) == 0 || len(values) != len(records) {
+		return store.ErrInvalidArgument
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	list, exists := s.lists[value.ListID]
-	if !exists || list.WorkspaceID != value.WorkspaceID {
-		return store.ErrNotFound
+	seen := make(map[domain.ListItemID]struct{}, len(values))
+	for _, value := range values {
+		list, exists := s.lists[value.ListID]
+		if !exists || list.WorkspaceID != value.WorkspaceID {
+			return store.ErrNotFound
+		}
+		previous, exists := s.listItems[value.ListID][value.ID]
+		if !exists {
+			return store.ErrNotFound
+		}
+		if _, duplicate := seen[value.ID]; duplicate {
+			return store.ErrInvalidArgument
+		}
+		seen[value.ID] = struct{}{}
+		if value.Version != previous.Version+1 {
+			return store.ErrConflict
+		}
 	}
-	previous, exists := s.listItems[value.ListID][value.ID]
-	if !exists {
-		return store.ErrNotFound
+	for index, value := range values {
+		previous := s.listItems[value.ListID][value.ID]
+		value.CreatedAt = previous.CreatedAt
+		value.CreatedBy = previous.CreatedBy
+		s.listItems[value.ListID][value.ID] = value
+		s.outbox = append(s.outbox, records[index])
 	}
-	value.CreatedAt = previous.CreatedAt
-	value.CreatedBy = previous.CreatedBy
-	s.listItems[value.ListID][value.ID] = value
-	s.outbox = append(s.outbox, event)
 	return nil
 }
 
@@ -7043,7 +7396,7 @@ func (s *Store) resolveAccessLocked(workspace domain.WorkspaceID, owner, userID 
 			if domain.UserID(entityID) != userID {
 				return
 			}
-		case "channel":
+		case "channel", "channel_canvas":
 			conversation, ok := s.conversations[domain.ConversationID(entityID)]
 			if !ok || conversation.WorkspaceID != workspace {
 				return
@@ -7249,6 +7602,32 @@ func (s *Store) GetExternalUpload(_ context.Context, id domain.ExternalUploadID)
 	return value, nil
 }
 
+func (s *Store) PendingUploadReferenceExists(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, upload domain.ExternalUploadID) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, draft := range s.drafts {
+		if draft.WorkspaceID != workspace || draft.UserID != user {
+			continue
+		}
+		for _, attachment := range draft.Attachments {
+			if attachment.UploadID == upload {
+				return true, nil
+			}
+		}
+	}
+	for id, scheduled := range s.scheduled {
+		if scheduled.WorkspaceID != workspace || scheduled.Author != user || s.scheduledDelivered[id] {
+			continue
+		}
+		for _, attachment := range scheduled.FileAttachments {
+			if attachment.UploadID == upload {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (s *Store) MarkExternalUploadUploaded(_ context.Context, id domain.ExternalUploadID, uploadedAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -7269,9 +7648,23 @@ func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUp
 	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event}, nil, nil)
 }
 
-func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
+func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
+	return s.completeExternalUploads(ctx, "", completions, files, channels, emitted, messages, messageEvents)
+}
+
+func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, message domain.Message, messageEvent events.Event) error {
+	if id == "" {
+		return store.InvalidArgument("scheduled external upload completion requires a schedule")
+	}
+	return s.completeExternalUploads(ctx, id, completions, files, channels, emitted, []domain.Message{message}, []events.Event{messageEvent})
+}
+
+func (s *Store) completeExternalUploads(_ context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
 	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
+	}
+	if scheduledID != "" && len(messages) != 1 {
+		return store.InvalidArgument("scheduled external upload completion requires one message")
 	}
 	for index := range messages {
 		normalized, err := normalizeMessage(messages[index])
@@ -7282,6 +7675,20 @@ func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if scheduledID != "" {
+		message := messages[0]
+		scheduled, exists := s.scheduled[scheduledID]
+		if !exists || s.scheduledDelivered[scheduledID] ||
+			scheduled.WorkspaceID != message.WorkspaceID || scheduled.Author != message.AuthorID || scheduled.Channel != message.Conversation ||
+			len(scheduled.FileAttachments) != len(completions) {
+			return store.ErrNotFound
+		}
+		for index, attachment := range scheduled.FileAttachments {
+			if attachment.UploadID != completions[index].ID {
+				return store.ErrNotFound
+			}
+		}
+	}
 	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(completions))
 	seenFiles := make(map[domain.FileID]struct{}, len(files))
 	previousUploads := make(map[domain.ExternalUploadID]domain.ExternalUpload, len(completions))
@@ -7290,7 +7697,38 @@ func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.
 		if !exists {
 			return store.ErrNotFound
 		}
-		if value.Status != domain.ExternalUploadUploaded || !value.ExpiresAt.After(time.Now().UTC()) {
+		pendingOwned := false
+		for _, draft := range s.drafts {
+			if draft.WorkspaceID != value.WorkspaceID || draft.UserID != value.Uploader {
+				continue
+			}
+			for _, attachment := range draft.Attachments {
+				if attachment.UploadID == completion.ID {
+					pendingOwned = true
+					break
+				}
+			}
+			if pendingOwned {
+				break
+			}
+		}
+		if !pendingOwned {
+			for id, scheduled := range s.scheduled {
+				if scheduled.WorkspaceID != value.WorkspaceID || scheduled.Author != value.Uploader || s.scheduledDelivered[id] {
+					continue
+				}
+				for _, attachment := range scheduled.FileAttachments {
+					if attachment.UploadID == completion.ID {
+						pendingOwned = true
+						break
+					}
+				}
+				if pendingOwned {
+					break
+				}
+			}
+		}
+		if value.Status != domain.ExternalUploadUploaded || (!value.ExpiresAt.After(time.Now().UTC()) && !pendingOwned) {
 			return store.ErrConflict
 		}
 		if _, exists := seenUploads[completion.ID]; exists {
@@ -7318,27 +7756,48 @@ func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.
 		s.fileShares[file.ID] = append([]domain.ConversationID(nil), channels...)
 		s.outbox = append(s.outbox, emitted[index])
 	}
+	rollback := func() {
+		for uploadID, value := range previousUploads {
+			s.externalUploads[uploadID] = value
+		}
+		for _, file := range files {
+			delete(s.files, file.ID)
+			delete(s.fileShares, file.ID)
+		}
+		s.outbox = s.outbox[:outboxLength]
+	}
+	prepared := make([]domain.Message, len(messages))
+	seenMessages := make(map[domain.MessageID]struct{}, len(messages))
+	seenTimestamps := make(map[string]struct{}, len(messages))
 	for index, message := range messages {
-		if err := s.createMessageLocked(message, messageEvents[index], ""); err != nil {
-			for uploadID, value := range previousUploads {
-				s.externalUploads[uploadID] = value
-			}
-			for _, file := range files {
-				delete(s.files, file.ID)
-				delete(s.fileShares, file.ID)
-			}
-			for _, inserted := range messages[:index] {
-				values := s.messages[inserted.Conversation]
-				for position := range values {
-					if values[position].ID == inserted.ID {
-						s.messages[inserted.Conversation] = slices.Delete(values, position, position+1)
-						break
-					}
-				}
-			}
-			s.outbox = s.outbox[:outboxLength]
+		key := ""
+		if index == 0 {
+			key = string(scheduledID)
+		}
+		if _, duplicate := seenMessages[message.ID]; duplicate {
+			rollback()
+			return store.ErrAlreadyExists
+		}
+		timestampKey := string(message.Conversation) + "\x00" + string(domain.NewStoredTime(message.CreatedAt))
+		if _, duplicate := seenTimestamps[timestampKey]; duplicate {
+			rollback()
+			return store.ErrMessageTimestampTaken
+		}
+		value, err := s.prepareMessageLocked(message, key)
+		if err != nil {
+			rollback()
 			return err
 		}
+		prepared[index] = value
+		seenMessages[message.ID] = struct{}{}
+		seenTimestamps[timestampKey] = struct{}{}
+	}
+	for index, message := range prepared {
+		key := ""
+		if index == 0 {
+			key = string(scheduledID)
+		}
+		s.commitMessageLocked(message, messageEvents[index], key)
 	}
 	return nil
 }

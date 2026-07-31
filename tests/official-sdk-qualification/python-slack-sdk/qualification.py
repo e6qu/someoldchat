@@ -418,8 +418,14 @@ assert joined["ok"] is True
 assert joined["channel"]["id"] == "C2"
 invited = client.conversations_invite(channel="C1", users="U2")
 assert invited["ok"] is True
+force_invited = client.conversations_invite(channel="C1", users="U-missing,U3", force=True)
+assert force_invited["ok"] is True
 kicked = client.conversations_kick(channel="C1", user="U2")
 assert kicked["ok"] is True
+private_invitation_channel = client.conversations_create(name="sdk-private-invitation", is_private=True)
+assert private_invitation_channel["ok"] is True
+private_invited = client.conversations_invite(channel=private_invitation_channel["channel"]["id"], users="U2")
+assert private_invited["ok"] is True
 left = client.conversations_leave(channel="C2")
 assert left["ok"] is True
 assert client.admin_conversations_convertToPrivate(channel_id="C2")["ok"] is True

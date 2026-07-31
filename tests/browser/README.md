@@ -1,6 +1,6 @@
 # Browser qualification
 
-This suite runs 34 seeded journeys in Chromium, Firefox, and WebKit and
+This suite runs 36 seeded journeys in Chromium, Firefox, and WebKit and
 exercises behavior that server-side tests cannot observe: session-authenticated
 workspace entry, public-channel preview and joining, message posting with the
 advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
@@ -17,7 +17,9 @@ drawer focus containment, contextual mutation failures, unread bookkeeping,
 live delivery, history pagination, search-result positioning, JSON-authored
 blocks, attachments, link previews, draft preservation, reviewed DM
 participant expansion with selected history, and in-place group-DM conversion
-to a private channel. The current
+to a private channel. Activity qualification also creates a real private
+channel through the Slack-compatible API, invites the signed-in member, and
+checks its durable source-linked Invitations item. The current
 Slack Later journey is exercised through focused-message `A`, private
 save/unsave state, In progress, Completed, Archived, restore, source navigation,
 and removal. It also

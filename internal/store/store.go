@@ -356,6 +356,7 @@ type Store interface {
 	PutAppDatastoreItems(context.Context, []domain.AppDatastoreItem) error
 	MergeAppDatastoreItems(context.Context, []domain.AppDatastoreItem) ([]domain.AppDatastoreItem, error)
 	GetAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, []string) ([]domain.AppDatastoreItem, error)
+	ListAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, domain.PageRequest) ([]domain.AppDatastoreItem, bool, domain.Cursor, error)
 	DeleteAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, []string) error
 	CreateAppPermissionRequest(context.Context, domain.AppPermissionRequest, events.Event) error
 	CreateView(context.Context, domain.View, events.Event) error
@@ -448,6 +449,7 @@ type Store interface {
 	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
 	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	GetAppEventCursor(context.Context, domain.AppID, string) (domain.AppEventCursor, error)
 	ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error)
 	ClaimEventsForTopic(context.Context, domain.WorkspaceID, string, string, int, time.Duration) ([]events.Record, error)
 	RenewEvents(context.Context, string, []uint64, time.Duration) error
@@ -478,6 +480,7 @@ type Store interface {
 	// the sentinel. A fixture that hands the repository two colliding instants is
 	// in the same position as one that hands it two identical identifiers.
 	CreateMessage(context.Context, domain.Message, events.Event, string) error
+	CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event) error
 	CreateEphemeralMessage(context.Context, domain.EphemeralMessage, events.Event) error
 	GetEphemeralMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
@@ -556,6 +559,7 @@ type Store interface {
 	ListScheduledMessagesForCredential(context.Context, domain.WorkspaceID, domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error)
 	ListScheduledMessageHistory(context.Context, domain.WorkspaceID, string, bool, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	EarliestScheduledMessage(context.Context, domain.WorkspaceID) (time.Time, error)
+	GetScheduledMessage(context.Context, domain.WorkspaceID, domain.ScheduledMessageID) (domain.ScheduledMessage, error)
 	UpdateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessageUpdate, time.Duration, int, events.Event) (domain.ScheduledMessage, error)
 	ClaimScheduledMessageForCredential(context.Context, domain.WorkspaceID, string, domain.ScheduledMessageID, string, time.Duration) (domain.ScheduledMessage, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID, events.Event) error
@@ -584,9 +588,11 @@ type Store interface {
 	CreateFile(context.Context, domain.File, events.Event) error
 	CreateExternalUpload(context.Context, domain.ExternalUpload) error
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)
+	PendingUploadReferenceExists(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID) (bool, error)
 	MarkExternalUploadUploaded(context.Context, domain.ExternalUploadID, time.Time) error
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
 	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, []domain.Message, []events.Event) error
+	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, domain.Message, events.Event) error
 	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
@@ -607,7 +613,11 @@ type Store interface {
 	SetRemoteFileShares(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, []domain.ConversationID, events.Event) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFile, events.Event) (domain.RemoteFile, error)
 	CreateCanvas(context.Context, domain.Canvas, events.Event) error
+	CreateCanvasWithAccess(context.Context, domain.Canvas, events.Event, domain.CanvasAccess, events.Event) error
+	CreateChannelCanvas(context.Context, domain.Canvas, events.Event, domain.ConversationID, events.Event) error
+	GetChannelCanvas(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.Canvas, error)
 	GetCanvas(context.Context, domain.WorkspaceID, domain.CanvasID) (domain.Canvas, error)
+	ListCanvases(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.CanvasPage, error)
 	UpdateCanvas(context.Context, domain.Canvas, events.Event) error
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.CanvasID, events.Event) error
 	SetCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
@@ -631,11 +641,15 @@ type Store interface {
 	// bounding it; it is a list's item count, which the product already bounds.
 	CreateListWithItems(context.Context, domain.List, events.Event, []ListItemCreation) error
 	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
+	ListLists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
 	UpdateList(context.Context, domain.List, events.Event) error
 	CreateListItem(context.Context, domain.ListItem, events.Event) error
 	GetListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID) (domain.ListItem, error)
 	ListItems(context.Context, domain.WorkspaceID, domain.ListID, domain.PageRequest, bool) (domain.ListItemPage, error)
 	UpdateListItem(context.Context, domain.ListItem, events.Event) error
+	// UpdateListItems commits every revision and event as one unit and rejects
+	// the whole batch if any submitted revision is stale.
+	UpdateListItems(context.Context, []domain.ListItem, []events.Event) error
 	DeleteListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID, events.Event) error
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.ListID, []domain.ListItemID, events.Event) error
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error

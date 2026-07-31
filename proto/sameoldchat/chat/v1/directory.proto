@@ -65,6 +65,21 @@ message WorkspaceRequest {
   string user_id = 2;
 }
 
+message AuthorizedAppWorkspacesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+  bool descending = 6;
+}
+
+message WorkspacePage {
+  repeated Workspace workspaces = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
 message AdminCreateWorkspaceRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -360,6 +375,7 @@ service DirectoryService {
   rpc Users(UsersRequest) returns (UserPage);
   rpc ConversationMembers(ConversationMembersRequest) returns (UserPage);
   rpc WorkspaceInfo(WorkspaceRequest) returns (Workspace);
+  rpc AuthorizedAppWorkspaces(AuthorizedAppWorkspacesRequest) returns (WorkspacePage);
   rpc TeamBillableInfo(BillableInfoRequest) returns (BillableInfo);
   rpc RemoveUser(RemoveUserRequest) returns (MutationResponse);
   rpc SetUserRole(SetUserRoleRequest) returns (MutationResponse);

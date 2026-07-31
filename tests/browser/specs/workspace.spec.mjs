@@ -59,16 +59,28 @@ async function postPayloadWithToken(request, token, body) {
 }
 
 async function installActivityBot(page, request) {
-  await page.goto('/app/developer/apps');
   const redirectURI = 'https://client.example/browser-oauth-callback';
   const name = `Activity bot ${Date.now()}`;
-  await page.getByRole('textbox', { name: 'App manifest (JSON)' }).fill(JSON.stringify({
+  const installed = await createAndInstallApp(page, request, {
     display_information: { name },
     oauth_config: {
       redirect_urls: [redirectURI],
-      scopes: { bot: ['channels:join', 'chat:write'] },
+      scopes: { bot: ['channels:join', 'channels:manage', 'groups:write', 'chat:write'] },
     },
-  }, null, 2));
+  }, redirectURI);
+
+  const join = await request.post('/api/conversations.join', {
+    headers: { authorization: `Bearer ${installed.token}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL },
+  });
+  const joined = await join.json();
+  expect(joined.ok, JSON.stringify(joined)).toBe(true);
+  return { ...installed, name };
+}
+
+async function createAndInstallApp(page, request, manifest, redirectURI) {
+  await page.goto('/app/developer/apps');
+  await page.getByRole('textbox', { name: 'App manifest (JSON)' }).fill(JSON.stringify(manifest, null, 2));
   await page.getByRole('button', { name: 'Create app' }).click();
   await expect(page.getByRole('heading', { name: 'Save these app credentials now' })).toBeVisible();
   const appID = new URL(page.url()).searchParams.get('app');
@@ -77,7 +89,7 @@ async function installActivityBot(page, request) {
   const clientSecret = (await page.locator('dt:text-is("Client secret") + dd code').textContent()).trim();
 
   await page.getByRole('link', { name: 'Open install flow' }).click();
-  await expect(page.getByRole('heading', { name: `Authorize ${name}` })).toBeVisible();
+  await expect(page.getByRole('heading', { name: `Authorize ${manifest.display_information.name}` })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Allow' })).toBeEnabled();
   const consent = await page.locator('form').evaluate((form) => Object.fromEntries(new FormData(form)));
   consent.decision = 'approve';
@@ -106,14 +118,7 @@ async function installActivityBot(page, request) {
   expect(installed.ok, JSON.stringify(installed)).toBe(true);
   expect(installed.access_token).toMatch(/^xoxb-/);
   expect(installed.bot_user_id).toBeTruthy();
-
-  const join = await request.post('/api/conversations.join', {
-    headers: { authorization: `Bearer ${installed.access_token}`, 'content-type': 'application/json' },
-    data: { channel: CHANNEL },
-  });
-  const joined = await join.json();
-  expect(joined.ok, JSON.stringify(joined)).toBe(true);
-  return { appID, token: installed.access_token, botUserID: installed.bot_user_id, name };
+  return { appID, token: installed.access_token, botUserID: installed.bot_user_id };
 }
 
 async function expectNoSeriousAccessibilityViolations(page) {
@@ -266,11 +271,29 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     const second = `app mention two ${Date.now()}`;
     await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${first}` });
     await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${second}` });
+    const invitationChannelName = `activity-invite-${Date.now()}`;
+    const invitationChannelResponse = await request.post('/api/conversations.create', {
+      headers: { authorization: `Bearer ${activityBot.token}`, 'content-type': 'application/json' },
+      data: { name: invitationChannelName, is_private: true },
+    });
+    const invitationChannel = await invitationChannelResponse.json();
+    expect(invitationChannel.ok, JSON.stringify(invitationChannel)).toBe(true);
+    const invitationResponse = await request.post('/api/conversations.invite', {
+      headers: { authorization: `Bearer ${activityBot.token}`, 'content-type': 'application/json' },
+      data: { channel: invitationChannel.channel.id, users: 'Udev' },
+    });
+    const invitation = await invitationResponse.json();
+    expect(invitation.ok, JSON.stringify(invitation)).toBe(true);
     await page.goto('/app/activity');
 
     await expect(page.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
     await expect(page.getByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText(selfMessage)).toHaveCount(0);
+    await page.getByRole('link', { name: 'Invitations' }).click();
+    await expect(page.getByRole('link', { name: 'Invitations' })).toHaveAttribute('aria-current', 'page');
+    const invitationRow = page.locator('[data-activity-row]', { hasText: `Added you to #${invitationChannelName}.` });
+    await expect(invitationRow).toBeVisible();
+    await expect(invitationRow.locator('[data-activity-source]')).toHaveAttribute('href', `/app?channel=${invitationChannel.channel.id}`);
     await page.getByRole('link', { name: 'Apps' }).click();
     await expect(page).toHaveURL(/kind=app/);
     await expect(page.getByRole('link', { name: 'Apps' })).toHaveAttribute('aria-current', 'page');
@@ -303,6 +326,19 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     await rows.nth(0).focus();
     await page.keyboard.press('c');
     await expect(page.locator('[data-activity-row]')).toHaveCount(1);
+
+    rows = page.locator('[data-activity-row]');
+    const focusedActivityID = await rows.nth(0).getAttribute('data-activity-id');
+    await rows.nth(0).focus();
+    const live = `app mention live ${Date.now()}`;
+    await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${live}` });
+    await expect(page.locator('[data-activity-row]')).toHaveCount(2);
+    await expect(page.locator(`[data-activity-id="${focusedActivityID}"]`)).toBeFocused();
+    const liveRow = page.locator('[data-activity-row]', { hasText: live });
+    await expect(liveRow).toBeVisible();
+    await liveRow.focus();
+    await page.keyboard.press('r');
+    await expect(liveRow).not.toHaveClass(/unread/);
 
     await page.getByRole('link', { name: 'Unread' }).click();
     await expect(page.getByRole('link', { name: 'Unread' })).toHaveAttribute('aria-current', 'page');
@@ -431,12 +467,56 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and ca
   await composer.fill(`${message} cancel`);
   await page.getByRole('button', { name: 'Schedule message' }).click();
   await page.getByLabel('Send date and time').fill(localFuture);
-  await page.locator('button[formaction^="/app/message/schedule"]').click();
+  await Promise.all([
+    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
+    page.locator('button[formaction^="/app/message/schedule"]').click(),
+  ]);
   const cancellable = page.locator('.scheduled-item', { hasText: `${message} cancel` });
   await cancellable.getByRole('button', { name: /Cancel scheduled message/ }).click();
   await expect(page.getByRole('status')).toHaveText('Scheduled message cancelled.');
   await expect(page.locator('.scheduled-item', { hasText: `${message} cancel` })).toHaveCount(0);
   await expect(page.getByText('You have no scheduled messages.')).toBeVisible();
+});
+
+test('[SCHED-01 SCHED-02 FILE-01 A11Y-01] a staged file remains private until one scheduled delivery', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  const stamp = Date.now();
+  const title = `Scheduled file ${stamp}`;
+  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
+  await page.getByLabel('Title (optional)').fill(title);
+  await page.locator('#upload-file').setInputFiles({
+    name: `scheduled-${stamp}.txt`,
+    mimeType: 'text/plain',
+    buffer: Buffer.from('scheduled browser file contents'),
+  });
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Schedule message' }).click();
+  const localFuture = await page.evaluate(() => {
+    const value = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const pad = (part) => String(part).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+  });
+  await page.getByLabel('Send date and time').fill(localFuture);
+  await Promise.all([
+    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
+    page.locator('button[formaction^="/app/message/schedule"]').click(),
+  ]);
+  await expect(page.getByRole('status')).toHaveText('Message scheduled.');
+  const scheduled = page.locator('.scheduled-item', { hasText: 'File attachment' });
+  await expect(scheduled).toContainText('1 attachment');
+  await expect(scheduled).toContainText('Attached files stay with this scheduled message.');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page.locator('.message-file', { hasText: title })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Drafts and sent' }).click();
+  await page.getByRole('link', { name: 'Scheduled', exact: true }).click();
+  await scheduled.getByRole('button', { name: 'Send now' }).click();
+  await expect(page.getByRole('status')).toHaveText('Scheduled message sent.');
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page.locator('.message-file', { hasText: title })).toBeVisible();
 });
 
 test('[DRAFT-01 DRAFT-02 A11Y-01] drafts persist on the server and Drafts & sent exposes all tabs', async ({ page, context }) => {
@@ -605,7 +685,7 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
   await signIn(context);
   await page.goto('/app');
 
-  await page.getByText('Attach a file', { exact: true }).click();
+  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
   const title = `Browser file ${Date.now()}`;
   await page.getByLabel('Title (optional)').fill(title);
   await page.locator('#upload-file').setInputFiles({
@@ -613,7 +693,8 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
     mimeType: 'text/plain',
     buffer: Buffer.from('browser file contents'),
   });
-  await page.getByRole('button', { name: 'Upload and send' }).click();
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
 
   await expect(page).toHaveURL(/\/app\?channel=Cdev/);
   const card = page.locator('.message-file', { hasText: title }).last();
@@ -639,14 +720,15 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await postThroughTheAPI(request, message);
 
   await page.goto('/app');
-  await page.getByText('Attach a file', { exact: true }).click();
+  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
   await page.getByLabel('Title (optional)').fill(fileTitle);
   await page.locator('#upload-file').setInputFiles({
     name: `${needle}.txt`,
     mimeType: 'text/plain',
     buffer: Buffer.from(`file contents for ${needle}`),
   });
-  await page.getByRole('button', { name: 'Upload and send' }).click();
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.locator('.message-file', { hasText: fileTitle })).toBeVisible();
 
   const { primary } = await slackModifiers(page);
@@ -759,6 +841,75 @@ test('[APP-01 APP-02 APP-09] developer app console creates, validates, edits, an
   await page.getByRole('button', { name: 'Delete app' }).click();
   await expect(page).toHaveURL(/\/app\/developer\/apps$/);
   await expect(page.getByText('You have not created an app yet.')).toBeVisible();
+});
+
+test('[ADMIN-04 APP-08 APP-09 WORKFLOW-02] hosted app datastores and event delivery state are inspectable from app administration', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/hosted-datastore-callback';
+  const name = `Hosted data ${Date.now()}`;
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name, description: 'Browser-qualified hosted storage' },
+    oauth_config: {
+      redirect_urls: [redirectURI],
+      scopes: { bot: ['datastore:read', 'datastore:write'] },
+    },
+    settings: { is_hosted: true, function_runtime: 'slack', socket_mode_enabled: true },
+    datastores: {
+      incidents: {
+        primary_key: 'id',
+        time_to_live_attribute: 'expires_at',
+        attributes: {
+          id: { type: 'string' },
+          title: { type: 'string' },
+          priority: { type: 'integer' },
+          expires_at: { type: 'slack#/types/timestamp' },
+        },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto(`/app/developer/apps?app=${installed.appID}`);
+  await page.getByRole('link', { name: 'Manage hosted datastores' }).click();
+  await expect(page.getByRole('heading', { name: 'incidents' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Manifest schema' })).toBeVisible();
+  await expect(page.getByText('No items matched this page.')).toBeVisible();
+
+  const item = page.getByRole('textbox', { name: 'Item (JSON)' });
+  await item.fill(JSON.stringify({ title: 'Investigate latency', id: 'INC-1', priority: 1 }, null, 2));
+  await page.getByRole('button', { name: 'Persist item' }).click();
+  await expect(page.getByRole('status')).toContainText('Item persisted');
+  await expect(page.getByText('Investigate latency')).toBeVisible();
+  await expect(page.getByText('1 matching item.')).toBeVisible();
+
+  await page.getByRole('textbox', { name: 'Expression', exact: true }).fill('contains (#title, :term)');
+  await page.getByRole('textbox', { name: 'Expression attributes (JSON)' }).fill('{"#title":"title"}');
+  await page.getByRole('textbox', { name: 'Expression values (JSON)' }).fill('{":term":"latency"}');
+  await page.getByRole('button', { name: 'Run query' }).click();
+  await expect(page.getByText('Investigate latency')).toBeVisible();
+
+  await page.getByLabel('Operation').selectOption('merge');
+  await item.fill('{"id":"INC-1","priority":2}');
+  await page.getByRole('button', { name: 'Persist item' }).click();
+  await expect(page.getByText('Investigate latency')).toBeVisible();
+  await expect(page.locator('.item pre')).toContainText('"priority":2');
+
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('status')).toContainText('Item deleted');
+  await expect(page.getByText('No items matched this page.')).toBeVisible();
+
+  await page.goto(`/app/developer/apps?app=${installed.appID}`);
+  await page.getByRole('link', { name: 'View event delivery health' }).click();
+  await expect(page.getByRole('heading', { name: 'Event delivery health' })).toBeVisible();
+  await expect(page.getByText('Queued', { exact: true })).toBeVisible();
+  await expect(page.getByText('Socket Mode', { exact: true })).toBeVisible();
+  await expect(page.getByText('Yes', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Next journal record awaiting evaluation' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.goto(`/app/developer/apps?app=${installed.appID}`);
+  await page.getByRole('button', { name: 'Delete app' }).click();
+  await expect(page).toHaveURL(/\/app\/developer\/apps$/);
 });
 
 test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls render as usable messages', async ({ page, context, request }) => {
@@ -1117,6 +1268,11 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   });
   await expect(page.locator('#upload-preview')).toContainText('preview.txt');
   await expect(page.locator('#upload-preview')).toContainText('12 B');
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.reload();
+  await expect(composer).toHaveValue(draft);
+  await expect(page.locator('#upload-preview')).toContainText('preview.txt');
+  await expect(page.locator('.side-link[aria-label*="has a draft"]').first()).toBeVisible();
 
   const sent = `draft cleared ${Date.now()}`;
   await composer.fill(sent);
@@ -1648,6 +1804,41 @@ test('[MSG-01 RESILIENCE-01] a message sent while reading older history is not l
   // The reader is taken to the window the message is actually in.
   await expect(page.locator('#timeline')).toHaveAttribute('data-live', 'true');
   await expect(page.locator('.message-text', { hasText: sent })).toHaveCount(1);
+});
+
+test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive their daily UI journeys', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  await page.getByRole('link', { name: 'Canvases' }).click();
+  await page.getByText('Create a canvas').click();
+  const canvasName = `Launch canvas ${Date.now()}`;
+  await page.getByLabel('Name').fill(canvasName);
+  await page.getByLabel('Content').fill('Initial durable content');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name: canvasName })).toBeVisible();
+  await page.getByLabel('Title').fill(`${canvasName} revised`);
+  await page.getByLabel('Content').fill('One atomic revision');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('Canvas saved')).toBeVisible();
+  await page.getByRole('link', { name: 'Canvases' }).click();
+  await expect(page.getByRole('heading', { name: `${canvasName} revised` })).toBeVisible();
+
+  await page.goto('/app/lists');
+  await page.getByText('Create a list').click();
+  const listName = `Launch list ${Date.now()}`;
+  await page.getByLabel('Name').fill(listName);
+  await page.getByLabel('Use as a to-do list').check();
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name: listName })).toBeVisible();
+  await page.getByLabel('New item').fill('Verify the persisted journey');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByText('Verify the persisted journey')).toBeVisible();
+  await page.getByRole('button', { name: 'Complete' }).click();
+  await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 // Sign-out must come last in this file. The suite runs with a single worker

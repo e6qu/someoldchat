@@ -134,6 +134,11 @@ without deleting user-owned workspace history Slack retains.
   SameOldChat—without hand-authored callback payloads standing in for delivery.
 - Browser tests discover manifest-derived commands/shortcuts, distinguish bot
   identity, exercise all response types, and inspect app administration.
+- The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey installs a
+  Socket Mode app and inspects the same payload-redacted durable delivery cursor
+  used by local and generated-gRPC workers. SQL restart tests preserve queued
+  retry time/count/reason, while the console labels unevaluated journal work
+  separately from acknowledged callbacks.
 - Live differential tests compare exact form/JSON envelopes after normalizing
   secrets, IDs, and timestamps.
 
@@ -151,7 +156,7 @@ without deleting user-owned workspace history Slack retains.
 | APP-08 | [Events API](https://docs.slack.dev/apis/events-api/) | Events API and Socket Mode require acknowledgements, retries, and scoped event delivery. |
 | APP-09 | [Installing with OAuth](https://docs.slack.dev/authentication/installing-with-oauth/) | Revocation and uninstall disable associated tokens, commands, webhooks, and bot access. |
 
-Sources checked 2026-07-29:
+Sources checked 2026-07-31:
 
 - [Guide to apps in Slack](https://slack.com/help/articles/360001537467-Guide-to-apps-in-Slack)
 - [Implementing slash commands](https://docs.slack.dev/interactivity/implementing-slash-commands/)

@@ -129,6 +129,54 @@ func (s *Store) GetAppDatastoreItems(ctx context.Context, appID domain.AppID, wo
 	return values, nil
 }
 
+func (s *Store) ListAppDatastoreItems(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, datastore string, request domain.PageRequest) ([]domain.AppDatastoreItem, bool, domain.Cursor, error) {
+	if appID == "" || workspaceID == "" || strings.TrimSpace(datastore) == "" {
+		return nil, false, "", store.InvalidArgument("invalid app datastore query")
+	}
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return nil, false, "", err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT item_id, item, updated_at FROM app_datastore_items
+		WHERE app_id = ? AND workspace_id = ? AND datastore = ? AND item_id > ?
+		ORDER BY item_id ASC LIMIT ?`, appID, workspaceID, datastore, after, request.Limit+1)
+	if err != nil {
+		return nil, false, "", classify(err)
+	}
+	defer rows.Close()
+	values := make([]domain.AppDatastoreItem, 0, request.Limit+1)
+	for rows.Next() {
+		value := domain.AppDatastoreItem{AppID: appID, WorkspaceID: workspaceID, Datastore: datastore}
+		var updated string
+		if err := rows.Scan(&value.ID, &value.Item, &updated); err != nil {
+			return nil, false, "", classify(err)
+		}
+		value.UpdatedAt, err = domain.ParseStoredTime(updated)
+		if err != nil {
+			return nil, false, "", err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, "", classify(err)
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	var next domain.Cursor
+	if hasMore {
+		next, err = domain.NewListCursor(values[len(values)-1].ID)
+		if err != nil {
+			return nil, false, "", err
+		}
+	}
+	return values, hasMore, next, nil
+}
+
 func (s *Store) DeleteAppDatastoreItems(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, datastore string, ids []string) error {
 	if appID == "" || workspaceID == "" || strings.TrimSpace(datastore) == "" || len(ids) == 0 || len(ids) > 25 {
 		return store.InvalidArgument("invalid app datastore delete")

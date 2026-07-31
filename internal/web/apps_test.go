@@ -8,9 +8,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -83,4 +85,134 @@ func TestDeveloperAppConsoleCoversCreateEditInstallTokensAndDelete(t *testing.T)
 	if _, _, err := repository.GetApp(context.Background(), domain.AppID(appID)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted app error=%v", err)
 	}
+}
+
+func TestDeveloperDatastoreConsoleUsesHostedAppPersistenceAndSlackQuerySemantics(t *testing.T) {
+	repository, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	manifest := `{"display_information":{"name":"Hosted incidents"},"oauth_config":{"scopes":{"bot":["datastore:read","datastore:write"]}},"settings":{"is_hosted":true,"function_runtime":"slack"},"datastores":{"incidents":{"primary_key":"id","time_to_live_attribute":"expires_at","attributes":{"id":{"type":"string"},"title":{"type":"string"},"priority":{"type":"integer"},"expires_at":{"type":"slack#/types/timestamp"}}}}}`
+	if err := repository.CreateApp(ctx, domain.App{
+		ID: "Ahosted", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Hosted incidents", ClientID: "hosted-client",
+		SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "Ahosted", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "hosted-client", SecretHash: "client-hash", AppID: "Ahosted"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "Ahosted", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	appPage := get(t, mux, "/app/developer/apps?app=Ahosted")
+	if appPage.Code != http.StatusOK {
+		t.Fatalf("app status=%d body=%s", appPage.Code, appPage.Body)
+	}
+	requireContains(t, "hosted app link", appPage.Body.String(), "Manage hosted datastores", "datastore=incidents")
+
+	page := get(t, mux, "/app/developer/apps/datastore?app=Ahosted&datastore=incidents")
+	if page.Code != http.StatusOK {
+		t.Fatalf("datastore status=%d body=%s", page.Code, page.Body)
+	}
+	requireContains(t, "empty datastore", page.Body.String(),
+		"Hosted datastore", "Manifest schema", "primary key", "time to live", "No items matched this page", "0 matching items",
+	)
+
+	put := postForm(t, mux, "/app/developer/apps/datastore/put", url.Values{
+		"app_id": {"Ahosted"}, "datastore": {"incidents"}, "mode": {"replace"},
+		"item": {`{"title":"Investigate latency","id":"INC-1","priority":1}`},
+	}.Encode(), false)
+	if put.Code != http.StatusSeeOther {
+		t.Fatalf("put status=%d body=%s", put.Code, put.Body)
+	}
+	persisted := get(t, mux, put.Header().Get("Location"))
+	if persisted.Code != http.StatusOK {
+		t.Fatalf("persisted status=%d body=%s", persisted.Code, persisted.Body)
+	}
+	requireContains(t, "persisted item", persisted.Body.String(), "Item persisted", "INC-1", "Investigate latency", "1 matching item")
+
+	filtered := get(t, mux, "/app/developer/apps/datastore?"+url.Values{
+		"app": {"Ahosted"}, "datastore": {"incidents"},
+		"expression": {"contains (#title, :term)"},
+		"attributes": {`{"#title":"title"}`}, "values": {`{":term":"latency"}`}, "limit": {"10"},
+	}.Encode())
+	if filtered.Code != http.StatusOK {
+		t.Fatalf("filtered status=%d body=%s", filtered.Code, filtered.Body)
+	}
+	requireContains(t, "filtered item", filtered.Body.String(), "Investigate latency", "1 matching item", "contains (#title, :term)")
+
+	merged := postForm(t, mux, "/app/developer/apps/datastore/put", url.Values{
+		"app_id": {"Ahosted"}, "datastore": {"incidents"}, "mode": {"merge"},
+		"item": {`{"id":"INC-1","priority":2}`},
+	}.Encode(), false)
+	if merged.Code != http.StatusSeeOther {
+		t.Fatalf("merge status=%d body=%s", merged.Code, merged.Body)
+	}
+	afterMerge := get(t, mux, merged.Header().Get("Location"))
+	requireContains(t, "merged item", afterMerge.Body.String(), "Investigate latency", `&#34;priority&#34;:2`)
+
+	invalid := postForm(t, mux, "/app/developer/apps/datastore/put", url.Values{
+		"app_id": {"Ahosted"}, "datastore": {"incidents"}, "mode": {"replace"},
+		"item": {`{"id":"INC-2","priority":"urgent"}`},
+	}.Encode(), false)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status=%d body=%s", invalid.Code, invalid.Body)
+	}
+	requireContains(t, "invalid schema", invalid.Body.String(), "does not match the datastore schema", `priority&#34;:&#34;urgent`)
+
+	deleted := postForm(t, mux, "/app/developer/apps/datastore/delete", url.Values{
+		"app_id": {"Ahosted"}, "datastore": {"incidents"}, "id": {"INC-1"},
+	}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body)
+	}
+	empty := get(t, mux, deleted.Header().Get("Location"))
+	requireContains(t, "deleted item", empty.Body.String(), "Item deleted", "No items matched this page", "0 matching items")
+}
+
+func TestDeveloperAppDeliveryHealthShowsDurableRetryWithoutExposingPayload(t *testing.T) {
+	repository, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	manifest := `{"display_information":{"name":"Event receiver"},"settings":{"socket_mode_enabled":true,"event_subscriptions":{"bot_events":["message.channels"]}}}`
+	if err := repository.CreateApp(ctx, domain.App{
+		ID: "Aevents", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Event receiver", ClientID: "events-client",
+		SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "Aevents", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "events-client", SecretHash: "client-hash", AppID: "Aevents"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "Aevents", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	const privatePayload = `{"secret":"must-not-render"}`
+	if err := repository.AppendEvent(ctx, events.Event{
+		ID: "Edelivery", WorkspaceID: "T1", ActorID: "U1", Topic: "message.created", Payload: privatePayload, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, _, _, found, err := repository.ClaimAppEvent(ctx, "Aevents", "socket", "test-worker", time.Minute)
+	if err != nil || !found {
+		t.Fatalf("claim=%+v found=%v err=%v", claimed, found, err)
+	}
+	if err := repository.ReleaseAppEvent(ctx, "Aevents", "socket", "test-worker", claimed.Sequence, "connection_closed", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	appPage := get(t, mux, "/app/developer/apps?app=Aevents")
+	requireContains(t, "delivery link", appPage.Body.String(), "View event delivery health", "/app/developer/apps/delivery?app=Aevents")
+	page := get(t, mux, "/app/developer/apps/delivery?app=Aevents")
+	if page.Code != http.StatusOK {
+		t.Fatalf("delivery status=%d body=%s", page.Code, page.Body)
+	}
+	requireContains(t, "durable retry", page.Body.String(),
+		"Event delivery health", "Retry scheduled", "Socket Mode", "connection_closed",
+		"Next journal record awaiting evaluation", "message.created",
+	)
+	requireMissing(t, "delivery payload redaction", page.Body.String(), privatePayload, "must-not-render", "test-worker")
 }

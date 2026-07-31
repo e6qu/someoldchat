@@ -272,6 +272,19 @@ type PostWithBlocksRequest struct {
 	ThreadTimestamp string                 `protobuf:"bytes,6,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
 	IdempotencyKey  string                 `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	AppId           string                 `protobuf:"bytes,9,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Metadata        string                 `protobuf:"bytes,10,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	MarkdownText    bool                   `protobuf:"varint,11,opt,name=markdown_text,json=markdownText,proto3" json:"markdown_text,omitempty"`
+	ReplyBroadcast  bool                   `protobuf:"varint,12,opt,name=reply_broadcast,json=replyBroadcast,proto3" json:"reply_broadcast,omitempty"`
+	Parse           string                 `protobuf:"bytes,13,opt,name=parse,proto3" json:"parse,omitempty"`
+	MrkdwnDisabled  bool                   `protobuf:"varint,14,opt,name=mrkdwn_disabled,json=mrkdwnDisabled,proto3" json:"mrkdwn_disabled,omitempty"`
+	LinkNames       bool                   `protobuf:"varint,15,opt,name=link_names,json=linkNames,proto3" json:"link_names,omitempty"`
+	UnfurlLinks     bool                   `protobuf:"varint,16,opt,name=unfurl_links,json=unfurlLinks,proto3" json:"unfurl_links,omitempty"`
+	UnfurlLinksSet  bool                   `protobuf:"varint,17,opt,name=unfurl_links_set,json=unfurlLinksSet,proto3" json:"unfurl_links_set,omitempty"`
+	UnfurlMedia     bool                   `protobuf:"varint,18,opt,name=unfurl_media,json=unfurlMedia,proto3" json:"unfurl_media,omitempty"`
+	UnfurlMediaSet  bool                   `protobuf:"varint,19,opt,name=unfurl_media_set,json=unfurlMediaSet,proto3" json:"unfurl_media_set,omitempty"`
+	Username        string                 `protobuf:"bytes,20,opt,name=username,proto3" json:"username,omitempty"`
+	IconEmoji       string                 `protobuf:"bytes,21,opt,name=icon_emoji,json=iconEmoji,proto3" json:"icon_emoji,omitempty"`
+	IconUrl         string                 `protobuf:"bytes,22,opt,name=icon_url,json=iconUrl,proto3" json:"icon_url,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -365,6 +378,97 @@ func (x *PostWithBlocksRequest) GetIdempotencyKey() string {
 func (x *PostWithBlocksRequest) GetAppId() string {
 	if x != nil {
 		return x.AppId
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetMetadata() string {
+	if x != nil {
+		return x.Metadata
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetMarkdownText() bool {
+	if x != nil {
+		return x.MarkdownText
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetReplyBroadcast() bool {
+	if x != nil {
+		return x.ReplyBroadcast
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetParse() string {
+	if x != nil {
+		return x.Parse
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetMrkdwnDisabled() bool {
+	if x != nil {
+		return x.MrkdwnDisabled
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetLinkNames() bool {
+	if x != nil {
+		return x.LinkNames
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetUnfurlLinks() bool {
+	if x != nil {
+		return x.UnfurlLinks
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetUnfurlLinksSet() bool {
+	if x != nil {
+		return x.UnfurlLinksSet
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetUnfurlMedia() bool {
+	if x != nil {
+		return x.UnfurlMedia
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetUnfurlMediaSet() bool {
+	if x != nil {
+		return x.UnfurlMediaSet
+	}
+	return false
+}
+
+func (x *PostWithBlocksRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetIconEmoji() string {
+	if x != nil {
+		return x.IconEmoji
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetIconUrl() string {
+	if x != nil {
+		return x.IconUrl
 	}
 	return ""
 }
@@ -2593,7 +2697,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12)\n" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
-	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\xb5\x02\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\xed\x05\n" +
 	"\x15PostWithBlocksRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -2603,7 +2707,23 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\vattachments\x18\b \x01(\tR\vattachments\x12)\n" +
 	"\x10thread_timestamp\x18\x06 \x01(\tR\x0fthreadTimestamp\x12'\n" +
 	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\x12\x15\n" +
-	"\x06app_id\x18\t \x01(\tR\x05appId\"\xbb\x01\n" +
+	"\x06app_id\x18\t \x01(\tR\x05appId\x12\x1a\n" +
+	"\bmetadata\x18\n" +
+	" \x01(\tR\bmetadata\x12#\n" +
+	"\rmarkdown_text\x18\v \x01(\bR\fmarkdownText\x12'\n" +
+	"\x0freply_broadcast\x18\f \x01(\bR\x0ereplyBroadcast\x12\x14\n" +
+	"\x05parse\x18\r \x01(\tR\x05parse\x12'\n" +
+	"\x0fmrkdwn_disabled\x18\x0e \x01(\bR\x0emrkdwnDisabled\x12\x1d\n" +
+	"\n" +
+	"link_names\x18\x0f \x01(\bR\tlinkNames\x12!\n" +
+	"\funfurl_links\x18\x10 \x01(\bR\vunfurlLinks\x12(\n" +
+	"\x10unfurl_links_set\x18\x11 \x01(\bR\x0eunfurlLinksSet\x12!\n" +
+	"\funfurl_media\x18\x12 \x01(\bR\vunfurlMedia\x12(\n" +
+	"\x10unfurl_media_set\x18\x13 \x01(\bR\x0eunfurlMediaSet\x12\x1a\n" +
+	"\busername\x18\x14 \x01(\tR\busername\x12\x1d\n" +
+	"\n" +
+	"icon_emoji\x18\x15 \x01(\tR\ticonEmoji\x12\x19\n" +
+	"\bicon_url\x18\x16 \x01(\tR\aiconUrl\"\xbb\x01\n" +
 	"\x10ShareFileRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +

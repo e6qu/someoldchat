@@ -199,6 +199,68 @@ func TestBothCompositionsNameTheSameFailure(t *testing.T) {
 	}
 }
 
+func TestConversationInviteAtomicAndForcedResultsMatchAcrossCompositions(t *testing.T) {
+	seed := func(t *testing.T, target *memory.Store) {
+		seedParityWorkspace(t, target)
+		for _, user := range []domain.User{
+			{ID: "U2", WorkspaceID: "T1", Name: "bob"},
+			{ID: "U3", WorkspaceID: "T1", Name: "carol"},
+		} {
+			if err := target.SeedUser(user); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := target.SeedConversationMember("C1", "U2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compositions := parityCompositions(t, seed)
+	defaultBodies := make(map[string]string, len(compositions))
+	for _, composition := range compositions {
+		response := parityRawCall(t, composition.handler, "/api/conversations.invite", "channel=C1&users=U2,U-missing,U3")
+		defaultBodies[composition.name] = response
+		for _, fragment := range []string{`"ok":false`, `"error":"already_in_channel"`, `"error":"user_not_found"`} {
+			if !strings.Contains(response, fragment) {
+				t.Errorf("%s default body=%s missing %s", composition.name, response, fragment)
+			}
+		}
+		if member, err := composition.store.IsConversationMember(context.Background(), "C1", "U3"); err != nil || member {
+			t.Errorf("%s default U3 member=%v err=%v", composition.name, member, err)
+		}
+	}
+	if defaultBodies["local"] != defaultBodies["distributed"] {
+		t.Errorf("default invitation compositions disagree: local=%s distributed=%s", defaultBodies["local"], defaultBodies["distributed"])
+	}
+
+	forcedBodies := make(map[string]string, len(compositions))
+	for _, composition := range compositions {
+		response := parityRawCall(t, composition.handler, "/api/conversations.invite", "channel=C1&users=U-missing,U3&force=true")
+		forcedBodies[composition.name] = response
+		if !strings.Contains(response, `"ok":true`) {
+			t.Errorf("%s forced body=%s", composition.name, response)
+		}
+		if member, err := composition.store.IsConversationMember(context.Background(), "C1", "U3"); err != nil || !member {
+			t.Errorf("%s forced U3 member=%v err=%v", composition.name, member, err)
+		}
+	}
+	if forcedBodies["local"] != forcedBodies["distributed"] {
+		t.Errorf("forced invitation compositions disagree: local=%s distributed=%s", forcedBodies["local"], forcedBodies["distributed"])
+	}
+}
+
+func parityRawCall(t *testing.T, handler http.Handler, path, body string) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("POST %s: status=%d body=%s", path, response.Code, response.Body)
+	}
+	return response.Body.String()
+}
+
 func postParityMessage(t *testing.T, handler http.Handler, text string) string {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text="+text))

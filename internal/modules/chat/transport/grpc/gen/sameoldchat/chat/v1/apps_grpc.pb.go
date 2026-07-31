@@ -19,22 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AppsService_IssueAppConfigurationToken_FullMethodName  = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
-	AppsService_RotateAppConfigurationToken_FullMethodName = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
-	AppsService_ValidateAppManifest_FullMethodName         = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
-	AppsService_CreateAppFromManifest_FullMethodName       = "/sameoldchat.chat.v1.AppsService/CreateAppFromManifest"
-	AppsService_ExportAppManifest_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ExportAppManifest"
-	AppsService_UpdateAppFromManifest_FullMethodName       = "/sameoldchat.chat.v1.AppsService/UpdateAppFromManifest"
-	AppsService_DeleteDeveloperApp_FullMethodName          = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
-	AppsService_ListDeveloperApps_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
-	AppsService_ListWorkspaceApps_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
-	AppsService_PutAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
-	AppsService_GetAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
-	AppsService_DeleteAppDatastoreItems_FullMethodName     = "/sameoldchat.chat.v1.AppsService/DeleteAppDatastoreItems"
-	AppsService_GetDeveloperApp_FullMethodName             = "/sameoldchat.chat.v1.AppsService/GetDeveloperApp"
-	AppsService_IssueDeveloperAppToken_FullMethodName      = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
-	AppsService_InspectOAuthAuthorization_FullMethodName   = "/sameoldchat.chat.v1.AppsService/InspectOAuthAuthorization"
-	AppsService_AuthorizeOAuth_FullMethodName              = "/sameoldchat.chat.v1.AppsService/AuthorizeOAuth"
+	AppsService_IssueAppConfigurationToken_FullMethodName    = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
+	AppsService_RotateAppConfigurationToken_FullMethodName   = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
+	AppsService_ValidateAppManifest_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
+	AppsService_CreateAppFromManifest_FullMethodName         = "/sameoldchat.chat.v1.AppsService/CreateAppFromManifest"
+	AppsService_ExportAppManifest_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ExportAppManifest"
+	AppsService_UpdateAppFromManifest_FullMethodName         = "/sameoldchat.chat.v1.AppsService/UpdateAppFromManifest"
+	AppsService_DeleteDeveloperApp_FullMethodName            = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
+	AppsService_ListDeveloperApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
+	AppsService_ListWorkspaceApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
+	AppsService_PutAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
+	AppsService_GetAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
+	AppsService_QueryAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
+	AppsService_CountAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/CountAppDatastoreItems"
+	AppsService_DeleteAppDatastoreItems_FullMethodName       = "/sameoldchat.chat.v1.AppsService/DeleteAppDatastoreItems"
+	AppsService_GetDeveloperApp_FullMethodName               = "/sameoldchat.chat.v1.AppsService/GetDeveloperApp"
+	AppsService_GetDeveloperAppDeliveryHealth_FullMethodName = "/sameoldchat.chat.v1.AppsService/GetDeveloperAppDeliveryHealth"
+	AppsService_IssueDeveloperAppToken_FullMethodName        = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
+	AppsService_InspectOAuthAuthorization_FullMethodName     = "/sameoldchat.chat.v1.AppsService/InspectOAuthAuthorization"
+	AppsService_AuthorizeOAuth_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AuthorizeOAuth"
 )
 
 // AppsServiceClient is the client API for AppsService service.
@@ -52,8 +55,11 @@ type AppsServiceClient interface {
 	ListWorkspaceApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*InstalledAppListResponse, error)
 	PutAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
+	QueryAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
+	CountAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	DeleteAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	GetDeveloperApp(ctx context.Context, in *AppGetRequest, opts ...grpc.CallOption) (*AppExportResponse, error)
+	GetDeveloperAppDeliveryHealth(ctx context.Context, in *AppGetRequest, opts ...grpc.CallOption) (*AppDeliveryHealth, error)
 	IssueDeveloperAppToken(ctx context.Context, in *AppTokenIssueRequest, opts ...grpc.CallOption) (*AppTokenCredentials, error)
 	InspectOAuthAuthorization(ctx context.Context, in *OAuthAuthorizationRequest, opts ...grpc.CallOption) (*OAuthAuthorization, error)
 	AuthorizeOAuth(ctx context.Context, in *OAuthAuthorizationRequest, opts ...grpc.CallOption) (*OAuthAuthorization, error)
@@ -177,6 +183,26 @@ func (c *appsServiceClient) GetAppDatastoreItems(ctx context.Context, in *AppDat
 	return out, nil
 }
 
+func (c *appsServiceClient) QueryAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppDatastoreResponse)
+	err := c.cc.Invoke(ctx, AppsService_QueryAppDatastoreItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) CountAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppDatastoreResponse)
+	err := c.cc.Invoke(ctx, AppsService_CountAppDatastoreItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *appsServiceClient) DeleteAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppMutationResponse)
@@ -191,6 +217,16 @@ func (c *appsServiceClient) GetDeveloperApp(ctx context.Context, in *AppGetReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppExportResponse)
 	err := c.cc.Invoke(ctx, AppsService_GetDeveloperApp_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) GetDeveloperAppDeliveryHealth(ctx context.Context, in *AppGetRequest, opts ...grpc.CallOption) (*AppDeliveryHealth, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppDeliveryHealth)
+	err := c.cc.Invoke(ctx, AppsService_GetDeveloperAppDeliveryHealth_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -242,8 +278,11 @@ type AppsServiceServer interface {
 	ListWorkspaceApps(context.Context, *AppListRequest) (*InstalledAppListResponse, error)
 	PutAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
+	QueryAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
+	CountAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	DeleteAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppMutationResponse, error)
 	GetDeveloperApp(context.Context, *AppGetRequest) (*AppExportResponse, error)
+	GetDeveloperAppDeliveryHealth(context.Context, *AppGetRequest) (*AppDeliveryHealth, error)
 	IssueDeveloperAppToken(context.Context, *AppTokenIssueRequest) (*AppTokenCredentials, error)
 	InspectOAuthAuthorization(context.Context, *OAuthAuthorizationRequest) (*OAuthAuthorization, error)
 	AuthorizeOAuth(context.Context, *OAuthAuthorizationRequest) (*OAuthAuthorization, error)
@@ -289,11 +328,20 @@ func (UnimplementedAppsServiceServer) PutAppDatastoreItems(context.Context, *App
 func (UnimplementedAppsServiceServer) GetAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAppDatastoreItems not implemented")
 }
+func (UnimplementedAppsServiceServer) QueryAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method QueryAppDatastoreItems not implemented")
+}
+func (UnimplementedAppsServiceServer) CountAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CountAppDatastoreItems not implemented")
+}
 func (UnimplementedAppsServiceServer) DeleteAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAppDatastoreItems not implemented")
 }
 func (UnimplementedAppsServiceServer) GetDeveloperApp(context.Context, *AppGetRequest) (*AppExportResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDeveloperApp not implemented")
+}
+func (UnimplementedAppsServiceServer) GetDeveloperAppDeliveryHealth(context.Context, *AppGetRequest) (*AppDeliveryHealth, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDeveloperAppDeliveryHealth not implemented")
 }
 func (UnimplementedAppsServiceServer) IssueDeveloperAppToken(context.Context, *AppTokenIssueRequest) (*AppTokenCredentials, error) {
 	return nil, status.Error(codes.Unimplemented, "method IssueDeveloperAppToken not implemented")
@@ -522,6 +570,42 @@ func _AppsService_GetAppDatastoreItems_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AppsService_QueryAppDatastoreItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppDatastoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).QueryAppDatastoreItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_QueryAppDatastoreItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).QueryAppDatastoreItems(ctx, req.(*AppDatastoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_CountAppDatastoreItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppDatastoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).CountAppDatastoreItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_CountAppDatastoreItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).CountAppDatastoreItems(ctx, req.(*AppDatastoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AppsService_DeleteAppDatastoreItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AppDatastoreRequest)
 	if err := dec(in); err != nil {
@@ -554,6 +638,24 @@ func _AppsService_GetDeveloperApp_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AppsServiceServer).GetDeveloperApp(ctx, req.(*AppGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_GetDeveloperAppDeliveryHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).GetDeveloperAppDeliveryHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_GetDeveloperAppDeliveryHealth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).GetDeveloperAppDeliveryHealth(ctx, req.(*AppGetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -664,12 +766,24 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AppsService_GetAppDatastoreItems_Handler,
 		},
 		{
+			MethodName: "QueryAppDatastoreItems",
+			Handler:    _AppsService_QueryAppDatastoreItems_Handler,
+		},
+		{
+			MethodName: "CountAppDatastoreItems",
+			Handler:    _AppsService_CountAppDatastoreItems_Handler,
+		},
+		{
 			MethodName: "DeleteAppDatastoreItems",
 			Handler:    _AppsService_DeleteAppDatastoreItems_Handler,
 		},
 		{
 			MethodName: "GetDeveloperApp",
 			Handler:    _AppsService_GetDeveloperApp_Handler,
+		},
+		{
+			MethodName: "GetDeveloperAppDeliveryHealth",
+			Handler:    _AppsService_GetDeveloperAppDeliveryHealth_Handler,
 		},
 		{
 			MethodName: "IssueDeveloperAppToken",

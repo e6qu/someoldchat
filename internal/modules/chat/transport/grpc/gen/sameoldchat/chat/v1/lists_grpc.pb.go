@@ -20,6 +20,9 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ListsService_CreateList_FullMethodName        = "/sameoldchat.chat.v1.ListsService/CreateList"
+	ListsService_GetList_FullMethodName           = "/sameoldchat.chat.v1.ListsService/GetList"
+	ListsService_GetListAccess_FullMethodName     = "/sameoldchat.chat.v1.ListsService/GetListAccess"
+	ListsService_ListLists_FullMethodName         = "/sameoldchat.chat.v1.ListsService/ListLists"
 	ListsService_UpdateList_FullMethodName        = "/sameoldchat.chat.v1.ListsService/UpdateList"
 	ListsService_CreateListItem_FullMethodName    = "/sameoldchat.chat.v1.ListsService/CreateListItem"
 	ListsService_GetListItem_FullMethodName       = "/sameoldchat.chat.v1.ListsService/GetListItem"
@@ -38,6 +41,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ListsServiceClient interface {
 	CreateList(ctx context.Context, in *CreateListRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	GetList(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	GetListAccess(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListAccessResponse, error)
+	ListLists(ctx context.Context, in *ListsRequest, opts ...grpc.CallOption) (*ListPage, error)
 	UpdateList(ctx context.Context, in *UpdateListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	CreateListItem(ctx context.Context, in *CreateListItemRequest, opts ...grpc.CallOption) (*ListItemResponse, error)
 	GetListItem(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListItemResponse, error)
@@ -63,6 +69,36 @@ func (c *listsServiceClient) CreateList(ctx context.Context, in *CreateListReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListResponse)
 	err := c.cc.Invoke(ctx, ListsService_CreateList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) GetList(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListResponse)
+	err := c.cc.Invoke(ctx, ListsService_GetList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) GetListAccess(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAccessResponse)
+	err := c.cc.Invoke(ctx, ListsService_GetListAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) ListLists(ctx context.Context, in *ListsRequest, opts ...grpc.CallOption) (*ListPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPage)
+	err := c.cc.Invoke(ctx, ListsService_ListLists_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +220,9 @@ func (c *listsServiceClient) GetListDownload(ctx context.Context, in *ListDownlo
 // for forward compatibility.
 type ListsServiceServer interface {
 	CreateList(context.Context, *CreateListRequest) (*ListResponse, error)
+	GetList(context.Context, *ListItemRequest) (*ListResponse, error)
+	GetListAccess(context.Context, *ListItemRequest) (*ListAccessResponse, error)
+	ListLists(context.Context, *ListsRequest) (*ListPage, error)
 	UpdateList(context.Context, *UpdateListRequest) (*ListResponse, error)
 	CreateListItem(context.Context, *CreateListItemRequest) (*ListItemResponse, error)
 	GetListItem(context.Context, *ListItemRequest) (*ListItemResponse, error)
@@ -206,6 +245,15 @@ type UnimplementedListsServiceServer struct{}
 
 func (UnimplementedListsServiceServer) CreateList(context.Context, *CreateListRequest) (*ListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateList not implemented")
+}
+func (UnimplementedListsServiceServer) GetList(context.Context, *ListItemRequest) (*ListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetList not implemented")
+}
+func (UnimplementedListsServiceServer) GetListAccess(context.Context, *ListItemRequest) (*ListAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetListAccess not implemented")
+}
+func (UnimplementedListsServiceServer) ListLists(context.Context, *ListsRequest) (*ListPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLists not implemented")
 }
 func (UnimplementedListsServiceServer) UpdateList(context.Context, *UpdateListRequest) (*ListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateList not implemented")
@@ -274,6 +322,60 @@ func _ListsService_CreateList_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ListsServiceServer).CreateList(ctx, req.(*CreateListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_GetList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).GetList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_GetList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).GetList(ctx, req.(*ListItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_GetListAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).GetListAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_GetListAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).GetListAccess(ctx, req.(*ListItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_ListLists_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).ListLists(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_ListLists_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).ListLists(ctx, req.(*ListsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -486,6 +588,18 @@ var ListsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateList",
 			Handler:    _ListsService_CreateList_Handler,
+		},
+		{
+			MethodName: "GetList",
+			Handler:    _ListsService_GetList_Handler,
+		},
+		{
+			MethodName: "GetListAccess",
+			Handler:    _ListsService_GetListAccess_Handler,
+		},
+		{
+			MethodName: "ListLists",
+			Handler:    _ListsService_ListLists_Handler,
 		},
 		{
 			MethodName: "UpdateList",

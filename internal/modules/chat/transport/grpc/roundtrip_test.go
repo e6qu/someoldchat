@@ -180,6 +180,7 @@ func conversionCases() map[string]conversionCase {
 	return map[string]conversionCase{
 		"User":              {sample: &domain.User{}, through: through(encodeProtoUser, decodeProtoUser)},
 		"Workspace":         {sample: &domain.Workspace{}, through: through(encodeProtoWorkspace, decodeProtoWorkspace)},
+		"WorkspacePage":     {sample: &domain.WorkspacePage{}, through: through(encodeProtoWorkspacePage, decodeProtoWorkspacePage)},
 		"Conversation":      {sample: &domain.Conversation{}, through: through(encodeProtoConversation, decodeProtoConversation)},
 		"ConversationPage":  {sample: &domain.ConversationPage{}, through: through(encodeProtoConversationPage, decodeProtoConversationPage)},
 		"ConversationPrefs": {sample: &domain.ConversationPrefs{}, through: through(encodeProtoConversationPrefs, decodeProtoConversationPrefs)},
@@ -314,16 +315,35 @@ func conversionCases() map[string]conversionCase {
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
 		"ScheduledStatus":  {sample: &domain.ScheduledStatus{}, through: through(encodeProtoScheduledStatus, decodeProtoScheduledStatus)},
 		"Draft":            {sample: &domain.Draft{}, through: through(encodeProtoDraft, decodeProtoDraft)},
-		"DoNotDisturb":     {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
-		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
-		"Call":             {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
-		"Canvas":           {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
-		"List":             {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
-		"ListItem":         {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
-		"ListItemPage":     {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
-		"ListDownload":     {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
-		"AccessLog":        {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
-		"View":             {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
+		"DraftAttachments": {
+			sample: &draftAttachmentsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message) {
+				value := filled.(*draftAttachmentsRoundTrip)
+				wire := &chatv1.Draft{Attachments: encodeProtoDraftAttachments(value.Attachments)}
+				return &draftAttachmentsRoundTrip{Attachments: decodeProtoDraftAttachments(wire.GetAttachments())}, wire
+			},
+		},
+		"AppDeliveryHealth": {
+			sample: &domain.AppDeliveryHealth{},
+			prepare: func(filled any) {
+				health := filled.(*domain.AppDeliveryHealth)
+				health.Surface = "http"
+				health.Configured = true
+			},
+			through: through(encodeProtoAppDeliveryHealth, decodeProtoAppDeliveryHealth),
+		},
+		"DoNotDisturb": {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
+		"UserGroup":    {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
+		"Call":         {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
+		"Canvas":       {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
+		"CanvasPage":   {sample: &domain.CanvasPage{}, through: through(encodeProtoCanvasPage, decodeProtoCanvasPage)},
+		"List":         {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
+		"ListPage":     {sample: &domain.ListPage{}, through: through(encodeProtoListPage, decodeProtoListPage)},
+		"ListItem":     {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
+		"ListItemPage": {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
+		"ListDownload": {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
+		"AccessLog":    {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
+		"View":         {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
 		"AppHome": {
 			sample: &appHomeRoundTrip{},
 			through: through(
@@ -439,6 +459,10 @@ type reactionPage struct {
 	Reactions  []domain.Reaction
 	NextCursor domain.Cursor
 	HasMore    bool
+}
+
+type draftAttachmentsRoundTrip struct {
+	Attachments []domain.DraftAttachment
 }
 
 // TestEveryConverterPairIsExercisedByTheProperty derives the case list instead

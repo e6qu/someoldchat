@@ -28,6 +28,7 @@ type Emoji struct {
 	Category    string   `json:"c"`
 	Aliases     []string `json:"a"`
 	SortOrder   int      `json:"o"`
+	SkinTones   bool     `json:"s"`
 }
 
 type Category struct {
@@ -167,4 +168,39 @@ func Unicode(emoji Emoji) string {
 		value.WriteRune(rune(codePoint))
 	}
 	return value.String()
+}
+
+// ParseReactionName accepts Slack's documented reaction modifier syntax,
+// `<base>::skin-tone-<2..6>`, and rejects modifiers for emoji that do not
+// declare skin variations in the pinned iamcal source.
+func ParseReactionName(value string) (Emoji, int, bool) {
+	value = strings.ToLower(strings.Trim(strings.TrimSpace(value), ":"))
+	base, modifier, hasModifier := strings.Cut(value, "::skin-tone-")
+	emoji, ok := Lookup(base)
+	if !ok {
+		return Emoji{}, 0, false
+	}
+	if !hasModifier {
+		return emoji, 0, true
+	}
+	tone, err := strconv.Atoi(modifier)
+	if err != nil || tone < 2 || tone > 6 || !emoji.SkinTones {
+		return Emoji{}, 0, false
+	}
+	return emoji, tone, true
+}
+
+func ReactionUnicode(value string) (string, bool) {
+	emoji, tone, ok := ParseReactionName(value)
+	if !ok {
+		return "", false
+	}
+	rendered := Unicode(emoji)
+	if rendered == "" {
+		return "", false
+	}
+	if tone != 0 {
+		rendered += string(rune(0x1F3FB + tone - 2))
+	}
+	return rendered, true
 }

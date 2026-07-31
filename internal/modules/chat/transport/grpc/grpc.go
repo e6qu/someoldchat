@@ -993,6 +993,30 @@ func (r Remote) CreateList(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return decodeProtoList(out.GetList())
 }
 
+func (r Remote) List(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) (domain.List, error) {
+	out, err := r.lists.GetList(ctx, &chatv1.ListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id)})
+	if err != nil {
+		return domain.List{}, err
+	}
+	return decodeProtoList(out.GetList())
+}
+
+func (r Remote) ListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) (domain.ListAccess, error) {
+	out, err := r.lists.GetListAccess(ctx, &chatv1.ListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id)})
+	if err != nil {
+		return domain.ListAccess{}, err
+	}
+	return domain.ListAccess{ListID: domain.ListID(out.GetListId()), EntityType: out.GetEntityType(), EntityID: out.GetEntityId(), Access: out.GetAccess()}, nil
+}
+
+func (r Remote) Lists(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {
+	out, err := r.lists.ListLists(ctx, &chatv1.ListsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending})
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	return decodeProtoListPage(out)
+}
+
 func (r Remote) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, name, descriptionBlocks string, todoMode, todoModeSet bool) (domain.List, error) {
 	out, err := r.lists.UpdateList(ctx, &chatv1.UpdateListRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id), Name: name, DescriptionBlocks: descriptionBlocks, TodoMode: todoMode, TodoModeSet: todoModeSet})
 	if err != nil {
@@ -1187,6 +1211,46 @@ func (r Remote) CreateCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.Canvas{}, err
 	}
 	return decodeProtoCanvas(out)
+}
+
+func (r Remote) CreateConversationCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channelID domain.ConversationID, title, documentContent string) (domain.Canvas, error) {
+	out, err := r.canvases.CreateConversationCanvas(ctx, &chatv1.CreateCanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Title: title, DocumentContent: documentContent, ChannelId: string(channelID)})
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	return decodeProtoCanvas(out)
+}
+
+func (r Remote) ConversationCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channelID domain.ConversationID) (domain.Canvas, error) {
+	out, err := r.canvases.ConversationCanvas(ctx, &chatv1.CreateCanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channelID)})
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	return decodeProtoCanvas(out)
+}
+
+func (r Remote) Canvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) (domain.Canvas, error) {
+	out, err := r.canvases.GetCanvas(ctx, &chatv1.CanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id)})
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	return decodeProtoCanvas(out)
+}
+
+func (r Remote) CanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) (domain.CanvasAccess, error) {
+	out, err := r.canvases.GetCanvasAccess(ctx, &chatv1.CanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id)})
+	if err != nil {
+		return domain.CanvasAccess{}, err
+	}
+	return domain.CanvasAccess{CanvasID: domain.CanvasID(out.GetCanvasId()), EntityType: out.GetEntityType(), EntityID: out.GetEntityId(), Access: out.GetAccess()}, nil
+}
+
+func (r Remote) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.CanvasPage, error) {
+	out, err := r.canvases.ListCanvases(ctx, &chatv1.CanvasesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending})
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	return decodeProtoCanvasPage(out)
 }
 
 func (r Remote) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
@@ -1961,6 +2025,17 @@ func (r Remote) WorkspaceInfo(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Workspace{}, err
 	}
 	return decodeProtoWorkspace(out)
+}
+
+func (r Remote) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, request domain.PageRequest) (domain.WorkspacePage, error) {
+	out, err := r.directory.AuthorizedAppWorkspaces(ctx, &chatv1.AuthorizedAppWorkspacesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending,
+	})
+	if err != nil {
+		return domain.WorkspacePage{}, err
+	}
+	return decodeProtoWorkspacePage(out)
 }
 
 func (r Remote) AdminCreateWorkspace(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, domainName, name, description string, discoverability domain.WorkspaceDiscoverability) (domain.Workspace, error) {
@@ -3091,6 +3166,16 @@ func (r Remote) SendScheduledMessageNow(ctx context.Context, workspaceID domain.
 	return decodeProtoMessage(out)
 }
 
+func (r Remote) PostScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, id domain.ScheduledMessageID) (domain.Message, error) {
+	out, err := r.scheduled.PostScheduledMessage(ctx, &chatv1.PostScheduledMessageRequest{
+		WorkspaceId: string(workspaceID), ScheduledMessageId: string(id),
+	})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
 func (r Remote) DeleteScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID) error {
 	return r.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, grpcScheduledCredential(workspaceID, userID), channel, id)
 }
@@ -3107,9 +3192,13 @@ func (r Remote) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 }
 
 func (r Remote) SaveDraft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string) (domain.Draft, error) {
+	return r.SaveDraftWithAttachments(ctx, workspaceID, userID, conversation, thread, text, nil)
+}
+
+func (r Remote) SaveDraftWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string, attachments []domain.DraftAttachment) (domain.Draft, error) {
 	out, err := r.scheduled.SaveDraft(ctx, &chatv1.DraftRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversation),
-		ThreadTs: string(thread), Text: text,
+		ThreadTs: string(thread), Text: text, Attachments: encodeProtoDraftAttachments(attachments),
 	})
 	if err != nil {
 		return domain.Draft{}, err
@@ -3328,6 +3417,48 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 
 func (s *Server) CreateCanvas(ctx context.Context, input *chatv1.CreateCanvasRequest) (*chatv1.Canvas, error) {
 	return s.createCanvasProto(ctx, input)
+}
+
+func (s *Server) CreateConversationCanvas(ctx context.Context, input *chatv1.CreateCanvasRequest) (*chatv1.Canvas, error) {
+	canvas, err := s.implementation.CreateConversationCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), input.GetTitle(), input.GetDocumentContent())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvas(canvas), nil
+}
+
+func (s *Server) ConversationCanvas(ctx context.Context, input *chatv1.CreateCanvasRequest) (*chatv1.Canvas, error) {
+	canvas, err := s.implementation.ConversationCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvas(canvas), nil
+}
+
+func (s *Server) GetCanvas(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.Canvas, error) {
+	value, err := s.implementation.Canvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvas(value), nil
+}
+
+func (s *Server) GetCanvasAccess(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.CanvasAccessResponse, error) {
+	value, err := s.implementation.CanvasAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.CanvasAccessResponse{CanvasId: string(value.CanvasID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}, nil
+}
+
+func (s *Server) ListCanvases(ctx context.Context, input *chatv1.CanvasesRequest) (*chatv1.CanvasPage, error) {
+	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	request.Descending = input.GetDescending()
+	value, err := s.implementation.Canvases(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvasPage(value), nil
 }
 
 func (s *Server) EditCanvas(ctx context.Context, input *chatv1.EditCanvasRequest) (*chatv1.MutationResponse, error) {
@@ -4154,6 +4285,17 @@ func (s *Server) WorkspaceInfo(ctx context.Context, input *chatv1.WorkspaceReque
 	return s.workspaceInfoProto(ctx, input)
 }
 
+func (s *Server) AuthorizedAppWorkspaces(ctx context.Context, input *chatv1.AuthorizedAppWorkspacesRequest) (*chatv1.WorkspacePage, error) {
+	page, err := s.implementation.AuthorizedAppWorkspaces(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), domain.PageRequest{Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor()), Descending: input.GetDescending()},
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspacePage(page), nil
+}
+
 func (s *Server) AdminCreateWorkspace(ctx context.Context, input *chatv1.AdminCreateWorkspaceRequest) (*chatv1.Workspace, error) {
 	value, err := s.implementation.AdminCreateWorkspace(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTeamDomain(), input.GetTeamName(), input.GetTeamDescription(), domain.WorkspaceDiscoverability(input.GetTeamDiscoverability()))
 	if err != nil {
@@ -4702,6 +4844,32 @@ func (s *Server) CreateList(ctx context.Context, input *chatv1.CreateListRequest
 		return nil, mapError(err)
 	}
 	return &chatv1.ListResponse{Ok: true, List: encodeProtoList(value)}, nil
+}
+
+func (s *Server) GetList(ctx context.Context, input *chatv1.ListItemRequest) (*chatv1.ListResponse, error) {
+	value, err := s.implementation.List(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListResponse{Ok: true, List: encodeProtoList(value)}, nil
+}
+
+func (s *Server) GetListAccess(ctx context.Context, input *chatv1.ListItemRequest) (*chatv1.ListAccessResponse, error) {
+	value, err := s.implementation.ListAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListAccessResponse{ListId: string(value.ListID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}, nil
+}
+
+func (s *Server) ListLists(ctx context.Context, input *chatv1.ListsRequest) (*chatv1.ListPage, error) {
+	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	request.Descending = input.GetDescending()
+	value, err := s.implementation.Lists(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoListPage(value), nil
 }
 
 func (s *Server) UpdateList(ctx context.Context, input *chatv1.UpdateListRequest) (*chatv1.ListResponse, error) {
@@ -5400,14 +5568,25 @@ func (s *Server) SendScheduledMessageNow(ctx context.Context, input *chatv1.Send
 	return encodeProtoMessage(value), nil
 }
 
+func (s *Server) PostScheduledMessage(ctx context.Context, input *chatv1.PostScheduledMessageRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.PostScheduledMessage(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.ScheduledMessageID(input.GetScheduledMessageId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
 func (s *Server) DeleteScheduledMessage(ctx context.Context, input *chatv1.DeleteScheduledMessageRequest) (*chatv1.MutationResponse, error) {
 	return s.deleteScheduledMessageProto(ctx, input)
 }
 
 func (s *Server) SaveDraft(ctx context.Context, input *chatv1.DraftRequest) (*chatv1.Draft, error) {
-	value, err := s.implementation.SaveDraft(
+	value, err := s.implementation.SaveDraftWithAttachments(
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
 		domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTs()), input.GetText(),
+		decodeProtoDraftAttachments(input.GetAttachments()),
 	)
 	if err != nil {
 		return nil, mapError(err)
@@ -6391,7 +6570,8 @@ func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.Schedul
 		Channel: domain.ConversationID(input.GetChannelId()), Text: input.GetText(), Blocks: input.GetBlocks(),
 		Attachments: input.GetAttachments(), AppID: domain.AppID(input.GetAppId()), BotID: domain.BotID(input.GetBotId()),
 		CredentialHash: credentialHash, ThreadTimestamp: domain.MessageTimestamp(input.GetThreadTs()),
-		PostAt: time.Unix(input.GetPostAt(), 0).UTC(),
+		Metadata: input.GetMetadata(), StreamState: input.GetStreamState(), PostAt: time.Unix(input.GetPostAt(), 0).UTC(),
+		FileAttachments: decodeProtoDraftAttachments(input.GetFileAttachments()),
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -6695,6 +6875,29 @@ func decodeProtoWorkspace(value *chatv1.Workspace) (domain.Workspace, error) {
 	return domain.Workspace{ID: domain.WorkspaceID(value.GetId()), Domain: value.GetDomain(), Name: value.GetName(), Description: value.GetDescription(), Discoverability: domain.WorkspaceDiscoverability(value.GetDiscoverability()), IconURL: value.GetIconUrl(), DefaultChannelIDs: channels}, nil
 }
 
+func encodeProtoWorkspacePage(value domain.WorkspacePage) *chatv1.WorkspacePage {
+	workspaces := make([]*chatv1.Workspace, 0, len(value.Workspaces))
+	for _, workspace := range value.Workspaces {
+		workspaces = append(workspaces, encodeProtoWorkspace(workspace))
+	}
+	return &chatv1.WorkspacePage{Workspaces: workspaces, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoWorkspacePage(value *chatv1.WorkspacePage) (domain.WorkspacePage, error) {
+	if value == nil {
+		return domain.WorkspacePage{}, errors.New("typed workspace page response is nil")
+	}
+	workspaces := make([]domain.Workspace, 0, len(value.GetWorkspaces()))
+	for _, item := range value.GetWorkspaces() {
+		workspace, err := decodeProtoWorkspace(item)
+		if err != nil {
+			return domain.WorkspacePage{}, err
+		}
+		workspaces = append(workspaces, workspace)
+	}
+	return domain.WorkspacePage{Workspaces: workspaces, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+}
+
 func encodeProtoConversationPrefs(value domain.ConversationPrefs) *chatv1.ConversationPrefs {
 	canTypes := make([]string, 0, len(value.CanThread.Types))
 	for _, item := range value.CanThread.Types {
@@ -6749,7 +6952,7 @@ func decodeProtoConversationPrefsValue(value *chatv1.ConversationPrefs) domain.C
 }
 
 func encodeProtoList(value domain.List) *chatv1.List {
-	return &chatv1.List{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, DescriptionBlocks: value.DescriptionBlocks, Schema: value.Schema, TodoMode: value.TodoMode, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+	return &chatv1.List{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, DescriptionBlocks: value.DescriptionBlocks, Schema: value.Schema, TodoMode: value.TodoMode, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Version: value.Version}
 }
 
 func decodeProtoList(value *chatv1.List) (domain.List, error) {
@@ -6764,11 +6967,34 @@ func decodeProtoList(value *chatv1.List) (domain.List, error) {
 	if err != nil {
 		return domain.List{}, err
 	}
-	return domain.List{ID: domain.ListID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), DescriptionBlocks: value.GetDescriptionBlocks(), Schema: value.GetSchema(), TodoMode: value.GetTodoMode(), CreatedAt: createdAt, UpdatedAt: updatedAt}, nil
+	return domain.List{ID: domain.ListID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), DescriptionBlocks: value.GetDescriptionBlocks(), Schema: value.GetSchema(), TodoMode: value.GetTodoMode(), Version: value.GetVersion(), CreatedAt: createdAt, UpdatedAt: updatedAt}, nil
+}
+
+func encodeProtoListPage(value domain.ListPage) *chatv1.ListPage {
+	items := make([]*chatv1.List, 0, len(value.Lists))
+	for _, item := range value.Lists {
+		items = append(items, encodeProtoList(item))
+	}
+	return &chatv1.ListPage{Lists: items, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoListPage(value *chatv1.ListPage) (domain.ListPage, error) {
+	if value == nil {
+		return domain.ListPage{}, errors.New("typed list page is required")
+	}
+	items := make([]domain.List, 0, len(value.GetLists()))
+	for _, item := range value.GetLists() {
+		decoded, err := decodeProtoList(item)
+		if err != nil {
+			return domain.ListPage{}, err
+		}
+		items = append(items, decoded)
+	}
+	return domain.ListPage{Lists: items, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
 
 func encodeProtoListItem(value domain.ListItem) *chatv1.ListItem {
-	return &chatv1.ListItem{Id: string(value.ID), ListId: string(value.ListID), ParentItemId: string(value.ParentItemID), WorkspaceId: string(value.WorkspaceID), Fields: value.Fields, CreatedBy: string(value.CreatedBy), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Archived: value.Archived}
+	return &chatv1.ListItem{Id: string(value.ID), ListId: string(value.ListID), ParentItemId: string(value.ParentItemID), WorkspaceId: string(value.WorkspaceID), Fields: value.Fields, CreatedBy: string(value.CreatedBy), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Archived: value.Archived, Version: value.Version}
 }
 
 func decodeProtoListItem(value *chatv1.ListItem) (domain.ListItem, error) {
@@ -6783,7 +7009,7 @@ func decodeProtoListItem(value *chatv1.ListItem) (domain.ListItem, error) {
 	if err != nil {
 		return domain.ListItem{}, err
 	}
-	return domain.ListItem{ID: domain.ListItemID(value.GetId()), ListID: domain.ListID(value.GetListId()), ParentItemID: domain.ListItemID(value.GetParentItemId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Fields: value.GetFields(), CreatedBy: domain.UserID(value.GetCreatedBy()), UpdatedBy: domain.UserID(value.GetUpdatedBy()), CreatedAt: createdAt, UpdatedAt: updatedAt, Archived: value.GetArchived()}, nil
+	return domain.ListItem{ID: domain.ListItemID(value.GetId()), ListID: domain.ListID(value.GetListId()), ParentItemID: domain.ListItemID(value.GetParentItemId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Fields: value.GetFields(), CreatedBy: domain.UserID(value.GetCreatedBy()), UpdatedBy: domain.UserID(value.GetUpdatedBy()), CreatedAt: createdAt, UpdatedAt: updatedAt, Archived: value.GetArchived(), Version: value.GetVersion()}, nil
 }
 
 func encodeProtoListItemPage(value domain.ListItemPage) *chatv1.ListItemPage {
@@ -6973,16 +7199,38 @@ func decodeProtoMessagePage(value *chatv1.MessagePage) (domain.MessagePage, erro
 }
 
 func encodeProtoCanvas(value domain.Canvas) *chatv1.Canvas {
-	return &chatv1.Canvas{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Title: value.Title, DocumentContent: value.DocumentContent, CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix()}
+	return &chatv1.Canvas{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Title: value.Title, DocumentContent: value.DocumentContent, CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix(), Version: value.Version}
 }
 
 func decodeProtoCanvas(value *chatv1.Canvas) (domain.Canvas, error) {
 	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetOwnerId() == "" {
 		return domain.Canvas{}, errors.New("invalid canvas response")
 	}
-	return domain.Canvas{ID: domain.CanvasID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Title: value.GetTitle(), DocumentContent: value.GetDocumentContent(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC()}, nil
+	return domain.Canvas{ID: domain.CanvasID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Title: value.GetTitle(), DocumentContent: value.GetDocumentContent(), Version: value.GetVersion(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC()}, nil
 }
 
+func encodeProtoCanvasPage(value domain.CanvasPage) *chatv1.CanvasPage {
+	items := make([]*chatv1.Canvas, 0, len(value.Canvases))
+	for _, item := range value.Canvases {
+		items = append(items, encodeProtoCanvas(item))
+	}
+	return &chatv1.CanvasPage{Canvases: items, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoCanvasPage(value *chatv1.CanvasPage) (domain.CanvasPage, error) {
+	if value == nil {
+		return domain.CanvasPage{}, errors.New("typed canvas page is required")
+	}
+	items := make([]domain.Canvas, 0, len(value.GetCanvases()))
+	for _, item := range value.GetCanvases() {
+		decoded, err := decodeProtoCanvas(item)
+		if err != nil {
+			return domain.CanvasPage{}, err
+		}
+		items = append(items, decoded)
+	}
+	return domain.CanvasPage{Canvases: items, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+}
 func encodeProtoFile(value domain.File) *chatv1.File {
 	return &chatv1.File{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader),
@@ -7612,7 +7860,9 @@ func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.Schedule
 		WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ChannelId: string(value.Channel), AuthorId: string(value.Author),
 		Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, PostAt: value.PostAt.Unix(), CreatedAt: value.CreatedAt.Unix(),
 		AppId: string(value.AppID), BotId: string(value.BotID), CredentialHash: value.CredentialHash, ThreadTs: string(value.ThreadTimestamp),
+		Metadata: value.Metadata, StreamState: value.StreamState,
 		DeliveredAt: unixOrZero(value.DeliveredAt), FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
+		FileAttachments: encodeProtoDraftAttachments(value.FileAttachments),
 	}
 }
 
@@ -7635,17 +7885,18 @@ func timeFromUnix(value int64) time.Time {
 }
 
 func decodeProtoScheduledMessage(value *chatv1.ScheduledMessage) (domain.ScheduledMessage, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "") || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
+	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "" && len(value.GetFileAttachments()) == 0) || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
 		return domain.ScheduledMessage{}, errors.New("typed scheduled message is incomplete")
 	}
 	return domain.ScheduledMessage{
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ScheduledMessageID(value.GetId()),
 		Channel: domain.ConversationID(value.GetChannelId()), Author: domain.UserID(value.GetAuthorId()),
 		AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), CredentialHash: value.GetCredentialHash(),
-		Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(),
+		Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Metadata: value.GetMetadata(), StreamState: value.GetStreamState(),
 		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), PostAt: time.Unix(value.GetPostAt(), 0).UTC(),
 		CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), DeliveredAt: timeFromUnix(value.GetDeliveredAt()),
 		FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
+		FileAttachments: decodeProtoDraftAttachments(value.GetFileAttachments()),
 	}, nil
 }
 
@@ -7653,18 +7904,44 @@ func encodeProtoDraft(value domain.Draft) *chatv1.Draft {
 	return &chatv1.Draft{
 		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ConversationId: string(value.ConversationID),
 		ThreadTs: string(value.ThreadTimestamp), Text: value.Text, UpdatedAtUnixNano: value.UpdatedAt.UTC().UnixNano(),
+		Attachments: encodeProtoDraftAttachments(value.Attachments),
 	}
+}
+
+func encodeProtoDraftAttachments(values []domain.DraftAttachment) []*chatv1.DraftAttachment {
+	result := make([]*chatv1.DraftAttachment, 0, len(values))
+	for _, value := range values {
+		result = append(result, &chatv1.DraftAttachment{
+			UploadId: string(value.UploadID), Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size,
+		})
+	}
+	return result
+}
+
+func decodeProtoDraftAttachments(values []*chatv1.DraftAttachment) []domain.DraftAttachment {
+	result := make([]domain.DraftAttachment, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		result = append(result, domain.DraftAttachment{
+			UploadID: domain.ExternalUploadID(value.GetUploadId()), Name: value.GetName(), Title: value.GetTitle(),
+			MIMEType: value.GetMimeType(), Size: value.GetSize(),
+		})
+	}
+	return result
 }
 
 func decodeProtoDraft(value *chatv1.Draft) (domain.Draft, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetConversationId() == "" ||
-		value.GetText() == "" || value.GetUpdatedAtUnixNano() <= 0 {
+		(value.GetText() == "" && len(value.GetAttachments()) == 0) || value.GetUpdatedAtUnixNano() <= 0 {
 		return domain.Draft{}, errors.New("typed draft is incomplete")
 	}
 	return domain.Draft{
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
 		ConversationID: domain.ConversationID(value.GetConversationId()), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()),
-		Text: value.GetText(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
+		Text: value.GetText(), Attachments: decodeProtoDraftAttachments(value.GetAttachments()),
+		UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
 	}, nil
 }
 
@@ -7966,11 +8243,32 @@ func (r Remote) UpdateWithBlocks(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (s *Server) PostWithBlocks(ctx context.Context, input *chatv1.PostWithBlocksRequest) (*chatv1.Message, error) {
-	value, err := s.implementation.PostWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey(), domain.AppID(input.GetAppId()))
+	request := decodeProtoMessagePostRequest(input)
+	value, err := s.implementation.PostMessageAs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
 		return nil, mapError(err)
 	}
 	return encodeProtoMessage(value), nil
+}
+
+func decodeProtoMessagePostRequest(input *chatv1.PostWithBlocksRequest) domain.MessagePostRequest {
+	request := domain.MessagePostRequest{
+		Conversation: domain.ConversationID(input.GetConversationId()), Text: input.GetText(),
+		Blocks: input.GetBlocks(), Attachments: input.GetAttachments(), Metadata: input.GetMetadata(),
+		ThreadTimestamp: domain.MessageTimestamp(input.GetThreadTimestamp()), IdempotencyKey: input.GetIdempotencyKey(),
+		AppID: domain.AppID(input.GetAppId()), MarkdownText: input.GetMarkdownText(),
+		ReplyBroadcast: input.GetReplyBroadcast(), Parse: input.GetParse(), MrkdwnDisabled: input.GetMrkdwnDisabled(),
+		LinkNames: input.GetLinkNames(), Username: input.GetUsername(), IconEmoji: input.GetIconEmoji(), IconURL: input.GetIconUrl(),
+	}
+	if input.GetUnfurlLinksSet() {
+		value := input.GetUnfurlLinks()
+		request.UnfurlLinks = &value
+	}
+	if input.GetUnfurlMediaSet() {
+		value := input.GetUnfurlMedia()
+		request.UnfurlMedia = &value
+	}
+	return request
 }
 
 func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithBlocksRequest) (*chatv1.Message, error) {
@@ -8037,7 +8335,30 @@ func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.
 }
 
 func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
-	out, err := r.messages.PostWithBlocks(ctx, &chatv1.PostWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Text: text, Blocks: blocks, Attachments: attachments, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey, AppId: string(appID)})
+	return r.PostMessageAs(ctx, workspaceID, userID, domain.MessagePostRequest{
+		Conversation: conversationID, Text: text, Blocks: blocks, Attachments: attachments,
+		ThreadTimestamp: threadTimestamp, IdempotencyKey: idempotencyKey, AppID: appID,
+	})
+}
+
+func (r Remote) PostMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessagePostRequest) (domain.Message, error) {
+	input := &chatv1.PostWithBlocksRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(request.Conversation),
+		Text: request.Text, Blocks: request.Blocks, Attachments: request.Attachments, Metadata: request.Metadata,
+		ThreadTimestamp: string(request.ThreadTimestamp), IdempotencyKey: request.IdempotencyKey, AppId: string(request.AppID),
+		MarkdownText: request.MarkdownText, ReplyBroadcast: request.ReplyBroadcast, Parse: request.Parse,
+		MrkdwnDisabled: request.MrkdwnDisabled, LinkNames: request.LinkNames,
+		Username: request.Username, IconEmoji: request.IconEmoji, IconUrl: request.IconURL,
+	}
+	if request.UnfurlLinks != nil {
+		input.UnfurlLinksSet = true
+		input.UnfurlLinks = *request.UnfurlLinks
+	}
+	if request.UnfurlMedia != nil {
+		input.UnfurlMediaSet = true
+		input.UnfurlMedia = *request.UnfurlMedia
+	}
+	out, err := r.messages.PostWithBlocks(ctx, input)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -8151,7 +8472,8 @@ func (r Remote) ScheduleMessageAs(ctx context.Context, workspaceID domain.Worksp
 		WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(request.Channel),
 		Text: request.Text, Blocks: request.Blocks, Attachments: request.Attachments, PostAt: request.PostAt.Unix(),
 		AppId: string(request.AppID), BotId: string(request.BotID), CredentialHash: request.CredentialHash,
-		ThreadTs: string(request.ThreadTimestamp),
+		ThreadTs: string(request.ThreadTimestamp), Metadata: request.Metadata, StreamState: request.StreamState,
+		FileAttachments: encodeProtoDraftAttachments(request.FileAttachments),
 	})
 	if err != nil {
 		return domain.ScheduledMessage{}, err
@@ -8479,6 +8801,31 @@ func (r Remote) GetAppDatastoreItems(ctx context.Context, workspaceID domain.Wor
 	return append([]string(nil), out.GetItems()...), nil
 }
 
+func (r Remote) QueryAppDatastoreItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, datastore string, query domain.AppDatastoreQuery) (domain.AppDatastoreQueryPage, error) {
+	out, err := r.apps.QueryAppDatastoreItems(ctx, &chatv1.AppDatastoreRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), Datastore: datastore,
+		Expression: query.Expression, ExpressionAttributes: query.ExpressionAttributes, ExpressionValues: query.ExpressionValues,
+		Limit: int32(query.Page.Limit), Cursor: string(query.Page.Cursor),
+	})
+	if err != nil {
+		return domain.AppDatastoreQueryPage{}, err
+	}
+	return domain.AppDatastoreQueryPage{
+		Items: append([]string(nil), out.GetItems()...), NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore(),
+	}, nil
+}
+
+func (r Remote) CountAppDatastoreItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, datastore string, query domain.AppDatastoreQuery) (int, error) {
+	out, err := r.apps.CountAppDatastoreItems(ctx, &chatv1.AppDatastoreRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), Datastore: datastore,
+		Expression: query.Expression, ExpressionAttributes: query.ExpressionAttributes, ExpressionValues: query.ExpressionValues,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetCount()), nil
+}
+
 func (r Remote) DeleteAppDatastoreItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, datastore string, ids []string) error {
 	out, err := r.apps.DeleteAppDatastoreItems(ctx, &chatv1.AppDatastoreRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
@@ -8500,6 +8847,14 @@ func (r Remote) GetDeveloperApp(ctx context.Context, workspaceID domain.Workspac
 		return domain.App{}, "", err
 	}
 	return app, out.GetManifest(), nil
+}
+
+func (r Remote) GetDeveloperAppDeliveryHealth(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.AppDeliveryHealth, error) {
+	out, err := r.apps.GetDeveloperAppDeliveryHealth(ctx, &chatv1.AppGetRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	return decodeProtoAppDeliveryHealth(out)
 }
 
 func (r Remote) IssueDeveloperAppToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, scopes []string) (domain.AppTokenCredentials, error) {
@@ -8634,6 +8989,33 @@ func (s *Server) GetAppDatastoreItems(ctx context.Context, input *chatv1.AppData
 	return &chatv1.AppDatastoreResponse{Items: items}, nil
 }
 
+func (s *Server) QueryAppDatastoreItems(ctx context.Context, input *chatv1.AppDatastoreRequest) (*chatv1.AppDatastoreResponse, error) {
+	page, err := s.implementation.QueryAppDatastoreItems(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetDatastore(), domain.AppDatastoreQuery{
+			Expression: input.GetExpression(), ExpressionAttributes: input.GetExpressionAttributes(), ExpressionValues: input.GetExpressionValues(),
+			Page: domain.PageRequest{Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor())},
+		},
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppDatastoreResponse{Items: page.Items, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) CountAppDatastoreItems(ctx context.Context, input *chatv1.AppDatastoreRequest) (*chatv1.AppDatastoreResponse, error) {
+	count, err := s.implementation.CountAppDatastoreItems(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetDatastore(), domain.AppDatastoreQuery{
+			Expression: input.GetExpression(), ExpressionAttributes: input.GetExpressionAttributes(), ExpressionValues: input.GetExpressionValues(),
+		},
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppDatastoreResponse{Count: int64(count)}, nil
+}
+
 func (s *Server) DeleteAppDatastoreItems(ctx context.Context, input *chatv1.AppDatastoreRequest) (*chatv1.AppMutationResponse, error) {
 	if err := s.implementation.DeleteAppDatastoreItems(
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
@@ -8650,6 +9032,14 @@ func (s *Server) GetDeveloperApp(ctx context.Context, input *chatv1.AppGetReques
 		return nil, mapError(err)
 	}
 	return &chatv1.AppExportResponse{App: encodeProtoDeveloperApp(app), Manifest: manifest}, nil
+}
+
+func (s *Server) GetDeveloperAppDeliveryHealth(ctx context.Context, input *chatv1.AppGetRequest) (*chatv1.AppDeliveryHealth, error) {
+	health, err := s.implementation.GetDeveloperAppDeliveryHealth(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppDeliveryHealth(health), nil
 }
 
 func (s *Server) IssueDeveloperAppToken(ctx context.Context, input *chatv1.AppTokenIssueRequest) (*chatv1.AppTokenCredentials, error) {
@@ -8720,6 +9110,51 @@ func decodeProtoDeveloperApp(value *chatv1.DeveloperApp) (domain.App, error) {
 		return domain.App{}, err
 	}
 	return domain.App{ID: domain.AppID(value.GetId()), DevelopmentWorkspaceID: domain.WorkspaceID(value.GetDevelopmentWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), Description: value.GetDescription(), ClientID: value.GetClientId(), ManifestVersion: value.GetManifestVersion(), Distribution: value.GetDistribution(), SocketModeEnabled: value.GetSocketModeEnabled(), TokenRotationEnabled: value.GetTokenRotationEnabled(), Deleted: value.GetDeleted(), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}, nil
+}
+
+func encodeProtoAppDeliveryHealth(value domain.AppDeliveryHealth) *chatv1.AppDeliveryHealth {
+	result := &chatv1.AppDeliveryHealth{
+		AppId: string(value.AppID), Surface: value.Surface, Endpoint: value.Endpoint,
+		Configured: value.Configured, Installed: value.Installed,
+		AcknowledgedSequence: value.AcknowledgedSequence, InFlightSequence: value.InFlightSequence,
+		RetryCount: int32(value.RetryCount), RetryReason: value.RetryReason,
+		PendingEvaluation: value.PendingEvaluation, NextEventTopic: value.NextEventTopic,
+	}
+	if !value.InFlightUntil.IsZero() {
+		result.InFlightUntil = value.InFlightUntil.UTC().Format(time.RFC3339Nano)
+	}
+	if !value.RetryAt.IsZero() {
+		result.RetryAt = value.RetryAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !value.NextEventAt.IsZero() {
+		result.NextEventAt = value.NextEventAt.UTC().Format(time.RFC3339Nano)
+	}
+	return result
+}
+
+func decodeProtoAppDeliveryHealth(value *chatv1.AppDeliveryHealth) (domain.AppDeliveryHealth, error) {
+	if value == nil || value.GetAppId() == "" || (value.GetConfigured() && value.GetSurface() != "http" && value.GetSurface() != "socket") || value.GetRetryCount() < 0 {
+		return domain.AppDeliveryHealth{}, errors.New("typed app delivery health is invalid")
+	}
+	inFlightUntil, err := decodeOptionalProtoTime(value.GetInFlightUntil())
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	retryAt, err := decodeOptionalProtoTime(value.GetRetryAt())
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	nextEventAt, err := decodeOptionalProtoTime(value.GetNextEventAt())
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	return domain.AppDeliveryHealth{
+		AppID: domain.AppID(value.GetAppId()), Surface: value.GetSurface(), Endpoint: value.GetEndpoint(),
+		Configured: value.GetConfigured(), Installed: value.GetInstalled(),
+		AcknowledgedSequence: value.GetAcknowledgedSequence(), InFlightSequence: value.GetInFlightSequence(),
+		InFlightUntil: inFlightUntil, RetryAt: retryAt, RetryCount: int(value.GetRetryCount()), RetryReason: value.GetRetryReason(),
+		PendingEvaluation: value.GetPendingEvaluation(), NextEventTopic: value.GetNextEventTopic(), NextEventAt: nextEventAt,
+	}, nil
 }
 
 func encodeProtoInstalledApp(value domain.InstalledApp) *chatv1.InstalledApp {

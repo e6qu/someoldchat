@@ -24,7 +24,8 @@ jq -c '[.[] | .short_name as $primary | {
 	u: .unified,
 	c: .category,
 	a: ((.short_names // []) | map(select(. != $primary))),
-	o: .sort_order
+	o: .sort_order,
+	s: ((.skin_variations // {}) | length > 0)
 }]' "$work/emoji.json" >"$work/catalog.json"
 
 mkdir -p "$root/internal/slackemoji"

@@ -68,6 +68,45 @@ func TestBlocksValidateMatchesCurrentSlackResponseShapes(t *testing.T) {
 	}
 }
 
+func TestConversationsCanvasesCreateMatchesSlackSingularChannelCanvas(t *testing.T) {
+	handler := testHandler()
+	call := func(path string, form url.Values) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	created := call("/api/conversations.canvases.create", url.Values{
+		"channel_id": {"C1"}, "title": {"Channel notes"},
+		"document_content": {`{"type":"markdown","markdown":"hello"}`},
+	})
+	canvasID, _ := created["canvas_id"].(string)
+	if created["ok"] != true || canvasID == "" {
+		t.Fatalf("created=%v", created)
+	}
+	info := call("/api/conversations.info", url.Values{"channel": {"C1"}})
+	channel, _ := info["channel"].(map[string]any)
+	properties, _ := channel["properties"].(map[string]any)
+	canvas, _ := properties["canvas"].(map[string]any)
+	if canvas["file_id"] != canvasID || canvas["is_empty"] != false {
+		t.Fatalf("conversation canvas projection=%v", info)
+	}
+	duplicate := call("/api/conversations.canvases.create", url.Values{"channel_id": {"C1"}})
+	if duplicate["ok"] != false || duplicate["error"] != "channel_canvas_already_exists" {
+		t.Fatalf("duplicate=%v", duplicate)
+	}
+}
+
 func TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection(t *testing.T) {
 	store := memory.New()
 	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
@@ -164,7 +203,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -676,29 +715,51 @@ func TestOAuthAccessAndTokenHTTPExchangeCodes(t *testing.T) {
 }
 
 func TestRTMConnectReturnsDurableEventStreamURL(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/rtm.connect?token=token", nil)
-	request.Host = "chat.example.test"
+	for _, method := range []string{"rtm.connect", "rtm.start"} {
+		request := httptest.NewRequest(http.MethodGet, "/api/"+method+"?token=token", nil)
+		request.Host = "chat.example.test"
+		response := httptest.NewRecorder()
+		testHandler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", method, response.Code, response.Body)
+		}
+		var body struct {
+			OK   bool   `json:"ok"`
+			URL  string `json:"url"`
+			Self struct {
+				ID string `json:"id"`
+			} `json:"self"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		streamURL, err := url.Parse(body.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !body.OK || streamURL.Scheme != "ws" || streamURL.Host != "chat.example.test" || streamURL.Path != "/rtm" || streamURL.Query().Get("session_id") == "" || body.Self.ID != "U1" {
+			t.Fatalf("%s unexpected body: %s", method, response.Body)
+		}
+	}
+}
+
+func TestTeamPreferencesListReturnsEnforcedWorkspacePolicies(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/team.preferences.list", nil)
+	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
 	testHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
-	var body struct {
-		OK   bool   `json:"ok"`
-		URL  string `json:"url"`
-		Self struct {
-			ID string `json:"id"`
-		} `json:"self"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	streamURL, err := url.Parse(body.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !body.OK || streamURL.Scheme != "ws" || streamURL.Host != "chat.example.test" || streamURL.Path != "/rtm" || streamURL.Query().Get("session_id") == "" || body.Self.ID != "U1" {
-		t.Fatalf("unexpected body: %s", response.Body)
+	for _, fragment := range []string{
+		`"display_real_names":false`,
+		`"disable_file_uploads":"allow_all"`,
+		`"msg_edit_window_mins":0`,
+		`"who_can_post_general":"everyone"`,
+	} {
+		if !strings.Contains(response.Body.String(), fragment) {
+			t.Fatalf("response does not contain %q: %s", fragment, response.Body)
+		}
 	}
 }
 
@@ -1801,7 +1862,10 @@ func TestRenameConversationNormalizesAndPersists(t *testing.T) {
 }
 
 func TestInviteConversationNormalizesMembers(t *testing.T) {
-	handler := testHandler()
+	handler, repository := testHandlerWithStore()
+	if err := repository.RemoveConversationMember(context.Background(), "C1", "U2", events.Event{ID: "E-remove-before-invite", WorkspaceID: "T1", ActorID: "U1", Topic: "conversation.member_removed", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2,U2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer token")
@@ -1810,6 +1874,167 @@ func TestInviteConversationNormalizesMembers(t *testing.T) {
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"C1"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
+	duplicate := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2"))
+	duplicate.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	duplicate.Header.Set("Authorization", "Bearer token")
+	duplicateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(duplicateResponse, duplicate)
+	if duplicateResponse.Code != http.StatusOK || !strings.Contains(duplicateResponse.Body.String(), `"error":"already_in_channel"`) {
+		t.Fatalf("duplicate status=%d body=%s", duplicateResponse.Code, duplicateResponse.Body)
+	}
+}
+
+func TestInviteConversationReportsPerUserFailuresAndIsAtomicByDefault(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	repository.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
+
+	response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U2,U-missing,U1,U3")
+	body := response.Body.String()
+	for _, fragment := range []string{
+		`"ok":false`,
+		`"error":"already_in_channel"`,
+		`"user":"U2"`,
+		`"user":"U-missing"`,
+		`"error":"user_not_found"`,
+		`"user":"U1"`,
+		`"error":"cant_invite_self"`,
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("body=%s missing %s", body, fragment)
+		}
+	}
+	member, err := repository.IsConversationMember(context.Background(), "C1", "U3")
+	if err != nil || member {
+		t.Fatalf("U3 member=%v err=%v; default invite must be atomic", member, err)
+	}
+}
+
+func TestInviteConversationForceInvitesValidSubset(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	repository.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
+
+	response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U-missing,U3&force=true")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	member, err := repository.IsConversationMember(context.Background(), "C1", "U3")
+	if err != nil || !member {
+		t.Fatalf("U3 member=%v err=%v", member, err)
+	}
+	member, err = repository.IsConversationMember(context.Background(), "C1", "U-missing")
+	if err != nil || member {
+		t.Fatalf("missing user member=%v err=%v", member, err)
+	}
+}
+
+func TestInviteConversationValidatesForceAndCurrentHundredUserLimit(t *testing.T) {
+	handler := testHandler()
+	invalidForce := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U3&force=occasionally")
+	if invalidForce.Code != http.StatusOK || !strings.Contains(invalidForce.Body.String(), `"error":"invalid_arg_name"`) {
+		t.Fatalf("invalid force status=%d body=%s", invalidForce.Code, invalidForce.Body)
+	}
+
+	users := make([]string, 101)
+	for index := range users {
+		users[index] = "U" + strconv.Itoa(index+100)
+	}
+	tooMany := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users="+strings.Join(users, ","))
+	if tooMany.Code != http.StatusOK || !strings.Contains(tooMany.Body.String(), `"error":"too_many_users"`) {
+		t.Fatalf("too many status=%d body=%s", tooMany.Code, tooMany.Body)
+	}
+}
+
+func TestInviteConversationSupportsPrivateChannels(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	repository.SeedConversation(domain.Conversation{ID: "C-private", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	repository.SeedConversationMember("C-private", "U1")
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C-private&users=U2"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"C-private"`) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+	activity, err := repository.ListActivity(context.Background(), "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || len(activity.Items) != 1 || !activity.Items[0].SourceAvailable {
+		t.Fatalf("private invitation activity=%+v err=%v", activity, err)
+	}
+}
+
+func TestInviteConversationUsesCurrentTokenAndChannelScopeMatrix(t *testing.T) {
+	t.Run("bot public channels write invites", func(t *testing.T) {
+		handler, repository := testHandlerWithScopes(auth.ScopeChannelsWriteInvites)
+		if err := repository.RemoveConversationMember(context.Background(), "C1", "U2", events.Event{ID: "E-scope-remove", WorkspaceID: "T1", ActorID: "U1", CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U2")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+
+	t.Run("bot private groups write", func(t *testing.T) {
+		handler, repository := testHandlerWithScopes(auth.ScopeGroupsWrite)
+		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", IsPrivate: true})
+		repository.SeedConversationMember("C-private-scope", "U1")
+		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+
+	t.Run("public scope cannot invite to private channel", func(t *testing.T) {
+		handler, repository := testHandlerWithScopes(auth.ScopeChannelsManage)
+		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", IsPrivate: true})
+		repository.SeedConversationMember("C-private-scope", "U1")
+		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"missing_scope"`) || !strings.Contains(response.Body.String(), `"needed":"groups:write"`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+
+	t.Run("user public channels write", func(t *testing.T) {
+		repository := memory.New()
+		repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+		repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+		repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+		repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+		repository.SeedConversationMember("C1", "U1")
+		authenticator, err := auth.NewStatic("user-token", auth.Principal{
+			WorkspaceID: "T1", UserID: "U1", TokenType: "user",
+			Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsWrite: {}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		api, err := NewHandler(service.Messages{Store: repository}, authenticator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux := http.NewServeMux()
+		api.Register(mux)
+		request := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2"))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer user-token")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+}
+
+func callSlackForm(t *testing.T, handler http.Handler, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
 }
 
 func TestPostMessageForm(t *testing.T) {
@@ -1922,6 +2147,50 @@ func TestTeamInfo(t *testing.T) {
 	testHandler().ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"T1"`) || !strings.Contains(res.Body.String(), `"name":"test"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}
+
+func TestAuthTeamsListPagesEveryApprovedWorkspaceAndOptionalIcons(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	repository.SeedWorkspace(domain.Workspace{ID: "T2", Name: "second", IconURL: "https://cdn.example.test/team.png"})
+	if err := repository.CreateAppInstallation(context.Background(), domain.AppInstallation{
+		AppID: "A1", WorkspaceID: "T2", Enabled: true, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(path string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		var value map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	first := call("/api/auth.teams.list?limit=1&include_icon=true")
+	teams, _ := first["teams"].([]any)
+	if len(teams) != 1 || teams[0].(map[string]any)["id"] != "T1" {
+		t.Fatalf("first=%v", first)
+	}
+	metadata, _ := first["response_metadata"].(map[string]any)
+	cursor, _ := metadata["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatalf("first page has no cursor: %v", first)
+	}
+	second := call("/api/auth.teams.list?limit=1&include_icon=true&cursor=" + url.QueryEscape(cursor))
+	teams, _ = second["teams"].([]any)
+	if len(teams) != 1 || teams[0].(map[string]any)["id"] != "T2" {
+		t.Fatalf("second=%v", second)
+	}
+	icon, _ := teams[0].(map[string]any)["icon"].(map[string]any)
+	if icon["image_132"] != "https://cdn.example.test/team.png" || icon["image_default"] != false {
+		t.Fatalf("icon=%v", icon)
 	}
 }
 
@@ -3301,6 +3570,85 @@ func TestScheduleMessageFormAcceptsBlocksWithoutFallbackText(t *testing.T) {
 	testHandler().ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}
+
+func TestScheduleMessagePreservesCurrentSlackMessageOptionsUntilDelivery(t *testing.T) {
+	handler, backing := testHandlerWithStore()
+	post := func(path string, form url.Values) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer token")
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, res.Code, res.Body)
+		}
+		var response map[string]any
+		if err := json.Unmarshal(res.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	root := post("/api/chat.postMessage", url.Values{"channel": {"C1"}, "text": {"root"}})
+	rootTS, _ := root["ts"].(string)
+	if rootTS == "" {
+		t.Fatalf("root response=%v", root)
+	}
+	metadata := `{"event_type":"task_created","event_payload":{"id":"11223"}}`
+	scheduled := post("/api/chat.scheduleMessage", url.Values{
+		"channel":         {"C1"},
+		"markdown_text":   {"**future**"},
+		"metadata":        {metadata},
+		"thread_ts":       {rootTS},
+		"reply_broadcast": {"true"},
+		"link_names":      {"true"},
+		"parse":           {"none"},
+		"unfurl_links":    {"false"},
+		"unfurl_media":    {"true"},
+		"post_at":         {strconv.FormatInt(time.Now().UTC().Add(time.Hour).Unix(), 10)},
+	})
+	id, _ := scheduled["scheduled_message_id"].(string)
+	if scheduled["ok"] != true || id == "" {
+		t.Fatalf("schedule response=%v", scheduled)
+	}
+	item, err := backing.ClaimScheduledMessageForCredential(context.Background(), "T1", domain.HashToken("token"), domain.ScheduledMessageID(id), "delivery", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := service.ScheduledMessagePostRequest(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Text != "**future**" || !request.MarkdownText || !request.ReplyBroadcast || !request.LinkNames ||
+		request.Parse != "none" || request.Metadata == "" || request.UnfurlLinks == nil || *request.UnfurlLinks ||
+		request.UnfurlMedia == nil || !*request.UnfurlMedia {
+		t.Fatalf("scheduled delivery request lost message options: %+v", request)
+	}
+}
+
+func TestScheduleMessageRejectsMarkdownConflictsAndInvalidBooleans(t *testing.T) {
+	for name, form := range map[string]url.Values{
+		"markdown conflict": {
+			"channel": {"C1"}, "text": {"text"}, "markdown_text": {"**markdown**"},
+			"post_at": {strconv.FormatInt(time.Now().UTC().Add(time.Hour).Unix(), 10)},
+		},
+		"invalid boolean": {
+			"channel": {"C1"}, "text": {"text"}, "reply_broadcast": {"sometimes"},
+			"post_at": {strconv.FormatInt(time.Now().UTC().Add(time.Hour).Unix(), 10)},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/chat.scheduleMessage", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Authorization", "Bearer token")
+			res := httptest.NewRecorder()
+			testHandler().ServeHTTP(res, req)
+			if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"ok":false`) {
+				t.Fatalf("status=%d body=%s", res.Code, res.Body)
+			}
+		})
 	}
 }
 

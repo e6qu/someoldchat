@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -767,6 +768,52 @@ func TestAdminConversationInviteDoesNotRequireActorMembership(t *testing.T) {
 	member, err := s.IsConversationMember(context.Background(), "C1", "U2")
 	if err != nil || !member {
 		t.Fatalf("member=%v err=%v", member, err)
+	}
+}
+
+func TestConversationInviteSupportsPrivateChannelsAndCreatesActivity(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversationMember("C1", "U1")
+	if _, err := (Messages{Store: s}).InviteConversationMembers(context.Background(), "T1", "U1", "C1", []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ListActivity(context.Background(), "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || len(page.Items) != 1 || !page.Items[0].SourceAvailable || page.Items[0].ActorID != "U1" {
+		t.Fatalf("private invitation activity=%+v err=%v", page, err)
+	}
+}
+
+func TestConversationInviteIsAtomicUnlessForced(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "channel"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	messages := Messages{Store: s}
+
+	result, err := messages.inviteConversationMembersWithOptions(context.Background(), "T1", "U1", "C1", []domain.UserID{"U2", "U-missing", "U1", "U3"}, false)
+	if err != nil || result.InvitedCount != 0 || len(result.Failures) != 3 {
+		t.Fatalf("default result=%+v err=%v", result, err)
+	}
+	if member, err := s.IsConversationMember(context.Background(), "C1", "U3"); err != nil || member {
+		t.Fatalf("default U3 member=%v err=%v", member, err)
+	}
+
+	result, err = messages.inviteConversationMembersWithOptions(context.Background(), "T1", "U1", "C1", []domain.UserID{"U-missing", "U3"}, true)
+	if err != nil || result.InvitedCount != 1 || len(result.Failures) != 1 || result.Failures[0].Reason != conversationInviteUserNotFound {
+		t.Fatalf("forced result=%+v err=%v", result, err)
+	}
+	if member, err := s.IsConversationMember(context.Background(), "C1", "U3"); err != nil || !member {
+		t.Fatalf("forced U3 member=%v err=%v", member, err)
 	}
 }
 
@@ -1918,12 +1965,21 @@ func TestFirstPartyDraftAndScheduledManagementLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread := domain.NewMessageTimestamp(root.CreatedAt)
-	draft, err := messages.SaveDraft(ctx, "T1", "U1", "C1", thread, "  exact draft text  ")
-	if err != nil || draft.Text != "  exact draft text  " {
+	now := time.Now().UTC()
+	upload := domain.ExternalUpload{
+		ID: "draft-upload", WorkspaceID: "T1", Uploader: "U1", Name: "draft.txt", Title: "draft.txt",
+		MIMEType: "text/plain", BlobKey: "T1/external/draft-upload", Size: 5, Status: domain.ExternalUploadUploaded,
+		CreatedAt: now, ExpiresAt: now.Add(time.Hour), UploadedAt: now,
+	}
+	if err := s.CreateExternalUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := messages.SaveDraftWithAttachments(ctx, "T1", "U1", "C1", thread, "  exact draft text  ", []domain.DraftAttachment{{UploadID: upload.ID, Title: "Evidence"}})
+	if err != nil || draft.Text != "  exact draft text  " || len(draft.Attachments) != 1 || draft.Attachments[0].Name != "draft.txt" {
 		t.Fatalf("draft=%+v err=%v", draft, err)
 	}
 	loaded, err := messages.Draft(ctx, "T1", "U1", "C1", thread)
-	if err != nil || loaded.Text != draft.Text {
+	if err != nil || loaded.Text != draft.Text || len(loaded.Attachments) != 1 || loaded.Attachments[0].Title != "Evidence" {
 		t.Fatalf("loaded draft=%+v err=%v", loaded, err)
 	}
 	drafts, err := messages.Drafts(ctx, "T1", "U1", domain.PageRequest{Limit: 10, Descending: true})
@@ -1975,6 +2031,76 @@ func TestFirstPartyDraftAndScheduledManagementLifecycle(t *testing.T) {
 	history, err = messages.ScheduledMessageHistory(ctx, "T1", "U1", true, domain.PageRequest{Limit: 10})
 	if err != nil || len(history.Items) != 1 || history.Items[0].DeliveredAt.IsZero() || !history.Items[0].FailedAt.IsZero() || history.Items[0].FailureCode != "" {
 		t.Fatalf("delivered history=%+v err=%v", history, err)
+	}
+}
+
+func TestScheduledComposerFilesSurviveTicketExpiryAndDeliverIdempotently(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+	now := time.Now().UTC()
+	upload := domain.ExternalUpload{
+		ID: "scheduled-upload", WorkspaceID: "T1", Uploader: "U1", Name: "evidence.txt", Title: "evidence.txt",
+		MIMEType: "text/plain", BlobKey: "T1/external/scheduled-upload", Size: 8,
+		Status: domain.ExternalUploadUploaded, CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute), UploadedAt: now.Add(-time.Hour),
+	}
+	if err := s.CreateExternalUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	attachment := domain.DraftAttachment{
+		UploadID: upload.ID, Name: upload.Name, Title: "Evidence", MIMEType: upload.MIMEType, Size: upload.Size,
+	}
+	// Establish the durable draft ownership that lets an already-open composer
+	// survive the short-lived upload ticket.
+	if _, err := s.UpsertDraft(ctx, domain.Draft{
+		WorkspaceID: "T1", UserID: "U1", ConversationID: "C1", Text: "send later",
+		Attachments: []domain.DraftAttachment{attachment}, UpdatedAt: now,
+	}, events.Event{ID: "draft-event", WorkspaceID: "T1", Topic: "draft.saved", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := messages.SaveDraftWithAttachments(ctx, "T1", "U1", "C1", "", "send later", []domain.DraftAttachment{{UploadID: upload.ID, Title: "Evidence"}})
+	if err != nil || len(draft.Attachments) != 1 {
+		t.Fatalf("expired durable draft could not be saved: draft=%+v err=%v", draft, err)
+	}
+	scheduled, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
+		Channel: "C1", PostAt: now.Add(time.Hour), CredentialHash: InternalScheduledCredential("T1", "U1"),
+		FileAttachments: draft.Attachments,
+	})
+	if err != nil || scheduled.Text != "" || len(scheduled.FileAttachments) != 1 {
+		t.Fatalf("file-only schedule=%+v err=%v", scheduled, err)
+	}
+	if err := messages.DeleteDraft(ctx, "T1", "U1", "C1", ""); err != nil {
+		t.Fatal(err)
+	}
+	referenced, err := s.PendingUploadReferenceExists(ctx, "T1", "U1", upload.ID)
+	if err != nil || !referenced {
+		t.Fatalf("scheduled upload lost durable ownership: referenced=%v err=%v", referenced, err)
+	}
+	var references []string
+	if err := s.WalkBlobReferences(ctx, "T1", func(value string) error {
+		references = append(references, value)
+		return nil
+	}); err != nil || !slices.Contains(references, upload.BlobKey) {
+		t.Fatalf("scheduled blob was collectable: references=%v err=%v", references, err)
+	}
+	first, err := messages.PostScheduledMessage(ctx, scheduled.WorkspaceID, scheduled.ID)
+	if err != nil || len(first.Files) != 1 || first.Files[0].ID != domain.FileID(upload.ID) {
+		t.Fatalf("first delivery=%+v err=%v", first, err)
+	}
+	if err := messages.DeleteScheduledMessage(ctx, "T1", "U1", "C1", scheduled.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("committed schedule was cancelled before acknowledgement: %v", err)
+	}
+	second, err := messages.PostScheduledMessage(ctx, scheduled.WorkspaceID, scheduled.ID)
+	if err != nil || second.ID != first.ID {
+		t.Fatalf("retry delivery=%+v err=%v, want message %s", second, err, first.ID)
+	}
+	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != first.ID {
+		t.Fatalf("delivery duplicated message: history=%+v err=%v", history, err)
 	}
 }
 
@@ -2407,7 +2533,9 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "random"})
 	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C2", "U1")
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -2440,9 +2568,48 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if err != nil || len(retry) != 2 || retry[0].ID != files[1].ID || retry[1].ID != files[0].ID {
 		t.Fatalf("retry=%+v err=%v", retry, err)
 	}
+	if _, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID}, {ID: second.ID}}, []domain.ConversationID{"C2"}, "wrong destination", "", ""); !errors.Is(err, ErrInvalidExternalUpload) {
+		t.Fatalf("completed tickets reused in another channel: %v", err)
+	}
 	page, err = messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("duplicate messages=%+v err=%v", page.Messages, err)
+	}
+}
+
+func TestDraftOwnedUploadRemainsCompletableAfterTicketWindow(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	now := time.Now().UTC()
+	upload := domain.ExternalUpload{
+		ID: "draft-expired", WorkspaceID: "T1", Uploader: "U1", Name: "old.txt", Title: "old.txt",
+		MIMEType: "text/plain", BlobKey: "T1/external/draft-expired", Size: 3, Status: domain.ExternalUploadUploaded,
+		CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute), UploadedAt: now.Add(-time.Hour),
+	}
+	if err := s.CreateExternalUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertDraft(ctx, domain.Draft{
+		WorkspaceID: "T1", UserID: "U1", ConversationID: "C1", Text: "still working",
+		Attachments: []domain.DraftAttachment{{UploadID: upload.ID, Name: upload.Name, Title: upload.Title, MIMEType: upload.MIMEType, Size: upload.Size}},
+		UpdatedAt:   now,
+	}, events.Event{ID: "draft-event", WorkspaceID: "T1", Topic: "draft.saved"}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := (Messages{Store: s}).CompleteExternalUploads(
+		ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: upload.ID}},
+		[]domain.ConversationID{"C1"}, "finished", "", "",
+	)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("files=%+v err=%v", files, err)
+	}
+	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].Text != "finished" {
+		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }
 

@@ -19,12 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CanvasesService_CreateCanvas_FullMethodName         = "/sameoldchat.chat.v1.CanvasesService/CreateCanvas"
-	CanvasesService_EditCanvas_FullMethodName           = "/sameoldchat.chat.v1.CanvasesService/EditCanvas"
-	CanvasesService_DeleteCanvas_FullMethodName         = "/sameoldchat.chat.v1.CanvasesService/DeleteCanvas"
-	CanvasesService_SetCanvasAccess_FullMethodName      = "/sameoldchat.chat.v1.CanvasesService/SetCanvasAccess"
-	CanvasesService_DeleteCanvasAccess_FullMethodName   = "/sameoldchat.chat.v1.CanvasesService/DeleteCanvasAccess"
-	CanvasesService_LookupCanvasSections_FullMethodName = "/sameoldchat.chat.v1.CanvasesService/LookupCanvasSections"
+	CanvasesService_CreateCanvas_FullMethodName             = "/sameoldchat.chat.v1.CanvasesService/CreateCanvas"
+	CanvasesService_CreateConversationCanvas_FullMethodName = "/sameoldchat.chat.v1.CanvasesService/CreateConversationCanvas"
+	CanvasesService_ConversationCanvas_FullMethodName       = "/sameoldchat.chat.v1.CanvasesService/ConversationCanvas"
+	CanvasesService_GetCanvas_FullMethodName                = "/sameoldchat.chat.v1.CanvasesService/GetCanvas"
+	CanvasesService_GetCanvasAccess_FullMethodName          = "/sameoldchat.chat.v1.CanvasesService/GetCanvasAccess"
+	CanvasesService_ListCanvases_FullMethodName             = "/sameoldchat.chat.v1.CanvasesService/ListCanvases"
+	CanvasesService_EditCanvas_FullMethodName               = "/sameoldchat.chat.v1.CanvasesService/EditCanvas"
+	CanvasesService_DeleteCanvas_FullMethodName             = "/sameoldchat.chat.v1.CanvasesService/DeleteCanvas"
+	CanvasesService_SetCanvasAccess_FullMethodName          = "/sameoldchat.chat.v1.CanvasesService/SetCanvasAccess"
+	CanvasesService_DeleteCanvasAccess_FullMethodName       = "/sameoldchat.chat.v1.CanvasesService/DeleteCanvasAccess"
+	CanvasesService_LookupCanvasSections_FullMethodName     = "/sameoldchat.chat.v1.CanvasesService/LookupCanvasSections"
 )
 
 // CanvasesServiceClient is the client API for CanvasesService service.
@@ -32,6 +37,11 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CanvasesServiceClient interface {
 	CreateCanvas(ctx context.Context, in *CreateCanvasRequest, opts ...grpc.CallOption) (*Canvas, error)
+	CreateConversationCanvas(ctx context.Context, in *CreateCanvasRequest, opts ...grpc.CallOption) (*Canvas, error)
+	ConversationCanvas(ctx context.Context, in *CreateCanvasRequest, opts ...grpc.CallOption) (*Canvas, error)
+	GetCanvas(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*Canvas, error)
+	GetCanvasAccess(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*CanvasAccessResponse, error)
+	ListCanvases(ctx context.Context, in *CanvasesRequest, opts ...grpc.CallOption) (*CanvasPage, error)
 	EditCanvas(ctx context.Context, in *EditCanvasRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	DeleteCanvas(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetCanvasAccess(ctx context.Context, in *CanvasAccessRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -51,6 +61,56 @@ func (c *canvasesServiceClient) CreateCanvas(ctx context.Context, in *CreateCanv
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Canvas)
 	err := c.cc.Invoke(ctx, CanvasesService_CreateCanvas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *canvasesServiceClient) CreateConversationCanvas(ctx context.Context, in *CreateCanvasRequest, opts ...grpc.CallOption) (*Canvas, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Canvas)
+	err := c.cc.Invoke(ctx, CanvasesService_CreateConversationCanvas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *canvasesServiceClient) ConversationCanvas(ctx context.Context, in *CreateCanvasRequest, opts ...grpc.CallOption) (*Canvas, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Canvas)
+	err := c.cc.Invoke(ctx, CanvasesService_ConversationCanvas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *canvasesServiceClient) GetCanvas(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*Canvas, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Canvas)
+	err := c.cc.Invoke(ctx, CanvasesService_GetCanvas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *canvasesServiceClient) GetCanvasAccess(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*CanvasAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanvasAccessResponse)
+	err := c.cc.Invoke(ctx, CanvasesService_GetCanvasAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *canvasesServiceClient) ListCanvases(ctx context.Context, in *CanvasesRequest, opts ...grpc.CallOption) (*CanvasPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanvasPage)
+	err := c.cc.Invoke(ctx, CanvasesService_ListCanvases_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +172,11 @@ func (c *canvasesServiceClient) LookupCanvasSections(ctx context.Context, in *Ca
 // for forward compatibility.
 type CanvasesServiceServer interface {
 	CreateCanvas(context.Context, *CreateCanvasRequest) (*Canvas, error)
+	CreateConversationCanvas(context.Context, *CreateCanvasRequest) (*Canvas, error)
+	ConversationCanvas(context.Context, *CreateCanvasRequest) (*Canvas, error)
+	GetCanvas(context.Context, *CanvasRequest) (*Canvas, error)
+	GetCanvasAccess(context.Context, *CanvasRequest) (*CanvasAccessResponse, error)
+	ListCanvases(context.Context, *CanvasesRequest) (*CanvasPage, error)
 	EditCanvas(context.Context, *EditCanvasRequest) (*MutationResponse, error)
 	DeleteCanvas(context.Context, *CanvasRequest) (*MutationResponse, error)
 	SetCanvasAccess(context.Context, *CanvasAccessRequest) (*MutationResponse, error)
@@ -128,6 +193,21 @@ type UnimplementedCanvasesServiceServer struct{}
 
 func (UnimplementedCanvasesServiceServer) CreateCanvas(context.Context, *CreateCanvasRequest) (*Canvas, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateCanvas not implemented")
+}
+func (UnimplementedCanvasesServiceServer) CreateConversationCanvas(context.Context, *CreateCanvasRequest) (*Canvas, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateConversationCanvas not implemented")
+}
+func (UnimplementedCanvasesServiceServer) ConversationCanvas(context.Context, *CreateCanvasRequest) (*Canvas, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConversationCanvas not implemented")
+}
+func (UnimplementedCanvasesServiceServer) GetCanvas(context.Context, *CanvasRequest) (*Canvas, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCanvas not implemented")
+}
+func (UnimplementedCanvasesServiceServer) GetCanvasAccess(context.Context, *CanvasRequest) (*CanvasAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCanvasAccess not implemented")
+}
+func (UnimplementedCanvasesServiceServer) ListCanvases(context.Context, *CanvasesRequest) (*CanvasPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCanvases not implemented")
 }
 func (UnimplementedCanvasesServiceServer) EditCanvas(context.Context, *EditCanvasRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EditCanvas not implemented")
@@ -178,6 +258,96 @@ func _CanvasesService_CreateCanvas_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CanvasesServiceServer).CreateCanvas(ctx, req.(*CreateCanvasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CanvasesService_CreateConversationCanvas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCanvasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).CreateConversationCanvas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_CreateConversationCanvas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).CreateConversationCanvas(ctx, req.(*CreateCanvasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CanvasesService_ConversationCanvas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCanvasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).ConversationCanvas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_ConversationCanvas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).ConversationCanvas(ctx, req.(*CreateCanvasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CanvasesService_GetCanvas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CanvasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).GetCanvas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_GetCanvas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).GetCanvas(ctx, req.(*CanvasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CanvasesService_GetCanvasAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CanvasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).GetCanvasAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_GetCanvasAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).GetCanvasAccess(ctx, req.(*CanvasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CanvasesService_ListCanvases_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CanvasesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).ListCanvases(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_ListCanvases_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).ListCanvases(ctx, req.(*CanvasesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -282,6 +452,26 @@ var CanvasesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateCanvas",
 			Handler:    _CanvasesService_CreateCanvas_Handler,
+		},
+		{
+			MethodName: "CreateConversationCanvas",
+			Handler:    _CanvasesService_CreateConversationCanvas_Handler,
+		},
+		{
+			MethodName: "ConversationCanvas",
+			Handler:    _CanvasesService_ConversationCanvas_Handler,
+		},
+		{
+			MethodName: "GetCanvas",
+			Handler:    _CanvasesService_GetCanvas_Handler,
+		},
+		{
+			MethodName: "GetCanvasAccess",
+			Handler:    _CanvasesService_GetCanvasAccess_Handler,
+		},
+		{
+			MethodName: "ListCanvases",
+			Handler:    _CanvasesService_ListCanvases_Handler,
 		},
 		{
 			MethodName: "EditCanvas",

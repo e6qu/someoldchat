@@ -279,6 +279,71 @@ func parityCases() []parityCase {
 	}
 	return []parityCase{
 		{
+			name: "typed posting channel canvases and app workspace paging survive the composition seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, target.SeedWorkspace(domain.Workspace{ID: "T2", Name: "second workspace"}))
+				requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+					AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
+				}))
+				requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+					AppID: "A1", WorkspaceID: "T2", Enabled: true, CreatedAt: time.Unix(1_700_000_001, 0).UTC(),
+				}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				message, err := chat.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "C1", Text: "typed post"})
+				if err != nil {
+					return nil, err
+				}
+				canvas, err := chat.CreateConversationCanvas(ctx, "T1", "U1", "C1", "Channel canvas", `{"type":"markdown","markdown":"hello"}`)
+				if err != nil {
+					return nil, err
+				}
+				loaded, err := chat.ConversationCanvas(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				byID, err := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				canvasAccess, err := chat.CanvasAccess(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				canvasPage, err := chat.Canvases(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				list, err := chat.CreateList(ctx, "T1", "U1", "Work", "[]", "", "", false, true)
+				if err != nil {
+					return nil, err
+				}
+				listByID, err := chat.List(ctx, "T1", "U1", list.ID)
+				if err != nil {
+					return nil, err
+				}
+				listAccess, err := chat.ListAccess(ctx, "T1", "U1", list.ID)
+				if err != nil {
+					return nil, err
+				}
+				listPage, err := chat.Lists(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				workspaces, err := chat.AuthorizedAppWorkspaces(ctx, "T1", "U1", "A1", domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					message.Text, message.Conversation,
+					canvas.Title, loaded.ID == canvas.ID, byID.ID == canvas.ID, canvasAccess.Access, loaded.Version, len(canvasPage.Canvases),
+					listByID.Name, listAccess.Access, len(listPage.Lists),
+					len(workspaces.Workspaces), workspaces.Workspaces[0].ID, workspaces.HasMore, workspaces.NextCursor != "",
+				}, nil
+			},
+		},
+		{
 			name: "direct history expansion and private conversion survive the composition seam",
 			seed: func(t *testing.T, target *memory.Store) {
 				seedBaseline(t, target)
@@ -1176,8 +1241,20 @@ func parityCases() []parityCase {
 		},
 		{
 			name: "durable drafts and first-party scheduled management",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				now := time.Now().UTC()
+				requireSeed(t, target.CreateExternalUpload(context.Background(), domain.ExternalUpload{
+					ID: "draft-upload", WorkspaceID: "T1", Uploader: "U1", Name: "draft.txt", Title: "draft.txt",
+					MIMEType: "text/plain", BlobKey: "T1/external/draft-upload", Size: 5,
+					Status: domain.ExternalUploadUploaded, CreatedAt: now, ExpiresAt: now.Add(time.Hour), UploadedAt: now,
+				}))
+			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				draft, err := chat.SaveDraft(ctx, "T1", "U1", "C1", "", "unfinished thought")
+				if _, err := chat.SaveDraft(ctx, "T1", "U1", "C1", "", "unfinished thought"); err != nil {
+					return nil, err
+				}
+				draft, err := chat.SaveDraftWithAttachments(ctx, "T1", "U1", "C1", "", "unfinished thought", []domain.DraftAttachment{{UploadID: "draft-upload", Title: "Evidence"}})
 				if err != nil {
 					return nil, err
 				}
@@ -1189,11 +1266,15 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.DeleteDraft(ctx, "T1", "U1", "C1", ""); err != nil {
+				scheduled, err := chat.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
+					Channel: "C1", Text: "old text", PostAt: time.Now().UTC().Add(2 * time.Hour),
+					CredentialHash:  service.InternalScheduledCredential("T1", "U1"),
+					FileAttachments: draft.Attachments,
+				})
+				if err != nil {
 					return nil, err
 				}
-				scheduled, err := chat.ScheduleMessage(ctx, "T1", "U1", "C1", "old text", time.Now().UTC().Add(2*time.Hour))
-				if err != nil {
+				if err := chat.DeleteDraft(ctx, "T1", "U1", "C1", ""); err != nil {
 					return nil, err
 				}
 				updated, err := chat.UpdateScheduledMessage(ctx, "T1", "U1", scheduled.ID, "C1", "new text", time.Now().UTC().Add(3*time.Hour))
@@ -1201,6 +1282,14 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				history, err := chat.ScheduledMessageHistory(ctx, "T1", "U1", true, domain.PageRequest{Limit: 10, Descending: true})
+				if err != nil {
+					return nil, err
+				}
+				firstPost, err := chat.PostScheduledMessage(ctx, "T1", scheduled.ID)
+				if err != nil {
+					return nil, err
+				}
+				retriedPost, err := chat.PostScheduledMessage(ctx, "T1", scheduled.ID)
 				if err != nil {
 					return nil, err
 				}
@@ -1213,8 +1302,8 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{
-					draft.Text, loaded.Text, len(drafts.Items), updated.Text, len(history.Items),
-					sent.Text, len(sentPage.Messages), sentPage.Messages[0].Text,
+					draft.Text, len(draft.Attachments), loaded.Text, len(loaded.Attachments), len(drafts.Items), len(drafts.Items[0].Attachments), updated.Text, len(history.Items),
+					len(history.Items[0].FileAttachments), firstPost.ID == retriedPost.ID, firstPost.ID == sent.ID, sent.Text, len(sent.Files), len(sentPage.Messages), sentPage.Messages[0].Text, len(sentPage.Messages[0].Files),
 				}, nil
 			},
 		},
@@ -1522,6 +1611,10 @@ func parityCases() []parityCase {
 				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, "connection_closed", time.Now().UTC().Add(-time.Second)); err != nil {
 					return nil, err
 				}
+				health, err := chat.GetDeveloperAppDeliveryHealth(ctx, "T1", "U1", "A1")
+				if err != nil {
+					return nil, err
+				}
 				second, secondAttempt, secondReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-2", time.Minute)
 				if err != nil {
 					return nil, err
@@ -1534,7 +1627,11 @@ func parityCases() []parityCase {
 				}
 				return []any{
 					first.Sequence, first.Event.ID, first.Event.WorkspaceID, first.Event.ActorID, first.Event.Topic, first.Event.Payload,
-					firstAttempt, firstReason, second.Sequence, secondAttempt, secondReason,
+					firstAttempt, firstReason,
+					health.AppID, health.Surface, health.Endpoint, health.Configured, health.Installed,
+					health.AcknowledgedSequence, health.InFlightSequence, health.RetryCount, health.RetryReason,
+					health.PendingEvaluation, health.NextEventTopic, health.NextEventAt,
+					second.Sequence, secondAttempt, secondReason,
 				}, nil
 			},
 		},
@@ -1680,6 +1777,19 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				query, err := chat.QueryAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
+					Expression: "#priority >= :minimum", ExpressionAttributes: `{"#priority":"priority"}`,
+					ExpressionValues: `{":minimum":3}`, Page: domain.PageRequest{Limit: 1},
+				})
+				if err != nil {
+					return nil, err
+				}
+				count, err := chat.CountAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
+					Expression: "contains (#title, :term)", ExpressionAttributes: `{"#title":"title"}`, ExpressionValues: `{":term":"i"}`,
+				})
+				if err != nil {
+					return nil, err
+				}
 				if err := chat.DeleteAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-2"}); err != nil {
 					return nil, err
 				}
@@ -1687,7 +1797,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				return []any{put, updated, got, remaining}, nil
+				return []any{put, updated, got, query, count, remaining}, nil
 			},
 		},
 		{
@@ -1992,7 +2102,6 @@ var parityGaps = map[string]struct{}{
 	"RevokeToken":                             {},
 	"ScheduleMessageWithBlocks":               {},
 	"ScheduleMessageWithBlocksAndAttachments": {},
-	"ScheduleMessageAs":                       {},
 	"ScheduledMessagesForCredential":          {},
 	"SetAuthMethod":                           {},
 	"SetCanvasAccess":                         {},

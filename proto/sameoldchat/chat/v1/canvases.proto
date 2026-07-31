@@ -14,6 +14,7 @@ message Canvas {
   string document_content = 5;
   int64 created_at = 6;
   int64 updated_at = 7;
+  int64 version = 8;
 }
 
 message CreateCanvasRequest {
@@ -28,6 +29,20 @@ message CanvasRequest {
   string workspace_id = 1;
   string user_id = 2;
   string canvas_id = 3;
+}
+
+message CanvasesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+}
+
+message CanvasPage {
+  repeated Canvas canvases = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
 }
 
 message EditCanvasRequest {
@@ -54,6 +69,13 @@ message CanvasAccessDeleteRequest {
   repeated string user_ids = 5;
 }
 
+message CanvasAccessResponse {
+  string canvas_id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string access = 4;
+}
+
 message CanvasSection {
   string id = 1;
   string type = 2;
@@ -73,6 +95,11 @@ message CanvasSectionsResponse {
 
 service CanvasesService {
   rpc CreateCanvas(CreateCanvasRequest) returns (Canvas);
+  rpc CreateConversationCanvas(CreateCanvasRequest) returns (Canvas);
+  rpc ConversationCanvas(CreateCanvasRequest) returns (Canvas);
+  rpc GetCanvas(CanvasRequest) returns (Canvas);
+  rpc GetCanvasAccess(CanvasRequest) returns (CanvasAccessResponse);
+  rpc ListCanvases(CanvasesRequest) returns (CanvasPage);
   rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
   rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);
   rpc SetCanvasAccess(CanvasAccessRequest) returns (MutationResponse);

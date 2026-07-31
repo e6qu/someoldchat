@@ -59,6 +59,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/blocks.validate", h.blocksValidate)
 	mux.HandleFunc("POST /api/auth.test", h.authTest)
 	mux.HandleFunc("GET /api/auth.test", h.authTest)
+	mux.HandleFunc("POST /api/auth.teams.list", h.authTeamsList)
+	mux.HandleFunc("GET /api/auth.teams.list", h.authTeamsList)
 	mux.HandleFunc("GET /api/oauth.access", h.oauthAccess)
 	mux.HandleFunc("POST /api/oauth.access", h.oauthAccess)
 	mux.HandleFunc("GET /api/oauth.token", h.oauthAccess)
@@ -113,13 +115,19 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tooling.tokens.rotate", h.toolingTokensRotate)
 	mux.HandleFunc("GET /api/team.info", h.teamInfo)
 	mux.HandleFunc("POST /api/team.info", h.teamInfo)
+	mux.HandleFunc("GET /api/team.preferences.list", h.teamPreferencesList)
+	mux.HandleFunc("POST /api/team.preferences.list", h.teamPreferencesList)
 	mux.HandleFunc("GET /api/rtm.connect", h.rtmConnect)
 	mux.HandleFunc("POST /api/rtm.connect", h.rtmConnect)
+	mux.HandleFunc("GET /api/rtm.start", h.rtmConnect)
+	mux.HandleFunc("POST /api/rtm.start", h.rtmConnect)
 	mux.HandleFunc("POST /api/apps.connections.open", h.appsConnectionsOpen)
 	mux.HandleFunc("GET /api/apps.connections.open", h.appsConnectionsOpen)
 	mux.HandleFunc("POST /api/apps.datastore.put", h.appsDatastorePut)
 	mux.HandleFunc("POST /api/apps.datastore.update", h.appsDatastoreUpdate)
 	mux.HandleFunc("POST /api/apps.datastore.get", h.appsDatastoreGet)
+	mux.HandleFunc("POST /api/apps.datastore.query", h.appsDatastoreQuery)
+	mux.HandleFunc("POST /api/apps.datastore.count", h.appsDatastoreCount)
 	mux.HandleFunc("POST /api/apps.datastore.delete", h.appsDatastoreDelete)
 	mux.HandleFunc("POST /api/apps.datastore.bulkPut", h.appsDatastoreBulkPut)
 	mux.HandleFunc("POST /api/apps.datastore.bulkGet", h.appsDatastoreBulkGet)
@@ -286,6 +294,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/canvases.access.set", h.setCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.access.delete", h.deleteCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.sections.lookup", h.lookupCanvasSections)
+	mux.HandleFunc("POST /api/conversations.canvases.create", h.createConversationCanvas)
 	mux.HandleFunc("POST /api/slackLists.create", h.createList)
 	mux.HandleFunc("POST /api/slackLists.update", h.updateList)
 	mux.HandleFunc("POST /api/slackLists.items.create", h.createListItem)
@@ -604,6 +613,69 @@ func (h Handler) appsDatastoreBulkGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "datastore": datastore, "items": encoded})
 }
 
+func (h Handler) appsDatastoreQuery(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.appDatastoreReadRequest(w, r)
+	if !ok {
+		return
+	}
+	datastore := strings.TrimSpace(fields["datastore"])
+	limit := 100
+	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, "invalid_arguments")
+			return
+		}
+		limit = parsed
+	}
+	if datastore == "" || limit < 1 || limit > 1000 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	page, err := h.Messages.QueryAppDatastoreItems(
+		r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, datastore,
+		domain.AppDatastoreQuery{
+			Expression: fields["expression"], ExpressionAttributes: fields["expression_attributes"], ExpressionValues: fields["expression_values"],
+			Page: domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))},
+		},
+	)
+	if err != nil {
+		writeAppDatastoreError(w, err)
+		return
+	}
+	items := make([]json.RawMessage, len(page.Items))
+	for index, item := range page.Items {
+		items[index] = json.RawMessage(item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "datastore": datastore, "items": items,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)},
+	})
+}
+
+func (h Handler) appsDatastoreCount(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.appDatastoreReadRequest(w, r)
+	if !ok {
+		return
+	}
+	datastore := strings.TrimSpace(fields["datastore"])
+	if datastore == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	count, err := h.Messages.CountAppDatastoreItems(
+		r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, datastore,
+		domain.AppDatastoreQuery{
+			Expression: fields["expression"], ExpressionAttributes: fields["expression_attributes"], ExpressionValues: fields["expression_values"],
+		},
+	)
+	if err != nil {
+		writeAppDatastoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "datastore": datastore, "count": count})
+}
+
 func (h Handler) appsDatastoreDelete(w http.ResponseWriter, r *http.Request) {
 	principal, fields, ok := h.appDatastoreWriteRequest(w, r)
 	if !ok {
@@ -653,17 +725,26 @@ func (h Handler) decodeAppDatastoreRequest(w http.ResponseWriter, r *http.Reques
 		writeAuthError(w, err)
 		return auth.Principal{}, nil, false
 	}
-	if principal.TokenType != "bot" || principal.AppID == "" {
-		writeError(w, "not_allowed_token_type")
-		return auth.Principal{}, nil, false
-	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return auth.Principal{}, nil, false
 	}
-	if requested := domain.AppID(strings.TrimSpace(fields["app_id"])); requested != "" && requested != principal.AppID {
-		writeError(w, "invalid_app_id")
+	requested := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	switch principal.TokenType {
+	case "bot":
+		if principal.AppID == "" || (requested != "" && requested != principal.AppID) {
+			writeError(w, "invalid_app_id")
+			return auth.Principal{}, nil, false
+		}
+	case "user":
+		if requested == "" {
+			writeError(w, "invalid_arguments")
+			return auth.Principal{}, nil, false
+		}
+		principal.AppID = requested
+	default:
+		writeError(w, "not_allowed_token_type")
 		return auth.Principal{}, nil, false
 	}
 	return principal, fields, true
@@ -694,6 +775,8 @@ func writeAppDatastoreError(w http.ResponseWriter, err error) {
 			"ok": false, "error": "datastore_error",
 			"errors": []map[string]string{{"code": "invalid_item", "message": err.Error(), "pointer": "/item"}},
 		})
+	case errors.Is(err, service.ErrInvalidDatastoreQuery), errors.Is(err, domain.ErrInvalidCursor), errors.Is(err, store.ErrInvalidArgument):
+		writeError(w, "invalid_arguments")
 	case errors.Is(err, service.ErrAppNotHosted):
 		writeError(w, "app_not_hosted")
 	case errors.Is(err, store.ErrNotFound):
@@ -889,6 +972,63 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 		response["is_enterprise_install"] = false
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h Handler) authTeamsList(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	principal, err := h.authenticate(r, "")
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if principal.AppID == "" {
+		writeError(w, "not_allowed_token_type")
+		return
+	}
+	limit, err := clampLimit(fields["limit"], 100, 1000)
+	if err != nil {
+		writeError(w, "invalid_limit")
+		return
+	}
+	cursor, err := decodeCursor(fields["cursor"], "invalid_cursor")
+	if err != nil {
+		writeError(w, "invalid_cursor")
+		return
+	}
+	includeIcon, err := parseBoolField(fields["include_icon"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	page, err := h.Messages.AuthorizedAppWorkspaces(
+		r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID,
+		domain.PageRequest{Limit: limit, Cursor: cursor},
+	)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	teams := make([]map[string]any, 0, len(page.Workspaces))
+	for _, workspace := range page.Workspaces {
+		team := map[string]any{"id": workspace.ID, "name": workspace.Name}
+		if includeIcon {
+			team["icon"] = map[string]any{
+				"image_34": workspace.IconURL, "image_44": workspace.IconURL,
+				"image_68": workspace.IconURL, "image_88": workspace.IconURL,
+				"image_102": workspace.IconURL, "image_132": workspace.IconURL,
+				"image_default": strings.TrimSpace(workspace.IconURL) == "",
+			}
+		}
+		teams = append(teams, team)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "teams": teams,
+		"response_metadata": map[string]any{"next_cursor": page.NextCursor},
+	})
 }
 
 // foreignWorkspace reports the first workspace in values that is not the
@@ -1878,6 +2018,31 @@ func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	domainName := team.Domain
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": domainName}})
+}
+
+// teamPreferencesList exposes the workspace policies SameOldChat actually
+// enforces. These are product invariants rather than configurable-looking
+// placeholders: files are allowed subject to the caller's scopes, profiles use
+// display names, message editing has no workspace time limit, and the general
+// channel is not role-restricted.
+func (h Handler) teamPreferencesList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeTeamPreferencesRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if _, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
+		writeError(w, mapServiceError(err, "invalid_team"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                     true,
+		"display_real_names":     false,
+		"disable_file_uploads":   "allow_all",
+		"msg_edit_window_mins":   0,
+		"who_can_post_general":   "everyone",
+		"who_can_create_channel": "regular",
+	})
 }
 
 func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
@@ -3136,7 +3301,19 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	response := conversationResponse(conversation)
+	canvas, canvasErr := h.Messages.ConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID)
+	if canvasErr == nil {
+		var document struct {
+			Sections []json.RawMessage `json:"sections"`
+		}
+		_ = json.Unmarshal([]byte(canvas.DocumentContent), &document)
+		response["properties"] = map[string]any{"canvas": map[string]any{"file_id": canvas.ID, "is_empty": len(document.Sections) == 0}}
+	} else if !errors.Is(canvasErr, store.ErrNotFound) {
+		writeError(w, mapServiceError(canvasErr, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": response})
 }
 
 func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
@@ -3867,9 +4044,17 @@ func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userSco
 }
 
 func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticate(r, "")
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	allInviteScopes := []auth.Scope{
+		auth.ScopeChannelsManage, auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites,
+		auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite,
+	}
+	if !principalHasAnyScope(principal, allInviteScopes...) {
+		writeAuthError(w, missingScopeError{needed: auth.ScopeChannelsManage, provided: permissionScopes(principal)})
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -3882,14 +4067,49 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "channel_not_found")
 		return
 	}
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	required := []auth.Scope{auth.ScopeChannelsWrite}
+	switch {
+	case conversation.IsDirect:
+		required = []auth.Scope{auth.ScopeIMWrite}
+	case conversation.IsGroupDirect:
+		required = []auth.Scope{auth.ScopeMPIMWrite}
+	case conversation.IsPrivate:
+		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
+	case principal.TokenType == "bot" || principal.BotID != "":
+		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}
+	default:
+		required = []auth.Scope{auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites}
+	}
+	if !principalHasAnyScope(principal, required...) {
+		writeAuthError(w, missingScopeError{needed: required[0], provided: permissionScopes(principal)})
+		return
+	}
+	if conversation.Archived {
+		writeError(w, "is_archived")
+		return
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		writeError(w, "method_not_supported_for_channel_type")
+		return
+	}
 	if strings.TrimSpace(fields["users"]) == "" {
 		// /conversations.invite enumerates no_user for a missing users argument.
 		writeError(w, "no_user")
 		return
 	}
+	rawUsers := strings.Split(fields["users"], ",")
+	if len(rawUsers) > 100 {
+		writeError(w, "too_many_users")
+		return
+	}
 	users := make([]domain.UserID, 0)
 	seen := make(map[domain.UserID]struct{})
-	for _, raw := range strings.Split(fields["users"], ",") {
+	for _, raw := range rawUsers {
 		user := domain.UserID(strings.TrimSpace(raw))
 		if user == "" {
 			writeError(w, "invalid_array_arg")
@@ -3901,12 +4121,91 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		seen[user] = struct{}{}
 		users = append(users, user)
 	}
-	conversation, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
+	force, err := parseBoolField(fields["force"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	valid, failures, err := h.conversationInviteCandidates(r, principal, channel, users)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
+	if len(failures) != 0 && (!force || len(valid) == 0) {
+		items := make([]map[string]any, 0, len(failures))
+		for _, failure := range failures {
+			items = append(items, map[string]any{
+				"user": failure.UserID, "ok": false, "error": failure.Reason,
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": false, "error": failures[0].Reason, "errors": items,
+		})
+		return
+	}
+	conversation, err = h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, valid)
+	if err != nil {
+		writeError(w, mapServiceErrorExists(err, "channel_not_found", "already_in_channel"))
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+}
+
+type conversationInviteFailure struct {
+	UserID domain.UserID
+	Reason string
+}
+
+func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Principal, channel domain.ConversationID, users []domain.UserID) ([]domain.UserID, []conversationInviteFailure, error) {
+	members := make(map[domain.UserID]struct{})
+	request := domain.PageRequest{Limit: 200}
+	for {
+		page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, request)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, user := range page.Users {
+			members[user.ID] = struct{}{}
+		}
+		if !page.HasMore {
+			break
+		}
+		request.Cursor = page.NextCursor
+	}
+
+	valid := make([]domain.UserID, 0, len(users))
+	failures := make([]conversationInviteFailure, 0)
+	for _, targetID := range users {
+		reason := ""
+		switch {
+		case targetID == principal.UserID:
+			reason = "cant_invite_self"
+		default:
+			if _, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
+				if !errors.Is(err, store.ErrNotFound) {
+					return nil, nil, err
+				}
+				reason = "user_not_found"
+			} else if _, exists := members[targetID]; exists {
+				reason = "already_in_channel"
+			}
+		}
+		if reason != "" {
+			failures = append(failures, conversationInviteFailure{UserID: targetID, Reason: reason})
+			continue
+		}
+		valid = append(valid, targetID)
+	}
+	return valid, failures, nil
+}
+
+func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
+	for _, scope := range scopes {
+		if principal.HasScope(scope) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
@@ -4699,6 +4998,34 @@ func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
 	canvas, err := h.Messages.CreateCanvas(r.Context(), principal.WorkspaceID, principal.UserID, fields["title"], fields["document_content"], domain.ConversationID(strings.TrimSpace(fields["channel_id"])))
 	if err != nil {
 		writeError(w, mapServiceError(err, "canvas_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "canvas_id": canvas.ID})
+}
+
+func (h Handler) createConversationCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	channelID := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	if channelID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	canvas, err := h.Messages.CreateConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, channelID, fields["title"], fields["document_content"])
+	if err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			writeError(w, "channel_canvas_already_exists")
+			return
+		}
+		writeError(w, mapServiceError(err, "channel_canvas_creation_failed"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "canvas_id": canvas.ID})
@@ -6514,6 +6841,71 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	if err := checkMessageLength(fields); err != nil {
 		return domain.Message{}, err
 	}
+	markdownText := fields["markdown_text"]
+	if markdownText != "" {
+		if fields["text"] != "" || strings.TrimSpace(fields["blocks"]) != "" {
+			return domain.Message{}, decodeFailure("markdown_text_conflict", "markdown_text cannot be combined with text or blocks")
+		}
+		if utf8.RuneCountInString(markdownText) > 12000 {
+			return domain.Message{}, decodeFailure("msg_too_long", "markdown_text exceeds the maximum length")
+		}
+	}
+	if strings.TrimSpace(fields["metadata"]) != "" && principal.AppID == "" {
+		return domain.Message{}, decodeFailure("metadata_must_be_sent_from_app", "message metadata requires an app token")
+	}
+	parse := strings.TrimSpace(fields["parse"])
+	if parse != "" && parse != "none" && parse != "full" {
+		return domain.Message{}, decodeFailure("invalid_arguments", "parse must be none or full")
+	}
+	optionalBool := func(name string) (*bool, error) {
+		raw := strings.TrimSpace(fields[name])
+		if raw == "" {
+			return nil, nil
+		}
+		value, parseErr := parseBoolField(raw)
+		if parseErr != nil {
+			return nil, decodeFailure("invalid_arguments", name+" must be boolean")
+		}
+		return &value, nil
+	}
+	replyBroadcast, err := optionalBool("reply_broadcast")
+	if err != nil {
+		return domain.Message{}, err
+	}
+	linkNames, err := optionalBool("link_names")
+	if err != nil {
+		return domain.Message{}, err
+	}
+	mrkdwn, err := optionalBool("mrkdwn")
+	if err != nil {
+		return domain.Message{}, err
+	}
+	unfurlLinks, err := optionalBool("unfurl_links")
+	if err != nil {
+		return domain.Message{}, err
+	}
+	unfurlMedia, err := optionalBool("unfurl_media")
+	if err != nil {
+		return domain.Message{}, err
+	}
+	asUser, err := optionalBool("as_user")
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if asUser != nil && *asUser {
+		return domain.Message{}, decodeFailure("as_user_not_supported", "as_user is only available to classic apps")
+	}
+	username := strings.TrimSpace(fields["username"])
+	iconEmoji := strings.TrimSpace(fields["icon_emoji"])
+	iconURL := strings.TrimSpace(fields["icon_url"])
+	if username != "" || iconEmoji != "" || iconURL != "" {
+		if principal.AppID == "" || !principal.HasScope(auth.ScopeChatWriteCustomize) {
+			return domain.Message{}, decodeFailure("missing_scope", "message customization requires chat:write.customize")
+		}
+	}
+	if iconEmoji != "" {
+		iconURL = ""
+	}
 	blocks, err := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	if err != nil {
 		return domain.Message{}, service.ErrInvalidMessage
@@ -6522,17 +6914,24 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	if err != nil {
 		return domain.Message{}, service.ErrInvalidMessage
 	}
-	return h.Messages.PostWithBlocksAndAttachments(
+	text := fields["text"]
+	if markdownText != "" {
+		text = markdownText
+	}
+	return h.Messages.PostMessageAs(
 		r.Context(),
 		principal.WorkspaceID,
 		principal.UserID,
-		domain.ConversationID(strings.TrimSpace(fields["channel"])),
-		fields["text"],
-		blocks,
-		attachments,
-		domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
-		strings.TrimSpace(r.Header.Get("Idempotency-Key")),
-		principal.AppID,
+		domain.MessagePostRequest{
+			Conversation: domain.ConversationID(strings.TrimSpace(fields["channel"])),
+			Text:         text, Blocks: blocks, Attachments: attachments, Metadata: fields["metadata"],
+			ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
+			IdempotencyKey:  strings.TrimSpace(r.Header.Get("Idempotency-Key")), AppID: principal.AppID,
+			MarkdownText: markdownText != "", ReplyBroadcast: replyBroadcast != nil && *replyBroadcast,
+			Parse: parse, MrkdwnDisabled: mrkdwn != nil && !*mrkdwn, LinkNames: linkNames != nil && *linkNames,
+			UnfurlLinks: unfurlLinks, UnfurlMedia: unfurlMedia,
+			Username: username, IconEmoji: iconEmoji, IconURL: iconURL,
+		},
 	)
 }
 
@@ -6804,24 +7203,61 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	textValue := strings.TrimSpace(fields["text"])
+	markdownText := fields["markdown_text"]
+	if markdownText != "" {
+		if fields["text"] != "" || strings.TrimSpace(fields["blocks"]) != "" {
+			writeError(w, "markdown_text_conflict")
+			return
+		}
+		if utf8.RuneCountInString(markdownText) > 12000 {
+			writeError(w, "msg_too_long")
+			return
+		}
+		textValue = markdownText
+	}
+	if strings.TrimSpace(fields["metadata"]) != "" && principal.AppID == "" {
+		writeError(w, "metadata_must_be_sent_from_app")
+		return
+	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	postAt, err := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
-	unsupportedBoolean := func(name string) bool {
+	optionalBoolean := func(name string) (*bool, bool) {
 		raw := strings.TrimSpace(fields[name])
 		if raw == "" {
-			return false
+			return nil, true
 		}
 		value, parseErr := parseBoolField(raw)
-		return parseErr != nil || value
+		return &value, parseErr == nil
 	}
-	unsupported := fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
-	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || err != nil || postAt <= 0 || unsupported {
+	replyBroadcast, replyBroadcastOK := optionalBoolean("reply_broadcast")
+	asUser, asUserOK := optionalBoolean("as_user")
+	linkNames, linkNamesOK := optionalBoolean("link_names")
+	unfurlLinks, unfurlLinksOK := optionalBoolean("unfurl_links")
+	unfurlMedia, unfurlMediaOK := optionalBoolean("unfurl_media")
+	parse := strings.TrimSpace(fields["parse"])
+	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || err != nil || postAt <= 0 ||
+		!replyBroadcastOK || !asUserOK || !linkNamesOK || !unfurlLinksOK || !unfurlMediaOK ||
+		(parse != "" && parse != "none" && parse != "full") || (asUser != nil && *asUser) {
 		writeError(w, "invalid_arguments")
 		return
 	}
+	state := domain.MessageStreamState{
+		MarkdownText: markdownText != "", ReplyBroadcast: replyBroadcast != nil && *replyBroadcast,
+		Parse: parse, LinkNames: linkNames != nil && *linkNames, UnfurlLinks: unfurlLinks, UnfurlMedia: unfurlMedia,
+	}
+	encodedState, err := json.Marshal(state)
+	if err != nil {
+		writeError(w, "internal_error")
+		return
+	}
+	streamState := ""
+	if string(encodedState) != "{}" {
+		streamState = string(encodedState)
+	}
 	value, err := h.Messages.ScheduleMessageAs(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledMessageRequest{
 		Channel: channel, Text: textValue, Blocks: blocks, Attachments: attachments,
+		Metadata: fields["metadata"], StreamState: streamState,
 		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		PostAt:          time.Unix(postAt, 0).UTC(), AppID: principal.AppID, BotID: principal.BotID,
 		CredentialHash: principal.CredentialHash,
@@ -7657,6 +8093,10 @@ func messageResponse(message domain.Message) map[string]any {
 		} else if stream.IconURL != "" {
 			result["icons"] = map[string]string{"image_48": stream.IconURL}
 		}
+		if stream.ReplyBroadcast {
+			result["subtype"] = "thread_broadcast"
+			result["reply_broadcast"] = true
+		}
 	}
 	// `thread_ts` used to be emitted unconditionally, so a non-threaded message
 	// serialised as `"thread_ts": ""`, which the strictly typed SDK models (Java
@@ -7792,6 +8232,9 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	// not_in_channel, and it was reachable from no route.
 	if errors.Is(err, service.ErrNotInConversation) {
 		return "not_in_channel"
+	}
+	if errors.Is(err, service.ErrCannotInviteSelf) {
+		return "cant_invite_self"
 	}
 	if errors.Is(err, store.ErrAlreadyExists) {
 		if existsReason != "" {
@@ -8184,7 +8627,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // shape instead — see normalizeJSONField.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values":
 		return true
 	default:
 		return false

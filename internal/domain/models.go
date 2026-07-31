@@ -818,19 +818,20 @@ type Reaction struct {
 type ActivityKind string
 
 const (
-	ActivityDM       ActivityKind = "dm"
-	ActivityMention  ActivityKind = "mention"
-	ActivityThread   ActivityKind = "thread"
-	ActivityChannel  ActivityKind = "channel"
-	ActivityKeyword  ActivityKind = "keyword"
-	ActivityReaction ActivityKind = "reaction"
-	ActivityApp      ActivityKind = "app"
-	ActivityReminder ActivityKind = "reminder"
+	ActivityDM         ActivityKind = "dm"
+	ActivityMention    ActivityKind = "mention"
+	ActivityThread     ActivityKind = "thread"
+	ActivityChannel    ActivityKind = "channel"
+	ActivityKeyword    ActivityKind = "keyword"
+	ActivityReaction   ActivityKind = "reaction"
+	ActivityApp        ActivityKind = "app"
+	ActivityReminder   ActivityKind = "reminder"
+	ActivityInvitation ActivityKind = "invitation"
 )
 
 func (kind ActivityKind) Valid() bool {
 	switch kind {
-	case ActivityDM, ActivityMention, ActivityThread, ActivityChannel, ActivityKeyword, ActivityReaction, ActivityApp, ActivityReminder:
+	case ActivityDM, ActivityMention, ActivityThread, ActivityChannel, ActivityKeyword, ActivityReaction, ActivityApp, ActivityReminder, ActivityInvitation:
 		return true
 	default:
 		return false
@@ -1022,8 +1023,11 @@ type Canvas struct {
 	OwnerID         UserID
 	Title           string
 	DocumentContent string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// Version is a monotonic compare-and-swap revision. Writers submit the
+	// revision they read plus one; stores reject stale writes with ErrConflict.
+	Version   int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type CanvasAccess struct {
@@ -1155,12 +1159,15 @@ type ScheduledMessage struct {
 	Text            string
 	Blocks          string
 	Attachments     string
+	Metadata        string
+	StreamState     string
 	ThreadTimestamp MessageTimestamp
 	PostAt          time.Time
 	CreatedAt       time.Time
 	DeliveredAt     time.Time
 	FailedAt        time.Time
 	FailureCode     string
+	FileAttachments []DraftAttachment
 }
 
 type ScheduledMessagePage struct {
@@ -1174,11 +1181,14 @@ type ScheduledMessageRequest struct {
 	Text            string
 	Blocks          string
 	Attachments     string
+	Metadata        string
+	StreamState     string
 	ThreadTimestamp MessageTimestamp
 	PostAt          time.Time
 	AppID           AppID
 	BotID           BotID
 	CredentialHash  string
+	FileAttachments []DraftAttachment
 }
 
 type ScheduledMessageQuery struct {
@@ -1198,7 +1208,20 @@ type Draft struct {
 	ConversationID  ConversationID
 	ThreadTimestamp MessageTimestamp
 	Text            string
+	Attachments     []DraftAttachment
 	UpdatedAt       time.Time
+}
+
+// DraftAttachment is a private reference to an uploaded-but-unshared blob.
+// The upload remains owned by the draft's member and is not a workspace File
+// until the composer sends it through the ordinary atomic file completion
+// path.
+type DraftAttachment struct {
+	UploadID ExternalUploadID
+	Name     string
+	Title    string
+	MIMEType string
+	Size     int64
 }
 
 type DraftPage struct {
@@ -1301,6 +1324,41 @@ type AppInstallation struct {
 	WorkspaceID WorkspaceID
 	Enabled     bool
 	CreatedAt   time.Time
+}
+
+// AppEventCursor is the durable delivery position for one app transport. It is
+// intentionally payload-free: administration can explain queue progress and
+// retry state without exposing event bodies from installed workspaces.
+type AppEventCursor struct {
+	AppID                AppID
+	Surface              string
+	AcknowledgedSequence uint64
+	InFlightSequence     uint64
+	InFlightUntil        time.Time
+	RetryAt              time.Time
+	RetryCount           int
+	RetryReason          string
+}
+
+// AppDeliveryHealth is the developer-facing projection of an app's configured
+// event transport and its durable cursor. PendingEvaluation means at least one
+// journal record still needs subscription and visibility evaluation; it does
+// not incorrectly claim that every pending record will become a callback.
+type AppDeliveryHealth struct {
+	AppID                AppID
+	Surface              string
+	Endpoint             string
+	Configured           bool
+	Installed            bool
+	AcknowledgedSequence uint64
+	InFlightSequence     uint64
+	InFlightUntil        time.Time
+	RetryAt              time.Time
+	RetryCount           int
+	RetryReason          string
+	PendingEvaluation    bool
+	NextEventTopic       string
+	NextEventAt          time.Time
 }
 
 // App is the durable developer-owned Slack application. Installation records
@@ -1488,6 +1546,19 @@ type AppDatastoreItem struct {
 	UpdatedAt   time.Time
 }
 
+type AppDatastoreQuery struct {
+	Expression           string
+	ExpressionAttributes string
+	ExpressionValues     string
+	Page                 PageRequest
+}
+
+type AppDatastoreQueryPage struct {
+	Items      []string
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type AppPermissionRequest struct {
 	ID           AppRequestID
 	WorkspaceID  WorkspaceID
@@ -1534,6 +1605,7 @@ type List struct {
 	DescriptionBlocks string
 	Schema            string
 	TodoMode          bool
+	Version           int64
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -1549,6 +1621,7 @@ type ListItem struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	Archived     bool
+	Version      int64
 }
 
 type ListItemPage struct {
@@ -1661,6 +1734,37 @@ type MessageStreamState struct {
 	Tasks           []json.RawMessage `json:"tasks,omitempty"`
 	ChunkBlocks     []json.RawMessage `json:"chunk_blocks,omitempty"`
 	Warnings        []string          `json:"warnings,omitempty"`
+	MarkdownText    bool              `json:"markdown_text,omitempty"`
+	ReplyBroadcast  bool              `json:"reply_broadcast,omitempty"`
+	Parse           string            `json:"parse,omitempty"`
+	MrkdwnDisabled  bool              `json:"mrkdwn_disabled,omitempty"`
+	LinkNames       bool              `json:"link_names,omitempty"`
+	UnfurlLinks     *bool             `json:"unfurl_links,omitempty"`
+	UnfurlMedia     *bool             `json:"unfurl_media,omitempty"`
+}
+
+// MessagePostRequest is the complete current chat.postMessage payload after
+// transport decoding. Keeping it typed prevents the Web API, scheduled worker,
+// and first-party composer from silently supporting different message shapes.
+type MessagePostRequest struct {
+	Conversation    ConversationID
+	Text            string
+	Blocks          string
+	Attachments     string
+	Metadata        string
+	ThreadTimestamp MessageTimestamp
+	IdempotencyKey  string
+	AppID           AppID
+	MarkdownText    bool
+	ReplyBroadcast  bool
+	Parse           string
+	MrkdwnDisabled  bool
+	LinkNames       bool
+	UnfurlLinks     *bool
+	UnfurlMedia     *bool
+	Username        string
+	IconEmoji       string
+	IconURL         string
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a

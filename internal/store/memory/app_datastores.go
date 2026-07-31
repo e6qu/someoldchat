@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -73,6 +74,40 @@ func (s *Store) GetAppDatastoreItems(_ context.Context, appID domain.AppID, work
 		}
 	}
 	return values, nil
+}
+
+func (s *Store) ListAppDatastoreItems(_ context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, datastore string, request domain.PageRequest) ([]domain.AppDatastoreItem, bool, domain.Cursor, error) {
+	if appID == "" || workspaceID == "" || strings.TrimSpace(datastore) == "" {
+		return nil, false, "", store.InvalidArgument("invalid app datastore query")
+	}
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return nil, false, "", err
+	}
+	s.mu.RLock()
+	values := make([]domain.AppDatastoreItem, 0)
+	for _, value := range s.appDatastoreItems {
+		if value.AppID == appID && value.WorkspaceID == workspaceID && value.Datastore == datastore && value.ID > after {
+			values = append(values, value)
+		}
+	}
+	s.mu.RUnlock()
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	var next domain.Cursor
+	if hasMore {
+		next, err = domain.NewListCursor(values[len(values)-1].ID)
+		if err != nil {
+			return nil, false, "", err
+		}
+	}
+	return values, hasMore, next, nil
 }
 
 func (s *Store) DeleteAppDatastoreItems(_ context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, datastore string, ids []string) error {

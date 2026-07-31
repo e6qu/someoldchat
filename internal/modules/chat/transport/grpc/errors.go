@@ -123,6 +123,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_app_manifest", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppManifest},
 	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
 	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
+	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreQuery},
 	{key: "service.invalid_trigger", code: codes.InvalidArgument, sentinel: service.ErrInvalidTrigger},
 	{key: "service.slash_command_in_thread", code: codes.InvalidArgument, sentinel: service.ErrSlashCommandInThread},
 	// The generic member of the class closes it, and it restores a bare
@@ -194,6 +195,7 @@ var errorClasses = []errorClass{
 	// caller is a workspace member and the conversation exists, so it is neither
 	// an absence nor a permission failure.
 	{key: "service.not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrNotInConversation},
+	{key: "service.cannot_invite_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotInviteSelf},
 	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppInteractionUnavailable},
 	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: service.ErrAppHomeNotEnabled},
 	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: service.ErrAppNotHosted},

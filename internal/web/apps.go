@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
@@ -56,6 +57,8 @@ type developerAppsData struct {
 	AppToken        *domain.AppTokenCredentials
 	StarterManifest string
 	InstallURL      string
+	DatastoreURL    string
+	DeliveryURL     string
 }
 
 const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{end}}
@@ -94,7 +97,7 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
       <form method="post" action="{{if .Selected}}/app/developer/apps/update{{else}}/app/developer/apps/create{{end}}">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">{{if .Selected}}<input type="hidden" name="app_id" value="{{.Selected.ID}}">{{end}}
         <label class="field" for="manifest">App manifest (JSON)<textarea id="manifest" name="manifest" maxlength="1048576" spellcheck="false" required>{{.Manifest}}</textarea></label>
-        <div class="actions"><button class="button" type="submit">{{if .Selected}}Save manifest{{else}}Create app{{end}}</button>{{if .InstallURL}}<a href="{{.InstallURL}}">Open install flow</a>{{end}}</div>
+        <div class="actions"><button class="button" type="submit">{{if .Selected}}Save manifest{{else}}Create app{{end}}</button>{{if .InstallURL}}<a href="{{.InstallURL}}">Open install flow</a>{{end}}{{if .DatastoreURL}}<a href="{{.DatastoreURL}}">Manage hosted datastores</a>{{end}}{{if .DeliveryURL}}<a href="{{.DeliveryURL}}">View event delivery health</a>{{end}}</div>
       </form>
       {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form>{{end}}<form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
     </section>
@@ -246,16 +249,7 @@ func (h Handler) renderDeveloperAppsWithToken(w http.ResponseWriter, r *http.Req
 		return
 	}
 	data := developerAppsData{Apps: apps, Selected: &app, Manifest: manifest, CSRFToken: csrf, Notice: "App-level token generated.", AppToken: &token}
-	if parsed, problems := appmanifest.Parse(manifest); len(problems) == 0 && len(parsed.RedirectURLs) != 0 {
-		values := url.Values{"client_id": {app.ClientID}, "redirect_uri": {parsed.RedirectURLs[0]}}
-		if len(parsed.BotScopes) != 0 {
-			values.Set("scope", strings.Join(parsed.BotScopes, ","))
-		}
-		if len(parsed.UserScopes) != 0 {
-			values.Set("user_scope", strings.Join(parsed.UserScopes, ","))
-		}
-		data.InstallURL = "/oauth/v2/authorize?" + values.Encode()
-	}
+	setDeveloperAppLinks(&data, app, manifest)
 	h.writeHTML(w, developerAppsTemplate, data, http.StatusCreated, "app console rendering unavailable")
 }
 
@@ -295,19 +289,7 @@ func (h Handler) renderDeveloperApps(w http.ResponseWriter, r *http.Request, pri
 		} else {
 			data.Selected = &app
 			data.Manifest = manifest
-			if parsed, parsingProblems := appmanifest.Parse(manifest); len(parsingProblems) == 0 && len(parsed.RedirectURLs) != 0 {
-				values := url.Values{
-					"client_id":    {app.ClientID},
-					"redirect_uri": {parsed.RedirectURLs[0]},
-				}
-				if len(parsed.BotScopes) != 0 {
-					values.Set("scope", strings.Join(parsed.BotScopes, ","))
-				}
-				if len(parsed.UserScopes) != 0 {
-					values.Set("user_scope", strings.Join(parsed.UserScopes, ","))
-				}
-				data.InstallURL = "/oauth/v2/authorize?" + values.Encode()
-			}
+			setDeveloperAppLinks(&data, app, manifest)
 		}
 	}
 	if submittedManifest != "" {
@@ -319,6 +301,38 @@ func (h Handler) renderDeveloperApps(w http.ResponseWriter, r *http.Request, pri
 		data.Notice = message
 	}
 	h.writeHTML(w, developerAppsTemplate, data, status, "app console rendering unavailable")
+}
+
+func setDeveloperAppLinks(data *developerAppsData, app domain.App, manifest string) {
+	data.DeliveryURL = "/app/developer/apps/delivery?app=" + url.QueryEscape(string(app.ID))
+	parsed, problems := appmanifest.Parse(manifest)
+	if len(problems) != 0 {
+		return
+	}
+	if len(parsed.RedirectURLs) != 0 {
+		values := url.Values{
+			"client_id":    {app.ClientID},
+			"redirect_uri": {parsed.RedirectURLs[0]},
+		}
+		if len(parsed.BotScopes) != 0 {
+			values.Set("scope", strings.Join(parsed.BotScopes, ","))
+		}
+		if len(parsed.UserScopes) != 0 {
+			values.Set("user_scope", strings.Join(parsed.UserScopes, ","))
+		}
+		data.InstallURL = "/oauth/v2/authorize?" + values.Encode()
+	}
+	if parsed.IsHosted && parsed.FunctionRuntime == "slack" && len(parsed.Datastores) != 0 {
+		names := make([]string, 0, len(parsed.Datastores))
+		for name := range parsed.Datastores {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		data.DatastoreURL = "/app/developer/apps/datastore?" + url.Values{
+			"app":       {string(app.ID)},
+			"datastore": {names[0]},
+		}.Encode()
+	}
 }
 
 func developerAppStatus(err error) int {

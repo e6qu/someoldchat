@@ -32,6 +32,16 @@ name; invite or remove members; manage posting/notification settings; and copy
 the channel identifier/link. Unauthorized controls are absent or disabled with
 an explanation, while direct backend requests remain denied.
 
+Inviting a workspace member works for both public and private channels and
+commits membership, its durable event, and the recipient's Invitations Activity
+item as one mutation. Repeating an ordinary `conversations.invite` for a member
+already present returns Slack's `already_in_channel` error and does not create a
+second event or Activity item. The API applies Slack's current bot/user and
+public/private alternative scope matrix. A multi-user request is all-or-none by
+default and returns Slack's per-user `errors` entries for missing users,
+self-invites, and existing members. `force=true` invites only the valid subset.
+The formal current argument contract limits one request to 100 user IDs.
+
 ## CONV-04 — Leave, archive, unarchive, and delete
 
 - Leaving removes the member after Slack's applicable confirmation and moves

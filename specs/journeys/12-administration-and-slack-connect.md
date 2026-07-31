@@ -88,6 +88,13 @@ remaining channel.
   external member, bot, disabled user, and wrong workspace.
 - Current official SDKs exercise applicable `admin.*`, `team.*`, `users.*`,
   `apps.*`, and Slack Connect `conversations.*` methods.
+- The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey creates and installs a
+  hosted app, opens its manifest-declared datastore from app administration,
+  queries persisted items with Slack's expression semantics, replaces and
+  merges one item, deletes it, and inspects the payload-redacted durable Socket
+  Mode cursor before cleaning up the app. Service, memory/SQL, generated-gRPC,
+  official Node SDK, and automated accessibility qualifications cover the same
+  boundaries.
 - Opt-in Slack Enterprise/sandbox evidence is required before claiming plan-
   restricted administration equivalence; unavailable live evidence remains a
   named gap.
@@ -104,10 +111,11 @@ remaining channel.
 | CONNECT-02 | [Use Slack Connect with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect) | External channel invitations have approval, acceptance, decline, and revocation states. |
 | CONNECT-03 | [Use Slack Connect with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect) | Shared channels identify and constrain participating external organizations. |
 
-Sources checked 2026-07-29:
+Sources checked 2026-07-31:
 
 - [Roles in Slack](https://slack.com/help/articles/360018112273-Roles-in-Slack)
 - [Guide to app approval settings](https://slack.com/help/articles/222386767-Guide-to-app-approval-settings)
 - [What is Slack Connect?](https://slack.com/help/articles/360035092414-What-is-Slack-Connect)
 - [Use Slack Connect to work with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect)
 - [Slack Enterprise APIs](https://docs.slack.dev/enterprise/)
+- [Retrieving items from a datastore](https://docs.slack.dev/tools/deno-slack-sdk/guides/retrieving-items-from-a-datastore/)
