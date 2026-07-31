@@ -2060,8 +2060,8 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
     },
     settings: { function_runtime: 'remote' },
     functions: {
-      notify: {
-        title: 'Notify channel',
+      confirm: {
+        title: 'Send confirmation',
         input_parameters: { properties: {}, required: [] },
         output_parameters: { properties: {}, required: [] },
       },
@@ -2073,7 +2073,7 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   await page.getByText('Create a workflow').click();
   await page.getByLabel('Name').fill(`Interactive workflow ${Date.now()}`);
   await page.getByLabel('Owning app').selectOption(installed.appID);
-  await page.getByLabel('First step').selectOption('notify');
+  await page.getByLabel('First step').selectOption('confirm');
   await page.getByRole('button', { name: 'Create workflow' }).click();
 
   await page.getByLabel('Step 1 type').selectOption('form');
@@ -2081,7 +2081,7 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   await page.locator('select[name="step_type_2"]').selectOption('button');
   await page.getByLabel('Step 2 button label').fill('Approve');
   await page.locator('select[name="step_type_3"]').selectOption('function');
-  await page.locator('select[name="step_3"]').selectOption('notify');
+  await page.locator('select[name="step_3"]').selectOption('confirm');
   await page.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByText('Workflow published')).toBeVisible();
 
