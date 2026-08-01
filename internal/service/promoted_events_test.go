@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -236,5 +237,121 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	}
 	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 4, Event: privateRename}); err != nil || visible {
 		t.Fatalf("private rename leaked to a bot outside the room: visible=%v err=%v", visible, err)
+	}
+}
+
+// TestAppMentionIsDerivedForTheMentionedAppOnly drives a real posted message
+// through the per-app projection: the app whose bot is named in the text
+// receives message plus app_mention, and an app that is merely present
+// receives the message alone.
+func TestAppMentionIsDerivedForTheMentionedAppOnly(t *testing.T) {
+	ctx := context.Background()
+	state := memory.New()
+	state.SeedWorkspace(domain.Workspace{ID: "T1"})
+	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	state.SeedUser(domain.User{ID: "UB", WorkspaceID: "T1"})
+	state.SeedUser(domain.User{ID: "UC", WorkspaceID: "T1"})
+	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	state.SeedConversationMember("C1", "U1")
+	state.SeedConversationMember("C1", "UB")
+	state.SeedConversationMember("C1", "UC")
+	if err := state.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "UB", Name: "mentioned bot", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SeedToken(ctx, "xoxb-A1", domain.TokenRecord{WorkspaceID: "T1", UserID: "UB", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: []string{"channels:history"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.CreateBot(ctx, domain.Bot{ID: "B2", WorkspaceID: "T1", AppID: "A2", UserID: "UC", Name: "bystander bot", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SeedToken(ctx, "xoxb-A2", domain.TokenRecord{WorkspaceID: "T1", UserID: "UC", AppID: "A2", BotID: "B2", TokenType: "bot", Scopes: []string{"channels:history"}}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: state}
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", "<@UB> deploy please", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	records, err := state.ListEventsAfter(ctx, "T1", 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var posted events.Record
+	for _, record := range records {
+		if record.Event.Topic == "message.created" {
+			posted = record
+		}
+	}
+	if posted.Event.ID == "" {
+		t.Fatal("no message.created record")
+	}
+	bodiesFor := func(appID domain.AppID) []string {
+		t.Helper()
+		prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, appID, posted)
+		if err != nil || !visible {
+			t.Fatalf("%s visible=%v err=%v", appID, visible, err)
+		}
+		encoded, err := events.SlackEventBodies(prepared, string(appID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		types := make([]string, 0, len(encoded))
+		for _, body := range encoded {
+			var envelope struct {
+				Event struct {
+					Type string `json:"type"`
+				} `json:"event"`
+			}
+			if err := json.Unmarshal(body, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			types = append(types, envelope.Event.Type)
+		}
+		return types
+	}
+	mentioned := bodiesFor("A1")
+	if len(mentioned) != 2 || mentioned[0] != "message" || mentioned[1] != "app_mention" {
+		t.Fatalf("mentioned app bodies=%v, want message then app_mention", mentioned)
+	}
+	bystander := bodiesFor("A2")
+	if len(bystander) != 1 || bystander[0] != "message" {
+		t.Fatalf("bystander app bodies=%v, want the message alone", bystander)
+	}
+}
+
+// TestAppInstallCommitsTheInstalledEvent: sealing the freshly issued bot
+// token and announcing app_installed commit together, and the announcement is
+// routed to the installed app alone.
+func TestAppInstallCommitsTheInstalledEvent(t *testing.T) {
+	ctx := context.Background()
+	state := memory.New()
+	state.SeedWorkspace(domain.Workspace{ID: "T1"})
+	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	messages := Messages{Store: state, AppCredentialKey: []byte("0123456789abcdef0123456789abcdef")}
+	if err := messages.recordAppBotToken(ctx, "A1", "T1", "xoxb-plain", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := state.ListEventsAfter(ctx, "T1", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var installed events.Record
+	for _, record := range records {
+		if record.Event.Topic == "app.installed" {
+			installed = record
+		}
+	}
+	if installed.Event.ID == "" {
+		t.Fatal("no app.installed record committed with the token")
+	}
+	bodies, err := events.SlackEventBodies(installed, "A1")
+	if err != nil || len(bodies) != 1 || !strings.Contains(string(bodies[0]), `"type":"app_installed"`) {
+		t.Fatalf("installed app bodies=%q err=%v", bodies, err)
+	}
+	if strings.Contains(string(bodies[0]), "target_app_id") {
+		t.Fatalf("routing metadata leaked: %s", bodies[0])
+	}
+	other, err := events.SlackEventBodies(installed, "A2")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("another app received the install announcement: %q err=%v", other, err)
 	}
 }

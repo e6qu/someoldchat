@@ -148,8 +148,8 @@ var topicRules = []topicRule{
 	// complete Slack message only after proving the installed bot is a member of
 	// the conversation (service.PrepareAppEvent); workspace event streams retain
 	// the content-free record and cannot leak private text.
-	{topic: "message.created", slack: mapped("message", everySurface),
-		note: "pinned topic and example; app delivery hydrates it only after conversation visibility is proved"},
+	{topic: "message.created", slack: translatedAmong("message", []string{"app_mention"}, everySurface, projectedMessage),
+		note: "pinned topic and example; app delivery hydrates it only after conversation visibility is proved, and the projection marks a record that mentions the receiving app's bot so the app_mention companion (current catalog; empty x-scopes-required) is derived here"},
 	{topic: "message.changed", slack: mapped("message", everySurface),
 		note: "pinned topic; the message_changed subtype value is not pinned, and the event needs both bodies"},
 	{topic: "message.deleted", slack: mapped("message", everySurface),
@@ -336,6 +336,8 @@ var topicRules = []topicRule{
 	{topic: "view.published", note: "an interaction payload, not an event"},
 	{topic: "view.pushed", note: "an interaction payload, not an event"},
 	{topic: "view.updated", note: "an interaction payload, not an event"},
+	{topic: "app.installed", slack: automatic("app_installed", appSurfaces, appLifecycleEvent("app_installed")),
+		note: "current-catalog name (absent from the AsyncAPI): dispatched to the newly installed app itself with no subscription or scope, so it is automatic and routed by target_app_id. The inner is the bare {type, event_ts} frame; the envelope carries the identity"},
 	{topic: "function_executed", slack: automatic("function_executed", appSurfaces, functionExecuted),
 		note: "current function_executed reference: dispatched automatically when a function owned by the target app runs; no event subscription or scope is required"},
 	{topic: "workflow.step_configured", note: "not pinned: workflow_step_execute postdates the snapshot"},

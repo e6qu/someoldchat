@@ -2441,7 +2441,18 @@ func (m Messages) recordAppBotToken(ctx context.Context, appID domain.AppID, wor
 	if err != nil {
 		return err
 	}
-	return m.Store.SetAppBotToken(ctx, appID, workspaceID, ciphertext, event)
+	// app_installed commits with the issuance: Slack dispatches it to the
+	// newly installed app itself, so it is target-routed and automatic (no
+	// manifest subscription). A re-exchange re-announces the install, which
+	// is the observable Slack behavior for a reinstall.
+	installed, err := newEvent(workspaceID, installer, events.NewPayload("app.installed",
+		events.String("app_id", string(appID)),
+		events.String("target_app_id", string(appID)),
+	), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.SetAppBotToken(ctx, appID, workspaceID, ciphertext, event, installed)
 }
 
 func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (domain.OAuthToken, error) {

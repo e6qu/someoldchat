@@ -17,7 +17,8 @@ import (
 // a topic gains an event name nobody can produce and nobody decided to defer.
 func TestWithheldTopicsAreExactlyTheMessageProjectionRows(t *testing.T) {
 	withheld := map[string]bool{
-		"message.created":     true,
+		// message.created carries a builder now — it derives the app_mention
+		// companion — so only its siblings remain purely projection-shaped.
 		"message.changed":     true,
 		"message.deleted":     true,
 		"message.unfurled":    true,

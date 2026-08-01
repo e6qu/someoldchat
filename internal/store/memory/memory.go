@@ -2209,7 +2209,7 @@ func (s *Store) CreateAppInstallation(_ context.Context, value domain.AppInstall
 	return nil
 }
 
-func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, event events.Event) error {
+func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, written ...events.Event) error {
 	if appID == "" || workspace == "" || tokenCiphertext == "" {
 		return store.InvalidArgument("invalid app bot token")
 	}
@@ -2219,7 +2219,7 @@ func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace 
 		s.appBotTokens = make(map[string]string)
 	}
 	s.appBotTokens[string(appID)+"\x00"+string(workspace)] = tokenCiphertext
-	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, written...)
 	return nil
 }
 

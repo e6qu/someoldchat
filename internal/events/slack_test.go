@@ -477,3 +477,53 @@ func TestPromotedTopicsTranslateFromTheirProducerPayloads(t *testing.T) {
 		})
 	}
 }
+
+// The message projection can mark a body as mentioning the receiving app's
+// bot; the builder then emits the app_mention companion, strips the marker
+// from both, and never lets the companion reach RTM.
+func TestProjectedMessageDerivesAppMentionFromTheProjectionMarker(t *testing.T) {
+	mentioned := Event{
+		ID: "Ev1", WorkspaceID: "T1", Topic: "message.created",
+		Payload:   `{"type":"message","event_ts":"1700000000.000100","ts":"1700000000.000100","channel":"C1","user":"U1","text":"<@UB> deploy please","app_mentioned":true}`,
+		CreatedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	delivered, err := Deliverable(mentioned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inners, err := SlackInner(mentioned.Topic, delivered, SurfaceEventsAPI)
+	if err != nil || len(inners) != 2 {
+		t.Fatalf("inners=%d err=%v, want message plus app_mention", len(inners), err)
+	}
+	if inners[0].Type() != "message" || inners[1].Type() != "app_mention" {
+		t.Fatalf("types=%s,%s", inners[0].Type(), inners[1].Type())
+	}
+	for _, inner := range inners {
+		encoded, err := inner.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(encoded, "app_mentioned") {
+			t.Fatalf("the routing marker leaked into %s", encoded)
+		}
+		if !strings.Contains(encoded, `"text":"<@UB> deploy please"`) {
+			t.Fatalf("body lost its text: %s", encoded)
+		}
+	}
+	rtm, err := SlackInner(mentioned.Topic, delivered, SurfaceRTM)
+	if err != nil || len(rtm) != 1 || rtm[0].Type() != "message" {
+		t.Fatalf("RTM inners=%v err=%v, want the message alone", rtm, err)
+	}
+	plain := Event{
+		ID: "Ev2", WorkspaceID: "T1", Topic: "message.created",
+		Payload:   `{"type":"message","event_ts":"1700000000.000200","ts":"1700000000.000200","channel":"C1","user":"U1","text":"no bots here"}`,
+		CreatedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	deliveredPlain, err := Deliverable(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inners, err := SlackInner(plain.Topic, deliveredPlain, SurfaceEventsAPI); err != nil || len(inners) != 1 || inners[0].Type() != "message" {
+		t.Fatalf("plain inners=%v err=%v", inners, err)
+	}
+}

@@ -1012,3 +1012,51 @@ func filePublic(delivered Delivered, _ Surface) ([]Inner, error) {
 	}
 	return []Inner{inner}, nil
 }
+
+// projectedMessage carries the per-app message projection through to the
+// surface. The body in the payload was written by
+// service.projectMessageSnapshot after conversation visibility was proved;
+// this builder's own work is the app_mention companion: when the projection
+// marked the body as mentioning the receiving app's bot, the same body is
+// emitted a second time under the app_mention name the current catalog
+// subscribes separately. The marker is routing metadata and is stripped from
+// both. RTM does not carry app_mention — it is an application event.
+func projectedMessage(delivered Delivered, surface Surface) ([]Inner, error) {
+	inner, ok := slackShaped("message.created", delivered)
+	if !ok {
+		return nil, nil
+	}
+	mentioned := false
+	if raw, exists := inner.fields["app_mentioned"]; exists {
+		_ = json.Unmarshal(raw, &mentioned)
+		stripped := make(map[string]json.RawMessage, len(inner.fields)-1)
+		for name, value := range inner.fields {
+			if name != "app_mentioned" {
+				stripped[name] = value
+			}
+		}
+		inner = Inner{fields: stripped}
+	}
+	inners := []Inner{inner}
+	if mentioned && surface != SurfaceRTM && inner.Type() == "message" {
+		mention := make(map[string]json.RawMessage, len(inner.fields))
+		for name, value := range inner.fields {
+			mention[name] = value
+		}
+		mention[payloadTypeField] = mustEncodeString("app_mention")
+		inners = append(inners, Inner{fields: mention})
+	}
+	return inners, nil
+}
+
+// appLifecycleEvent renders the app lifecycle frames, whose meaning lives in
+// the envelope identity rather than in inner fields.
+func appLifecycleEvent(eventType string) builder {
+	return func(delivered Delivered, _ Surface) ([]Inner, error) {
+		inner, err := newInner(eventType, delivered)
+		if err != nil {
+			return nil, err
+		}
+		return []Inner{inner}, nil
+	}
+}

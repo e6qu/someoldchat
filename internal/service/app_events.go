@@ -163,7 +163,7 @@ func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, works
 		if err != nil || !member {
 			return record, member, err
 		}
-		return projectMessageSnapshot(ctx, state, record, snapshot)
+		return projectMessageSnapshot(ctx, state, record, snapshot, "")
 	}
 	delivered, err := events.Deliverable(record.Event)
 	if err != nil {
@@ -190,7 +190,7 @@ func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, works
 	if err != nil || !member {
 		return record, member, err
 	}
-	return projectMessageEvent(ctx, state, record, message)
+	return projectMessageEvent(ctx, state, record, message, "")
 }
 
 // PrepareAppEvent returns a Slack-shaped copy of a content-bearing app event
@@ -440,7 +440,7 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 			return record, false, err
 		}
 		record, _, _ = withEventAuthorizations(record, authorizations)
-		return projectMessageSnapshot(ctx, state, record, snapshot)
+		return projectMessageSnapshot(ctx, state, record, snapshot, appBotUserID(authorizations))
 	}
 	delivered, err := events.Deliverable(record.Event)
 	if err != nil {
@@ -465,18 +465,31 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 		return record, false, err
 	}
 	record, _, _ = withEventAuthorizations(record, authorizations)
-	return projectMessageEvent(ctx, state, record, message)
+	return projectMessageEvent(ctx, state, record, message, appBotUserID(authorizations))
 }
 
 type messageEventProjectionStore interface {
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
 }
 
-func projectMessageEvent(ctx context.Context, state any, record events.Record, message domain.Message) (events.Record, bool, error) {
-	return projectMessageSnapshot(ctx, state, record, messageEventSnapshot{Current: message})
+func projectMessageEvent(ctx context.Context, state any, record events.Record, message domain.Message, botUserID domain.UserID) (events.Record, bool, error) {
+	return projectMessageSnapshot(ctx, state, record, messageEventSnapshot{Current: message}, botUserID)
 }
 
-func projectMessageSnapshot(ctx context.Context, state any, record events.Record, snapshot messageEventSnapshot) (events.Record, bool, error) {
+// appBotUserID names the receiving app's bot member, when the app has one:
+// it is the user the message text must mention for the app_mention companion
+// to be derived. Per-user delivery passes none — app_mention is an
+// application event.
+func appBotUserID(authorizations []domain.AppAuthorization) domain.UserID {
+	for _, authorization := range authorizations {
+		if authorization.TokenType == "bot" {
+			return authorization.UserID
+		}
+	}
+	return ""
+}
+
+func projectMessageSnapshot(ctx context.Context, state any, record events.Record, snapshot messageEventSnapshot, botUserID domain.UserID) (events.Record, bool, error) {
 	switch record.Event.Topic {
 	case "message.changed":
 		if snapshot.Previous == nil {
@@ -521,6 +534,11 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 		body, err := appEventMessage(ctx, state, snapshot.Current)
 		if err != nil {
 			return events.Record{}, false, err
+		}
+		// The marker is routing metadata for the events builder, which strips
+		// it and emits the app_mention companion; it never reaches a consumer.
+		if botUserID != "" && strings.Contains(snapshot.Current.Text, "<@"+string(botUserID)+">") {
+			body["app_mentioned"] = true
 		}
 		return encodeProjectedEvent(record, body)
 	}
