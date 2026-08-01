@@ -2712,6 +2712,29 @@ func (r Remote) SetTriggerPermission(ctx context.Context, workspaceID domain.Wor
 	return decodeAutomationPermission(out), nil
 }
 
+func workflowPermissionRequest(workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, scope string, permission domain.AutomationPermission) *chatv1.WorkflowPermissionRequest {
+	return &chatv1.WorkflowPermissionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+		Scope: scope, Permission: encodeAutomationPermission(permission),
+	}
+}
+
+func (r Remote) GetWorkflowPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, scope string) (domain.AutomationPermission, error) {
+	out, err := r.workflows.GetWorkflowPermission(ctx, workflowPermissionRequest(workspaceID, userID, workflowID, scope, domain.AutomationPermission{}))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) SetWorkflowPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, scope string, permission domain.AutomationPermission) (domain.AutomationPermission, error) {
+	out, err := r.workflows.SetWorkflowPermission(ctx, workflowPermissionRequest(workspaceID, userID, workflowID, scope, permission))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
 func (r Remote) SetFeaturedWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, triggerIDs []domain.WorkflowTriggerID) error {
 	ids := make([]string, len(triggerIDs))
 	for index, id := range triggerIDs {
@@ -5348,6 +5371,29 @@ func (s *Server) SetTriggerPermission(ctx context.Context, input *chatv1.Trigger
 	value, err := s.implementation.SetTriggerPermission(ctx,
 		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
 		domain.WorkflowTriggerID(input.GetTriggerId()), decodeAutomationPermission(input.GetPermission()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) GetWorkflowPermission(ctx context.Context, input *chatv1.WorkflowPermissionRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.GetWorkflowPermission(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetScope(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) SetWorkflowPermission(ctx context.Context, input *chatv1.WorkflowPermissionRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.SetWorkflowPermission(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetScope(),
+		decodeAutomationPermission(input.GetPermission()),
 	)
 	if err != nil {
 		return nil, mapError(err)

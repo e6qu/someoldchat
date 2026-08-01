@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 )
 
 // Data migrations that rewrite whole columns do not belong inside the schema
@@ -278,6 +279,12 @@ const (
 	// invariant could not be installed because rows the upgrade could not decode
 	// still share an identifier.
 	MigrationNoticeMessageInstantsNotUnique = "message_instants_not_unique"
+	// MigrationNoticeEventPayloadQuarantined records a journal record written
+	// before the typed payload contract — a bare scalar where consumers expect
+	// a self-describing JSON object. The row is retained but marked
+	// undeliverable, so it stops being re-scanned and re-logged by every new
+	// event stream while staying auditable here.
+	MigrationNoticeEventPayloadQuarantined = "event_payload_quarantined"
 )
 
 // migrationNoticeSubjectLimit caps how much of an offending value a notice
@@ -344,7 +351,7 @@ func truncateNoticeSubject(subject string) string {
 // the scan.
 func registerBackfills(ctx context.Context, db queryExecutor, names []string) error {
 	for _, name := range names {
-		if _, ok := columnBackfills[name]; !ok && name != messagesIdentityBackfill {
+		if _, ok := columnBackfills[name]; !ok && name != messagesIdentityBackfill && name != outboxQuarantineBackfill {
 			return fmt.Errorf("unknown column backfill %q", name)
 		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO schema_backfills(name, cursor, done, rejected) VALUES (?, '', 0, 0) ON CONFLICT(name) DO UPDATE SET cursor = '', done = 0, rejected = 0`, name); err != nil {
@@ -419,7 +426,7 @@ func (s *Store) BackfillStatuses(ctx context.Context) ([]BackfillStatus, error) 
 // Without it, repairing the rows a pass rejected required hand-editing
 // schema_backfills, which is the SQL client the notices exist to remove.
 func (s *Store) ResetBackfill(ctx context.Context, name string) error {
-	if _, ok := columnBackfills[name]; !ok && name != messagesIdentityBackfill {
+	if _, ok := columnBackfills[name]; !ok && name != messagesIdentityBackfill && name != outboxQuarantineBackfill {
 		return fmt.Errorf("unknown column backfill %q", name)
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO schema_backfills(name, cursor, done, rejected) VALUES (?, '', 0, 0) ON CONFLICT(name) DO UPDATE SET cursor = '', done = 0, rejected = 0`, name)
@@ -441,6 +448,8 @@ func (s *Store) runPendingBackfills(ctx context.Context) error {
 		switch task, known := columnBackfills[name]; {
 		case name == messagesIdentityBackfill:
 			runErr = s.runMessageIdentityBackfill(ctx)
+		case name == outboxQuarantineBackfill:
+			runErr = s.runOutboxQuarantineBackfill(ctx)
 		case known:
 			runErr = s.runColumnBackfill(ctx, task)
 		default:
@@ -760,6 +769,124 @@ func (s *Store) finishColumnBackfill(ctx context.Context, task columnBackfill) e
 func (s *Store) finishBackfill(ctx context.Context, name string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE schema_backfills SET done = 1 WHERE name = ?`, name)
 	return err
+}
+
+// outboxQuarantineBackfill is the pass that walks the event journal once and
+// durably marks every record whose payload predates the typed payload
+// contract. See runOutboxQuarantineBackfill.
+const outboxQuarantineBackfill = "outbox.undeliverable"
+
+// runOutboxQuarantineBackfill quarantines journal records that can never be
+// delivered.
+//
+// A record written before the typed payload contract stores a bare scalar —
+// "M0123456789", an object-storage key — where every consumer expects a
+// self-describing JSON object. events.Deliverable refuses such a record with
+// ErrPayloadMalformed, correctly and permanently. What was missing was a
+// durable consequence: the SSE handler's cursor is the client's Last-Event-ID
+// and nothing else, so every NEW browser stream started before the legacy
+// head, re-read it, and re-logged one warning per record, for ever (issue
+// #111). The policy here: walk the journal once, off the startup path, mark
+// each such row undeliverable, and record a migration notice per row, so the
+// rows stay auditable but leave every consumer's read predicate.
+//
+// The repair deliberately rewrites nothing: the fields the scalar payload no
+// longer carries cannot be invented. Rows an operator repairs by hand can be
+// reinstated by clearing undeliverable and calling ResetBackfill.
+//
+// The walk chunks by outbox.id — TEXT, UNIQUE, indexed by its constraint — so
+// each chunk is an index range seek, and it judges rows in Go with the same
+// events decode every consumer uses rather than approximating the contract in
+// SQL. Only ErrPayloadMalformed quarantines: an internal-topic record is
+// refused by consumers for what it IS, not for being undecodable, and the
+// workers that own such records decode their payloads themselves.
+func (s *Store) runOutboxQuarantineBackfill(ctx context.Context) error {
+	for chunk := 1; ; chunk++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		cursor, done, err := s.backfillProgress(ctx, outboxQuarantineBackfill)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		records, err := s.selectOutboxQuarantineChunk(ctx, cursor)
+		if err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return s.finishBackfill(ctx, outboxQuarantineBackfill)
+		}
+		if err := s.observeChunk(outboxQuarantineBackfill, chunk); err != nil {
+			return err
+		}
+		if err := underContention(ctx, func() error { return s.applyOutboxQuarantineChunk(ctx, records) }); err != nil {
+			return err
+		}
+		if len(records) < backfillChunkSize {
+			return s.finishBackfill(ctx, outboxQuarantineBackfill)
+		}
+	}
+}
+
+type outboxQuarantineRow struct {
+	sequence uint64
+	id       string
+	topic    string
+	payload  string
+}
+
+func (s *Store) selectOutboxQuarantineChunk(ctx context.Context, cursor string) ([]outboxQuarantineRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, topic, payload FROM outbox WHERE id > ? AND undeliverable = 0 ORDER BY id LIMIT ?`, cursor, backfillChunkSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records := make([]outboxQuarantineRow, 0, backfillChunkSize)
+	for rows.Next() {
+		var record outboxQuarantineRow
+		if err := rows.Scan(&record.sequence, &record.id, &record.topic, &record.payload); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, rows.Err()
+}
+
+// applyOutboxQuarantineChunk marks one chunk's unrecoverable records and
+// advances the durable cursor in the same transaction. Quarantined rows are
+// not counted in schema_backfills.rejected: rejected means "left behind for an
+// operator to repair", while quarantine IS the decided durable outcome, and
+// each row already has its own notice.
+func (s *Store) applyOutboxQuarantineChunk(ctx context.Context, records []outboxQuarantineRow) error {
+	quarantined := make([]outboxQuarantineRow, 0)
+	for _, record := range records {
+		_, err := events.Deliverable(events.Event{Topic: record.topic, Payload: record.payload})
+		if errors.Is(err, events.ErrPayloadMalformed) {
+			quarantined = append(quarantined, record)
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	observed := s.now().UTC()
+	for _, record := range quarantined {
+		if _, err := tx.ExecContext(ctx, `UPDATE outbox SET undeliverable = 1 WHERE id = ?`, record.id); err != nil {
+			return err
+		}
+		detail := fmt.Sprintf("event %s (topic %s, sequence %d) predates the typed payload contract and can never be delivered; the row is retained but excluded from event streams", record.id, record.topic, record.sequence)
+		if err := recordMigrationNotice(ctx, tx, MigrationNoticeEventPayloadQuarantined, record.id, detail, observed); err != nil {
+			return err
+		}
+	}
+	if err := advanceBackfillCursorOn(ctx, tx, outboxQuarantineBackfill, records[len(records)-1].id, 0); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // runMessageIdentityBackfill rewrites messages.created_at to the resolution of a

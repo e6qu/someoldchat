@@ -470,6 +470,22 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		len(storedPermission.ChannelIDs) != 1 || storedPermission.ChannelIDs[0] != conversationID {
 		t.Fatalf("workflow permission=%+v err=%v", storedPermission, err)
 	}
+	// The workflow-level find/use/copy scopes ride the same storage with their
+	// own resource types; each scope is addressed independently.
+	scopePermission := domain.AutomationPermission{
+		ResourceType: "workflow_copy", ResourceID: string(workflowID), WorkspaceID: workspaceID,
+		AppID: workflow.AppID, PermissionType: "everyone", UpdatedAt: now,
+	}
+	if err := repository.SetAutomationPermission(ctx, scopePermission, event("scope-permission", "workflow.permission_set", now)); err != nil {
+		t.Fatal(err)
+	}
+	storedScope, err := repository.GetAutomationPermission(ctx, workspaceID, "workflow_copy", string(workflowID))
+	if err != nil || storedScope.PermissionType != "everyone" || storedScope.ResourceType != "workflow_copy" {
+		t.Fatalf("workflow copy scope=%+v err=%v", storedScope, err)
+	}
+	if _, err := repository.GetAutomationPermission(ctx, workspaceID, "workflow_find", string(workflowID)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unset workflow find scope error=%v, want ErrNotFound", err)
+	}
 	if err := repository.SetFeaturedWorkflows(ctx, workspaceID, conversationID, []domain.FeaturedWorkflow{{
 		TriggerID: triggerID, Title: trigger.Title,
 	}}, event("featured", "workflow.featured_set", now)); err != nil {

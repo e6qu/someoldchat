@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -752,6 +753,153 @@ func TestSQLiteBackfillIsSafeWhenReplicasStartTogether(t *testing.T) {
 // migration contract: a database created by this release owes the re-encodings
 // nothing and says so. It still installs the uniqueness invariant, which is part
 // of the schema this release promises.
+// TestSQLiteLegacyEventPayloadQuarantineStopsRescans pins the durable policy
+// of issue #111. A journal head of pre-typed scalar payloads was refused
+// correctly by every consumer, but only with an in-memory cursor, so every
+// NEW event stream re-scanned and re-logged the same rows. The upgrade must
+// quarantine them once — durable, auditable, off the startup path — while
+// records that are scalar BY CONTRACT (internal worker topics carrying blob
+// keys) stay untouched, later events keep their sequence numbers, and a
+// restart neither repeats the walk nor duplicates the notices.
+func TestSQLiteLegacyEventPayloadQuarantineStopsRescans(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "quarantine.db")
+	first := openDrained(t, ctx, path)
+	for _, workspace := range []domain.Workspace{{ID: "T1", Name: "One"}, {ID: "T2", Name: "Two"}} {
+		if err := first.SeedWorkspace(ctx, workspace); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Unix(1700000000, 0).UTC()
+	// The head of the journal, exactly as a pre-typed release left it: bare
+	// identifiers under ordinary topics, across two workspaces.
+	for _, legacy := range []events.Event{
+		{ID: "E1", WorkspaceID: "T1", Topic: "conversation.read", Payload: "C0123", CreatedAt: at},
+		{ID: "E2", WorkspaceID: "T1", Topic: "workspace.role_changed", Payload: "U042", CreatedAt: at},
+		{ID: "E3", WorkspaceID: "T2", Topic: "user.sessions_revoked_by_oidc", Payload: "U7", CreatedAt: at},
+	} {
+		if err := first.AppendEvent(ctx, legacy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, healthy := range []struct {
+		id        domain.EventID
+		workspace domain.WorkspaceID
+	}{{"E4", "T1"}, {"E5", "T2"}} {
+		event, err := events.New(healthy.id, healthy.workspace, "U1", events.NewPayload("conversation.read"), at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := first.AppendEvent(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// An internal worker record: its payload is a blob key — scalar BY
+	// CONTRACT, owned by a dedicated worker — and must not be quarantined.
+	internalTopic := store.InternalTopics()[0]
+	if err := first.AppendEvent(ctx, events.Event{ID: "E6", WorkspaceID: "T1", Topic: internalTopic, Payload: "T1/users/U1/photo_secret", CreatedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	// Rewind to the release before the quarantine pass existed.
+	if _, err := first.db.ExecContext(ctx, `ALTER TABLE outbox DROP COLUMN undeliverable`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `DELETE FROM schema_backfills WHERE name = ?`, outboxQuarantineBackfill); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `UPDATE schema_migrations SET version = 126 WHERE version = ?`, schemaVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := openDrained(t, ctx, path)
+	// A brand-new stream — no Last-Event-ID, cursor 0 — must no longer see the
+	// legacy head, and the events that follow keep their sequence numbers.
+	for workspace, wantID := range map[domain.WorkspaceID]domain.EventID{"T1": "E4", "T2": "E5"} {
+		records, err := second.ListEventsAfter(ctx, workspace, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) != 1 || records[0].Event.ID != wantID {
+			t.Fatalf("workspace %s streamed %+v, want only %s", workspace, records, wantID)
+		}
+		if wantSequence := map[domain.EventID]uint64{"E4": 4, "E5": 5}[wantID]; records[0].Sequence != wantSequence {
+			t.Fatalf("%s has sequence %d after the upgrade, want its original %d", wantID, records[0].Sequence, wantSequence)
+		}
+	}
+	// The worker path must not claim quarantined rows either.
+	claimed, err := second.ClaimEvents(ctx, "T1", "worker-1", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 1 || claimed[0].Event.ID != "E4" {
+		t.Fatalf("worker claimed %+v, want only E4", claimed)
+	}
+	var internalQuarantined int
+	if err := second.db.QueryRowContext(ctx, `SELECT undeliverable FROM outbox WHERE id = 'E6'`).Scan(&internalQuarantined); err != nil {
+		t.Fatal(err)
+	}
+	if internalQuarantined != 0 {
+		t.Fatal("the internal blob-key record was quarantined; it is scalar by contract and belongs to its worker")
+	}
+	assertQuarantineNotices := func(s *Store) {
+		t.Helper()
+		notices, err := s.MigrationNotices(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		quarantined := make([]string, 0)
+		for _, notice := range notices {
+			if notice.Kind == MigrationNoticeEventPayloadQuarantined {
+				quarantined = append(quarantined, notice.Subject)
+			}
+		}
+		sort.Strings(quarantined)
+		if want := []string{"E1", "E2", "E3"}; !slices.Equal(quarantined, want) {
+			t.Fatalf("quarantine notices for %v, want %v", quarantined, want)
+		}
+	}
+	assertQuarantineNotices(second)
+	statuses, err := second.BackfillStatuses(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range statuses {
+		if status.Name == outboxQuarantineBackfill && (!status.Done || status.Rejected != 0) {
+			t.Fatalf("quarantine pass finished as %+v, want done and clean", status)
+		}
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A restart repeats neither the walk nor the notices: the pass is done, so
+	// reopening does zero chunks of quarantine work.
+	chunks := 0
+	setBackfillChunkObserver(func(name string, chunk int) error {
+		if name == outboxQuarantineBackfill {
+			chunks++
+		}
+		return nil
+	})
+	defer setBackfillChunkObserver(nil)
+	third := openDrained(t, ctx, path)
+	defer third.Close()
+	if chunks != 0 {
+		t.Fatalf("a restart re-ran %d quarantine chunks, want 0", chunks)
+	}
+	records, err := third.ListEventsAfter(ctx, "T1", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Event.ID != "E4" {
+		t.Fatalf("after a restart workspace T1 streamed %+v, want only E4", records)
+	}
+	assertQuarantineNotices(third)
+}
+
 func TestSQLiteBackfillIsANoOpOnAFreshDatabase(t *testing.T) {
 	ctx := context.Background()
 	chunks := 0
@@ -775,7 +923,7 @@ func TestSQLiteBackfillIsANoOpOnAFreshDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantStatuses := append(foldBackfillNames(), messagesIdentityBackfill)
+	wantStatuses := append(foldBackfillNames(), messagesIdentityBackfill, outboxQuarantineBackfill)
 	sort.Strings(wantStatuses)
 	if len(statuses) != len(wantStatuses) {
 		t.Fatalf("a fresh database registered %+v, want completed release passes %v", statuses, wantStatuses)

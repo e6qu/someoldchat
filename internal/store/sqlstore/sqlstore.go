@@ -284,10 +284,17 @@ CREATE TABLE IF NOT EXISTS remote_file_shares (
  PRIMARY KEY (remote_file_id, conversation_id)
 );
 CREATE INDEX IF NOT EXISTS files_workspace_id ON files(workspace_id, id);
+-- outbox.undeliverable quarantines a record whose payload predates the typed
+-- payload contract (a bare identifier instead of a self-describing JSON
+-- object). Such a row can never be delivered, so every consumer read excludes
+-- it; the row itself is retained for audit and its quarantine is recorded as a
+-- schema_migration_notices entry. Without the durable marker, every new event
+-- stream re-scanned and re-logged the same head-of-journal rows for ever.
 CREATE TABLE IF NOT EXISTS outbox (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, topic TEXT NOT NULL,
  actor_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, private_payload TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0,
- lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', next_attempt_at TEXT NOT NULL DEFAULT ''
+ lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', next_attempt_at TEXT NOT NULL DEFAULT '',
+ undeliverable INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS access_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
@@ -472,7 +479,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 126
+const schemaVersion = 127
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1315,7 +1322,16 @@ func (s *Store) Migrate(ctx context.Context) error {
 }
 
 func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
-	if _, err := db.ExecContext(ctx, schema); err != nil {
+	// The base schema runs in two phases around the version ladder. Tables
+	// first: on a fresh database they create the current shape, on an existing
+	// one every CREATE TABLE IF NOT EXISTS is a no-op and the ladder below
+	// upgrades the old shape column by column. Indexes only after the ladder:
+	// a base-schema index may cover a column the ladder adds, and creating it
+	// before the ladder failed on every pre-existing database with
+	// `column "credential_hash" does not exist` (issue #128) — CREATE INDEX
+	// IF NOT EXISTS skips nothing when the index is missing but its column is.
+	baseTables, baseIndexes := splitSchemaIndexes(schema)
+	if _, err := db.ExecContext(ctx, baseTables); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
 	}
 	var version int
@@ -2798,6 +2814,41 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate app bot tokens: %w", err)
 		}
 	}
+	if version < 127 {
+		// Records written before the typed payload contract hold a bare scalar
+		// where every consumer expects a self-describing JSON object. They can
+		// never be delivered, and the runtime skip alone made every NEW event
+		// stream re-scan and re-log the same head-of-journal rows (issue #111).
+		// The durable policy: mark them undeliverable once, off the startup
+		// path, each with a migration notice so the row stays auditable.
+		columns, err := s.tableColumns(ctx, db, "outbox")
+		if err != nil {
+			return err
+		}
+		if !columns["undeliverable"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE outbox ADD COLUMN undeliverable INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate outbox undeliverable marker: %w", err)
+			}
+		}
+		if err := registerBackfills(ctx, db, []string{outboxQuarantineBackfill}); err != nil {
+			return err
+		}
+		// The schema statement above created the journal empty, so the pass owes
+		// nothing; finishing it here avoids one background writer racing the
+		// first application writes on SQLite.
+		if freshDatabase {
+			if _, err := db.ExecContext(ctx, `UPDATE schema_backfills SET done = 1 WHERE name = ?`, outboxQuarantineBackfill); err != nil {
+				return fmt.Errorf("complete empty backfill %s: %w", outboxQuarantineBackfill, err)
+			}
+		}
+	}
+	// Every ladder step has run, so each column a base-schema index covers now
+	// exists on databases of every age; see the phase split at the top.
+	for _, statement := range baseIndexes {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("migrate schema indexes: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2812,6 +2863,43 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		return fmt.Errorf("unsupported schema version %d (want %d)", version, schemaVersion)
 	}
 	return nil
+}
+
+// splitSchemaIndexes separates the base schema into everything that must run
+// before the version ladder (tables, seeds) and the CREATE INDEX statements
+// that must run after it, each kept with the comment lines above it. The
+// split is what lets a base-schema index cover a column that only a ladder
+// step adds to pre-existing databases.
+func splitSchemaIndexes(schema string) (tables string, indexes []string) {
+	var kept, statement []string
+	flush := func() {
+		if len(statement) == 0 {
+			return
+		}
+		isIndex := false
+		for _, line := range statement {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+				continue
+			}
+			isIndex = strings.HasPrefix(trimmed, "CREATE INDEX") || strings.HasPrefix(trimmed, "CREATE UNIQUE INDEX")
+			break
+		}
+		if isIndex {
+			indexes = append(indexes, strings.Join(statement, "\n"))
+		} else {
+			kept = append(kept, statement...)
+		}
+		statement = nil
+	}
+	for _, line := range strings.Split(schema, "\n") {
+		statement = append(statement, line)
+		if strings.HasSuffix(strings.TrimSpace(line), ";") {
+			flush()
+		}
+	}
+	flush()
+	return strings.Join(kept, "\n"), indexes
 }
 
 func repairDuplicateConversationNames(ctx context.Context, db queryExecutor) error {
@@ -13607,7 +13695,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	now := s.now()
 	nowText := domain.NewStoredTime(now)
 	expiresText := domain.NewStoredTime(now.Add(lease))
-	query := `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE workspace_id = ? AND delivered = 0`
+	query := `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE workspace_id = ? AND delivered = 0 AND undeliverable = 0`
 	args := []any{workspace}
 	if topic == "" {
 		predicate, excluded := internalTopicPredicate("topic")
@@ -13749,7 +13837,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 	}
 	args = append(args, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE sequence > ?`+scope+predicate+` ORDER BY sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE sequence > ? AND undeliverable = 0`+scope+predicate+` ORDER BY sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -13778,7 +13866,7 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	predicate, excluded := internalTopicPredicate("o.topic")
 	args := append([]any{appID, after}, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ? AND o.undeliverable = 0`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -13838,7 +13926,7 @@ func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, 
 		var created string
 		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at
 			FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND i.enabled = 1
-			WHERE o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT 1`, args...).
+			WHERE o.sequence > ? AND o.undeliverable = 0`+predicate+` ORDER BY o.sequence LIMIT 1`, args...).
 			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &claimed.Event.PrivatePayload, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			return tx.Commit()

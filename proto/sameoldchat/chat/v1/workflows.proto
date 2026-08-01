@@ -308,6 +308,14 @@ message TriggerPermissionRequest {
   AutomationPermission permission = 5;
 }
 
+message WorkflowPermissionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_id = 3;
+  string scope = 4;
+  AutomationPermission permission = 5;
+}
+
 message FeaturedWorkflowsRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -383,6 +391,8 @@ service WorkflowsService {
   rpc SetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);
   rpc GetTriggerPermission(TriggerPermissionRequest) returns (AutomationPermission);
   rpc SetTriggerPermission(TriggerPermissionRequest) returns (AutomationPermission);
+  rpc GetWorkflowPermission(WorkflowPermissionRequest) returns (AutomationPermission);
+  rpc SetWorkflowPermission(WorkflowPermissionRequest) returns (AutomationPermission);
   rpc SetFeaturedWorkflows(FeaturedWorkflowsRequest) returns (WorkflowStepMutationResponse);
   rpc ListFeaturedWorkflows(FeaturedWorkflowsRequest) returns (FeaturedWorkflowsResponse);
   rpc ListFunctionWorkflowSteps(FunctionWorkflowStepsRequest) returns (WorkflowStepVersionsResponse);

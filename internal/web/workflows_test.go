@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -15,9 +17,17 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
 func seedWorkflowApp(t *testing.T) (*http.ServeMux, string) {
+	t.Helper()
+	_, mux, csrf := seedWorkflowAppWithStore(t)
+	return mux, csrf
+}
+
+func seedWorkflowAppWithStore(t *testing.T) (*memory.Store, *http.ServeMux, string) {
 	t.Helper()
 	repository, mux := browserWorkspace(t, auth.AllScopes())
 	for _, user := range []domain.User{{ID: "U2", WorkspaceID: "T1", Name: "member two"}, {ID: "U3", WorkspaceID: "T1", Name: "member three"}} {
@@ -42,7 +52,7 @@ func seedWorkflowApp(t *testing.T) (*http.ServeMux, string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return mux, auth.CSRFToken("session")
+	return repository, mux, auth.CSRFToken("session")
 }
 
 func TestWorkflowPagesAgreeWithTheContentSecurityPolicy(t *testing.T) {
@@ -748,4 +758,133 @@ func TestWorkflowBuilderSavesAndRendersStepConditions(t *testing.T) {
 	page := get(t, mux, saved.Header().Get("Location"))
 	requireContains(t, "rendered condition", page.Body.String(),
 		`name="condition_source_1" value="inputs.severity"`, `name="condition_value_1" value="high"`, `option value="equals" selected`)
+}
+
+// TestWorkflowPermissionsPanelControlsFindUseAndCopy walks the find/use/copy
+// journey through the builder: the owner's permissions panel narrows each
+// scope, and a member's page loses exactly the control the scope closes —
+// the run button under "use", the copy control under "copy", and the whole
+// page under "find" — while the underlying POSTs are refused, not just
+// hidden.
+func TestWorkflowPermissionsPanelControlsFindUseAndCopy(t *testing.T) {
+	repository, mux, csrf := seedWorkflowAppWithStore(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	workflowID := domain.WorkflowID(strings.TrimPrefix(workflowURL, "/app/workflows/"))
+	published := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+	if published.Code != http.StatusSeeOther {
+		t.Fatalf("publish=%d: %s", published.Code, published.Body)
+	}
+	triggered := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Start triage"}, "type": {"link"},
+	}.Encode(), false)
+	if triggered.Code != http.StatusSeeOther {
+		t.Fatalf("create trigger=%d: %s", triggered.Code, triggered.Body)
+	}
+	page := get(t, mux, workflowURL)
+	requireContains(t, "owner page", page.Body.String(),
+		"Workflow permissions", "Who can find this workflow", "Who can use this workflow", "Who can copy this workflow")
+	trigger := regexp.MustCompile(`/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	if len(trigger) != 2 {
+		t.Fatalf("owner page has no run form: %s", page.Body)
+	}
+	// Open the trigger to everyone so the workflow-level use scope is the only
+	// gate left on the member's run button.
+	if _, err := (service.Messages{Store: repository}).SetTriggerPermission(context.Background(), "T1", "U1", "Aworkflow",
+		domain.WorkflowTriggerID(trigger[1]), domain.AutomationPermission{PermissionType: "everyone"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repository.SeedSession(context.Background(), "member-session", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	memberCSRF := auth.CSRFToken("member-session")
+	memberDo := func(method, target, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		request := httptest.NewRequest(method, target, reader)
+		if body != "" {
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "member-session"})
+		request.Header.Set(auth.CSRFTokenHeaderName, memberCSRF)
+		request.Header.Set("Sec-Fetch-Site", "same-origin")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response
+	}
+
+	memberPage := memberDo(http.MethodGet, workflowURL, "")
+	if memberPage.Code != http.StatusOK {
+		t.Fatalf("member page=%d: %s", memberPage.Code, memberPage.Body)
+	}
+	requireContains(t, "member page with open use", memberPage.Body.String(), `<button type="submit">Run</button>`)
+	requireMissing(t, "member page controls", memberPage.Body.String(), "Workflow permissions", "Copy workflow")
+	if copied := memberDo(http.MethodPost, workflowURL+"/copy", url.Values{"_csrf": {memberCSRF}}.Encode()); copied.Code != http.StatusNotFound {
+		t.Fatalf("member copy with copy closed=%d, want %d", copied.Code, http.StatusNotFound)
+	}
+
+	// The owner opens copy to everyone: the member gains the control and the
+	// POST now succeeds.
+	if opened := postForm(t, mux, workflowURL+"/permissions", url.Values{
+		"_csrf": {csrf}, "scope": {"copy"}, "permission_type": {"everyone"},
+	}.Encode(), false); opened.Code != http.StatusSeeOther {
+		t.Fatalf("open copy=%d: %s", opened.Code, opened.Body)
+	}
+	memberPage = memberDo(http.MethodGet, workflowURL, "")
+	requireContains(t, "member page with open copy", memberPage.Body.String(), "Copy workflow")
+	copied := memberDo(http.MethodPost, workflowURL+"/copy", url.Values{"_csrf": {memberCSRF}}.Encode())
+	if copied.Code != http.StatusSeeOther {
+		t.Fatalf("member copy=%d: %s", copied.Code, copied.Body)
+	}
+	copyPage := memberDo(http.MethodGet, copied.Header().Get("Location"), "")
+	requireContains(t, "member copy", copyPage.Body.String(), "Incident triage (copy)", "draft")
+
+	// Narrowing use to somebody else removes the member's run button, and the
+	// run POST is refused.
+	if narrowed := postForm(t, mux, workflowURL+"/permissions", url.Values{
+		"_csrf": {csrf}, "scope": {"use"}, "permission_type": {"named_entities"}, "user_ids": {"U3"},
+	}.Encode(), false); narrowed.Code != http.StatusSeeOther {
+		t.Fatalf("narrow use=%d: %s", narrowed.Code, narrowed.Body)
+	}
+	memberPage = memberDo(http.MethodGet, workflowURL, "")
+	requireMissing(t, "member page with narrowed use", memberPage.Body.String(), `<button type="submit">Run</button>`)
+	if run := memberDo(http.MethodPost, workflowURL+"/triggers/"+trigger[1]+"/run", url.Values{
+		"_csrf": {memberCSRF}, "idempotency_key": {"member-run"},
+	}.Encode()); run.Code < http.StatusBadRequest {
+		t.Fatalf("member run with narrowed use=%d, want a refusal", run.Code)
+	}
+
+	// A permission the service rejects surfaces as a mutation error, not a 500.
+	if invalid := postForm(t, mux, workflowURL+"/permissions", url.Values{
+		"_csrf": {csrf}, "scope": {"share"}, "permission_type": {"everyone"},
+	}.Encode(), false); invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid scope=%d: %s", invalid.Code, invalid.Body)
+	}
+
+	// Narrowing find hides the workflow entirely: page and directory.
+	if hidden := postForm(t, mux, workflowURL+"/permissions", url.Values{
+		"_csrf": {csrf}, "scope": {"find"}, "permission_type": {"named_entities"}, "user_ids": {"U3"},
+	}.Encode(), false); hidden.Code != http.StatusSeeOther {
+		t.Fatalf("narrow find=%d: %s", hidden.Code, hidden.Body)
+	}
+	if memberPage = memberDo(http.MethodGet, workflowURL, ""); memberPage.Code != http.StatusNotFound {
+		t.Fatalf("member page with narrowed find=%d, want %d", memberPage.Code, http.StatusNotFound)
+	}
+	directory := memberDo(http.MethodGet, "/app/workflows", "")
+	requireMissing(t, "member directory with narrowed find", directory.Body.String(), string(workflowID))
+
+	// The owner's own page still shows everything, including the stored scope.
+	page = get(t, mux, workflowURL)
+	requireContains(t, "owner page after narrowing", page.Body.String(), "Workflow permissions", "U3")
 }
