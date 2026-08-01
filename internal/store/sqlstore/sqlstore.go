@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS workflows (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
  owner_id TEXT NOT NULL REFERENCES users(id), callback_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', icon TEXT NOT NULL DEFAULT '', input_schema TEXT NOT NULL DEFAULT '{}', steps TEXT NOT NULL DEFAULT '[]',
+ manager_ids TEXT NOT NULL DEFAULT '[]',
  status TEXT NOT NULL, version INTEGER NOT NULL, published_version INTEGER NOT NULL DEFAULT 0,
  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
@@ -470,7 +471,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 124
+const schemaVersion = 125
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2773,6 +2774,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 			if _, err := db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN icon TEXT NOT NULL DEFAULT ''`); err != nil {
 				return fmt.Errorf("migrate %s icon: %w", table, err)
+			}
+		}
+	}
+	if version < 125 {
+		columns, err := s.tableColumns(ctx, db, "workflows")
+		if err != nil {
+			return fmt.Errorf("inspect workflows: %w", err)
+		}
+		if _, exists := columns["manager_ids"]; !exists {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE workflows ADD COLUMN manager_ids TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				return fmt.Errorf("migrate workflow managers: %w", err)
 			}
 		}
 	}
@@ -5546,19 +5558,31 @@ func (s *Store) ListWorkflowRunSteps(ctx context.Context, workspace domain.Works
 	return values, rows.Err()
 }
 
-const workflowColumns = `id, workspace_id, app_id, owner_id, callback_id, title, description, icon, input_schema, steps, status, version, published_version, created_at, updated_at`
+const workflowColumns = `id, workspace_id, app_id, owner_id, callback_id, title, description, icon, input_schema, steps, manager_ids, status, version, published_version, created_at, updated_at`
 
 func scanWorkflow(row interface{ Scan(...any) error }) (domain.WorkflowDefinition, error) {
 	var value domain.WorkflowDefinition
 	var created, updated int64
+	var managerIDs string
 	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.AppID, &value.OwnerID, &value.CallbackID, &value.Title,
-		&value.Description, &value.Icon, &value.InputSchema, &value.Steps, &value.Status, &value.Version, &value.PublishedVersion,
+		&value.Description, &value.Icon, &value.InputSchema, &value.Steps, &managerIDs, &value.Status, &value.Version, &value.PublishedVersion,
 		&created, &updated); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	value.CreatedAt = time.Unix(0, created).UTC()
 	value.UpdatedAt = time.Unix(0, updated).UTC()
+	if err := json.Unmarshal([]byte(managerIDs), &value.ManagerIDs); err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
 	return value, nil
+}
+
+func workflowManagerIDsJSON(managerIDs []domain.UserID) (string, error) {
+	encoded, err := json.Marshal(managerIDs)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinition, event events.Event) error {
@@ -5574,12 +5598,16 @@ func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 		return err
 	}
 	defer tx.Rollback()
+	managerIDs, err := workflowManagerIDsJSON(value.ManagerIDs)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO workflows(
-		id, workspace_id, app_id, owner_id, callback_id, title, description, icon, input_schema, steps, status,
+		id, workspace_id, app_id, owner_id, callback_id, title, description, icon, input_schema, steps, manager_ids, status,
 		version, published_version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.WorkspaceID, value.AppID, value.OwnerID, value.CallbackID, value.Title, value.Description,
-		value.Icon, value.InputSchema, value.Steps, value.Status, value.Version, value.PublishedVersion,
+		value.Icon, value.InputSchema, value.Steps, managerIDs, value.Status, value.Version, value.PublishedVersion,
 		value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
 	if err != nil {
 		return classify(err)
@@ -5640,6 +5668,40 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 		if err := cancelRunningWorkflowRuns(ctx, tx, value.ID, value.WorkspaceID, value.UpdatedAt); err != nil {
 			return err
 		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetWorkflowManagers replaces a workflow's manager list in one statement.
+// Managers change independently of the versioned content, so this does not
+// touch the revision table or bump Version.
+func (s *Store) SetWorkflowManagers(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, managerIDs []domain.UserID, event events.Event) error {
+	if workflowID == "" || workspace == "" {
+		return store.InvalidArgument("invalid workflow manager update")
+	}
+	managerIDsJSON, err := workflowManagerIDsJSON(managerIDs)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE workflows SET manager_ids = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
+		managerIDsJSON, event.CreatedAt.UTC().UnixNano(), workflowID, workspace)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err

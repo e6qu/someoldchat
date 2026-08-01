@@ -355,8 +355,8 @@ func (m Messages) WebhookTriggerURL(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return "", err
 	}
-	if workflow.OwnerID != actor {
-		return "", store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, workflow, actor); err != nil {
+		return "", err
 	}
 	var stored workflowWebhookConfig
 	if err := json.Unmarshal([]byte(trigger.Config), &stored); err != nil || stored.SecretCiphertext == "" {

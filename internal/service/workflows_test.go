@@ -539,6 +539,62 @@ func TestNormalizeWorkflowStepsAssignsUniqueIDs(t *testing.T) {
 	}
 }
 
+func TestWorkflowManagersManageAlongsideTheOwner(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	if err := repository.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "member3"}); err != nil {
+		t.Fatal(err)
+	}
+	// A non-manager cannot edit the workflow at all.
+	if _, err := messages.UpdateWorkflow(ctx, "T1", "U3", workflow, workflow.Version, false); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("non-manager edit error=%v, want ErrNotFound", err)
+	}
+	// The owner names U2 a manager.
+	if _, err := messages.SetWorkflowManagers(ctx, "T1", "U1", workflow.ID, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	// The manager edits, publishes, and manages triggers like the owner.
+	edited := workflow
+	edited.Title = "Managed edit"
+	edited, err := messages.UpdateWorkflow(ctx, "T1", "U2", edited, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U2", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Manager trigger", Type: "link", Config: `{}`, Enabled: true,
+	}, 0); err != nil {
+		t.Fatalf("manager trigger err=%v", err)
+	}
+	// The manager reads the live head and the full trigger list; a non-manager
+	// is refused exactly as if the workflow did not exist.
+	if view, err := messages.GetWorkflow(ctx, "T1", "U2", workflow.ID); err != nil || view.Title != "Managed edit" {
+		t.Fatalf("manager view=%+v err=%v", view, err)
+	}
+	if _, err := messages.WorkflowActivity(ctx, "T1", "U2", workflow.ID); err != nil {
+		t.Fatalf("manager activity err=%v", err)
+	}
+	if managed, err := messages.CanManageWorkflow(ctx, "T1", "U2", workflow.ID); err != nil || !managed {
+		t.Fatalf("manager can-manage=%v err=%v", managed, err)
+	}
+	if managed, err := messages.CanManageWorkflow(ctx, "T1", "U3", workflow.ID); err != nil || managed {
+		t.Fatalf("non-manager can-manage=%v err=%v", managed, err)
+	}
+	// A manager cannot change the manager list — that stays with the owner.
+	if _, err := messages.SetWorkflowManagers(ctx, "T1", "U2", workflow.ID, []domain.UserID{"U3"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("manager set-managers error=%v, want ErrNotFound", err)
+	}
+	// The manager deletes the workflow they manage.
+	if err := messages.DeleteWorkflow(ctx, "T1", "U2", workflow.ID, edited.Version); err != nil {
+		t.Fatalf("manager delete err=%v", err)
+	}
+	if _, err := messages.GetWorkflow(ctx, "T1", "U1", workflow.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted workflow error=%v, want ErrNotFound", err)
+	}
+	// Validation: a non-member cannot be named a manager.
+	if _, err := messages.SetWorkflowManagers(ctx, "T1", "U1", "WfMissing", []domain.UserID{"U2"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing workflow set-managers error=%v, want ErrNotFound", err)
+	}
+}
+
 func TestWorkflowExportsReturnRunsAndFormResponses(t *testing.T) {
 	ctx, _, messages, _ := seedWorkflowTriggerWorld(t)
 	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
