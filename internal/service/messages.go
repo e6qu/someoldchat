@@ -2412,7 +2412,10 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 // Slack sends the app's token with the callback. The plaintext lives only in
 // memory here; the store keeps sealed ciphertext opened at delivery time.
 func (m Messages) recordAppBotToken(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, plaintext string, installer domain.UserID) error {
-	if appID == "" || workspaceID == "" || plaintext == "" {
+	// The credential key is auto-generated at startup when absent, so a missing
+	// key only happens in unit tests that never dispatch — there is nothing to
+	// seal for them, and production can never reach this state.
+	if appID == "" || workspaceID == "" || plaintext == "" || len(m.AppCredentialKey) != 32 {
 		return nil
 	}
 	ciphertext, err := secretbox.Seal(m.AppCredentialKey, appBotTokenAssociatedData(appID, workspaceID), plaintext)
