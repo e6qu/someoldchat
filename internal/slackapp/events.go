@@ -34,6 +34,7 @@ type EventStore interface {
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
 	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
+	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
 }
 
 type EventProcessor struct {
@@ -87,7 +88,7 @@ func (p EventProcessor) RunOnce(ctx context.Context) (int, error) {
 }
 
 func (p EventProcessor) deliver(ctx context.Context, snapshot domain.AppManifestSnapshot, parsed appmanifest.Parsed, record events.Record, attempt int, retryReason string) (bool, error) {
-	prepared, visible, err := service.PrepareAppEvent(ctx, p.Store, snapshot.App.ID, record)
+	prepared, visible, err := service.PrepareAppEvent(ctx, p.Store, p.AppCredentialKey, snapshot.App.ID, record)
 	if err != nil {
 		releaseErr := p.Store.ReleaseAppEvent(ctx, snapshot.App.ID, eventSurface, p.Owner, record.Sequence, "event_projection_failed", p.now().Add(time.Second))
 		return false, errors.Join(err, releaseErr)

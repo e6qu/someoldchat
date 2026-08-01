@@ -21,6 +21,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
@@ -216,7 +217,7 @@ func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, af
 		}
 		for _, record := range records {
 			cursor = record.Sequence
-			prepared, visible, prepareErr := PrepareAppEvent(ctx, m.Store, appID, record)
+			prepared, visible, prepareErr := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, appID, record)
 			if prepareErr != nil {
 				return nil, prepareErr
 			}
@@ -277,7 +278,7 @@ func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface
 		if err != nil || !found || surface != "socket" {
 			return record, attempt, reason, found, err
 		}
-		prepared, visible, err := PrepareAppEvent(ctx, m.Store, appID, record)
+		prepared, visible, err := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, appID, record)
 		if err != nil {
 			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "event_projection_failed", time.Now().UTC())
 			return events.Record{}, 0, "", false, err
@@ -2398,7 +2399,34 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	}
 	token.AppID = client.AppID
 	token.TokenType = tokenType
+	if tokenType == "bot" {
+		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, accessToken, token.InstallerID); err != nil {
+			return domain.OAuthToken{}, err
+		}
+	}
 	return token, nil
+}
+
+// recordAppBotToken seals a freshly issued bot access token so a later
+// function_executed dispatch can include it as bot_access_token, exactly as
+// Slack sends the app's token with the callback. The plaintext lives only in
+// memory here; the store keeps sealed ciphertext opened at delivery time.
+func (m Messages) recordAppBotToken(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, plaintext string, installer domain.UserID) error {
+	if appID == "" || workspaceID == "" || plaintext == "" {
+		return nil
+	}
+	ciphertext, err := secretbox.Seal(m.AppCredentialKey, appBotTokenAssociatedData(appID, workspaceID), plaintext)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, installer, events.NewPayload("app.bot_token_issued",
+		events.String("app_id", string(appID)),
+	), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.SetAppBotToken(ctx, appID, workspaceID, ciphertext, event)
 }
 
 func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (domain.OAuthToken, error) {
