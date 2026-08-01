@@ -62,7 +62,8 @@ func TestScheduledStatusCompareAndSetRejectsAnEditedRevision(t *testing.T) {
 	if err := source.UpdateScheduledStatus(ctx, edited); err != nil {
 		t.Fatal(err)
 	}
-	event, _ := scheduledStatusEvent(observed[0], start)
+	staleUser, _ := source.GetUser(ctx, "U1")
+	event, _ := scheduledStatusEvent(observed[0], staleUser, start)
 	changed, err := source.ActivateScheduledStatus(ctx, "T1", "U1", original.ID, observed[0].UpdatedAt, start, event)
 	if err != nil || changed {
 		t.Fatalf("stale revision changed=%t err=%v", changed, err)

@@ -69,9 +69,17 @@ func statusExpiredEvent(user domain.User, now time.Time) (events.Event, error) {
 	if err != nil {
 		return events.Event{}, err
 	}
-	return events.New(id, user.WorkspaceID, user.ID, events.NewPayload(
-		"user.profile_changed",
-		events.String("user_id", string(user.ID)),
-		events.String("reason", "status_expired"),
-	), now)
+	// The snapshot is the state the expiry produces: the status cleared. The
+	// user object rides in the payload because user_change and its
+	// user_status_changed companion carry one, and a builder has no store.
+	expired := user
+	expired.Profile.StatusText, expired.Profile.StatusEmoji = "", ""
+	expired.Profile.StatusExpiration = time.Time{}
+	expired.Profile.ActiveScheduledStatusID = ""
+	payload, err := events.UserChangePayload("user.profile_changed", expired, false, true, now,
+		events.String("reason", "status_expired"))
+	if err != nil {
+		return events.Event{}, err
+	}
+	return events.New(id, user.WorkspaceID, user.ID, payload, now)
 }

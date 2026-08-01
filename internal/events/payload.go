@@ -419,7 +419,88 @@ func (d Delivered) Strings(name string) ([]string, bool) {
 	return values, true
 }
 
+// Bool reports a boolean payload field, as Bool wrote it. The second result is
+// false when the field is absent or is not a JSON boolean.
+func (d Delivered) Bool(name string) (bool, bool) {
+	raw, exists := d.Object[name]
+	if !exists {
+		return false, false
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, false
+	}
+	return value, true
+}
+
+// Int reports an integer payload field, as Int wrote it. The second result is
+// false when the field is absent or is not a JSON integer.
+func (d Delivered) Int(name string) (int64, bool) {
+	raw, exists := d.Object[name]
+	if !exists {
+		return 0, false
+	}
+	var value int64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
 // Encode renders the payload object back to JSON with stable key ordering.
 func (d Delivered) Encode() (string, error) {
 	return encodeObject(d.Object)
+}
+
+// UserChangePayload builds the durable payload for the user.* topics whose
+// Slack events carry a user object: team_join, user_change and the
+// user_profile_changed / user_status_changed companions. It lives here, next
+// to the builders that consume it, so every producer — the service and the
+// status schedulers — snapshots the identical shape.
+//
+// Every field is one the workspace directory already shows; the e-mail
+// address is deliberately absent, because the journal is read by every
+// member's event stream and users:read.email is a separate grant.
+func UserChangePayload(topic string, user domain.User, deleted, statusChanged bool, at time.Time, extra ...Field) (Payload, error) {
+	profile := map[string]any{
+		"real_name":    user.RealName,
+		"display_name": user.Profile.DisplayName,
+		"status_text":  user.Profile.StatusText,
+		"status_emoji": user.Profile.StatusEmoji,
+	}
+	if !user.Profile.StatusExpiration.IsZero() {
+		profile["status_expiration"] = user.Profile.StatusExpiration.Unix()
+	}
+	for name, value := range map[string]string{
+		"image_24": user.Profile.Image24, "image_32": user.Profile.Image32,
+		"image_48": user.Profile.Image48, "image_72": user.Profile.Image72,
+		"image_192": user.Profile.Image192, "image_512": user.Profile.Image512,
+		"image_1024": user.Profile.Image1024,
+	} {
+		if value != "" {
+			profile[name] = value
+		}
+	}
+	encoded, err := json.Marshal(map[string]any{
+		"id":        user.ID,
+		"team_id":   user.WorkspaceID,
+		"name":      user.Name,
+		"real_name": user.RealName,
+		"deleted":   deleted,
+		"is_bot":    false,
+		"updated":   at.Unix(),
+		"profile":   profile,
+	})
+	if err != nil {
+		return Payload{}, err
+	}
+	fields := []Field{
+		String("user_id", string(user.ID)),
+		JSON("user", string(encoded)),
+	}
+	if statusChanged {
+		fields = append(fields, Bool("status_changed", true))
+	}
+	fields = append(fields, extra...)
+	return NewPayload(topic, fields...), nil
 }

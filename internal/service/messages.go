@@ -637,7 +637,7 @@ func (m Messages) ShareFilePublic(ctx context.Context, workspaceID domain.Worksp
 		if err != nil {
 			return domain.File{}, err
 		}
-		event, err := newEvent(workspaceID, userID, events.NewPayload("file.public_shared", events.String("file_id", string(fileID))), time.Now().UTC())
+		event, err := newEvent(workspaceID, userID, events.NewPayload("file.public_shared", events.String("file_id", string(fileID)), events.String("user_id", string(userID))), time.Now().UTC())
 		if err != nil {
 			return domain.File{}, err
 		}
@@ -1343,7 +1343,15 @@ func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID
 			}
 		}
 	}
-	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.removed", events.String("user_id", string(targetID))), time.Now().UTC())
+	target, getErr := m.Store.GetUser(ctx, targetID)
+	if getErr != nil || target.WorkspaceID != workspaceID {
+		return store.ErrNotFound
+	}
+	payload, err := events.UserChangePayload("user.removed", target, true, false, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, payload, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -1525,7 +1533,7 @@ func (m Messages) AdminDeleteConversation(ctx context.Context, workspaceID domai
 	if conversation.IsDirect || conversation.IsGroupDirect {
 		return ErrInvalidConversation
 	}
-	event, err := newEvent(workspaceID, actorID, conversationPayload("conversation.deleted", conversationID), time.Now().UTC())
+	event, err := conversationLifecycleEvent(workspaceID, "conversation.deleted", conversation, actorID)
 	if err != nil {
 		return err
 	}
@@ -1727,11 +1735,15 @@ func (m Messages) createWorkspaceUser(ctx context.Context, workspaceID domain.Wo
 		return domain.User{}, err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.created", events.String("user_id", string(id))), now)
+	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: realName, RealName: realName, Presence: domain.PresenceAuto}
+	payload, err := events.UserChangePayload("user.created", user, false, false, now)
 	if err != nil {
 		return domain.User{}, err
 	}
-	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: realName, RealName: realName, Presence: domain.PresenceAuto}
+	event, err := newEvent(workspaceID, actorID, payload, now)
+	if err != nil {
+		return domain.User{}, err
+	}
 	membership := domain.WorkspaceMembership{WorkspaceID: workspaceID, UserID: id, Role: role, Active: true}
 	if err := m.Store.CreateUser(ctx, user, membership, event); err != nil {
 		return domain.User{}, err
@@ -2609,7 +2621,21 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	if err := m.validateStatusEmoji(ctx, workspaceID, profile.StatusEmoji, ErrInvalidProfile); err != nil {
 		return domain.User{}, err
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("user.profile_changed", events.String("user_id", string(userID))), time.Now().UTC())
+	current, err := m.Store.GetUser(ctx, userID)
+	if err != nil || current.WorkspaceID != workspaceID {
+		return domain.User{}, store.ErrNotFound
+	}
+	statusChanged := current.Profile.StatusText != profile.StatusText ||
+		current.Profile.StatusEmoji != profile.StatusEmoji ||
+		!current.Profile.StatusExpiration.Equal(profile.StatusExpiration)
+	updated := current
+	updated.Profile = profile
+	now := time.Now().UTC()
+	payload, err := events.UserChangePayload("user.profile_changed", updated, false, statusChanged, now)
+	if err != nil {
+		return domain.User{}, err
+	}
+	event, err := newEvent(workspaceID, userID, payload, now)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -2861,7 +2887,11 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 	oldToken := currentUserPhotoToken(workspaceID, user)
 	photoURL := userPhotoURL(workspaceID, userID, token)
 	user.Profile.Image24, user.Profile.Image32, user.Profile.Image48, user.Profile.Image72, user.Profile.Image192, user.Profile.Image512, user.Profile.Image1024 = photoURL, photoURL, photoURL, photoURL, photoURL, photoURL, photoURL
-	event, err := newEvent(workspaceID, userID, events.NewPayload("user.profile_changed", events.String("user_id", string(userID))), time.Now().UTC())
+	photoPayload, err := events.UserChangePayload("user.profile_changed", user, false, false, time.Now().UTC())
+	if err != nil {
+		return domain.User{}, err
+	}
+	event, err := newEvent(workspaceID, userID, photoPayload, time.Now().UTC())
 	if err != nil {
 		if cleanupErr := m.Blob.Delete(context.Background(), key); cleanupErr != nil {
 			return domain.User{}, errors.Join(err, fmt.Errorf("blob cleanup: %w", cleanupErr))
@@ -2920,7 +2950,11 @@ func (m Messages) DeleteUserPhoto(ctx context.Context, workspaceID domain.Worksp
 	}
 	oldToken := currentUserPhotoToken(workspaceID, user)
 	user.Profile.Image24, user.Profile.Image32, user.Profile.Image48, user.Profile.Image72, user.Profile.Image192, user.Profile.Image512, user.Profile.Image1024 = "", "", "", "", "", "", ""
-	event, err := newEvent(workspaceID, userID, events.NewPayload("user.profile_changed", events.String("user_id", string(userID))), time.Now().UTC())
+	photoPayload, err := events.UserChangePayload("user.profile_changed", user, false, false, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, userID, photoPayload, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -2981,7 +3015,7 @@ func (m Messages) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 		return domain.DoNotDisturb{}, err
 	}
 	value.SnoozeUntil = time.Now().UTC().Truncate(time.Second).Add(time.Duration(minutes) * time.Minute)
-	event, err := newEvent(workspaceID, userID, events.NewPayload("user.dnd_snoozed", events.String("user_id", string(userID))), time.Now().UTC())
+	event, err := newEvent(workspaceID, userID, dndEventPayload("user.dnd_snoozed", userID, value, time.Now().UTC()), time.Now().UTC())
 	if err != nil {
 		return domain.DoNotDisturb{}, err
 	}
@@ -3000,7 +3034,7 @@ func (m Messages) EndSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 		return domain.DoNotDisturb{}, err
 	}
 	value.SnoozeUntil = time.Time{}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("user.dnd_snooze_ended", events.String("user_id", string(userID))), time.Now().UTC())
+	event, err := newEvent(workspaceID, userID, dndEventPayload("user.dnd_snooze_ended", userID, value, time.Now().UTC()), time.Now().UTC())
 	if err != nil {
 		return domain.DoNotDisturb{}, err
 	}
@@ -3021,7 +3055,7 @@ func (m Messages) EndDND(ctx context.Context, workspaceID domain.WorkspaceID, us
 	value.Enabled = false
 	value.NextStartAt = time.Time{}
 	value.NextEndAt = time.Time{}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("user.dnd_ended", events.String("user_id", string(userID))), time.Now().UTC())
+	event, err := newEvent(workspaceID, userID, dndEventPayload("user.dnd_ended", userID, value, time.Now().UTC()), time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -3244,7 +3278,7 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 		return domain.Conversation{}, err
 	}
 	conversation := domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: "direct", IsPrivate: true, IsDirect: len(members) == 2, IsGroupDirect: len(members) > 2}
-	event, err := conversationEvent(workspaceID, "conversation.direct_created", conversation.ID)
+	event, err := conversationLifecycleEvent(workspaceID, "conversation.direct_created", conversation, userID)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -3445,7 +3479,7 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 		return domain.Conversation{}, err
 	}
 	conversation := domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: name, IsPrivate: private}
-	event, err := conversationEvent(workspaceID, "conversation.created", conversation.ID)
+	event, err := conversationLifecycleEvent(workspaceID, "conversation.created", conversation, userID)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -3474,7 +3508,9 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
-	event, err := conversationEvent(workspaceID, "conversation.renamed", conversationID)
+	renamed := conversation
+	renamed.Name = name
+	event, err := conversationLifecycleEvent(workspaceID, "conversation.renamed", renamed, userID)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -3541,7 +3577,7 @@ func (m Messages) SetConversationArchived(ctx context.Context, workspaceID domai
 	if archived {
 		topic = "conversation.archived"
 	}
-	event, err := conversationEvent(workspaceID, topic, conversationID)
+	event, err := conversationLifecycleEvent(workspaceID, topic, conversation, userID)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -3935,7 +3971,7 @@ func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.Workspac
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
 		return ErrInvalidEmoji
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name)), time.Now().UTC())
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name), events.String("value", imageURL)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -4068,7 +4104,15 @@ func (m Messages) AddUserGroupChannels(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return err
 	}
-	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.channels_changed", events.String("usergroup_id", string(id)), events.Strings("channel_ids", conversationIDStrings(combined))), time.Now().UTC())
+	snapshot := value
+	snapshot.Channels = combined
+	snapshot.UpdatedBy = actor
+	snapshot.UpdatedAt = time.Now().UTC()
+	payload, err := userGroupEventPayload("usergroup.channels_changed", snapshot, events.Strings("channel_ids", conversationIDStrings(combined)))
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actor, payload, snapshot.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -4127,7 +4171,15 @@ func (m Messages) RemoveUserGroupChannels(ctx context.Context, workspaceID domai
 			remaining = append(remaining, channel)
 		}
 	}
-	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.channels_changed", events.String("usergroup_id", string(id)), events.Strings("channel_ids", conversationIDStrings(remaining))), time.Now().UTC())
+	snapshot := value
+	snapshot.Channels = remaining
+	snapshot.UpdatedBy = actor
+	snapshot.UpdatedAt = time.Now().UTC()
+	payload, err := userGroupEventPayload("usergroup.channels_changed", snapshot, events.Strings("channel_ids", conversationIDStrings(remaining)))
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actor, payload, snapshot.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -5480,7 +5532,11 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	}
 	now := time.Now().UTC()
 	value := domain.UserGroup{WorkspaceID: workspaceID, ID: id, Name: name, Handle: handle, Description: description, Creator: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now, Enabled: true}
-	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.created", events.String("usergroup_id", string(id)), events.String("handle", handle)), now)
+	payload, err := userGroupEventPayload("usergroup.created", value)
+	if err != nil {
+		return domain.UserGroup{}, err
+	}
+	event, err := newEvent(workspaceID, actor, payload, now)
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
@@ -5512,7 +5568,11 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	}
 	value.UpdatedBy = actor
 	value.UpdatedAt = time.Now().UTC()
-	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.updated", events.String("usergroup_id", string(id)), events.String("handle", value.Handle)), value.UpdatedAt)
+	payload, err := userGroupEventPayload("usergroup.updated", value)
+	if err != nil {
+		return domain.UserGroup{}, err
+	}
+	event, err := newEvent(workspaceID, actor, payload, value.UpdatedAt)
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
@@ -5526,7 +5586,18 @@ func (m Messages) SetUserGroupEnabled(ctx context.Context, workspaceID domain.Wo
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
-	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.enabled_changed", events.String("usergroup_id", string(id)), events.Bool("enabled", enabled)), time.Now().UTC())
+	value, err := m.Store.GetUserGroup(ctx, workspaceID, id)
+	if err != nil {
+		return domain.UserGroup{}, err
+	}
+	value.Enabled = enabled
+	value.UpdatedBy = actor
+	value.UpdatedAt = time.Now().UTC()
+	payload, err := userGroupEventPayload("usergroup.enabled_changed", value, events.Bool("enabled", enabled))
+	if err != nil {
+		return domain.UserGroup{}, err
+	}
+	event, err := newEvent(workspaceID, actor, payload, value.UpdatedAt)
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
@@ -5571,7 +5642,23 @@ func (m Messages) SetUserGroupUsers(ctx context.Context, workspaceID domain.Work
 			return domain.UserGroup{}, store.ErrNotFound
 		}
 	}
-	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.users_changed", events.String("usergroup_id", string(id)), events.Strings("user_ids", userIDStrings(normalized))), time.Now().UTC())
+	previous, err := m.Store.GetUserGroup(ctx, workspaceID, id)
+	if err != nil {
+		return domain.UserGroup{}, err
+	}
+	snapshot := previous
+	snapshot.Users = normalized
+	snapshot.UpdatedBy = actor
+	snapshot.UpdatedAt = time.Now().UTC()
+	added, removed := userIDDeltas(previous.Users, normalized)
+	payload, err := userGroupEventPayload("usergroup.users_changed", snapshot,
+		events.Strings("added_users", added),
+		events.Strings("removed_users", removed),
+	)
+	if err != nil {
+		return domain.UserGroup{}, err
+	}
+	event, err := newEvent(workspaceID, actor, payload, snapshot.UpdatedAt)
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
@@ -6084,12 +6171,119 @@ func messagePayload(topic string, message domain.Message) events.Payload {
 	return events.NewPayload(topic, fields...)
 }
 
+// userIDDeltas reports which members a new set adds and removes relative to
+// the previous one, in the order the sets carry them; Slack's
+// subteam_members_changed speaks in deltas, not whole sets.
+func userIDDeltas(previous, next []domain.UserID) (added, removed []string) {
+	added, removed = []string{}, []string{}
+	before := make(map[domain.UserID]struct{}, len(previous))
+	for _, id := range previous {
+		before[id] = struct{}{}
+	}
+	after := make(map[domain.UserID]struct{}, len(next))
+	for _, id := range next {
+		after[id] = struct{}{}
+	}
+	for _, id := range next {
+		if _, existed := before[id]; !existed {
+			added = append(added, string(id))
+		}
+	}
+	for _, id := range previous {
+		if _, remains := after[id]; !remains {
+			removed = append(removed, string(id))
+		}
+	}
+	return added, removed
+}
+
 func conversationEvent(workspaceID domain.WorkspaceID, topic string, conversationID domain.ConversationID) (events.Event, error) {
 	return newEvent(workspaceID, "", conversationPayload(topic, conversationID), time.Now().UTC())
 }
 
 func conversationPayload(topic string, conversationID domain.ConversationID) events.Payload {
 	return events.NewPayload(topic, events.String("channel_id", string(conversationID)))
+}
+
+// conversationLifecycleEvent snapshots the workspace-visible facts the Slack
+// channel lifecycle events carry: the name, the privacy that selects between
+// the channel_* and group_* vocabularies, and the acting user. `created` is
+// recorded only where the event IS the creation, because the domain
+// conversation carries no creation instant of its own.
+func conversationLifecycleEvent(workspaceID domain.WorkspaceID, topic string, conversation domain.Conversation, actorID domain.UserID) (events.Event, error) {
+	now := time.Now().UTC()
+	fields := []events.Field{
+		events.String("channel_id", string(conversation.ID)),
+		events.String("name", conversation.Name),
+		events.Bool("is_private", conversation.IsPrivate),
+	}
+	if conversation.IsGroupDirect {
+		fields = append(fields, events.Bool("is_mpim", true))
+	}
+	if topic == "conversation.created" || topic == "conversation.direct_created" {
+		fields = append(fields, events.Int("created", now.Unix()))
+	}
+	if actorID != "" {
+		fields = append(fields, events.String("user_id", string(actorID)))
+	}
+	return newEvent(workspaceID, actorID, events.NewPayload(topic, fields...), now)
+}
+
+// subteamJSON renders the subteam object the subteam_* events carry, in the
+// field vocabulary usergroups.* responses already use.
+func subteamJSON(group domain.UserGroup) (string, error) {
+	object := map[string]any{
+		"id":           group.ID,
+		"team_id":      group.WorkspaceID,
+		"is_usergroup": true,
+		"name":         group.Name,
+		"handle":       group.Handle,
+		"description":  group.Description,
+		"date_create":  group.CreatedAt.Unix(),
+		"date_update":  group.UpdatedAt.Unix(),
+		"created_by":   group.Creator,
+		"updated_by":   group.UpdatedBy,
+		"user_count":   len(group.Users),
+	}
+	if !group.DeletedAt.IsZero() {
+		object["date_delete"] = group.DeletedAt.Unix()
+	}
+	encoded, err := json.Marshal(object)
+	return string(encoded), err
+}
+
+func userGroupEventPayload(topic string, group domain.UserGroup, extra ...events.Field) (events.Payload, error) {
+	encoded, err := subteamJSON(group)
+	if err != nil {
+		return events.Payload{}, err
+	}
+	fields := append([]events.Field{
+		events.String("usergroup_id", string(group.ID)),
+		events.String("team_id", string(group.WorkspaceID)),
+		events.String("handle", group.Handle),
+		events.JSON("subteam", encoded),
+	}, extra...)
+	return events.NewPayload(topic, fields...), nil
+}
+
+// dndEventPayload snapshots the dnd_status fields the dnd_updated event
+// carries, mirroring the dnd.info response vocabulary.
+func dndEventPayload(topic string, userID domain.UserID, value domain.DoNotDisturb, now time.Time) events.Payload {
+	fields := []events.Field{
+		events.String("user_id", string(userID)),
+		events.Bool("dnd_enabled", value.Enabled),
+		events.Bool("snooze_enabled", value.SnoozeEnabled(now)),
+	}
+	if !value.NextStartAt.IsZero() {
+		fields = append(fields, events.Int("next_dnd_start_ts", value.NextStartAt.Unix()))
+	}
+	if !value.NextEndAt.IsZero() {
+		fields = append(fields, events.Int("next_dnd_end_ts", value.NextEndAt.Unix()))
+	}
+	if value.SnoozeEnabled(now) {
+		fields = append(fields, events.Int("snooze_endtime", value.SnoozeUntil.Unix()))
+	}
+	return events.NewPayload(topic, fields...)
 }
 
 func (m Messages) authorizeConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {

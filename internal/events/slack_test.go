@@ -3,8 +3,11 @@ package events
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
 func TestSlackSignatureUsesPublishedV0Format(t *testing.T) {
@@ -199,13 +202,21 @@ func jsonTreeContainsField(value any, field string) bool {
 	return false
 }
 
-func TestPretranslatedEventCannotBypassKnownTopicSurface(t *testing.T) {
-	event := Event{
-		ID:          "Ev1",
-		WorkspaceID: "T1",
-		Topic:       "user.presence_changed",
-		Payload:     `{"type":"presence_change","event_ts":"1700000000.000000","user":"U1","presence":"away"}`,
-		CreatedAt:   time.Unix(1700000000, 0).UTC(),
+// An RTM-only mapping must stay off the webhook and Socket Mode no matter how
+// the record arrives: a produced payload is translated for RTM and withheld
+// from every application surface, and a pre-translated presence body cannot
+// ride an application surface either. The topic used to be a mapped row fed
+// by pre-translated bodies; it is producer-translated now, and the surface
+// restriction is checked before the builder runs, so both arrivals stay
+// restricted.
+func TestPresenceCannotBypassItsRTMOnlySurface(t *testing.T) {
+	payload := NewPayload("user.presence_changed",
+		String("user_id", "U1"),
+		String("presence", "away"),
+	)
+	event, err := New("Ev1", "T1", "U1", payload, time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
 	}
 	delivered, err := Deliverable(event)
 	if err != nil {
@@ -214,9 +225,26 @@ func TestPretranslatedEventCannotBypassKnownTopicSurface(t *testing.T) {
 	if inners, err := SlackInner(event.Topic, delivered, SurfaceEventsAPI); err != nil || len(inners) != 0 {
 		t.Fatalf("Events API inners=%v err=%v, want RTM-only event withheld", inners, err)
 	}
+	if inners, err := SlackInner(event.Topic, delivered, SurfaceSocketMode); err != nil || len(inners) != 0 {
+		t.Fatalf("Socket Mode inners=%v err=%v, want RTM-only event withheld", inners, err)
+	}
 	inners, err := SlackInner(event.Topic, delivered, SurfaceRTM)
 	if err != nil || len(inners) != 1 || inners[0].Type() != "presence_change" {
 		t.Fatalf("RTM inners=%v err=%v", inners, err)
+	}
+	pretranslated := Event{
+		ID:          "Ev2",
+		WorkspaceID: "T1",
+		Topic:       "user.presence_changed",
+		Payload:     `{"type":"presence_change","event_ts":"1700000000.000000","user":"U1","presence":"away"}`,
+		CreatedAt:   time.Unix(1700000000, 0).UTC(),
+	}
+	deliveredPretranslated, err := Deliverable(pretranslated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inners, err := SlackInner(pretranslated.Topic, deliveredPretranslated, SurfaceEventsAPI); err != nil || len(inners) != 0 {
+		t.Fatalf("pre-translated Events API inners=%v err=%v, want withheld", inners, err)
 	}
 }
 
@@ -234,5 +262,218 @@ func TestPretranslatedEventMustMatchKnownTopicMapping(t *testing.T) {
 	}
 	if _, err := SlackInner(event.Topic, delivered, SurfaceSocketMode); !errors.Is(err, ErrPayloadFieldInvalid) {
 		t.Fatalf("mismatched translated event error=%v, want %v", err, ErrPayloadFieldInvalid)
+	}
+}
+
+// TestPromotedTopicsTranslateFromTheirProducerPayloads drives every wave-one
+// promotion through SlackInner with the exact payload shape its producer
+// writes, and asserts the event name and the load-bearing fields. The
+// payloads here are the contract the producers in internal/service and
+// internal/scheduler must keep: a field dropped there surfaces here as
+// ErrSlackEventIncomplete before it surfaces in an app's webhook.
+func TestPromotedTopicsTranslateFromTheirProducerPayloads(t *testing.T) {
+	at := time.Unix(1700000000, 0).UTC()
+	user := domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", RealName: "Alice"}
+	user.Profile.StatusText = "focussing"
+	userPayload := func(topic string, statusChanged bool) Payload {
+		payload, err := UserChangePayload(topic, user, topic == "user.removed", statusChanged, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	cases := []struct {
+		name    string
+		payload Payload
+		surface Surface
+		want    []string          // event type per emitted inner, in order
+		fields  map[string]string // raw JSON fragment per field of the FIRST inner
+	}{
+		{
+			name: "public channel created",
+			payload: NewPayload("conversation.created",
+				String("channel_id", "C1"), String("name", "general"),
+				Bool("is_private", false), Int("created", 1700000000), String("user_id", "U1")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"channel_created"},
+			fields:  map[string]string{"channel": `"name":"general"`},
+		},
+		{
+			name: "direct conversation created",
+			payload: NewPayload("conversation.direct_created",
+				String("channel_id", "D1"), String("name", "direct"),
+				Bool("is_private", true), Int("created", 1700000000), String("user_id", "U1")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"im_created"},
+			fields:  map[string]string{"user": `"U1"`, "channel": `"is_im":true`},
+		},
+		{
+			name: "public rename",
+			payload: NewPayload("conversation.renamed",
+				String("channel_id", "C1"), String("name", "renamed"), Bool("is_private", false), String("user_id", "U1")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"channel_rename"},
+		},
+		{
+			name: "private rename travels as group_rename",
+			payload: NewPayload("conversation.renamed",
+				String("channel_id", "C1"), String("name", "renamed"), Bool("is_private", true), String("user_id", "U1")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"group_rename"},
+		},
+		{
+			name: "public archive carries the acting user",
+			payload: NewPayload("conversation.archived",
+				String("channel_id", "C1"), String("name", "general"), Bool("is_private", false), String("user_id", "U2")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"channel_archive"},
+			fields:  map[string]string{"channel": `"C1"`, "user": `"U2"`},
+		},
+		{
+			name: "private unarchive travels as group_unarchive",
+			payload: NewPayload("conversation.unarchived",
+				String("channel_id", "C1"), String("name", "general"), Bool("is_private", true), String("user_id", "U2")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"group_unarchive"},
+		},
+		{
+			name: "channel deleted",
+			payload: NewPayload("conversation.deleted",
+				String("channel_id", "C1"), String("name", "general"), Bool("is_private", false), String("user_id", "U2")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"channel_deleted"},
+		},
+		{
+			name:    "emoji added",
+			payload: NewPayload("emoji.added", String("name", "party"), String("value", "https://emoji.test/party.png")),
+			surface: SurfaceSocketMode,
+			want:    []string{"emoji_changed"},
+			fields:  map[string]string{"subtype": `"add"`, "name": `"party"`, "value": `"https://emoji.test/party.png"`},
+		},
+		{
+			name:    "emoji alias added",
+			payload: NewPayload("emoji.alias_added", String("name", "cheer"), String("alias_for", "party")),
+			surface: SurfaceSocketMode,
+			want:    []string{"emoji_changed"},
+			fields:  map[string]string{"subtype": `"add"`, "value": `"alias:party"`},
+		},
+		{
+			name:    "emoji removed",
+			payload: NewPayload("emoji.removed", String("name", "party")),
+			surface: SurfaceSocketMode,
+			want:    []string{"emoji_changed"},
+			fields:  map[string]string{"subtype": `"remove"`, "names": `["party"]`},
+		},
+		{
+			name:    "emoji renamed",
+			payload: NewPayload("emoji.renamed", String("old_name", "party"), String("new_name", "celebrate")),
+			surface: SurfaceSocketMode,
+			want:    []string{"emoji_changed"},
+			fields:  map[string]string{"subtype": `"rename"`, "old_name": `"party"`, "new_name": `"celebrate"`},
+		},
+		{
+			name: "usergroup created",
+			payload: NewPayload("usergroup.created",
+				String("usergroup_id", "S1"), String("team_id", "T1"), String("handle", "oncall"),
+				JSON("subteam", `{"id":"S1","team_id":"T1","handle":"oncall","is_usergroup":true}`)),
+			surface: SurfaceEventsAPI,
+			want:    []string{"subteam_created"},
+			fields:  map[string]string{"subteam": `"handle":"oncall"`},
+		},
+		{
+			name: "usergroup members changed",
+			payload: NewPayload("usergroup.users_changed",
+				String("usergroup_id", "S1"), String("team_id", "T1"), String("handle", "oncall"),
+				JSON("subteam", `{"id":"S1"}`),
+				Strings("added_users", []string{"U2"}), Strings("removed_users", []string{})),
+			surface: SurfaceEventsAPI,
+			want:    []string{"subteam_members_changed"},
+			fields:  map[string]string{"subteam_id": `"S1"`, "team_id": `"T1"`, "added_users": `["U2"]`, "removed_users": `[]`},
+		},
+		{
+			name:    "team join",
+			payload: userPayload("user.created", false),
+			surface: SurfaceEventsAPI,
+			want:    []string{"team_join"},
+			fields:  map[string]string{"user": `"id":"U1"`},
+		},
+		{
+			name:    "user removed reports deleted",
+			payload: userPayload("user.removed", false),
+			surface: SurfaceEventsAPI,
+			want:    []string{"user_change"},
+			fields:  map[string]string{"user": `"deleted":true`},
+		},
+		{
+			name:    "profile change fans out to the current catalog names",
+			payload: userPayload("user.profile_changed", false),
+			surface: SurfaceEventsAPI,
+			want:    []string{"user_change", "user_profile_changed"},
+		},
+		{
+			name:    "status change adds user_status_changed",
+			payload: userPayload("user.profile_changed", true),
+			surface: SurfaceSocketMode,
+			want:    []string{"user_change", "user_profile_changed", "user_status_changed"},
+		},
+		{
+			name: "dnd snooze",
+			payload: NewPayload("user.dnd_snoozed",
+				String("user_id", "U1"), Bool("dnd_enabled", false), Bool("snooze_enabled", true),
+				Int("snooze_endtime", 1700003600)),
+			surface: SurfaceEventsAPI,
+			want:    []string{"dnd_updated"},
+			fields:  map[string]string{"user": `"U1"`, "dnd_status": `"snooze_enabled":true`},
+		},
+		{
+			name:    "workspace rename",
+			payload: NewPayload("workspace.name_changed", String("name", "New Name")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"team_rename"},
+			fields:  map[string]string{"name": `"New Name"`},
+		},
+		{
+			name:    "file made public",
+			payload: NewPayload("file.public_shared", String("file_id", "F1"), String("user_id", "U1")),
+			surface: SurfaceEventsAPI,
+			want:    []string{"file_public"},
+			fields:  map[string]string{"file_id": `"F1"`, "file": `"id":"F1"`},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			event, err := New("Ev1", "T1", "U1", testCase.payload, at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivered, err := Broadcastable(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inners, err := SlackInner(event.Topic, delivered, testCase.surface)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(inners) != len(testCase.want) {
+				t.Fatalf("inners=%d, want %d", len(inners), len(testCase.want))
+			}
+			for index, want := range testCase.want {
+				if inners[index].Type() != want {
+					t.Fatalf("inner[%d].Type=%s, want %s", index, inners[index].Type(), want)
+				}
+			}
+			encoded, err := inners[0].Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for field, fragment := range testCase.fields {
+				if !strings.Contains(encoded, `"`+field+`":`) || !strings.Contains(encoded, fragment) {
+					t.Fatalf("inner %s lacks %s carrying %s", encoded, field, fragment)
+				}
+			}
+			if !strings.Contains(encoded, `"event_ts":`) {
+				t.Fatalf("inner %s lacks event_ts", encoded)
+			}
+		})
 	}
 }

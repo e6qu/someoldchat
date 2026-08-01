@@ -30,11 +30,15 @@ const everySurface = SurfaceEventsAPI | SurfaceSocketMode | SurfaceRTM
 // answer for an event that is only meaningful to an installed app.
 const appSurfaces = SurfaceEventsAPI | SurfaceSocketMode
 
-// builder renders the Slack inner events one durable payload becomes. The
-// result is a slice because the mapping is not one-to-one: a single
-// conversation.members_invited record is N member_joined_channel events, and a
-// topic that is not publishable is zero.
-type builder func(Delivered) ([]Inner, error)
+// builder renders the Slack inner events one durable payload becomes on one
+// surface. The result is a slice because the mapping is not one-to-one: a
+// single conversation.members_invited record is N member_joined_channel
+// events, one user.profile_changed record is a user_change plus its
+// current-catalog companions, and a topic that is not publishable is zero.
+// Most builders ignore the surface; it exists for the mappings whose event
+// set differs per surface, so that difference lives in the table's builder
+// rather than in a transport.
+type builder func(Delivered, Surface) ([]Inner, error)
 
 // slackRule is a topic's mapping onto the Slack event vocabulary. The zero
 // value means "this topic is not publishable to any Slack client", which is the
@@ -43,7 +47,16 @@ type builder func(Delivered) ([]Inner, error)
 // no event for. Exclusion is an answer, not a gap.
 type slackRule struct {
 	// eventType is the Slack event name, or "" when the topic maps to none.
+	// It is the name subscription primacy and reporting use.
 	eventType string
+	// alternates are the additional event names this topic's translation may
+	// legitimately produce: a private channel rename is group_rename where a
+	// public one is channel_rename, and one profile change is user_change
+	// plus the current catalog's user_profile_changed and
+	// user_status_changed. Every produced inner event must carry one of the
+	// names the row declares — SlackInner enforces it — so a builder cannot
+	// invent vocabulary the table never decided.
+	alternates []string
 	// surfaces are the surfaces this event may be written to.
 	surfaces Surface
 	// automatic marks an app-targeted event Slack dispatches because the app
@@ -90,6 +103,12 @@ func mapped(eventType string, surfaces Surface) slackRule {
 // translated builds a row for a topic this package can render today.
 func translated(eventType string, surfaces Surface, build builder) slackRule {
 	return slackRule{eventType: eventType, surfaces: surfaces, build: build}
+}
+
+// translatedAmong is translated for a topic whose rendering may produce more
+// than one event name.
+func translatedAmong(eventType string, alternates []string, surfaces Surface, build builder) slackRule {
+	return slackRule{eventType: eventType, alternates: alternates, surfaces: surfaces, build: build}
 }
 
 func automatic(eventType string, surfaces Surface, build builder) slackRule {
@@ -173,18 +192,18 @@ var topicRules = []topicRule{
 		note: "inference: Slack has no removal event, and a removed member has left the channel. The distinction between leaving and being removed is lost, which is what the pinned vocabulary can express"},
 
 	// ---- conversation lifecycle --------------------------------------------
-	{topic: "conversation.created", slack: mapped("channel_created", everySurface),
-		note: "pinned topic; needs the conversation object (name, created, creator) and its privacy, and the pinned set has no group_created, so a private channel has no pinned mapping"},
-	{topic: "conversation.direct_created", slack: mapped("im_created", everySurface),
-		note: "pinned topic; needs the channel object"},
-	{topic: "conversation.renamed", slack: mapped("channel_rename", everySurface),
-		note: "pinned topics channel_rename and group_rename; which one applies needs the conversation's privacy, and the new name is not in the payload"},
-	{topic: "conversation.archived", slack: mapped("channel_archive", everySurface),
-		note: "pinned topics channel_archive and group_archive; needs privacy, and Slack sends the acting user"},
-	{topic: "conversation.unarchived", slack: mapped("channel_unarchive", everySurface),
-		note: "pinned topics channel_unarchive and group_unarchive; needs privacy"},
-	{topic: "conversation.deleted", slack: mapped("channel_deleted", everySurface),
-		note: "pinned topic; withheld only because the channel_type / group split is unsettled"},
+	{topic: "conversation.created", slack: translated("channel_created", everySurface, channelCreated),
+		note: "pinned topic; the channel object carries id, name, created, creator and is_private from the durable payload. Neither snapshot has group_created and the current catalog agrees: private channels are channel_created with is_private"},
+	{topic: "conversation.direct_created", slack: translated("im_created", everySurface, imCreated),
+		note: "pinned topic; inner shape NOT settled — {user, channel{id, created, is_im}} follows the channel_created naming"},
+	{topic: "conversation.renamed", slack: translatedAmong("channel_rename", []string{"group_rename"}, everySurface, channelRenamed),
+		note: "pinned topics channel_rename and group_rename; the durable payload carries the new name and is_private, which selects between them"},
+	{topic: "conversation.archived", slack: translatedAmong("channel_archive", []string{"group_archive"}, everySurface, channelState("channel_archive", "group_archive")),
+		note: "pinned topics channel_archive and group_archive, selected by the payload's is_private; the payload carries the acting user Slack sends"},
+	{topic: "conversation.unarchived", slack: translatedAmong("channel_unarchive", []string{"group_unarchive"}, everySurface, channelState("channel_unarchive", "group_unarchive")),
+		note: "pinned topics channel_unarchive and group_unarchive, selected by the payload's is_private"},
+	{topic: "conversation.deleted", slack: translatedAmong("channel_deleted", []string{"group_deleted"}, everySurface, channelState("channel_deleted", "group_deleted")),
+		note: "pinned topic channel_deleted; group_deleted is current-catalog only (it is absent from the AsyncAPI), selected by the payload's is_private"},
 	{topic: "conversation.topic_changed",
 		note: "not pinned as its own event: Slack emits this as a message with subtype channel_topic, and neither the subtype value nor the message shape is settled here"},
 	{topic: "conversation.purpose_changed",
@@ -209,38 +228,38 @@ var topicRules = []topicRule{
 		note: "not pinned: shared-channel events postdate the snapshot"},
 
 	// ---- emoji, user groups, users, workspace, files -----------------------
-	{topic: "emoji.added", slack: mapped("emoji_changed", appSurfaces),
-		note: "pinned topic; four topics collapse to one event and the add/remove/rename subtype values are not pinned"},
-	{topic: "emoji.removed", slack: mapped("emoji_changed", appSurfaces),
-		note: "pinned topic; subtype value not pinned"},
-	{topic: "emoji.renamed", slack: mapped("emoji_changed", appSurfaces),
-		note: "pinned topic; subtype value not pinned"},
-	{topic: "emoji.alias_added", slack: mapped("emoji_changed", appSurfaces),
-		note: "pinned topic; subtype value not pinned"},
-	{topic: "usergroup.created", slack: mapped("subteam_created", everySurface),
-		note: "pinned topic; needs the full subteam object"},
-	{topic: "usergroup.updated", slack: mapped("subteam_updated", everySurface),
-		note: "pinned topic; three topics collapse to one event and it needs the subteam object"},
-	{topic: "usergroup.enabled_changed", slack: mapped("subteam_updated", everySurface),
-		note: "pinned topic; needs the subteam object"},
-	{topic: "usergroup.channels_changed", slack: mapped("subteam_updated", everySurface),
-		note: "pinned topic; needs the subteam object"},
-	{topic: "usergroup.users_changed", slack: mapped("subteam_members_changed", everySurface),
-		note: "pinned topic; needs added and removed lists, and the payload carries the whole set"},
-	{topic: "user.created", slack: mapped("team_join", everySurface),
-		note: "pinned topic; needs the full user object"},
-	{topic: "user.profile_changed", slack: mapped("user_change", everySurface),
-		note: "pinned topic; needs the full user object"},
-	{topic: "user.removed", slack: mapped("user_change", everySurface),
-		note: "inference: Slack reports deletion as user_change with deleted true; needs the user object"},
-	{topic: "user.dnd_snoozed", slack: mapped("dnd_updated", everySurface),
-		note: "pinned topics dnd_updated and dnd_updated_user; which one applies is recipient-dependent, and the event needs a dnd_status object"},
-	{topic: "user.dnd_snooze_ended", slack: mapped("dnd_updated", everySurface),
-		note: "pinned topic; needs a dnd_status object"},
-	{topic: "user.dnd_ended", slack: mapped("dnd_updated", everySurface),
-		note: "pinned topic; needs a dnd_status object"},
-	{topic: "user.presence_changed", slack: mapped("presence_change", SurfaceRTM),
-		note: "presence_change is an RTM event and is NOT an Events API topic in the pinned AsyncAPI, so it must never reach the webhook or Socket Mode"},
+	{topic: "emoji.added", slack: translated("emoji_changed", appSurfaces, emojiChanged("add")),
+		note: "pinned topic; the add/remove/rename subtype values follow the current emoji_changed reference, not the snapshot"},
+	{topic: "emoji.removed", slack: translated("emoji_changed", appSurfaces, emojiChanged("remove")),
+		note: "pinned topic; the remove subtype carries names as a list per the current reference"},
+	{topic: "emoji.renamed", slack: translated("emoji_changed", appSurfaces, emojiChanged("rename")),
+		note: "pinned topic; the rename subtype carries old_name and new_name per the current reference"},
+	{topic: "emoji.alias_added", slack: translated("emoji_changed", appSurfaces, emojiChanged("add")),
+		note: "pinned topic; an alias is an add whose value is the alias: reference, per the current reference"},
+	{topic: "usergroup.created", slack: translated("subteam_created", everySurface, subteamEvent("subteam_created")),
+		note: "pinned topic; the durable payload carries the subteam object the producer snapshots"},
+	{topic: "usergroup.updated", slack: translated("subteam_updated", everySurface, subteamEvent("subteam_updated")),
+		note: "pinned topic; three topics collapse to one event, each carrying the snapshotted subteam object"},
+	{topic: "usergroup.enabled_changed", slack: translated("subteam_updated", everySurface, subteamEvent("subteam_updated")),
+		note: "pinned topic; carries the snapshotted subteam object"},
+	{topic: "usergroup.channels_changed", slack: translated("subteam_updated", everySurface, subteamEvent("subteam_updated")),
+		note: "pinned topic; carries the snapshotted subteam object"},
+	{topic: "usergroup.users_changed", slack: translated("subteam_members_changed", everySurface, subteamMembersChanged),
+		note: "pinned topic; the producer records the added and removed deltas, not the whole set"},
+	{topic: "user.created", slack: translated("team_join", everySurface, userEvent("team_join")),
+		note: "pinned topic; the durable payload carries the user object the producer snapshots"},
+	{topic: "user.profile_changed", slack: translatedAmong("user_change", []string{"user_profile_changed", "user_status_changed"}, everySurface, userChanged),
+		note: "pinned topic user_change; user_profile_changed always accompanies it and user_status_changed joins when the payload marks a status change — both are current-catalog names an app subscribes to separately"},
+	{topic: "user.removed", slack: translated("user_change", everySurface, userEvent("user_change")),
+		note: "inference: Slack reports deletion as user_change whose user object carries deleted true, which the producer's snapshot records"},
+	{topic: "user.dnd_snoozed", slack: translated("dnd_updated", everySurface, dndUpdated),
+		note: "pinned topic; the payload carries the dnd_status fields. dnd_updated_user, the variant Slack addresses to everyone but the subject, remains a recorded gap: this delivery does not vary the event name per recipient"},
+	{topic: "user.dnd_snooze_ended", slack: translated("dnd_updated", everySurface, dndUpdated),
+		note: "pinned topic; the payload carries the dnd_status fields"},
+	{topic: "user.dnd_ended", slack: translated("dnd_updated", everySurface, dndUpdated),
+		note: "pinned topic; the payload carries the dnd_status fields"},
+	{topic: "user.presence_changed", slack: translated("presence_change", SurfaceRTM, presenceChange),
+		note: "presence_change is an RTM event and is NOT an Events API topic in the pinned AsyncAPI, so it must never reach the webhook or Socket Mode; the inner shape {user, presence} is the documented RTM frame"},
 	{topic: "user.assigned",
 		note: "not pinned: an account-provisioning product concept"},
 	{topic: "user.expiration_changed",
@@ -249,8 +268,8 @@ var topicRules = []topicRule{
 		note: "not pinned: tokens_revoked is about application tokens, not user sessions"},
 	{topic: "user.sessions_revoked_by_oidc",
 		note: "not pinned: tokens_revoked is about application tokens, not user sessions"},
-	{topic: "workspace.name_changed", slack: mapped("team_rename", everySurface),
-		note: "pinned topic; withheld only because the inner shape is unmodelled and the payload's field names are not the event's"},
+	{topic: "workspace.name_changed", slack: translated("team_rename", everySurface, teamRename),
+		note: "pinned topic; the inner shape {name} is the documented team_rename frame"},
 	{topic: "workspace.created",
 		note: "not pinned: no Slack event for workspace creation"},
 	{topic: "workspace.description_changed",
@@ -269,8 +288,8 @@ var topicRules = []topicRule{
 		note: "current Slack reference; delivery uses the immutable file/channel snapshot captured by the share transaction"},
 	{topic: "file.unshared", slack: mapped("file_unshared", everySurface),
 		note: "current Slack reference; delivery authorizes against the channel recorded before the final share is removed"},
-	{topic: "file.public_shared", slack: mapped("file_public", everySurface),
-		note: "pinned topic; needs the file object"},
+	{topic: "file.public_shared", slack: translated("file_public", everySurface, filePublic),
+		note: "pinned topic; like Slack's other file events the inner carries identifiers only ({file_id, user_id, file{id}}), and a consumer hydrates through files.info"},
 	{topic: "file.public_revoked",
 		note: "not pinned: file_unshared is a different fact"},
 	{topic: "file.comment_deleted",

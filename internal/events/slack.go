@@ -153,7 +153,7 @@ func itemEvent(eventType string, withReaction bool) builder {
 	if withReaction {
 		required = append(required, "reaction")
 	}
-	return func(delivered Delivered) ([]Inner, error) {
+	return func(delivered Delivered, _ Surface) ([]Inner, error) {
 		values, err := stringFields(delivered, required...)
 		if err != nil {
 			return nil, err
@@ -178,7 +178,7 @@ func itemEvent(eventType string, withReaction bool) builder {
 	}
 }
 
-func appHomeOpened(delivered Delivered) ([]Inner, error) {
+func appHomeOpened(delivered Delivered, _ Surface) ([]Inner, error) {
 	values, err := stringFields(delivered, "user_id", "channel_id", "tab")
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func appHomeOpened(delivered Delivered) ([]Inner, error) {
 	return []Inner{inner}, nil
 }
 
-func functionExecuted(delivered Delivered) ([]Inner, error) {
+func functionExecuted(delivered Delivered, _ Surface) ([]Inner, error) {
 	values, err := stringFields(delivered, "function_execution_id", "workflow_execution_id")
 	if err != nil {
 		return nil, err
@@ -287,7 +287,7 @@ func broadcastableToApp(event Event, appID string) (Delivered, bool, error) {
 // conversation.member_kicked as member_left_channel. The pinned AsyncAPI
 // settles the event name; the inner field names follow the naming of the one
 // worked example above and are recorded as unsettled.
-func memberLeftChannel(delivered Delivered) ([]Inner, error) {
+func memberLeftChannel(delivered Delivered, _ Surface) ([]Inner, error) {
 	values, err := stringFields(delivered, "channel_id", "user_id")
 	if err != nil {
 		return nil, err
@@ -305,7 +305,7 @@ func memberLeftChannel(delivered Delivered) ([]Inner, error) {
 // memberJoinedChannel renders the one-user self-service join record. Invitations
 // use the fan-out builder below because one durable invitation can name many
 // users; a join always names exactly its actor.
-func memberJoinedChannel(delivered Delivered) ([]Inner, error) {
+func memberJoinedChannel(delivered Delivered, _ Surface) ([]Inner, error) {
 	values, err := stringFields(delivered, "channel_id", "user_id")
 	if err != nil {
 		return nil, err
@@ -329,7 +329,7 @@ func memberJoinedChannel(delivered Delivered) ([]Inner, error) {
 // records the acting user only in the record's ActorID, which the payload
 // contract does not expose to a translation, so the field is omitted rather
 // than guessed.
-func membersJoinedChannel(delivered Delivered) ([]Inner, error) {
+func membersJoinedChannel(delivered Delivered, _ Surface) ([]Inner, error) {
 	values, err := stringFields(delivered, "channel_id")
 	if err != nil {
 		return nil, err
@@ -434,25 +434,36 @@ func SlackInner(topic string, delivered Delivered, surface Surface) ([]Inner, er
 	if rule.eventType != "" && rule.surfaces&surface == 0 {
 		return nil, nil
 	}
+	allowed := func(name string) bool {
+		if name == rule.eventType {
+			return true
+		}
+		for _, alternate := range rule.alternates {
+			if name == alternate {
+				return true
+			}
+		}
+		return false
+	}
 	if rule.build == nil {
 		if rule.eventType != "" {
 			inner, ok := slackShaped(topic, delivered)
 			if !ok {
 				return nil, nil
 			}
-			if inner.Type() != rule.eventType {
+			if !allowed(inner.Type()) {
 				return nil, fmt.Errorf("%w: topic %s carries a %s event, want %s", ErrPayloadFieldInvalid, topic, inner.Type(), rule.eventType)
 			}
 			return []Inner{inner}, nil
 		}
 		return nil, nil
 	}
-	inners, err := rule.build(delivered)
+	inners, err := rule.build(delivered, surface)
 	if err != nil {
 		return nil, err
 	}
 	for _, inner := range inners {
-		if inner.Type() != rule.eventType {
+		if !allowed(inner.Type()) {
 			return nil, fmt.Errorf("%w: topic %s built a %s event, want %s", ErrPayloadFieldInvalid, topic, inner.Type(), rule.eventType)
 		}
 	}
@@ -641,4 +652,363 @@ func SlackSignature(signingSecret string, timestamp time.Time, body []byte) (str
 	mac := hmac.New(sha256.New, []byte(signingSecret))
 	_, _ = mac.Write([]byte(base))
 	return "v0=" + hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+// eventTypeByPrivacy selects between a channel_* and a group_* event name
+// from the payload's is_private. The split is Slack's: the same fact about a
+// private channel travels under the group_* vocabulary.
+func eventTypeByPrivacy(delivered Delivered, public, private string) (string, error) {
+	isPrivate, ok := delivered.Bool("is_private")
+	if !ok {
+		return "", fmt.Errorf("%w: %s payload has no is_private", ErrSlackEventIncomplete, delivered.Type)
+	}
+	if isPrivate {
+		return private, nil
+	}
+	return public, nil
+}
+
+// conversationObject renders the channel object channel_created and
+// channel_rename carry: identifiers and workspace-visible metadata the
+// durable payload snapshots, never content.
+func conversationObject(delivered Delivered) (string, error) {
+	values, err := stringFields(delivered, "channel_id", "name")
+	if err != nil {
+		return "", err
+	}
+	object := map[string]json.RawMessage{
+		"id":         mustEncodeString(values["channel_id"]),
+		"name":       mustEncodeString(values["name"]),
+		"is_channel": json.RawMessage("true"),
+	}
+	if isPrivate, ok := delivered.Bool("is_private"); ok {
+		object["is_private"] = mustEncodeBool(isPrivate)
+	}
+	if isMPIM, ok := delivered.Bool("is_mpim"); ok && isMPIM {
+		object["is_mpim"] = json.RawMessage("true")
+	}
+	if created, ok := delivered.Int("created"); ok {
+		object["created"] = json.RawMessage(strconv.FormatInt(created, 10))
+	}
+	if creator, ok := delivered.Field("user_id"); ok && creator != "" {
+		object["creator"] = mustEncodeString(creator)
+	}
+	encoded, err := encodeObject(object)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrPayloadFieldInvalid, err)
+	}
+	return encoded, nil
+}
+
+func mustEncodeBool(value bool) json.RawMessage {
+	if value {
+		return json.RawMessage("true")
+	}
+	return json.RawMessage("false")
+}
+
+func channelCreated(delivered Delivered, _ Surface) ([]Inner, error) {
+	channel, err := conversationObject(delivered)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := newInner("channel_created", delivered, JSON("channel", channel))
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+func imCreated(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "channel_id", "user_id")
+	if err != nil {
+		return nil, err
+	}
+	object := map[string]json.RawMessage{
+		"id":    mustEncodeString(values["channel_id"]),
+		"is_im": json.RawMessage("true"),
+	}
+	if created, ok := delivered.Int("created"); ok {
+		object["created"] = json.RawMessage(strconv.FormatInt(created, 10))
+	}
+	channel, err := encodeObject(object)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPayloadFieldInvalid, err)
+	}
+	inner, err := newInner("im_created", delivered,
+		String("user", values["user_id"]),
+		JSON("channel", channel),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+func channelRenamed(delivered Delivered, _ Surface) ([]Inner, error) {
+	eventType, err := eventTypeByPrivacy(delivered, "channel_rename", "group_rename")
+	if err != nil {
+		return nil, err
+	}
+	channel, err := conversationObject(delivered)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := newInner(eventType, delivered, JSON("channel", channel))
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+// channelState renders the archive, unarchive and delete family: the channel
+// travels as its identifier, not as an object, and the acting user rides
+// along when the payload names one.
+func channelState(public, private string) builder {
+	return func(delivered Delivered, _ Surface) ([]Inner, error) {
+		eventType, err := eventTypeByPrivacy(delivered, public, private)
+		if err != nil {
+			return nil, err
+		}
+		values, err := stringFields(delivered, "channel_id")
+		if err != nil {
+			return nil, err
+		}
+		fields := []Field{String("channel", values["channel_id"])}
+		if actor, ok := delivered.Field("user_id"); ok && actor != "" {
+			fields = append(fields, String("user", actor))
+		}
+		inner, err := newInner(eventType, delivered, fields...)
+		if err != nil {
+			return nil, err
+		}
+		return []Inner{inner}, nil
+	}
+}
+
+// emojiChanged renders the four emoji topics as emoji_changed with the
+// current reference's subtype vocabulary: add carries name (and value when
+// the payload has one), remove carries names as a list, rename carries
+// old_name and new_name.
+func emojiChanged(subtype string) builder {
+	return func(delivered Delivered, _ Surface) ([]Inner, error) {
+		fields := []Field{String("subtype", subtype)}
+		switch subtype {
+		case "add":
+			values, err := stringFields(delivered, "name")
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, String("name", values["name"]))
+			if value, ok := delivered.Field("value"); ok && value != "" {
+				fields = append(fields, String("value", value))
+			} else if alias, ok := delivered.Field("alias_for"); ok && alias != "" {
+				fields = append(fields, String("value", "alias:"+alias))
+			}
+		case "remove":
+			values, err := stringFields(delivered, "name")
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, Strings("names", []string{values["name"]}))
+		case "rename":
+			values, err := stringFields(delivered, "old_name", "new_name")
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, String("old_name", values["old_name"]), String("new_name", values["new_name"]))
+		default:
+			return nil, fmt.Errorf("%w: emoji_changed subtype %q is not one the table decided", ErrPayloadFieldInvalid, subtype)
+		}
+		inner, err := newInner("emoji_changed", delivered, fields...)
+		if err != nil {
+			return nil, err
+		}
+		return []Inner{inner}, nil
+	}
+}
+
+// subteamEvent renders subteam_created and subteam_updated from the subteam
+// object the producer snapshots into the payload.
+func subteamEvent(eventType string) builder {
+	return func(delivered Delivered, _ Surface) ([]Inner, error) {
+		subteam, exists := delivered.Object["subteam"]
+		if !exists || len(subteam) == 0 {
+			return nil, fmt.Errorf("%w: %s payload has no subteam", ErrSlackEventIncomplete, delivered.Type)
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(subteam, &object) != nil || object == nil {
+			return nil, fmt.Errorf("%w: %s payload has an invalid subteam", ErrSlackEventIncomplete, delivered.Type)
+		}
+		inner, err := newInner(eventType, delivered, Field{name: "subteam", value: append(json.RawMessage(nil), subteam...)})
+		if err != nil {
+			return nil, err
+		}
+		return []Inner{inner}, nil
+	}
+}
+
+func subteamMembersChanged(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "usergroup_id", "team_id")
+	if err != nil {
+		return nil, err
+	}
+	added, addedOK := delivered.Strings("added_users")
+	removed, removedOK := delivered.Strings("removed_users")
+	if !addedOK && !removedOK {
+		return nil, fmt.Errorf("%w: %s payload has neither added_users nor removed_users", ErrSlackEventIncomplete, delivered.Type)
+	}
+	inner, err := newInner("subteam_members_changed", delivered,
+		String("subteam_id", values["usergroup_id"]),
+		String("team_id", values["team_id"]),
+		Strings("added_users", added),
+		Strings("removed_users", removed),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+// userEvent renders team_join and the plain user_change from the user object
+// the producer snapshots into the payload.
+func userEvent(eventType string) builder {
+	return func(delivered Delivered, _ Surface) ([]Inner, error) {
+		inner, err := userInner(eventType, delivered)
+		if err != nil {
+			return nil, err
+		}
+		return []Inner{inner}, nil
+	}
+}
+
+func userInner(eventType string, delivered Delivered) (Inner, error) {
+	user, exists := delivered.Object["user"]
+	if !exists || len(user) == 0 {
+		return Inner{}, fmt.Errorf("%w: %s payload has no user", ErrSlackEventIncomplete, delivered.Type)
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(user, &object) != nil || object == nil {
+		return Inner{}, fmt.Errorf("%w: %s payload has an invalid user", ErrSlackEventIncomplete, delivered.Type)
+	}
+	return newInner(eventType, delivered, Field{name: "user", value: append(json.RawMessage(nil), user...)})
+}
+
+// userChanged fans one profile change out to the names the current catalog
+// subscribes separately: user_change always, user_profile_changed always, and
+// user_status_changed when the producer marked the change as a status change.
+// The subscription filter then narrows delivery to the names each app asked
+// for, and an app subscribed to more than one receives more than one event —
+// which is Slack's behavior for the same change.
+func userChanged(delivered Delivered, _ Surface) ([]Inner, error) {
+	inners := make([]Inner, 0, 3)
+	for _, eventType := range []string{"user_change", "user_profile_changed"} {
+		inner, err := userInner(eventType, delivered)
+		if err != nil {
+			return nil, err
+		}
+		inners = append(inners, inner)
+	}
+	if statusChanged, ok := delivered.Bool("status_changed"); ok && statusChanged {
+		inner, err := userInner("user_status_changed", delivered)
+		if err != nil {
+			return nil, err
+		}
+		inners = append(inners, inner)
+	}
+	return inners, nil
+}
+
+// dndUpdated renders the three DND topics as dnd_updated with the documented
+// dnd_status object. dnd_updated_user — the name Slack uses toward everyone
+// but the subject — is a recorded gap; see the topic table.
+func dndUpdated(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "user_id")
+	if err != nil {
+		return nil, err
+	}
+	dndEnabled, ok := delivered.Bool("dnd_enabled")
+	if !ok {
+		return nil, fmt.Errorf("%w: %s payload has no dnd_enabled", ErrSlackEventIncomplete, delivered.Type)
+	}
+	snoozeEnabled, ok := delivered.Bool("snooze_enabled")
+	if !ok {
+		return nil, fmt.Errorf("%w: %s payload has no snooze_enabled", ErrSlackEventIncomplete, delivered.Type)
+	}
+	status := map[string]json.RawMessage{
+		"dnd_enabled":    mustEncodeBool(dndEnabled),
+		"snooze_enabled": mustEncodeBool(snoozeEnabled),
+	}
+	for payloadField, statusField := range map[string]string{
+		"next_dnd_start_ts": "next_dnd_start_ts",
+		"next_dnd_end_ts":   "next_dnd_end_ts",
+		"snooze_endtime":    "snooze_endtime",
+	} {
+		if value, ok := delivered.Int(payloadField); ok {
+			status[statusField] = json.RawMessage(strconv.FormatInt(value, 10))
+		}
+	}
+	encoded, err := encodeObject(status)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPayloadFieldInvalid, err)
+	}
+	inner, err := newInner("dnd_updated", delivered,
+		String("user", values["user_id"]),
+		JSON("dnd_status", encoded),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+// presenceChange renders the documented RTM presence frame. The topic table
+// restricts it to SurfaceRTM; the builder needs no surface logic of its own.
+func presenceChange(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "user_id", "presence")
+	if err != nil {
+		return nil, err
+	}
+	inner, err := newInner("presence_change", delivered,
+		String("user", values["user_id"]),
+		String("presence", values["presence"]),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+func teamRename(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "name")
+	if err != nil {
+		return nil, err
+	}
+	inner, err := newInner("team_rename", delivered, String("name", values["name"]))
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+// filePublic renders file_public the way Slack's file events travel:
+// identifiers only, hydrated by the consumer through files.info.
+func filePublic(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "file_id", "user_id")
+	if err != nil {
+		return nil, err
+	}
+	file, err := encodeObject(map[string]json.RawMessage{"id": mustEncodeString(values["file_id"])})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPayloadFieldInvalid, err)
+	}
+	inner, err := newInner("file_public", delivered,
+		String("file_id", values["file_id"]),
+		String("user_id", values["user_id"]),
+		JSON("file", file),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
 }

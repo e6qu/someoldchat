@@ -238,7 +238,7 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 	case "function_executed":
 		return prepareFunctionExecutedEvent(ctx, state, credentialKey, appID, authorizations, record)
 	default:
-		if channelID, scoped := eventChannelID(record.Event); scoped {
+		if channelID, scoped := eventChannelID(record.Event); scoped && !publicConversationLifecycleEvent(record.Event) {
 			authorizations, err = visibleAppAuthorizations(ctx, state, authorizations, channelID)
 			if err != nil {
 				return events.Record{}, false, err
@@ -246,6 +246,26 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 		}
 		return withEventAuthorizations(record, authorizations)
 	}
+}
+
+// publicConversationLifecycleEvent reports a lifecycle record about a public
+// channel. Slack addresses channel_created, channel_rename, channel_archive
+// and their kin to the workspace — a freshly created channel has no members
+// at all — so the membership filter that guards content-adjacent events must
+// not run for them. Private lifecycle records keep the filter: group_rename
+// to a non-member would leak the room's existence and name.
+func publicConversationLifecycleEvent(event events.Event) bool {
+	switch event.Topic {
+	case "conversation.created", "conversation.renamed", "conversation.archived", "conversation.unarchived", "conversation.deleted":
+	default:
+		return false
+	}
+	delivered, err := events.Deliverable(event)
+	if err != nil {
+		return false
+	}
+	isPrivate, ok := delivered.Bool("is_private")
+	return ok && !isPrivate
 }
 
 func prepareFunctionExecutedEvent(ctx context.Context, state AppEventProjectionStore, credentialKey []byte, appID domain.AppID, authorizations []domain.AppAuthorization, record events.Record) (events.Record, bool, error) {
@@ -327,13 +347,19 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 		return []string{"stars:read"}, nil
 	case strings.HasPrefix(event.Topic, "emoji."):
 		return []string{"emoji:read"}, nil
-	case strings.HasPrefix(event.Topic, "dnd."):
-		return []string{"dnd:read"}, nil
 	case strings.HasPrefix(event.Topic, "usergroup."):
 		return []string{"usergroups:read"}, nil
+	// The DND check precedes the generic user. prefix: the durable topics are
+	// user.dnd_snoozed and friends, and a "dnd." case here matched nothing, so
+	// dnd_updated was deliverable on a users:read grant the AsyncAPI does not
+	// accept for it.
+	case strings.HasPrefix(event.Topic, "user.dnd_"):
+		return []string{"dnd:read"}, nil
 	case strings.HasPrefix(event.Topic, "user."):
 		return []string{"users:read"}, nil
-	case strings.HasPrefix(event.Topic, "team."):
+	// team_rename's durable topic is workspace.name_changed; a "team." case
+	// here matched nothing, so the event would have required no scope at all.
+	case strings.HasPrefix(event.Topic, "workspace."):
 		return []string{"team:read"}, nil
 	case strings.HasPrefix(event.Topic, "link."):
 		return []string{"links:read"}, nil
@@ -374,6 +400,9 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 func userCanSeeChannelEvent(ctx context.Context, state UserEventProjectionStore, userID domain.UserID, event events.Event) (bool, error) {
 	channelID, scoped := eventChannelID(event)
 	if !scoped {
+		return true, nil
+	}
+	if publicConversationLifecycleEvent(event) {
 		return true, nil
 	}
 	member, err := state.IsConversationMember(ctx, channelID, userID)
