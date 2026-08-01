@@ -426,6 +426,44 @@ func parityCases() []parityCase {
 	}
 	return []parityCase{
 		{
+			name: "workflow managers manage across the composition seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// Before assignment a member cannot manage; the owner names them.
+				before, err := chat.CanManageWorkflow(ctx, "T1", "U2", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				assigned, err := chat.SetWorkflowManagers(ctx, "T1", "U1", "WfParity", []domain.UserID{"U2"})
+				if err != nil {
+					return nil, err
+				}
+				after, err := chat.CanManageWorkflow(ctx, "T1", "U2", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				// The manager edits the workflow; a non-manager is refused.
+				edited, err := chat.GetWorkflow(ctx, "T1", "U2", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				edited.Title = "Manager edit"
+				if _, err := chat.UpdateWorkflow(ctx, "T1", "U2", edited, edited.Version, false); err != nil {
+					return nil, err
+				}
+				stored, err := chat.GetWorkflow(ctx, "T1", "U1", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetWorkflowManagers(ctx, "T1", "U2", "WfParity", []domain.UserID{"U2"}); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("manager set-managers error=%v, want ErrNotFound", err)
+				}
+				return []any{
+					before, after, len(assigned.ManagerIDs), stored.Title, len(stored.ManagerIDs),
+				}, nil
+			},
+		},
+		{
 			name: "form and button steps resume across the composition seam",
 			seed: seedFormParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {

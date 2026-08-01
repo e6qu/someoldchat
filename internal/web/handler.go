@@ -3278,6 +3278,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/workflows/{workflowID}/update", h.updateWorkflow)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/copy", h.duplicateWorkflow)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/delete", h.deleteWorkflow)
+	mux.HandleFunc("POST /app/workflows/{workflowID}/managers", h.setWorkflowManagers)
 	mux.HandleFunc("GET /app/workflows/export/runs/{workflowID}", h.exportWorkflowRuns)
 	mux.HandleFunc("GET /app/workflows/export/form-responses/{workflowID}", h.exportWorkflowFormResponses)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers", h.createWorkflowTrigger)

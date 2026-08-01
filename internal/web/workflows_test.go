@@ -20,6 +20,11 @@ import (
 func seedWorkflowApp(t *testing.T) (*http.ServeMux, string) {
 	t.Helper()
 	repository, mux := browserWorkspace(t, auth.AllScopes())
+	for _, user := range []domain.User{{ID: "U2", WorkspaceID: "T1", Name: "member two"}, {ID: "U3", WorkspaceID: "T1", Name: "member three"}} {
+		if err := repository.SeedUser(user); err != nil {
+			t.Fatal(err)
+		}
+	}
 	now := time.Now().UTC()
 	manifest := `{"display_information":{"name":"Workflow tools"},"settings":{"function_runtime":"remote"},"functions":{"triage":{"title":"Triage request","description":"Triage one request","input_parameters":{"properties":{"item":{"type":"string","title":"Item"}},"required":["item"]},"output_parameters":{"properties":{"result":{"type":"string","title":"Result"}},"required":["result"]}},"notify":{"title":"Notify channel","description":"Post a notification","input_parameters":{"properties":{}},"output_parameters":{"properties":{}}}}}`
 	if err := repository.CreateApp(context.Background(), domain.App{
@@ -506,6 +511,33 @@ func TestWorkflowBuilderSavesAndShowsAnIcon(t *testing.T) {
 	}
 	page = get(t, mux, workflowURL)
 	requireContains(t, "updated icon", page.Body.String(), `value="📋"`)
+}
+
+func TestWorkflowOwnerAssignsManagersFromTheBuilder(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Managed workflow"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	page := get(t, mux, workflowURL)
+	requireContains(t, "managers section", page.Body.String(), "Workflow managers", `name="manager_ids"`)
+
+	saved := postForm(t, mux, workflowURL+"/managers", url.Values{
+		"_csrf": {csrf}, "manager_ids": {"U2, U3"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save managers=%d: %s", saved.Code, saved.Body)
+	}
+	page = get(t, mux, saved.Header().Get("Location"))
+	requireContains(t, "saved managers", page.Body.String(), "Managers updated", `value="U2, U3"`)
+
+	// A member ID that is not a workspace member is rejected.
+	bad := postForm(t, mux, workflowURL+"/managers", url.Values{
+		"_csrf": {csrf}, "manager_ids": {"Unobody"},
+	}.Encode(), false)
+	if bad.Code != http.StatusBadRequest && bad.Code != http.StatusNotFound {
+		t.Fatalf("invalid manager=%d: %s", bad.Code, bad.Body)
+	}
 }
 
 func TestWorkflowBuilderExportsRunsAndFormResponsesAsCSV(t *testing.T) {

@@ -1892,6 +1892,8 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('draft', { exact: true })).toBeVisible();
   // The icon travels with the workflow and shows on its builder page.
   await expect(page.locator('.wf-icon')).toHaveText('🚨');
+  // The owner sees the workflow managers section.
+  await expect(page.getByRole('heading', { name: 'Workflow managers' })).toBeVisible();
 
   await page.locator('select[name="step_2"]').selectOption('notify');
   await page.getByRole('button', { name: 'Publish' }).click();

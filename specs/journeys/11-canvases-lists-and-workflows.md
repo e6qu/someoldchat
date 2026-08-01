@@ -203,9 +203,10 @@ path as a function completion. Run views are workspace-shareable so a member
 can open an interactive run; steps reorder in place; a workflow carries an icon
 through its revisions and views; a published workflow's trigger is locked to
 enable/disable; and the owner exports run history and submitted form fields as
-CSV.
+CSV. The owner and workspace administrators can name managers who edit, publish,
+and delete the workflow alongside the owner.
 
-This is not full Slack Workflow Builder parity. Workflow managers, find/use/copy
+This is not full Slack Workflow Builder parity. find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions,
 templates and AI creation, asynchronous CSV export at scale,
 enforcement of typed workflow/function input and output schemas, multi-org

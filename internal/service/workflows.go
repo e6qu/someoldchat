@@ -367,8 +367,26 @@ func workflowStepOutputsByID(executions []domain.WorkflowStep) map[string]map[st
 	return outputs
 }
 
+// requireInstalledWorkflowApp verifies the app a workflow builds against is
+// installed in the workspace, which is what makes its functions usable — Slack
+// does not require the builder to own the app, so a workflow manager can edit a
+// workflow referencing an installed app they do not own.
+func (m Messages) requireInstalledWorkflowApp(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return err
+	}
+	installed, err := m.appInstalledInWorkspace(ctx, appID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if !installed {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (m Messages) CreateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, value domain.WorkflowDefinition) (domain.WorkflowDefinition, error) {
-	if _, _, err := m.GetDeveloperApp(ctx, workspaceID, actor, value.AppID); err != nil {
+	if err := m.requireInstalledWorkflowApp(ctx, workspaceID, actor, value.AppID); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	value.Title = strings.TrimSpace(value.Title)
@@ -422,10 +440,10 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	if current.OwnerID != actor {
-		return domain.WorkflowDefinition{}, store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return domain.WorkflowDefinition{}, err
 	}
-	if _, _, err := m.GetDeveloperApp(ctx, workspaceID, actor, current.AppID); err != nil {
+	if err := m.requireInstalledWorkflowApp(ctx, workspaceID, actor, current.AppID); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	unpublish := !publish && value.Status == domain.WorkflowDisabled
@@ -454,6 +472,9 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	value.WorkspaceID = current.WorkspaceID
 	value.AppID = current.AppID
 	value.OwnerID = current.OwnerID
+	// Managers are workflow-level metadata set independently of content, so an
+	// edit carries the existing list forward rather than clearing it.
+	value.ManagerIDs = current.ManagerIDs
 	value.InputSchema = inputSchema
 	value.Steps = steps
 	value.CreatedAt = current.CreatedAt
@@ -493,6 +514,103 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	return value, nil
 }
 
+// canManageWorkflow reports whether the actor may manage the workflow: its
+// owner, one of its named managers, or a workspace administrator — Slack's
+// manager and admin roles for a workflow.
+func (m Messages) canManageWorkflow(ctx context.Context, workflow domain.WorkflowDefinition, actor domain.UserID) (bool, error) {
+	if workflow.OwnerID == actor || slices.Contains(workflow.ManagerIDs, actor) {
+		return true, nil
+	}
+	membership, err := m.activeWorkspaceMembership(ctx, workflow.WorkspaceID, actor)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return membership.Role == domain.WorkspaceRoleAdmin || membership.Role == domain.WorkspaceRoleOwner, nil
+}
+
+// requireWorkflowManager admits the caller when they can manage the workflow,
+// answering ErrNotFound exactly as an owner-only check would so a non-manager
+// cannot distinguish a missing workflow from one they merely may not manage.
+func (m Messages) requireWorkflowManager(ctx context.Context, workflow domain.WorkflowDefinition, actor domain.UserID) error {
+	allowed, err := m.canManageWorkflow(ctx, workflow, actor)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+// SetWorkflowManagers replaces a workflow's manager list. The owner and
+// workspace administrators assign managers; managers themselves cannot change
+// the list, matching Slack, where managers manage the workflow but ownership
+// controls who else may.
+func (m Messages) SetWorkflowManagers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID, managerIDs []domain.UserID) (domain.WorkflowDefinition, error) {
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	isOwnerOrAdmin := current.OwnerID == actor
+	if !isOwnerOrAdmin {
+		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, actor)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return domain.WorkflowDefinition{}, err
+		}
+		isOwnerOrAdmin = err == nil && (membership.Role == domain.WorkspaceRoleAdmin || membership.Role == domain.WorkspaceRoleOwner)
+	}
+	if !isOwnerOrAdmin {
+		return domain.WorkflowDefinition{}, store.ErrNotFound
+	}
+	seen := make(map[domain.UserID]bool, len(managerIDs))
+	clean := make([]domain.UserID, 0, len(managerIDs))
+	for _, id := range managerIDs {
+		id = domain.UserID(strings.TrimSpace(string(id)))
+		if id == "" || seen[id] {
+			continue
+		}
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, id); err != nil {
+			return domain.WorkflowDefinition{}, ErrInvalidWorkflowStep
+		}
+		seen[id] = true
+		clean = append(clean, id)
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.managers_set",
+		events.String("workflow_id", string(current.ID)),
+		events.Int("managers", int64(len(clean))),
+	), now)
+	if err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	if err := m.Store.SetWorkflowManagers(ctx, workspaceID, workflowID, clean, event); err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	current.ManagerIDs = clean
+	current.UpdatedAt = now
+	return current, nil
+}
+
+// CanManageWorkflow reports whether the actor may manage the workflow, so a
+// builder view can show or hide the management surface. It returns false (not
+// an error) for a workflow the actor may not even see.
+func (m Messages) CanManageWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) (bool, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return false, err
+	}
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return m.canManageWorkflow(ctx, current, actor)
+}
+
 // DiscardWorkflowStagedChanges reverts a published workflow's draft to its
 // published revision. The owner reads the live (staged) head; this operation
 // throws those staged edits away and realigns the head to what is currently
@@ -502,8 +620,8 @@ func (m Messages) DiscardWorkflowStagedChanges(ctx context.Context, workspaceID 
 	if err != nil {
 		return err
 	}
-	if current.OwnerID != actor {
-		return store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return err
 	}
 	if current.Status != domain.WorkflowPublished || current.Version == current.PublishedVersion {
 		return ErrInvalidWorkflowStep
@@ -538,8 +656,8 @@ func (m Messages) DuplicateWorkflow(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	if current.OwnerID != actor {
-		return domain.WorkflowDefinition{}, store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return domain.WorkflowDefinition{}, err
 	}
 	callbackID := current.CallbackID
 	if callbackID != "" {
@@ -565,8 +683,8 @@ func (m Messages) DeleteWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return err
 	}
-	if current.OwnerID != actor {
-		return store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return err
 	}
 	if expectedVersion != current.Version {
 		return store.ErrConflict
@@ -593,8 +711,8 @@ func (m Messages) WorkflowActivity(ctx context.Context, workspaceID domain.Works
 	if err != nil {
 		return domain.WorkflowActivity{}, err
 	}
-	if current.OwnerID != actor {
-		return domain.WorkflowActivity{}, store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return domain.WorkflowActivity{}, err
 	}
 	return m.Store.SummarizeWorkflowRuns(ctx, workspaceID, workflowID, workflowActivityRecentLimit)
 }
@@ -614,8 +732,8 @@ func (m Messages) WorkflowRunExport(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return nil, err
 	}
-	if current.OwnerID != actor {
-		return nil, store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return nil, err
 	}
 	runs, _, _, err := m.Store.ListWorkflowRuns(ctx, workspaceID, workflowID, domain.PageRequest{Limit: workflowExportRunLimit})
 	if err != nil {
@@ -632,8 +750,8 @@ func (m Messages) WorkflowFormResponseExport(ctx context.Context, workspaceID do
 	if err != nil {
 		return nil, err
 	}
-	if current.OwnerID != actor {
-		return nil, store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return nil, err
 	}
 	steps, err := m.workflowStepsAtVersion(ctx, current, current.Version)
 	if err != nil {
@@ -696,8 +814,8 @@ func (m Messages) WorkflowStepChanges(ctx context.Context, workspaceID domain.Wo
 	if err != nil {
 		return nil, err
 	}
-	if current.OwnerID != actor {
-		return nil, store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+		return nil, err
 	}
 	if current.Status != domain.WorkflowPublished || current.Version == current.PublishedVersion {
 		return nil, nil
@@ -794,7 +912,13 @@ func (m Messages) ListWorkflows(ctx context.Context, workspaceID domain.Workspac
 			return nil, false, "", err
 		}
 		for _, value := range values {
-			if value.OwnerID == actor || value.Status == domain.WorkflowPublished {
+			// Managers see the workflows they manage in the directory alongside
+			// their own and every published workflow.
+			managed, err := m.canManageWorkflow(ctx, value, actor)
+			if err != nil {
+				return nil, false, "", err
+			}
+			if managed || value.Status == domain.WorkflowPublished {
 				visible = append(visible, value)
 				if len(visible) > request.Limit {
 					break
@@ -845,11 +969,15 @@ func (m Messages) GetWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	if value.OwnerID != actor && value.Status != domain.WorkflowPublished {
-		return domain.WorkflowDefinition{}, store.ErrNotFound
-	}
-	if value.OwnerID == actor {
+	// A manager reads the live head like the owner; everyone else sees only a
+	// published workflow, and only its published revision.
+	if managed, err := m.canManageWorkflow(ctx, value, actor); err != nil {
+		return domain.WorkflowDefinition{}, err
+	} else if managed {
 		return value, nil
+	}
+	if value.Status != domain.WorkflowPublished {
+		return domain.WorkflowDefinition{}, store.ErrNotFound
 	}
 	return m.publishedProjection(ctx, value)
 }
@@ -887,8 +1015,8 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return domain.WorkflowTrigger{}, err
 	}
-	if workflow.OwnerID != actor {
-		return domain.WorkflowTrigger{}, store.ErrNotFound
+	if err := m.requireWorkflowManager(ctx, workflow, actor); err != nil {
+		return domain.WorkflowTrigger{}, err
 	}
 	value.Title = strings.TrimSpace(value.Title)
 	value.Type = strings.TrimSpace(value.Type)
@@ -962,7 +1090,9 @@ func (m Messages) ListWorkflowTriggers(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return nil, err
 	}
-	if workflow.OwnerID == actor {
+	if managed, err := m.canManageWorkflow(ctx, workflow, actor); err != nil {
+		return nil, err
+	} else if managed {
 		return values, nil
 	}
 	visible := values[:0]
@@ -1800,7 +1930,11 @@ func (m Messages) SetFeaturedWorkflows(ctx context.Context, workspaceID domain.W
 		if err != nil {
 			return err
 		}
-		if !allowed || workflow.OwnerID != actor {
+		managed, err := m.canManageWorkflow(ctx, workflow, actor)
+		if err != nil {
+			return err
+		}
+		if !allowed || !managed {
 			return ErrWorkflowPermissionDenied
 		}
 		values[index] = domain.FeaturedWorkflow{

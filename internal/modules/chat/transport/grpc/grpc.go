@@ -2233,10 +2233,14 @@ func optionalTimeFromUnixNano(value int64) time.Time {
 }
 
 func encodeWorkflowDefinition(value domain.WorkflowDefinition) *chatv1.WorkflowDefinition {
+	managerIDs := make([]string, 0, len(value.ManagerIDs))
+	for _, id := range value.ManagerIDs {
+		managerIDs = append(managerIDs, string(id))
+	}
 	return &chatv1.WorkflowDefinition{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), AppId: string(value.AppID),
 		OwnerId: string(value.OwnerID), CallbackId: value.CallbackID, Title: value.Title,
-		Description: value.Description, Icon: value.Icon, InputSchema: value.InputSchema, Steps: value.Steps,
+		Description: value.Description, Icon: value.Icon, ManagerIds: managerIDs, InputSchema: value.InputSchema, Steps: value.Steps,
 		Status: string(value.Status), Version: value.Version, PublishedVersion: value.PublishedVersion,
 		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
 	}
@@ -2250,11 +2254,22 @@ func decodeWorkflowDefinition(value *chatv1.WorkflowDefinition) domain.WorkflowD
 		ID: domain.WorkflowID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		AppID: domain.AppID(value.GetAppId()), OwnerID: domain.UserID(value.GetOwnerId()),
 		CallbackID: value.GetCallbackId(), Title: value.GetTitle(), Description: value.GetDescription(),
-		Icon: value.GetIcon(), InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
+		Icon: value.GetIcon(), ManagerIDs: decodeWorkflowUserIDs(value.GetManagerIds()), InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
 		Version: value.GetVersion(), PublishedVersion: value.GetPublishedVersion(),
 		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
 	}
+}
+
+func decodeWorkflowUserIDs(ids []string) []domain.UserID {
+	if len(ids) == 0 {
+		return nil
+	}
+	values := make([]domain.UserID, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, domain.UserID(id))
+	}
+	return values
 }
 
 func encodeWorkflowStepChanges(changes []domain.WorkflowStepChange) []*chatv1.WorkflowStepChange {
@@ -2464,6 +2479,27 @@ func (r Remote) WorkflowFormResponseExport(ctx context.Context, workspaceID doma
 		})
 	}
 	return responses, nil
+}
+
+func (r Remote) SetWorkflowManagers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, managerIDs []domain.UserID) (domain.WorkflowDefinition, error) {
+	ids := make([]string, 0, len(managerIDs))
+	for _, id := range managerIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.workflows.SetWorkflowManagers(ctx, &chatv1.WorkflowManagersRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID), ManagerIds: ids,
+	})
+	return decodeWorkflowDefinition(out), err
+}
+
+func (r Remote) CanManageWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (bool, error) {
+	out, err := r.workflows.CanManageWorkflow(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	if err != nil {
+		return false, err
+	}
+	return out.GetCanManage(), nil
 }
 
 func (r Remote) WorkflowActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowActivity, error) {
@@ -5125,6 +5161,28 @@ func (s *Server) WorkflowFormResponseExport(ctx context.Context, input *chatv1.W
 		})
 	}
 	return out, nil
+}
+
+func (s *Server) SetWorkflowManagers(ctx context.Context, input *chatv1.WorkflowManagersRequest) (*chatv1.WorkflowDefinition, error) {
+	value, err := s.implementation.SetWorkflowManagers(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), decodeWorkflowUserIDs(input.GetManagerIds()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) CanManageWorkflow(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowManagePermissionResponse, error) {
+	allowed, err := s.implementation.CanManageWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowManagePermissionResponse{CanManage: allowed}, nil
 }
 
 func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {

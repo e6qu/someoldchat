@@ -385,6 +385,9 @@ type Store interface {
 	// version moved underneath the caller.
 	DeleteWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID, uint64, events.Event) (bool, error)
 	GetWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID) (domain.WorkflowDefinition, error)
+	// SetWorkflowManagers replaces a workflow's manager list independently of
+	// its versioned content.
+	SetWorkflowManagers(context.Context, domain.WorkspaceID, domain.WorkflowID, []domain.UserID, events.Event) error
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)
 	SetWorkflowTrigger(context.Context, domain.WorkflowTrigger, uint64, events.Event) error

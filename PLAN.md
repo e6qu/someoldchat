@@ -403,7 +403,7 @@ to the current Slack callback shape and bypass manifest subscription filtering,
 as Slack's no-scope automatic-dispatch contract requires, on both HTTP Events
 API and Socket Mode.
 
-The same pass keeps the remaining boundary explicit. Workflow managers,
+The same pass keeps the remaining boundary explicit.
 find/use/copy permissions, plan and admin policy, built-in and connector
 functions, asynchronous CSV exports at scale, multi-org permission
 semantics, typed workflow/function input and output enforcement, exact rate
@@ -485,6 +485,19 @@ longer happen. The owner exports the run history and every submitted form
 field as CSV through new seam operations. Each operation has a differential
 parity case and the schema gains the icon columns through an idempotent
 migration.
+
+The workflow managers pass then opens management beyond the owner. A workflow
+carries a manager list, stored in its own column and changed only through a
+dedicated operation (a content update preserves it in both stores, which the
+persistence qualification pins). The owner and workspace administrators assign
+managers; a manager edits, publishes, manages triggers, exports, duplicates,
+and deletes the workflow exactly as the owner does, reading the live head the
+same way, while a non-manager is refused indistinguishably from a missing
+workflow. The pass also corrected two defects it exposed: a content edit used
+to wipe the manager list in the memory store, and workflow create/edit wrongly
+required app ownership — building against an installed app is what Slack
+requires, so the check is now app-installed-in-workspace rather than
+app-owned-by-builder.
 
 The trigger-worker pass then replaced the configuration-only scheduled,
 webhook, message, reaction, join, and list trigger types with durable

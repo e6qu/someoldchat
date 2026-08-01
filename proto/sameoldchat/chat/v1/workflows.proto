@@ -35,6 +35,7 @@ message WorkflowDefinition {
   string title = 6;
   string description = 7;
   string icon = 15;
+  repeated string manager_ids = 16;
   string input_schema = 8;
   string steps = 9;
   string status = 10;
@@ -70,6 +71,17 @@ message WorkflowDeleteRequest {
   string user_id = 2;
   string workflow_id = 3;
   uint64 expected_version = 4;
+}
+
+message WorkflowManagersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_id = 3;
+  repeated string manager_ids = 4;
+}
+
+message WorkflowManagePermissionResponse {
+  bool can_manage = 1;
 }
 
 message WorkflowActivitySummary {
@@ -354,6 +366,8 @@ service WorkflowsService {
   rpc WorkflowRunInteraction(WorkflowRunGetRequest) returns (WorkflowInteraction);
   rpc WorkflowRunExport(WorkflowGetRequest) returns (WorkflowRunListResponse);
   rpc WorkflowFormResponseExport(WorkflowGetRequest) returns (WorkflowFormResponseListResponse);
+  rpc SetWorkflowManagers(WorkflowManagersRequest) returns (WorkflowDefinition);
+  rpc CanManageWorkflow(WorkflowGetRequest) returns (WorkflowManagePermissionResponse);
   rpc UpdateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
   rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);

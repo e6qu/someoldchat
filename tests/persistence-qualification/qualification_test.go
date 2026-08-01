@@ -403,6 +403,32 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		t.Fatalf("draft revision icon=%q, want 🚨", revisions[0].Icon)
 	}
 
+	// Managers are workflow-level metadata: a dedicated op replaces the list,
+	// and a content update carries it forward rather than clearing it.
+	if err := repository.SetWorkflowManagers(ctx, workspaceID, workflowID, []domain.UserID{userID, domain.UserID("U-manager-" + suffix)},
+		event("managers", "workflow.managers_set", now)); err != nil {
+		t.Fatal(err)
+	}
+	withManagers, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil || len(withManagers.ManagerIDs) != 2 {
+		t.Fatalf("workflow with managers=%+v err=%v", withManagers, err)
+	}
+	edited := workflow
+	edited.Icon = "🔁"
+	edited.UpdatedAt = now.Add(3 * time.Second)
+	if err := repository.UpdateWorkflow(ctx, edited, withManagers.Version, event("icon-edit", "workflow.updated", edited.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	afterEdit, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil || len(afterEdit.ManagerIDs) != 2 || afterEdit.Icon != "🔁" {
+		t.Fatalf("managers after content edit=%+v err=%v", afterEdit, err)
+	}
+	// Revert the staged edit so the rest of the qualification proceeds from the
+	// published revision it already set up.
+	if _, err := repository.DiscardWorkflowStagedChanges(ctx, workspaceID, workflowID, afterEdit.Version, event("icon-revert", "workflow.staged_discarded", edited.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+
 	trigger := domain.WorkflowTrigger{
 		ID: triggerID, WorkflowID: workflowID, WorkspaceID: workspaceID, AppID: workflow.AppID,
 		Title: "Run triage", Type: "link", Config: `{}`, Enabled: true,

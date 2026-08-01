@@ -15,6 +15,7 @@ type WorkflowDefinition struct {
 	WorkspaceID      WorkspaceID
 	AppID            AppID
 	OwnerID          UserID
+	ManagerIDs       []UserID
 	CallbackID       string
 	Title            string
 	Description      string

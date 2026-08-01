@@ -34,6 +34,8 @@ const (
 	WorkflowsService_WorkflowRunInteraction_FullMethodName        = "/sameoldchat.chat.v1.WorkflowsService/WorkflowRunInteraction"
 	WorkflowsService_WorkflowRunExport_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/WorkflowRunExport"
 	WorkflowsService_WorkflowFormResponseExport_FullMethodName    = "/sameoldchat.chat.v1.WorkflowsService/WorkflowFormResponseExport"
+	WorkflowsService_SetWorkflowManagers_FullMethodName           = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowManagers"
+	WorkflowsService_CanManageWorkflow_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/CanManageWorkflow"
 	WorkflowsService_UpdateWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/UpdateWorkflow"
 	WorkflowsService_ListWorkflows_FullMethodName                 = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflows"
 	WorkflowsService_SetWorkflowTrigger_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowTrigger"
@@ -73,6 +75,8 @@ type WorkflowsServiceClient interface {
 	WorkflowRunInteraction(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowInteraction, error)
 	WorkflowRunExport(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowRunListResponse, error)
 	WorkflowFormResponseExport(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowFormResponseListResponse, error)
+	SetWorkflowManagers(ctx context.Context, in *WorkflowManagersRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
+	CanManageWorkflow(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowManagePermissionResponse, error)
 	UpdateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
 	ListWorkflows(ctx context.Context, in *WorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error)
 	SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error)
@@ -245,6 +249,26 @@ func (c *workflowsServiceClient) WorkflowFormResponseExport(ctx context.Context,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkflowFormResponseListResponse)
 	err := c.cc.Invoke(ctx, WorkflowsService_WorkflowFormResponseExport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) SetWorkflowManagers(ctx context.Context, in *WorkflowManagersRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowDefinition)
+	err := c.cc.Invoke(ctx, WorkflowsService_SetWorkflowManagers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) CanManageWorkflow(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowManagePermissionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowManagePermissionResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_CanManageWorkflow_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +474,8 @@ type WorkflowsServiceServer interface {
 	WorkflowRunInteraction(context.Context, *WorkflowRunGetRequest) (*WorkflowInteraction, error)
 	WorkflowRunExport(context.Context, *WorkflowGetRequest) (*WorkflowRunListResponse, error)
 	WorkflowFormResponseExport(context.Context, *WorkflowGetRequest) (*WorkflowFormResponseListResponse, error)
+	SetWorkflowManagers(context.Context, *WorkflowManagersRequest) (*WorkflowDefinition, error)
+	CanManageWorkflow(context.Context, *WorkflowGetRequest) (*WorkflowManagePermissionResponse, error)
 	UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error)
 	ListWorkflows(context.Context, *WorkflowListRequest) (*WorkflowListResponse, error)
 	SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error)
@@ -521,6 +547,12 @@ func (UnimplementedWorkflowsServiceServer) WorkflowRunExport(context.Context, *W
 }
 func (UnimplementedWorkflowsServiceServer) WorkflowFormResponseExport(context.Context, *WorkflowGetRequest) (*WorkflowFormResponseListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method WorkflowFormResponseExport not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) SetWorkflowManagers(context.Context, *WorkflowManagersRequest) (*WorkflowDefinition, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetWorkflowManagers not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) CanManageWorkflow(context.Context, *WorkflowGetRequest) (*WorkflowManagePermissionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CanManageWorkflow not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateWorkflow not implemented")
@@ -862,6 +894,42 @@ func _WorkflowsService_WorkflowFormResponseExport_Handler(srv interface{}, ctx c
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(WorkflowsServiceServer).WorkflowFormResponseExport(ctx, req.(*WorkflowGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_SetWorkflowManagers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowManagersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).SetWorkflowManagers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_SetWorkflowManagers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).SetWorkflowManagers(ctx, req.(*WorkflowManagersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_CanManageWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).CanManageWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_CanManageWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).CanManageWorkflow(ctx, req.(*WorkflowGetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1256,6 +1324,14 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WorkflowFormResponseExport",
 			Handler:    _WorkflowsService_WorkflowFormResponseExport_Handler,
+		},
+		{
+			MethodName: "SetWorkflowManagers",
+			Handler:    _WorkflowsService_SetWorkflowManagers_Handler,
+		},
+		{
+			MethodName: "CanManageWorkflow",
+			Handler:    _WorkflowsService_CanManageWorkflow_Handler,
 		},
 		{
 			MethodName: "UpdateWorkflow",

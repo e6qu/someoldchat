@@ -2576,6 +2576,10 @@ func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 	}
 	value.CreatedAt = current.CreatedAt
 	value.Version = expectedVersion + 1
+	// The manager list is workflow-level metadata written only by
+	// SetWorkflowManagers; a content update preserves it, matching the SQL
+	// store, whose UPDATE leaves the manager_ids column untouched.
+	value.ManagerIDs = current.ManagerIDs
 	s.workflows[value.ID] = value
 	s.workflowRevisions[value.ID] = append(s.workflowRevisions[value.ID], domain.WorkflowRevision{
 		WorkflowID: value.ID, WorkspaceID: value.WorkspaceID, Version: value.Version, Title: value.Title,
@@ -2603,6 +2607,23 @@ func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 			}
 		}
 	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) SetWorkflowManagers(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, managerIDs []domain.UserID, event events.Event) error {
+	if workflowID == "" || workspace == "" {
+		return store.InvalidArgument("invalid workflow manager update")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.workflows[workflowID]
+	if !exists || current.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	current.ManagerIDs = slices.Clone(managerIDs)
+	current.UpdatedAt = event.CreatedAt
+	s.workflows[workflowID] = current
 	s.outbox = append(s.outbox, event)
 	return nil
 }
