@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -111,6 +113,149 @@ func TestVersion85MigrationAddsViewAppIDBeforeCreatingItsIndex(t *testing.T) {
 	}
 	if indexes != 1 {
 		t.Fatalf("views_published_user_app indexes = %d, want 1", indexes)
+	}
+}
+
+// TestOpenUpgradesVersion101DatabaseToCurrentSchema replays the whole ladder
+// against a database exactly as the release that shipped schema version 101
+// left it (testdata/fresh_install_version_101.sql is a sqlite3 .dump of a
+// fresh install produced by that release's own sqlstore.Open — the shape the
+// deployment reporting issue #128 was running). Version 85 and issue #128
+// were the same defect twice — a base-schema index covering a column only
+// the ladder adds — and each got a point fix; this test fails for ANY schema
+// element a fresh install has that an upgraded pre-existing database does
+// not, so the class stays fixed. The fixture is frozen history: never
+// regenerate it, teach the ladder to upgrade it.
+func TestOpenUpgradesVersion101DatabaseToCurrentSchema(t *testing.T) {
+	ctx := context.Background()
+	fixture, err := os.ReadFile(filepath.Join("testdata", "fresh_install_version_101.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dsn := filepath.Join(t.TempDir(), "version-101.sqlite")
+	legacy, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.ExecContext(ctx, string(fixture)); err != nil {
+		t.Fatalf("install version 101 database: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open version 101 database with current release: %v", err)
+	}
+	defer migrated.Close()
+	fresh, err := Open(ctx, filepath.Join(t.TempDir(), "fresh.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+
+	// Every table, column, and index of a fresh install must exist after the
+	// upgrade. (The reverse — leftovers the fresh install lacks — is allowed:
+	// dropping storage is its own migration decision.)
+	tables := func(db *sql.DB) []string {
+		rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var names []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatal(err)
+			}
+			names = append(names, name)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
+	indexes := func(db *sql.DB) map[string]bool {
+		rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		names := make(map[string]bool)
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatal(err)
+			}
+			names[name] = true
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
+	columns := func(s *Store, table string) map[string]bool {
+		rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		names := make(map[string]bool)
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatal(err)
+			}
+			names[name] = true
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
+	migratedTables := make(map[string]bool)
+	for _, table := range tables(migrated.db) {
+		migratedTables[table] = true
+	}
+	for _, table := range tables(fresh.db) {
+		if !migratedTables[table] {
+			t.Errorf("upgraded database is missing table %s", table)
+			continue
+		}
+		upgraded := columns(migrated, table)
+		for column := range columns(fresh, table) {
+			if !upgraded[column] {
+				t.Errorf("upgraded database is missing column %s.%s", table, column)
+			}
+		}
+	}
+	upgradedIndexes := indexes(migrated.db)
+	for name := range indexes(fresh.db) {
+		if !upgradedIndexes[name] {
+			t.Errorf("upgraded database is missing index %s", name)
+		}
+	}
+}
+
+// TestSplitSchemaIndexesSeparatesEveryIndexStatement pins the splitter to the
+// schema text it actually parses: every CREATE INDEX in the base schema must
+// land in the deferred half, and none may remain in the part executed before
+// the migration ladder.
+func TestSplitSchemaIndexesSeparatesEveryIndexStatement(t *testing.T) {
+	tables, indexes := splitSchemaIndexes(schema)
+	if strings.Contains(tables, "CREATE INDEX") || strings.Contains(tables, "CREATE UNIQUE INDEX") {
+		t.Fatal("an index statement remained in the pre-ladder schema half")
+	}
+	declared := strings.Count(schema, "CREATE INDEX") + strings.Count(schema, "CREATE UNIQUE INDEX")
+	if len(indexes) != declared {
+		t.Fatalf("deferred %d index statements, schema declares %d", len(indexes), declared)
+	}
+	for _, statement := range indexes {
+		if !strings.Contains(statement, "IF NOT EXISTS") {
+			t.Fatalf("index statement is not idempotent: %s", statement)
+		}
 	}
 }
 

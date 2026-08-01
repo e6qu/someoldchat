@@ -1315,7 +1315,16 @@ func (s *Store) Migrate(ctx context.Context) error {
 }
 
 func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
-	if _, err := db.ExecContext(ctx, schema); err != nil {
+	// The base schema runs in two phases around the version ladder. Tables
+	// first: on a fresh database they create the current shape, on an existing
+	// one every CREATE TABLE IF NOT EXISTS is a no-op and the ladder below
+	// upgrades the old shape column by column. Indexes only after the ladder:
+	// a base-schema index may cover a column the ladder adds, and creating it
+	// before the ladder failed on every pre-existing database with
+	// `column "credential_hash" does not exist` (issue #128) — CREATE INDEX
+	// IF NOT EXISTS skips nothing when the index is missing but its column is.
+	baseTables, baseIndexes := splitSchemaIndexes(schema)
+	if _, err := db.ExecContext(ctx, baseTables); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
 	}
 	var version int
@@ -2798,6 +2807,13 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate app bot tokens: %w", err)
 		}
 	}
+	// Every ladder step has run, so each column a base-schema index covers now
+	// exists on databases of every age; see the phase split at the top.
+	for _, statement := range baseIndexes {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("migrate schema indexes: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2812,6 +2828,43 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		return fmt.Errorf("unsupported schema version %d (want %d)", version, schemaVersion)
 	}
 	return nil
+}
+
+// splitSchemaIndexes separates the base schema into everything that must run
+// before the version ladder (tables, seeds) and the CREATE INDEX statements
+// that must run after it, each kept with the comment lines above it. The
+// split is what lets a base-schema index cover a column that only a ladder
+// step adds to pre-existing databases.
+func splitSchemaIndexes(schema string) (tables string, indexes []string) {
+	var kept, statement []string
+	flush := func() {
+		if len(statement) == 0 {
+			return
+		}
+		isIndex := false
+		for _, line := range statement {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+				continue
+			}
+			isIndex = strings.HasPrefix(trimmed, "CREATE INDEX") || strings.HasPrefix(trimmed, "CREATE UNIQUE INDEX")
+			break
+		}
+		if isIndex {
+			indexes = append(indexes, strings.Join(statement, "\n"))
+		} else {
+			kept = append(kept, statement...)
+		}
+		statement = nil
+	}
+	for _, line := range strings.Split(schema, "\n") {
+		statement = append(statement, line)
+		if strings.HasSuffix(strings.TrimSpace(line), ";") {
+			flush()
+		}
+	}
+	flush()
+	return strings.Join(kept, "\n"), indexes
 }
 
 func repairDuplicateConversationNames(ctx context.Context, db queryExecutor) error {

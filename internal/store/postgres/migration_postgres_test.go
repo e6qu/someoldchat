@@ -76,3 +76,85 @@ func TestConcurrentOpenSerializesSchemaMigration(t *testing.T) {
 		t.Errorf("concurrent PostgreSQL open failed: %v", openErr)
 	}
 }
+
+// TestOpenUpgradesDatabaseMissingLadderAddedColumns reproduces issue #128 on
+// the PostgreSQL dialect: a deployment at schema version 101 had a
+// scheduled_messages table without credential_hash, and startup failed with
+// SQLSTATE 42703 because the base schema created its index before the ladder
+// step that adds the column. The equivalent whole-ladder replay for the
+// shared migration logic is TestOpenUpgradesVersion101DatabaseToCurrentSchema
+// in internal/store/sqlstore.
+func TestOpenUpgradesDatabaseMissingLadderAddedColumns(t *testing.T) {
+	dsn := os.Getenv("SAMEOLDCHAT_POSTGRES_DSN")
+	if dsn == "" {
+		t.Fatal("SAMEOLDCHAT_POSTGRES_DSN is required for PostgreSQL migration qualification")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	admin, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := admin.Close(context.Background()); err != nil {
+			t.Errorf("close PostgreSQL migration test connection: %v", err)
+		}
+	})
+	schemaName := fmt.Sprintf("sameoldchat_upgrade_%d", time.Now().UnixNano())
+	schemaIdentifier := pgx.Identifier{schemaName}.Sanitize()
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schemaIdentifier); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if _, err := admin.Exec(cleanupCtx, "DROP SCHEMA "+schemaIdentifier+" CASCADE"); err != nil {
+			t.Errorf("drop upgrade test schema: %v", err)
+		}
+	})
+	parsedDSN, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsedDSN.Query()
+	query.Set("search_path", schemaName)
+	parsedDSN.RawQuery = query.Encode()
+
+	current, err := Open(ctx, parsedDSN.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Rewind to the shape issue #128 reported: version 101, before ladder
+	// step 102 added scheduled_messages.credential_hash and its index.
+	rewind := []string{
+		"SET search_path TO " + schemaIdentifier,
+		"DROP INDEX scheduled_messages_credential",
+		"ALTER TABLE scheduled_messages DROP COLUMN credential_hash",
+		"DELETE FROM schema_migrations",
+		"INSERT INTO schema_migrations(version, applied_at) VALUES (101, '2026-01-01T00:00:00Z')",
+	}
+	for _, statement := range rewind {
+		if _, err := admin.Exec(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+
+	upgraded, err := Open(ctx, parsedDSN.String())
+	if err != nil {
+		t.Fatalf("open version 101 PostgreSQL database with current release: %v", err)
+	}
+	defer upgraded.Close()
+	var columns, indexes int
+	if err := admin.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'scheduled_messages' AND column_name = 'credential_hash'`, schemaName).Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.QueryRow(ctx, `SELECT COUNT(*) FROM pg_indexes WHERE schemaname = $1 AND indexname = 'scheduled_messages_credential'`, schemaName).Scan(&indexes); err != nil {
+		t.Fatal(err)
+	}
+	if columns != 1 || indexes != 1 {
+		t.Fatalf("upgrade restored credential_hash column=%d index=%d, want 1 and 1", columns, indexes)
+	}
+}
