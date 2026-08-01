@@ -539,14 +539,77 @@ func TestAuthenticatorsReportWhichAuthenticationFailureOccurred(t *testing.T) {
 			t.Errorf("%s: err = %v does not wrap ErrNotAuthenticated", testCase.name, err)
 		}
 	}
-	// The four causes must stay distinguishable from one another, or mapping them
-	// to four different Slack codes is not possible.
-	distinct := []error{ErrNoToken, ErrInvalidToken, ErrTokenRevoked, ErrAccountInactive}
+	// The causes must stay distinguishable from one another, or mapping them
+	// to different Slack codes is not possible.
+	distinct := []error{ErrNoToken, ErrInvalidToken, ErrTokenRevoked, ErrAccountInactive, ErrCredentialStoreUnavailable}
 	for _, one := range distinct {
 		for _, other := range distinct {
 			if one != other && errors.Is(one, other) {
 				t.Errorf("%v is indistinguishable from %v", one, other)
 			}
+		}
+	}
+}
+
+// brokenCredentialStores is a credential backend that cannot answer: every
+// lookup fails with an error that does not wrap store.ErrNotFound.
+type brokenCredentialStores struct{}
+
+func (brokenCredentialStores) LookupToken(context.Context, string) (domain.TokenRecord, error) {
+	return domain.TokenRecord{}, errors.New("token store is unreachable")
+}
+
+func (brokenCredentialStores) LookupAppToken(context.Context, string) (domain.AppTokenRecord, error) {
+	return domain.AppTokenRecord{}, errors.New("token store is unreachable")
+}
+
+func (brokenCredentialStores) LookupSession(context.Context, string) (domain.SessionRecord, error) {
+	return domain.SessionRecord{}, errors.New("session store is unreachable")
+}
+
+// TestCredentialStoreOutageIsNotReportedAsABadCredential pins the difference
+// between "your credential is not one of ours" and "the store did not answer".
+// Collapsing the two onto ErrInvalidToken answered `invalid_auth` during every
+// store outage, and official clients respond to `invalid_auth` by discarding
+// the token — a transient backend failure became mass sign-outs. The outage
+// must not wrap ErrNotAuthenticated either: the web client's login redirect
+// keys off that class, and bouncing a signed-in person to the sign-in page
+// because a backend blinked is the same harm in browser form.
+func TestCredentialStoreOutageIsNotReportedAsABadCredential(t *testing.T) {
+	tokens, err := NewStored(brokenCredentialStores{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appTokens, err := NewAppStored(brokenCredentialStores{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewBrowser(brokenCredentialStores{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withBearer := httptest.NewRequest(http.MethodGet, "/api/auth.test", nil)
+	withBearer.Header.Set("Authorization", "Bearer sometoken")
+	withCookie := httptest.NewRequest(http.MethodGet, "/app", nil)
+	withCookie.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "somesession"})
+	for _, testCase := range []struct {
+		name          string
+		authenticator Authenticator
+		request       *http.Request
+	}{
+		{"stored", tokens, withBearer},
+		{"app stored", appTokens, withBearer},
+		{"browser", sessions, withCookie},
+	} {
+		_, err := testCase.authenticator.Authenticate(testCase.request)
+		if !errors.Is(err, ErrCredentialStoreUnavailable) {
+			t.Errorf("%s: err = %v, want ErrCredentialStoreUnavailable", testCase.name, err)
+		}
+		if errors.Is(err, ErrNotAuthenticated) {
+			t.Errorf("%s: a store outage must not read as an authentication outcome, got %v", testCase.name, err)
+		}
+		if errors.Is(err, ErrInvalidToken) {
+			t.Errorf("%s: a store outage must not read as a bad credential, got %v", testCase.name, err)
 		}
 	}
 }

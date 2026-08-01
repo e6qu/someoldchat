@@ -2005,6 +2005,10 @@ const laterMarkup = `{{define "title"}}Later · SameOldChat{{end}}
 
 var laterTemplate = mustPage(laterMarkup)
 
+// laterLiveScript reloads the Later views when their records change. It skips
+// the reload while any <details> editor is open: a reload re-renders the
+// editor closed, so a live event arriving mid-edit silently destroyed the
+// person's unsaved changes. Saving navigates anyway, which refreshes the page.
 const laterLiveScript = `<script>(function(){
 if(!window.EventSource)return;
 var cursor='';
@@ -2013,7 +2017,9 @@ var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponen
 var timezone='UTC';try{timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(error){}
 Array.prototype.forEach.call(document.querySelectorAll('[data-browser-timezone]'),function(input){input.value=timezone});
 ['saved_item.created','saved_item.changed','saved_item.removed','later_reminder.created','later_reminder.changed','later_reminder.completed','later_reminder.deleted','later_reminder.delivered','later_reminder.failed'].forEach(function(topic){
-stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}window.location.reload()});
+stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
+if(document.querySelector('details[open]'))return;
+window.location.reload()});
 });
 })();</script>`
 
@@ -3433,12 +3439,12 @@ func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, h.signInTarget(r), http.StatusSeeOther)
 			return
 		}
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	reader, err := requireHistoryReader(principal)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	h.renderApp(w, r, reader, composerState{Status: http.StatusOK})
@@ -3452,7 +3458,7 @@ func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, target, http.StatusSeeOther)
 			return
 		}
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -3480,7 +3486,7 @@ func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNoToken)
+		h.writeAuthError(w, r, auth.ErrNoToken)
 		return
 	}
 	h.writeHTML(w, oauthConsentTemplate, oauthConsentData{
@@ -3599,7 +3605,7 @@ func redirectOAuthAuthorization(w http.ResponseWriter, r *http.Request, rawRedir
 func (h Handler) markRead(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The read marker could not be read from the form. Reload the page and try again.")
@@ -3649,7 +3655,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	threadTimestamp := strings.TrimSpace(r.URL.Query().Get("thread"))
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	csrfToken := auth.CSRFToken(sessionCookie.Value)
@@ -3973,12 +3979,12 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
 	if cookieErr != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	channel := h.requestChannel(r)
@@ -4669,12 +4675,12 @@ func reminderActionURL(path string, id domain.LaterReminderID, state domain.Save
 func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	state, ok := parseLaterState(r.URL.Query().Get("state"))
@@ -4836,16 +4842,16 @@ func (h Handler) scheduledMessages(w http.ResponseWriter, r *http.Request) {
 func (h Handler) draftsAndSent(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if !principal.HasScope(auth.ScopeChatWrite) {
-		h.writeAuthError(w, auth.ErrMissingScope)
+		h.writeAuthError(w, r, auth.ErrMissingScope)
 		return
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
@@ -5009,7 +5015,7 @@ func scheduledFailureMessage(code string) string {
 func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
@@ -5193,7 +5199,7 @@ func activityPageURL(channel, kind string, unread, cleared bool, cursor domain.C
 func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
@@ -5254,7 +5260,7 @@ func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
 func (h Handler) setActivityPreferences(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload Activity and choose a layout again.")
@@ -5283,7 +5289,7 @@ func (h Handler) setActivityPreferences(w http.ResponseWriter, r *http.Request) 
 func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The reminder read marker could not be read. Reload Activity and try again."); !ok {
@@ -5303,12 +5309,12 @@ func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Req
 func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
@@ -5400,7 +5406,7 @@ func splitNotificationKeywords(value string) []string {
 func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload Notifications and try again.")
@@ -5426,7 +5432,7 @@ func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Reques
 func (h Handler) setNotificationSnooze(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload Notifications and try again.")
@@ -5485,7 +5491,7 @@ func (h Handler) hasUnacknowledgedReminder(ctx context.Context, principal auth.P
 func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeSearchRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -5639,7 +5645,7 @@ func searchHistoryViews(values []domain.SearchHistoryEntry, channel string) []se
 func (h Handler) searchSuggestions(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeSearchRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -5808,11 +5814,11 @@ func (h Handler) visibleChannelOptions(ctx context.Context, principal auth.Princ
 func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if !principal.HasScope(auth.ScopeEmojiRead) && !principal.HasScope(auth.ScopeChatWrite) && !principal.HasScope(auth.ScopeReactionsWrite) {
-		h.writeAuthError(w, auth.ErrMissingScope)
+		h.writeAuthError(w, r, auth.ErrMissingScope)
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -6116,7 +6122,7 @@ func canvasBody(value domain.Canvas) string {
 func (h Handler) canvases(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
@@ -6127,7 +6133,7 @@ func (h Handler) canvases(w http.ResponseWriter, r *http.Request) {
 	}
 	csrf, err := pageCSRFToken(r)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	cards := make([]documentCardView, 0, len(page.Canvases))
@@ -6148,7 +6154,7 @@ func (h Handler) canvases(w http.ResponseWriter, r *http.Request) {
 func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	value, err := h.Messages.Canvas(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID"))))
@@ -6163,7 +6169,7 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	}
 	csrf, err := pageCSRFToken(r)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	owner := value.OwnerID == principal.UserID
@@ -6180,7 +6186,7 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload Canvases and try again.")
@@ -6199,7 +6205,7 @@ func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
 func (h Handler) updateCanvas(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
@@ -6235,7 +6241,7 @@ func (h Handler) updateCanvas(w http.ResponseWriter, r *http.Request) {
 func (h Handler) deleteCanvas(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "Reload the canvas and try again."); !ok {
@@ -6273,7 +6279,7 @@ func listTitleFields(title string) string {
 func (h Handler) lists(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeListsRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	page, err := h.Messages.Lists(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 48, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))})
@@ -6283,7 +6289,7 @@ func (h Handler) lists(w http.ResponseWriter, r *http.Request) {
 	}
 	csrf, err := pageCSRFToken(r)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	cards := make([]documentCardView, 0, len(page.Lists))
@@ -6304,7 +6310,7 @@ func (h Handler) lists(w http.ResponseWriter, r *http.Request) {
 func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeListsRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
@@ -6325,7 +6331,7 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	csrf, err := pageCSRFToken(r)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	items := make([]listItemView, 0, len(page.Items))
@@ -6343,7 +6349,7 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeListsWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload Lists and try again.")
@@ -6361,7 +6367,7 @@ func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
 func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeListsWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
@@ -6379,7 +6385,7 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 func (h Handler) toggleListItem(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeListsWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
@@ -6399,7 +6405,7 @@ func (h Handler) toggleListItem(w http.ResponseWriter, r *http.Request) {
 func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	h.renderMembers(w, r, principal, nil, nil, "", http.StatusOK)
@@ -6408,7 +6414,7 @@ func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -6478,7 +6484,7 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 	})
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	h.writeHTML(w, directMessagesTemplate, directMessagesData{
@@ -6511,7 +6517,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	members := make([]memberView, 0, len(page.Users))
@@ -6570,7 +6576,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Your profile could not be read from the form. Reload the page and try again.")
@@ -6647,7 +6653,7 @@ func scheduledStatusSubmission(fields map[string]string) scheduledStatusView {
 func (h Handler) scheduleStatus(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The scheduled status could not be read. Reload the page and try again.")
@@ -6677,7 +6683,7 @@ func (h Handler) scheduleStatus(w http.ResponseWriter, r *http.Request) {
 func (h Handler) updateScheduledStatus(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The scheduled status could not be read. Reload the page and try again.")
@@ -6707,7 +6713,7 @@ func (h Handler) updateScheduledStatus(w http.ResponseWriter, r *http.Request) {
 func (h Handler) deleteScheduledStatus(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The scheduled status could not be read. Reload the page and try again.")
@@ -6729,7 +6735,7 @@ func (h Handler) deleteScheduledStatus(w http.ResponseWriter, r *http.Request) {
 func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Your availability could not be read from the form. Reload the page and try again.")
@@ -6754,7 +6760,7 @@ func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Authenticator.Authenticate(r); err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The sign-out request could not be read. Reload the page and try again."); !ok {
@@ -6762,7 +6768,7 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	redirectURL := "/signed-out"
@@ -6834,7 +6840,7 @@ func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string
 			http.Redirect(w, r, "/signed-out", http.StatusSeeOther)
 			return
 		}
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if !h.canShowIdentity() {
@@ -6853,7 +6859,7 @@ func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
 	avatarURL := profileImageURL(user.Profile)
@@ -6896,7 +6902,7 @@ func (h Handler) currentRole(r *http.Request, principal auth.Principal) (string,
 func (h Handler) joinConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The join request could not be read from the form. Reload the page and try again."); !ok {
@@ -6933,7 +6939,7 @@ func (h Handler) redirectMutation(w http.ResponseWriter, r *http.Request, target
 func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Your message could not be read from the form. Reload the page and send it again.")
@@ -7078,7 +7084,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("HX-Request") == "true" {
 		sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
 		if cookieErr != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-			h.writeAuthError(w, auth.ErrNotAuthenticated)
+			h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 			return
 		}
 		conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
@@ -7097,7 +7103,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 func (h Handler) saveDraft(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Your draft could not be read from the form. Reload the conversation and try again.")
@@ -7137,7 +7143,7 @@ func (h Handler) saveDraft(w http.ResponseWriter, r *http.Request) {
 func (h Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The draft could not be deleted from this form. Reload Drafts & sent and try again."); !ok {
@@ -7164,7 +7170,7 @@ func (h Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
 func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "Your scheduled message could not be read from the form. Reload the page and try again.")
@@ -7241,7 +7247,7 @@ func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Reques
 func (h Handler) updateScheduledMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The scheduled message could not be read from this form. Reload Drafts & sent and try again.")
@@ -7286,7 +7292,7 @@ func (h Handler) updateScheduledMessage(w http.ResponseWriter, r *http.Request) 
 func (h Handler) sendScheduledMessageNow(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The scheduled message could not be sent from this form. Reload Drafts & sent and try again."); !ok {
@@ -7321,7 +7327,7 @@ func (h Handler) sendScheduledMessageNow(w http.ResponseWriter, r *http.Request)
 func (h Handler) cancelScheduledMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The scheduled message could not be cancelled from this form. Reload Scheduled and try again."); !ok {
@@ -7361,11 +7367,11 @@ const (
 func (h Handler) stageDraftFiles(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if !principal.HasScope(auth.ScopeChatWrite) {
-		h.writeAuthError(w, auth.ErrMissingScope)
+		h.writeAuthError(w, r, auth.ErrMissingScope)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxWorkspaceUploadBytes+maxWorkspaceUploadFields)
@@ -7456,11 +7462,11 @@ func (h Handler) stageDraftFiles(w http.ResponseWriter, r *http.Request) {
 func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if !principal.HasScope(auth.ScopeChatWrite) {
-		h.writeAuthError(w, auth.ErrMissingScope)
+		h.writeAuthError(w, r, auth.ErrMissingScope)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxWorkspaceUploadBytes+maxWorkspaceUploadFields)
@@ -7550,7 +7556,7 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeFilesRead)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fileID := domain.FileID(strings.TrimSpace(r.PathValue("fileID")))
@@ -7831,7 +7837,7 @@ func reminderLocalTime(year int, month time.Month, day, hour, minute int, locati
 func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeAppInteractionMutation(w, r)
@@ -7877,7 +7883,7 @@ func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 func (h Handler) appShortcut(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "That shortcut could not be read from the form. Reload the conversation and try again.")
@@ -8011,7 +8017,7 @@ func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 func (h Handler) messageMutation(w http.ResponseWriter, r *http.Request, invalid string) (auth.Principal, map[string]string, domain.ConversationID, domain.MessageTimestamp, bool) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return auth.Principal{}, nil, "", "", false
 	}
 	fields, ok := h.decodeMutation(w, r, invalid+" Reload the page and try again.")
@@ -8062,7 +8068,7 @@ func (h Handler) removeReaction(w http.ResponseWriter, r *http.Request) {
 func (h Handler) mutateReaction(w http.ResponseWriter, r *http.Request, add bool) {
 	principal, err := h.authenticate(r, auth.ScopeReactionsWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The reaction could not be read from the form. Reload the page and try again.")
@@ -8114,7 +8120,7 @@ func (h Handler) removePin(w http.ResponseWriter, r *http.Request) {
 func (h Handler) mutatePin(w http.ResponseWriter, r *http.Request, add bool) {
 	principal, err := h.authenticate(r, auth.ScopePinsWrite)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The pin could not be read from the form. Reload the page and try again."); !ok {
@@ -8148,7 +8154,7 @@ func (h Handler) mutatePin(w http.ResponseWriter, r *http.Request, add bool) {
 func (h Handler) createLaterReminder(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The reminder could not be read from the form. Reload the page and try again.")
@@ -8181,7 +8187,7 @@ func (h Handler) createLaterReminder(w http.ResponseWriter, r *http.Request) {
 func (h Handler) updateLaterReminder(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The reminder changes could not be read from the form. Reload Later and try again.")
@@ -8216,7 +8222,7 @@ func (h Handler) deleteLaterReminder(w http.ResponseWriter, r *http.Request) {
 func (h Handler) mutateLaterReminder(w http.ResponseWriter, r *http.Request, complete bool) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The reminder action could not be read from the form. Reload Later and try again."); !ok {
@@ -8318,7 +8324,7 @@ func (h Handler) redirectReminderMutation(w http.ResponseWriter, r *http.Request
 func (h Handler) saveForLater(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The save request could not be read from the form. Reload the page and try again."); !ok {
@@ -8346,7 +8352,7 @@ func (h Handler) saveForLater(w http.ResponseWriter, r *http.Request) {
 func (h Handler) setSavedItemState(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The Later action could not be read from the form. Reload Later and try again."); !ok {
@@ -8375,7 +8381,7 @@ func (h Handler) setSavedItemState(w http.ResponseWriter, r *http.Request) {
 func (h Handler) removeSavedItem(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The remove request could not be read from the form. Reload the page and try again."); !ok {
@@ -8417,7 +8423,7 @@ func (h Handler) redirectLaterMutation(w http.ResponseWriter, r *http.Request, c
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The conversation could not be read from the form. Reload the page and try again.")
@@ -8470,7 +8476,7 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 func (h Handler) addPeopleToDirectConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The people and history choice could not be read. Open the DM details and try again.")
@@ -8507,7 +8513,7 @@ func (h Handler) addPeopleToDirectConversation(w http.ResponseWriter, r *http.Re
 		}
 		sessionCookie, err := r.Cookie(auth.SessionCookieName)
 		if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-			h.writeAuthError(w, auth.ErrNotAuthenticated)
+			h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 			return
 		}
 		sourceName := conversationName(conversation)
@@ -8551,7 +8557,7 @@ func (h Handler) addPeopleToDirectConversation(w http.ResponseWriter, r *http.Re
 func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The private channel name could not be read. Open the group DM settings and try again.")
@@ -8583,7 +8589,7 @@ func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Requ
 func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The channel could not be read from the form. Reload the page and try again.")
@@ -8613,7 +8619,7 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The member invitation could not be read from the form. Reload the page and try again.")
@@ -8647,7 +8653,7 @@ func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The channel name could not be read from the form. Reload the page and try again.")
@@ -8688,7 +8694,7 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 func (h Handler) setConversationNotifications(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The notification exception could not be read. Reload the conversation and try again.")
@@ -8719,7 +8725,7 @@ func (h Handler) setConversationNotifications(w http.ResponseWriter, r *http.Req
 func (h Handler) setThreadFollow(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The thread follow action could not be read. Reload the thread and try again.")
@@ -8757,7 +8763,7 @@ func (h Handler) setThreadFollow(w http.ResponseWriter, r *http.Request) {
 func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, field string) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The channel details could not be read from the form. Reload the page and try again.")
@@ -8789,7 +8795,7 @@ func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, fie
 func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "The archive request could not be read from the form. Reload the page and try again.")
@@ -8821,7 +8827,7 @@ func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request)
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	if _, ok := h.decodeMutation(w, r, "The leave request could not be read from the form. Reload the page and try again."); !ok {
@@ -9077,10 +9083,28 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 	return principal, nil
 }
 
-func (h Handler) writeAuthError(w http.ResponseWriter, err error) {
+func (h Handler) writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	secureHeaders(w, workspaceContentSecurityPolicy)
+	// A credential store that did not answer is server trouble, not an
+	// authentication outcome: nothing is known about the session, so neither a
+	// 401 nor a login redirect is honest, and both push a signed-in person
+	// back through sign-in for a transient backend failure.
+	if errors.Is(err, auth.ErrCredentialStoreUnavailable) {
+		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if errors.Is(err, auth.ErrMissingScope) {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	// A person navigating to a page without a session belongs on the sign-in
+	// flow. Only GET /app used to redirect, so every deeper page — /app/members,
+	// /app/later, a link a teammate shared — answered a bare text 401 to a
+	// browser. Fragment fetches (the app's own requests, marked HX-Request)
+	// keep the 401: redirecting them would inject the sign-in page into a
+	// fragment swap instead of navigating.
+	if errors.Is(err, auth.ErrNotAuthenticated) && r.Method == http.MethodGet && r.Header.Get("HX-Request") == "" {
+		http.Redirect(w, r, h.signInTarget(r)+"?return_to="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
 		return
 	}
 	http.Error(w, "not authenticated", http.StatusUnauthorized)

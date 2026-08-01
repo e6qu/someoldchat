@@ -9377,6 +9377,15 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		writeError(w, "fatal_error")
 		return
 	}
+	// A credential store that did not answer is server trouble, not an
+	// authentication outcome. Answering `invalid_auth` here made official
+	// clients discard their token and re-authenticate during every store
+	// outage; `fatal_error` is the vocabulary's server-side failure and tells
+	// them to retry with the credential they already hold.
+	if errors.Is(err, auth.ErrCredentialStoreUnavailable) {
+		writeError(w, "fatal_error")
+		return
+	}
 	var missing missingScopeError
 	if errors.As(err, &missing) {
 		body := map[string]any{"ok": false, "error": "missing_scope", "needed": string(missing.needed)}

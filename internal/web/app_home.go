@@ -235,7 +235,7 @@ func (h Handler) newHomeView(ctx context.Context, principal auth.Principal, valu
 func (h Handler) appHomeAction(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	values, ok := h.decodeModalMutation(w, r)

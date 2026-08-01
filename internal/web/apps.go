@@ -260,12 +260,12 @@ func (h Handler) developerPrincipal(w http.ResponseWriter, r *http.Request) (aut
 			http.Redirect(w, r, h.signInTarget(r), http.StatusSeeOther)
 			return auth.Principal{}, "", false
 		}
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return auth.Principal{}, "", false
 	}
 	cookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
-		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return auth.Principal{}, "", false
 	}
 	return principal, auth.CSRFToken(cookie.Value), true

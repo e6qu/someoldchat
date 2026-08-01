@@ -506,13 +506,13 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 				h.logger().Info("event stream ended because the session is no longer authorized", "workspace", h.Workspace, "user", principal.UserID)
 				return
 			default:
-				// The authenticator reports an unusable credential and an
-				// unreachable session store with the same error, so this arm is
-				// "the check did not reach a verdict". Ending the stream here
-				// turns a sub-second store failover into a full live-delivery
-				// outage: every stream in the workspace ends within one
-				// re-authorization interval, blames the user's session in the
-				// log, and reconnects together at the advertised retry delay.
+				// The check did not reach a verdict: the session store did not
+				// answer (auth.ErrCredentialStoreUnavailable). Ending the stream
+				// here turns a sub-second store failover into a full
+				// live-delivery outage: every stream in the workspace ends
+				// within one re-authorization interval, blames the user's
+				// session in the log, and reconnects together at the advertised
+				// retry delay.
 				unresolved++
 				if unresolved >= unresolvedReauthorizations {
 					h.logger().Warn("event stream ended after repeated inconclusive re-authorization", "workspace", h.Workspace, "user", principal.UserID, "attempts", unresolved, "error", authErr)
@@ -572,12 +572,16 @@ func (h Handler) reportWriteFailure(r *http.Request, user domain.UserID, err err
 // credentialWithdrawn reports whether a re-authorization failure means the
 // credential is gone rather than that the session store could not answer.
 //
-// auth.Browser maps every LookupSession failure to ErrInvalidToken and says so
-// itself, so ErrInvalidToken cannot distinguish a revoked session from a store
-// outage and must not end a stream on its own. The three sentinels here are
-// reached only after the store answered.
+// Every authentication sentinel wraps auth.ErrNotAuthenticated, and each one
+// is a verdict the store delivered: no cookie, a session looked up and found
+// revoked, an account with nothing behind it, or a session the store answered
+// "not found" for. An unreachable store is auth.ErrCredentialStoreUnavailable,
+// which deliberately does not wrap the class — so the class itself is the
+// predicate. ErrInvalidToken used to be excluded here because auth.Browser
+// collapsed outages onto it, which kept a signed-out user's stream open for
+// three grace intervals; that ambiguity is gone.
 func credentialWithdrawn(err error) bool {
-	return errors.Is(err, auth.ErrNoToken) || errors.Is(err, auth.ErrTokenRevoked) || errors.Is(err, auth.ErrAccountInactive)
+	return errors.Is(err, auth.ErrNotAuthenticated)
 }
 
 // addressedTo reports whether a decoded record may be shown to one recipient.

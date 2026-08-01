@@ -254,7 +254,7 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 	authenticator := &scriptedAuthenticator{
 		principal:    auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}},
 		allowed:      1,
-		err:          auth.ErrInvalidToken,
+		err:          auth.ErrCredentialStoreUnavailable,
 		failures:     2,
 		recoverAfter: true,
 	}
@@ -290,12 +290,41 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 	<-finished
 }
 
+// A session the store looked up and did not find is a verdict, not an
+// outage: the stream ends on the first re-authorization check. It used to
+// survive three grace intervals, because auth.Browser reported an unreachable
+// store and an unknown session with the same ErrInvalidToken and this stream
+// could not afford to end on an ambiguous answer.
+func TestSSEEndsPromptlyWhenTheStoreSaysTheSessionIsGone(t *testing.T) {
+	source := &countingSource{}
+	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrInvalidToken}
+	handler, err := NewHandler(source, "T1", authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Reauthorize = time.Nanosecond
+	handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	finished := make(chan struct{})
+	go func() {
+		handler.events(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events", nil))
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a stream whose session the store says is gone kept streaming")
+	}
+	if calls := authenticator.attempts(); calls != 2 {
+		t.Fatalf("authenticate calls=%d, want the connect check plus exactly one verdict", calls)
+	}
+}
+
 // A session that can never be confirmed must not stream forever either. The
 // bound is on consecutive inconclusive checks, so a store that stays down closes
 // the stream instead of leaving an unverifiable session live indefinitely.
 func TestSSEEndsAfterRepeatedInconclusiveReauthorization(t *testing.T) {
 	source := &countingSource{}
-	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrInvalidToken}
+	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrCredentialStoreUnavailable}
 	handler, err := NewHandler(source, "T1", authenticator)
 	if err != nil {
 		t.Fatal(err)

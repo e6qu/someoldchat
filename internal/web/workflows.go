@@ -309,12 +309,12 @@ var workflowRunTemplate = mustPage(workflowRunMarkup)
 func (h Handler) workflowPrincipal(w http.ResponseWriter, r *http.Request) (auth.Principal, string, bool) {
 	principal, err := h.Authenticator.Authenticate(r)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return auth.Principal{}, "", false
 	}
 	csrf, err := pageCSRFToken(r)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return auth.Principal{}, "", false
 	}
 	return principal, csrf, true
