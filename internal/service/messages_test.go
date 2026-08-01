@@ -154,7 +154,7 @@ func TestOAuthV2ExchangeIssuesBotIdentityAndScopes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	token, err := (Messages{Store: s}).OAuthV2Exchange(ctx, "client", "secret", "code", "https://callback", false)
+	token, err := (Messages{Store: s, AppCredentialKey: []byte("0123456789abcdef0123456789abcdef")}).OAuthV2Exchange(ctx, "client", "secret", "code", "https://callback", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -204,17 +204,16 @@ can open an interactive run; steps reorder in place; a workflow carries an icon
 through its revisions and views; a published workflow's trigger is locked to
 enable/disable; and the owner exports run history and submitted form fields as
 CSV. The owner and workspace administrators can name managers who edit, publish,
-and delete the workflow alongside the owner.
+and delete the workflow alongside the owner. A function_executed callback
+carries the app's `bot_access_token`, sealed at OAuth exchange and opened only
+at delivery.
 
 This is not full Slack Workflow Builder parity. find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions,
 templates and AI creation, asynchronous CSV export at scale,
 enforcement of typed workflow/function input and output schemas, multi-org
 permissions, exact rate limits, and controlled live-Slack outcomes remain
-verified gaps. Current callback snapshots
-also omit `function_executed.bot_access_token`: installation secrets are stored
-only as hashes, so the product must introduce a secure retrievable execution
-credential design rather than fabricate the field.
+verified gaps.
 
 ## Journey-source map
 

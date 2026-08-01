@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
 CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
+CREATE TABLE IF NOT EXISTS app_bot_tokens (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), token_ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
 CREATE TABLE IF NOT EXISTS app_permission_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), requester_id TEXT NOT NULL REFERENCES users(id), target_user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, trigger_id TEXT NOT NULL, created_at INTEGER NOT NULL);
@@ -471,7 +472,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 125
+const schemaVersion = 126
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2786,6 +2787,15 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE workflows ADD COLUMN manager_ids TEXT NOT NULL DEFAULT '[]'`); err != nil {
 				return fmt.Errorf("migrate workflow managers: %w", err)
 			}
+		}
+	}
+	if version < 126 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_bot_tokens (
+			app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			token_ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL,
+			PRIMARY KEY (app_id, workspace_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate app bot tokens: %w", err)
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -5180,6 +5190,32 @@ func (s *Store) CreateAppInstallation(ctx context.Context, value domain.AppInsta
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET created_at = CASE WHEN app_installations.enabled = 0 AND excluded.enabled = 1 THEN excluded.created_at ELSE app_installations.created_at END, enabled = excluded.enabled`, value.AppID, value.WorkspaceID, boolInt(value.Enabled), value.CreatedAt.UTC().UnixNano())
 	return err
+}
+
+func (s *Store) SetAppBotToken(ctx context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, event events.Event) error {
+	if appID == "" || workspace == "" || tokenCiphertext == "" {
+		return store.InvalidArgument("invalid app bot token")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_bot_tokens(app_id, workspace_id, token_ciphertext, updated_at)
+		VALUES (?, ?, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET token_ciphertext = excluded.token_ciphertext, updated_at = excluded.updated_at`,
+		appID, workspace, tokenCiphertext, event.CreatedAt.UTC().UnixNano()); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetAppBotTokenCiphertext(ctx context.Context, appID domain.AppID, workspace domain.WorkspaceID) (string, error) {
+	var ciphertext string
+	err := s.db.QueryRowContext(ctx, `SELECT token_ciphertext FROM app_bot_tokens WHERE app_id = ? AND workspace_id = ?`, appID, workspace).Scan(&ciphertext)
+	return ciphertext, translateNotFound(err)
 }
 
 func (s *Store) ListAppInstallations(ctx context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {

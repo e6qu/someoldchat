@@ -140,7 +140,7 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if functionRecord.Event.ID == "" || functionRecord.Event.PrivatePayload == "" {
 		t.Fatalf("function event not durably snapshotted: %+v", functionRecord)
 	}
-	prepared, visible, err := PrepareAppEvent(ctx, repository, "A1", functionRecord)
+	prepared, visible, err := PrepareAppEvent(ctx, repository, []byte("0123456789abcdef0123456789abcdef"), "A1", functionRecord)
 	if err != nil || !visible {
 		t.Fatalf("prepared=%+v visible=%v err=%v", prepared, visible, err)
 	}
@@ -643,6 +643,56 @@ func TestWorkflowExportsReturnRunsAndFormResponses(t *testing.T) {
 	}
 	if _, err := messages.WorkflowFormResponseExport(ctx, "T1", "U2", workflow.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("member form export error=%v, want ErrNotFound", err)
+	}
+}
+
+func TestFunctionExecutedDispatchCarriesTheBotAccessToken(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Issue and seal a bot access token for the app, as the OAuth exchange does.
+	if err := messages.recordAppBotToken(ctx, workflow.AppID, "T1", "xoxb-live-token", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	// The app needs a bot authorization for the dispatch to be visible to it.
+	if err := repository.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: workflow.AppID, UserID: "UB", Name: "Automation", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedToken(ctx, "xoxb-A1", domain.TokenRecord{WorkspaceID: "T1", UserID: "UB", AppID: workflow.AppID, BotID: "B1", TokenType: "bot"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "bot-token-run"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := repository.ListEventsAfter(ctx, "T1", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var functionRecord events.Record
+	for _, record := range records {
+		if record.Event.Topic == "function_executed" {
+			functionRecord = record
+		}
+	}
+	if functionRecord.Event.ID == "" {
+		t.Fatal("no function_executed event")
+	}
+	// At dispatch the sealed token is opened and sent as bot_access_token.
+	prepared, visible, err := PrepareAppEvent(ctx, repository, []byte("0123456789abcdef0123456789abcdef"), workflow.AppID, functionRecord)
+	if err != nil || !visible {
+		t.Fatalf("prepared=%+v visible=%v err=%v", prepared, visible, err)
+	}
+	delivered, err := events.Deliverable(prepared.Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, ok := delivered.Field("bot_access_token")
+	if !ok || token != "xoxb-live-token" {
+		t.Fatalf("bot_access_token=%q ok=%v, want xoxb-live-token", token, ok)
 	}
 }
 

@@ -34,6 +34,7 @@ type Store struct {
 	inviteRequests                map[domain.InviteRequestID]domain.InviteRequest
 	appApprovals                  map[domain.AppID]domain.AppApproval
 	appInstallations              map[string]domain.AppInstallation
+	appBotTokens                  map[string]string
 	apps                          map[domain.AppID]domain.App
 	appManifestRevisions          map[domain.AppID][]domain.AppManifestRevision
 	appTriggers                   map[string]domain.AppTrigger
@@ -2206,6 +2207,30 @@ func (s *Store) CreateAppInstallation(_ context.Context, value domain.AppInstall
 	}
 	s.appInstallations[key] = value
 	return nil
+}
+
+func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, event events.Event) error {
+	if appID == "" || workspace == "" || tokenCiphertext == "" {
+		return store.InvalidArgument("invalid app bot token")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.appBotTokens == nil {
+		s.appBotTokens = make(map[string]string)
+	}
+	s.appBotTokens[string(appID)+"\x00"+string(workspace)] = tokenCiphertext
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetAppBotTokenCiphertext(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ciphertext, ok := s.appBotTokens[string(appID)+"\x00"+string(workspace)]
+	if !ok {
+		return "", store.ErrNotFound
+	}
+	return ciphertext, nil
 }
 
 func (s *Store) ListAppInstallations(_ context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
