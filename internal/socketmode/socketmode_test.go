@@ -680,3 +680,39 @@ func FuzzEncodeEventMatchesDeliverability(f *testing.F) {
 }
 
 var _ http.Handler = Handler{}
+
+// The connection handoff speaks Slack's vocabulary: before the WebSocket
+// close, the client receives {"type":"disconnect","reason":"refresh_requested"},
+// which official SDKs treat as an orderly instruction to reconnect rather
+// than a failure to back off from.
+func TestHandlerAnnouncesRefreshRequestedDisconnectAtTheRefreshHorizon(t *testing.T) {
+	connections := memory.New()
+	client := dialHandler(t, Handler{
+		Store: connections, Queue: connections, Responses: new(testResponseSink),
+		RefreshAge: 50 * time.Millisecond,
+	}, connections)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := client.SetReadDeadline(deadline); err != nil {
+			t.Fatal(err)
+		}
+		var frame map[string]any
+		if err := client.ReadJSON(&frame); err != nil {
+			t.Fatalf("no disconnect frame before the close: %v", err)
+		}
+		if frame["type"] != "disconnect" {
+			continue
+		}
+		if frame["reason"] != "refresh_requested" {
+			t.Fatalf("disconnect frame=%v, want reason refresh_requested", frame)
+		}
+		debug, ok := frame["debug_info"].(map[string]any)
+		if !ok || debug["host"] == "" {
+			t.Fatalf("disconnect frame lacks debug_info.host: %v", frame)
+		}
+		break
+	}
+	if _, _, err := client.ReadMessage(); err == nil {
+		t.Fatal("connection stayed open after refresh_requested")
+	}
+}

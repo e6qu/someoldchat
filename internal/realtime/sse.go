@@ -195,6 +195,11 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	}()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	// goodbye is Slack's RTM farewell frame: the server announces an
+	// intentional end of the stream so an official client reconnects instead
+	// of treating the close as a failure. Best effort by design — the peer
+	// that is already gone cannot be told goodbye.
+	sayGoodbye := func() { _ = websocket.Message.Send(conn, `{"type":"goodbye"}`) }
 	for {
 		var records []events.Record
 		var listErr error
@@ -207,6 +212,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			if request.Context().Err() == nil {
 				h.logger().Error("RTM stream ended on an event source failure", "workspace", h.Workspace, "user", connection.UserID, "error", listErr)
 			}
+			sayGoodbye()
 			return
 		}
 		for _, record := range records {
@@ -246,8 +252,10 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 		}
 		select {
 		case <-request.Context().Done():
+			sayGoodbye()
 			return
 		case <-readerDone:
+			sayGoodbye()
 			return
 		case message := <-commands:
 			if err := handleRTMCommand(request.Context(), conn, connection, h.Messages, message); err != nil {
