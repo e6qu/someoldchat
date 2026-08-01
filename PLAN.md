@@ -408,10 +408,15 @@ find/use/copy permissions, plan and admin policy, built-in and connector
 functions, asynchronous CSV exports at scale, multi-org permission
 semantics, typed workflow/function input and output enforcement, exact rate
 limits, and controlled live-Slack outcomes remain.
-`function_executed.bot_access_token` is also
-unimplemented because installation credentials are deliberately stored only
-as hashes; completing it requires a secure retrievable execution-credential
-design, not a fabricated token.
+
+The bot access token pass then lets a function_executed callback carry the
+receiving app's `bot_access_token`, exactly as Slack sends it so the app can
+call back. Installation credentials stop being hash-only: a freshly issued bot
+token is sealed with the application credential key at OAuth exchange and kept
+as ciphertext in its own table, and the dispatch projection opens it only at
+delivery time — the plaintext is never persisted. An app installed before this
+change issued no retrievable token, so its callbacks omit the field until it
+reinstalls, matching the one-way nature of the hashes it was installed under.
 
 The staged-editing pass then lets a published workflow keep executing its
 published revision while its owner edits a draft. A non-publish update keeps
