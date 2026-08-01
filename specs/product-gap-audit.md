@@ -5,13 +5,25 @@ the Slack behavior it is intended to support. A registered handler or a
 server-rendered control is not counted as complete unless the surrounding user
 journey is usable.
 
-Measured on 2026-07-31:
+Measured on 2026-08-02:
 
-- 223 of Slack's 310 current catalogued Web API methods are registered; the
+- 236 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
-- 200 current methods are recorded as behavior-compatible, 21 as
+- 199 current methods are recorded as behavior-compatible, 35 as
   SDK-compatible, two as schema-compatible, and none as live-differential
   `verified-against-slack`;
+- the Events API surface emits 38 event names: the message family (with the
+  message_changed/message_deleted subtypes and the projection-derived
+  app_mention), reactions, pins, stars, membership, app_home_opened,
+  function_executed, app_installed, the file events including file_public,
+  the conversation lifecycle (channel_created, im_created, and the
+  channel_*/group_* rename/archive/unarchive/delete pairs), emoji_changed,
+  the subteam family, team_join, user_change with its user_profile_changed
+  and user_status_changed companions, dnd_updated, team_rename, and the
+  RTM-only presence_change. Recorded event gaps: tokens_revoked,
+  app_uninstalled, dnd_updated_user, link_shared, message metadata, typing,
+  and the Slack Connect and Grid families — see the events-api decision in
+  compatibility.yaml;
 - the current official Node Web API SDK exercises the product end to end,
   including app manifests, OAuth, Socket Mode, interactions, message streaming,
   Block Kit validation, hosted-datastore CRUD/bulk operations, and an external
@@ -21,16 +33,16 @@ Measured on 2026-07-31:
 - the official SDK qualification fixture records the exact Web API method paths
   emitted by the pinned Node, Python, and Java clients, while the Deno runtime
   suite records its separately verified completion requests. The fail-closed
-  comparison currently observes all 231 methods claimed at `sdk-compatible` or
-  above (221 current and ten retained legacy methods);
-- all 102 stable journey IDs have an individually checked source-map row. The
+  comparison currently observes all 244 methods claimed at `sdk-compatible` or
+  above (234 current and ten retained legacy methods);
+- all 104 stable journey IDs have an individually checked source-map row. The
   live official-source gate currently makes 136 representative assertions
   explicitly citing 51 of those IDs across authentication, navigation,
   conversations, messaging, search, files, apps, OAuth, presence, huddles,
   canvases, lists, workflows, administration, Slack Connect, accessibility,
   Activity, and reminders before local evidence runs. The remaining 51 IDs are
   printed as upstream-text evidence gaps rather than inheriting coverage;
-- 36 Playwright scenarios cite 76 of the normative catalog's 102 stable journey
+- 40 Playwright scenarios cite 80 of the normative catalog's 104 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.
   `make journey-check` rejects unknown IDs, missing or duplicate per-journey
@@ -99,16 +111,17 @@ implementation MUST NOT narrow the target.
 
 ## Web API and app-platform gaps
 
-The 87 unimplemented current Web API methods are:
+The 74 unimplemented current Web API methods are:
 
 | Namespace | Missing | Boundary |
 | --- | ---: | --- |
 | `admin.*` | 50 | Enterprise analytics, policies, roles, bulk conversation operations, org sessions, and org-wide app/function/workflow administration |
 | `apps.*` | 5 | External-auth get/delete, app activity history, app icons, and user connection state |
 | `conversations.*` | 9 | Slack Connect invitation/approval and external-invite policy |
-| `functions.*` / `workflows.*` | 14 | Function distribution, workflow-step discovery/export, featured workflows, and trigger permissions |
 | `assistant.*` | 5 | Assistant search context and thread title/status/suggested-prompt presentation |
-| `team.*`, `users.*` | 4 | Billing/external-team administration and discoverable contacts |
+| `team.*` | 3 | Billing and external-team administration |
+| `functions.*` | 1 | Workflow-step response export |
+| `users.*` | 1 | Discoverable contacts |
 
 App-platform work must remain dependency-ordered:
 
@@ -131,8 +144,8 @@ Official SDK qualification now proves, method by method, that genuine clients
 issued a request and parsed SameOldChat's response; a large neighboring test
 can no longer lend SDK evidence to an uncalled method. It still does not prove
 live Slack equivalence. The compatibility report also exposes the distinction:
-only 25 of 221 current claims at `sdk-compatible` or above presently carry
-method-level evidence in the ledger; the remaining 196 must not inherit that
+only 41 of 234 current claims at `sdk-compatible` or above presently carry
+method-level evidence in the ledger; the remaining 193 must not inherit that
 evidence from the aggregate green suite. The remaining evidence layers are:
 
 1. pin per-method current argument/response/error schemas, not only the current

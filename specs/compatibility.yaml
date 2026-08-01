@@ -1540,10 +1540,26 @@ decisions:
       result. Message mutation and file create/share callbacks use immutable
       outbox snapshots; HTTP and Socket Mode select bot/user authorization
       perspectives by granted scope, membership, and manifest subscription.
-      Bolt callback qualifications still submit independently constructed
-      signed callbacks, file-unshare production remains incomplete, and no
-      callback shape is live-Slack verified. The evidence therefore does not
-      promote the whole Events API surface.
+      The formerly withheld topic-table rows are translated now:
+      channel_created, im_created, channel_rename/group_rename,
+      channel_archive/group_archive, channel_unarchive/group_unarchive,
+      channel_deleted/group_deleted, emoji_changed, subteam_created,
+      subteam_updated, subteam_members_changed, team_join, user_change with
+      its current-catalog user_profile_changed and user_status_changed
+      companions, dnd_updated, presence_change (RTM only), team_rename and
+      file_public, each from a producer-snapshotted payload pinned by builder
+      and producer-seam tests. app_mention is derived by the per-app message
+      projection for the app whose bot the text names, and app_installed is
+      committed with the install's bot-token issuance, target-routed and
+      automatic. Remaining recorded gaps: tokens_revoked (the revocation
+      mutation reaches the token store directly across the auth seam, so the
+      event must be owned by the store mutation), app_uninstalled (the
+      app_installations join that scopes app event reads would hide the
+      app's own announcement), dnd_updated_user (delivery does not vary the
+      event name per recipient), Bolt callback qualifications still submit
+      independently constructed signed callbacks, and no callback shape is
+      live-Slack verified. The evidence therefore still does not promote the
+      whole Events API surface.
   - method: rtm.connect
     evidence: https://docs.slack.dev/reference/methods/rtm.connect/
     decision: >-
