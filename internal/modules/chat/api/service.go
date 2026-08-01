@@ -169,6 +169,8 @@ type Service interface {
 	SetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, domain.AutomationPermission) (domain.AutomationPermission, error)
 	GetTriggerPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowTriggerID) (domain.AutomationPermission, error)
 	SetTriggerPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowTriggerID, domain.AutomationPermission) (domain.AutomationPermission, error)
+	GetWorkflowPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) (domain.AutomationPermission, error)
+	SetWorkflowPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string, domain.AutomationPermission) (domain.AutomationPermission, error)
 	SetFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkflowTriggerID) error
 	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
 	ListFunctionWorkflowSteps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.WorkflowID, string, domain.AppID) ([]domain.WorkflowStepVersion, error)

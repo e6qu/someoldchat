@@ -531,6 +531,122 @@ func (m Messages) canManageWorkflow(ctx context.Context, workflow domain.Workflo
 	return membership.Role == domain.WorkspaceRoleAdmin || membership.Role == domain.WorkspaceRoleOwner, nil
 }
 
+// workflowScopePermission reports whether the actor may exercise one of a
+// workflow's find/use/copy scopes. Managers always may. Absent a stored
+// permission the default matches Slack: find and use are open (a published
+// workflow is visible and runnable), while copy is managers-only. A stored
+// permission narrows that to collaborators (managers) or named entities.
+func (m Messages) workflowScopePermission(ctx context.Context, workflow domain.WorkflowDefinition, scope string, actor domain.UserID) (bool, error) {
+	if managed, err := m.canManageWorkflow(ctx, workflow, actor); err != nil {
+		return false, err
+	} else if managed {
+		return true, nil
+	}
+	permission, err := m.Store.GetAutomationPermission(ctx, workflow.WorkspaceID, "workflow_"+scope, string(workflow.ID))
+	if errors.Is(err, store.ErrNotFound) {
+		return scope != "copy", nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch permission.PermissionType {
+	case "everyone":
+		return true, nil
+	case "named_entities":
+		return slices.Contains(permission.UserIDs, actor) ||
+			slices.Contains(permission.TeamIDs, workflow.WorkspaceID), nil
+	default: // app_collaborators and anything unrecognized: managers only
+		return false, nil
+	}
+}
+
+// workflowPermissionScopes are the find/use/copy settings a workflow carries.
+var workflowPermissionScopes = map[string]bool{"find": true, "use": true, "copy": true}
+
+// SetWorkflowPermission records one of a workflow's find/use/copy permissions.
+// The owner and administrators set them; the effective default when a scope is
+// unset is Slack's (find/use open, copy managers-only).
+func (m Messages) SetWorkflowPermission(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID, scope string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	if !workflowPermissionScopes[scope] {
+		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := m.requireWorkflowManager(ctx, workflow, actor); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, value.PermissionType) {
+		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
+	}
+	value.ResourceType = "workflow_" + scope
+	value.ResourceID = string(workflowID)
+	value.WorkspaceID = workspaceID
+	value.AppID = workflow.AppID
+	value.UpdatedAt = time.Now().UTC()
+	if err := m.validateAutomationEntities(ctx, &value); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.permission_set",
+		events.String("workflow_id", string(workflowID)),
+		events.String("scope", scope),
+		events.String("permission_type", value.PermissionType),
+	), value.UpdatedAt)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := m.Store.SetAutomationPermission(ctx, value, event); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return value, nil
+}
+
+// GetWorkflowPermission returns the stored find/use/copy permission for a
+// workflow scope, or the Slack default when none is set. It answers exactly
+// the actors GetWorkflow answers: a manager always, anyone else only for a
+// published workflow the find permission opens to them, so probing permission
+// scopes cannot reveal a workflow the directory hides.
+func (m Messages) GetWorkflowPermission(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID, scope string) (domain.AutomationPermission, error) {
+	if !workflowPermissionScopes[scope] {
+		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
+	}
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if managed, err := m.canManageWorkflow(ctx, workflow, actor); err != nil {
+		return domain.AutomationPermission{}, err
+	} else if !managed {
+		if workflow.Status != domain.WorkflowPublished {
+			return domain.AutomationPermission{}, store.ErrNotFound
+		}
+		if found, err := m.workflowScopePermission(ctx, workflow, "find", actor); err != nil {
+			return domain.AutomationPermission{}, err
+		} else if !found {
+			return domain.AutomationPermission{}, store.ErrNotFound
+		}
+	}
+	value, err := m.Store.GetAutomationPermission(ctx, workspaceID, "workflow_"+scope, string(workflowID))
+	if errors.Is(err, store.ErrNotFound) {
+		permissionType := "everyone"
+		if scope == "copy" {
+			permissionType = "app_collaborators"
+		}
+		return domain.AutomationPermission{
+			ResourceType: "workflow_" + scope, ResourceID: string(workflowID), WorkspaceID: workspaceID,
+			AppID: workflow.AppID, PermissionType: permissionType,
+		}, nil
+	}
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return value, nil
+}
+
 // requireWorkflowManager admits the caller when they can manage the workflow,
 // answering ErrNotFound exactly as an owner-only check would so a non-manager
 // cannot distinguish a missing workflow from one they merely may not manage.
@@ -656,8 +772,27 @@ func (m Messages) DuplicateWorkflow(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	if err := m.requireWorkflowManager(ctx, current, actor); err != nil {
+	// A manager copies the head. Anyone else needs the workflow to be visible
+	// to them at all — published and open to find — plus the copy permission,
+	// and copies the published revision rather than the head: the head can
+	// carry staged changes GetWorkflow deliberately hides from non-managers,
+	// and a copy must not become the way to read them.
+	if managed, err := m.canManageWorkflow(ctx, current, actor); err != nil {
 		return domain.WorkflowDefinition{}, err
+	} else if !managed {
+		if current.Status != domain.WorkflowPublished {
+			return domain.WorkflowDefinition{}, store.ErrNotFound
+		}
+		for _, scope := range []string{"find", "copy"} {
+			if allowed, err := m.workflowScopePermission(ctx, current, scope, actor); err != nil {
+				return domain.WorkflowDefinition{}, err
+			} else if !allowed {
+				return domain.WorkflowDefinition{}, store.ErrNotFound
+			}
+		}
+		if current, err = m.publishedProjection(ctx, current); err != nil {
+			return domain.WorkflowDefinition{}, err
+		}
 	}
 	callbackID := current.CallbackID
 	if callbackID != "" {
@@ -913,12 +1048,18 @@ func (m Messages) ListWorkflows(ctx context.Context, workspaceID domain.Workspac
 		}
 		for _, value := range values {
 			// Managers see the workflows they manage in the directory alongside
-			// their own and every published workflow.
+			// their own and every published workflow the find permission opens
+			// to them.
 			managed, err := m.canManageWorkflow(ctx, value, actor)
 			if err != nil {
 				return nil, false, "", err
 			}
-			if managed || value.Status == domain.WorkflowPublished {
+			if !managed && value.Status == domain.WorkflowPublished {
+				if managed, err = m.workflowScopePermission(ctx, value, "find", actor); err != nil {
+					return nil, false, "", err
+				}
+			}
+			if managed {
 				visible = append(visible, value)
 				if len(visible) > request.Limit {
 					break
@@ -970,13 +1111,19 @@ func (m Messages) GetWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.WorkflowDefinition{}, err
 	}
 	// A manager reads the live head like the owner; everyone else sees only a
-	// published workflow, and only its published revision.
+	// published workflow the find permission opens to them, and only its
+	// published revision.
 	if managed, err := m.canManageWorkflow(ctx, value, actor); err != nil {
 		return domain.WorkflowDefinition{}, err
 	} else if managed {
 		return value, nil
 	}
 	if value.Status != domain.WorkflowPublished {
+		return domain.WorkflowDefinition{}, store.ErrNotFound
+	}
+	if found, err := m.workflowScopePermission(ctx, value, "find", actor); err != nil {
+		return domain.WorkflowDefinition{}, err
+	} else if !found {
 		return domain.WorkflowDefinition{}, store.ErrNotFound
 	}
 	return m.publishedProjection(ctx, value)
@@ -1356,6 +1503,14 @@ func (m Messages) runWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 		if allowed, err := m.canRunWorkflowTrigger(ctx, workflow, trigger, actor, conversationID); err != nil {
 			return domain.WorkflowRun{}, err
 		} else if !allowed {
+			return domain.WorkflowRun{}, ErrWorkflowPermissionDenied
+		}
+		// The workflow-level use permission, when set, narrows who may run it
+		// beyond the trigger's own grant. Absent a stored permission the scope
+		// stays open (the trigger permission above already governed the run).
+		if used, err := m.workflowScopePermission(ctx, workflow, "use", actor); err != nil {
+			return domain.WorkflowRun{}, err
+		} else if !used {
 			return domain.WorkflowRun{}, ErrWorkflowPermissionDenied
 		}
 	}

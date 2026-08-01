@@ -744,6 +744,20 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				initialCopy, err := chat.GetWorkflowPermission(ctx, "T1", "U1", "WfParity", "copy")
+				if err != nil {
+					return nil, err
+				}
+				setCopy, err := chat.SetWorkflowPermission(ctx, "T1", "U1", "WfParity", "copy", domain.AutomationPermission{
+					PermissionType: "named_entities", UserIDs: []domain.UserID{"U2"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				storedCopy, err := chat.GetWorkflowPermission(ctx, "T1", "U1", "WfParity", "copy")
+				if err != nil {
+					return nil, err
+				}
 				if err := chat.SetFeaturedWorkflows(ctx, "T1", "U1", "C1", []domain.WorkflowTriggerID{"FtParity"}); err != nil {
 					return nil, err
 				}
@@ -772,6 +786,9 @@ func parityCases() []parityCase {
 					storedFunction.PermissionType, len(storedFunction.UserIDs),
 					initialTrigger.PermissionType,
 					setTrigger.PermissionType, storedTrigger.PermissionType,
+					initialCopy.PermissionType, initialCopy.ResourceType,
+					setCopy.PermissionType, len(setCopy.UserIDs),
+					storedCopy.PermissionType, len(storedCopy.UserIDs), storedCopy.ResourceType,
 					len(featured), featured[0].Title,
 					len(steps), steps[0].Title, steps[0].StepID,
 				}, nil
