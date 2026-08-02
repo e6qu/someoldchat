@@ -102,6 +102,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	chatClientCert := flags.String("chat-client-cert", "", "client certificate for distributed chat gRPC")
 	chatClientKey := flags.String("chat-client-key", "", "client private key for distributed chat gRPC")
 	apiToken := flags.String("api-token", os.Getenv("SAMEOLDCHAT_API_TOKEN"), "API bearer token (required)")
+	apiRateLimit := flags.Bool("api-rate-limit", true, "enforce the Web API rate-limiting contract (429 + Retry-After); qualification harnesses that seed fixtures at superhuman rates disable it")
 	// -session-token is optional. It seeds one static browser session that every
 	// visitor holding the value shares, which is a development convenience and
 	// never an identity: startupConfig.resolve rejects it as soon as a real
@@ -324,6 +325,12 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	if err != nil {
 		logger.Error("configure Slack API", "error", err)
 		return exitConfiguration
+	}
+	// The Web API rate-limiting contract is production behavior: official
+	// SDKs key their retry handling on 429 + Retry-After. Only qualification
+	// harnesses, which seed fixtures at superhuman request rates, turn it off.
+	if *apiRateLimit {
+		slackHandler.Limiter = slack.NewRateLimiter()
 	}
 	slackHandler.Register(mux)
 	if socketModeStore != nil {

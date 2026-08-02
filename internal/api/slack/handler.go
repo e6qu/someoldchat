@@ -39,6 +39,11 @@ type Handler struct {
 	Authenticator auth.Authenticator
 	SocketMode    socketmode.Service
 	SocketAuth    auth.Authenticator
+	// Limiter enforces the Web API rate-limiting contract over every /api/
+	// route when set. Production wiring sets it; a zero Handler serves
+	// unlimited, which is what the package's own request-shaped tests and the
+	// SDK qualification fixture rely on.
+	Limiter *RateLimiter
 }
 
 var errAccessLogging = errors.New("access logging failed")
@@ -56,6 +61,17 @@ func NewHandler(messages chatapi.Service, authenticator auth.Authenticator) (Han
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
+	if h.Limiter != nil {
+		// Every route registers on an inner mux and the limiter fronts the
+		// whole /api/ subtree, so a limited request is answered before any
+		// route handler — including the unknown-method catch-all — runs.
+		inner := http.NewServeMux()
+		unlimited := h
+		unlimited.Limiter = nil
+		unlimited.Register(inner)
+		mux.Handle("/api/", h.Limiter.Middleware(inner))
+		return
+	}
 	mux.HandleFunc("GET /api/api.test", h.apiTest)
 	mux.HandleFunc("POST /api/api.test", h.apiTest)
 	mux.HandleFunc("POST /api/blocks.validate", h.blocksValidate)

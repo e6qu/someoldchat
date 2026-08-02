@@ -104,7 +104,7 @@ operations:
         The full current payload is validated and persisted, but link-name
         expansion and external media unfurl fetching have not been qualified
         against live Slack outcomes.
-      - The Web API tier does not yet enforce Slack's per-method posting rate limits.
+      - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a uniform per-method budget at Tier 4's floor, answering 429 with Retry-After and rate_limited. Budgets are replica-local and per-method tier assignments below that floor are not enforced.
     audit:
       downgraded_from: behavior-compatible
       reason: >-
@@ -659,7 +659,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - markdown_text, metadata, as_user, reply_broadcast, parse, link_names, and unfurl controls are not implemented
-      - tier-wide Web API rate limiting is not implemented
+      - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
       - schedules created before schema 102 lack reconstructable app and token attribution
   - method: chat.scheduledMessages.list
     status: behavior-compatible
@@ -676,7 +676,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - org-level team_id selection is not implemented
-      - tier-wide Web API rate limiting is not implemented
+      - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
       - schedules created before schema 102 lack reconstructable token identity and are excluded from exact-token results
   - method: chat.unfurl
     status: behavior-compatible
@@ -1289,7 +1289,7 @@ operations:
       - tests/official-sdk-qualification/node-web-api/qualification.mjs
       - internal/modules/chat/transport/grpc/differential_test.go
     deviations:
-      - Enabled per-app workspace installations, deterministic cursor paging, and optional persisted icons are supported, but SameOldChat does not yet model Slack Enterprise organization-ready approval policy or the Tier 2 rate limit.
+      - Enabled per-app workspace installations, deterministic cursor paging, and optional persisted icons are supported, but SameOldChat does not yet model Slack Enterprise organization-ready approval policy; rate limiting is enforced at the uniform Tier 4 floor rather than this method's Tier 2.
   - method: blocks.validate
     status: sdk-compatible
     provenance: slack-reference
@@ -1397,7 +1397,7 @@ operations:
       - tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
-      - Tier 3 rate limiting is not enforced.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
   - method: functions.workflows.steps.responses.export
     status: unimplemented
     provenance: slack-reference
@@ -1490,7 +1490,7 @@ operations:
       - tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Workspace workflow-manager policy is currently represented by workflow ownership rather than Slack's multi-manager role.
-      - Tier 3 rate limiting is not enforced.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
   - method: workflows.triggers.permissions.add
     status: sdk-compatible
     provenance: slack-reference

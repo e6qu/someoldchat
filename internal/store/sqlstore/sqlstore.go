@@ -4290,18 +4290,40 @@ func (s *Store) LookupAppToken(ctx context.Context, token string) (domain.AppTok
 }
 
 func (s *Store) RevokeToken(ctx context.Context, token string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE token_hash = ?`, domain.HashToken(token))
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	changed, err := result.RowsAffected()
-	if err != nil {
+	defer tx.Rollback()
+	hash := domain.HashToken(token)
+	var workspaceID domain.WorkspaceID
+	var userID domain.UserID
+	var appID domain.AppID
+	var tokenType string
+	var revoked int
+	err = tx.QueryRowContext(ctx, `SELECT workspace_id, user_id, app_id, token_type, revoked FROM tokens WHERE token_hash = ?`, hash).
+		Scan(&workspaceID, &userID, &appID, &tokenType, &revoked)
+	if err := translateNotFound(err); err != nil {
 		return err
 	}
-	if changed != 1 {
-		return store.ErrNotFound
+	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE token_hash = ?`, hash); err != nil {
+		return err
 	}
-	return nil
+	// The tokens_revoked announcement is minted here, inside the revoking
+	// transaction: revocation arrives at this repository directly across the
+	// auth seam, so no service layer is guaranteed to be on the call path.
+	// Only an application token produces one, and re-revoking announces
+	// nothing.
+	if appID != "" && revoked == 0 {
+		event, err := events.TokensRevokedEvent(workspaceID, userID, appID, tokenType, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) RevokeAppToken(ctx context.Context, token string) error {
@@ -5332,7 +5354,7 @@ func (s *Store) ListAppInstallations(ctx context.Context, appID domain.AppID) ([
 	return values, rows.Err()
 }
 
-func (s *Store) UninstallApp(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID) error {
+func (s *Store) UninstallApp(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, written ...events.Event) error {
 	if workspaceID == "" || appID == "" {
 		return store.InvalidArgument("app installation identity is required")
 	}
@@ -5344,6 +5366,11 @@ func (s *Store) UninstallApp(ctx context.Context, workspaceID domain.WorkspaceID
 	result, err := tx.ExecContext(ctx, `UPDATE app_installations SET enabled = 0 WHERE workspace_id = ? AND app_id = ? AND enabled = 1`, workspaceID, appID)
 	if err != nil {
 		return err
+	}
+	for _, event := range written {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
@@ -13868,7 +13895,7 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	predicate, excluded := internalTopicPredicate("o.topic")
 	args := append([]any{appID, after}, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ? AND o.undeliverable = 0`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND (i.enabled = 1 OR o.topic = 'app.uninstalled') AND o.sequence > ? AND o.undeliverable = 0`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -13927,7 +13954,7 @@ func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, 
 		args := append([]any{appID, sequence}, excluded...)
 		var created string
 		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at
-			FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND i.enabled = 1
+			FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND (i.enabled = 1 OR o.topic = 'app.uninstalled')
 			WHERE o.sequence > ? AND o.undeliverable = 0`+predicate+` ORDER BY o.sequence LIMIT 1`, args...).
 			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &claimed.Event.PrivatePayload, &created)
 		if errors.Is(err, sql.ErrNoRows) {

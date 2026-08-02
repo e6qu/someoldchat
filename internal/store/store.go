@@ -350,7 +350,7 @@ type Store interface {
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
 	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
-	UninstallApp(context.Context, domain.WorkspaceID, domain.AppID) error
+	UninstallApp(context.Context, domain.WorkspaceID, domain.AppID, ...events.Event) error
 	CreateIncomingWebhook(context.Context, domain.IncomingWebhook) error
 	LookupIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.IncomingWebhook, error)
 	SetIncomingWebhookEnabled(context.Context, domain.WorkspaceID, domain.IncomingWebhookID, bool, events.Event) error

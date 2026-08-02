@@ -1241,3 +1241,145 @@ func authMethodDefaultsToEnabled(t *testing.T, open opener) {
 		t.Fatalf("an unwritten provider reported %+v, want Enabled: true", method)
 	}
 }
+
+// Revocation reaches the repositories directly across the auth seam, so the
+// tokens_revoked announcement is minted inside the revoking mutation itself.
+// Every profile must agree: one announcement per application token, routed to
+// the token's app, none for a personal token, and none again on re-revocation.
+func revokingAnAppTokenAnnouncesTokensRevokedOnce(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	appToken := "xoxb-revoked-" + f.suffix
+	if err := f.repository.SeedToken(ctx, appToken, domain.TokenRecord{WorkspaceID: f.workspaceID, UserID: f.userID, AppID: "A-revoke", TokenType: "bot", Scopes: []string{"chat:write"}}); err != nil {
+		t.Fatal(err)
+	}
+	personal := "xoxp-personal-" + f.suffix
+	if err := f.repository.SeedToken(ctx, personal, domain.TokenRecord{WorkspaceID: f.workspaceID, UserID: f.userID, TokenType: "user", Scopes: []string{"chat:write"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.RevokeToken(ctx, appToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.RevokeToken(ctx, personal); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.RevokeToken(ctx, appToken); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := f.repository.ListEventsAfter(ctx, f.workspaceID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	announcements := make([]events.Record, 0, 1)
+	for _, record := range listed {
+		if record.Event.Topic == "app.tokens_revoked" {
+			announcements = append(announcements, record)
+		}
+	}
+	if len(announcements) != 1 {
+		t.Fatalf("tokens_revoked announcements = %d, want exactly 1 (app token once; personal and repeat revocations announce nothing)", len(announcements))
+	}
+	bodies, err := events.SlackEventBodies(announcements[0], "A-revoke")
+	if err != nil || len(bodies) != 1 {
+		t.Fatalf("owning app bodies=%d err=%v", len(bodies), err)
+	}
+	if !strings.Contains(string(bodies[0]), `"type":"tokens_revoked"`) || !strings.Contains(string(bodies[0]), `"bot":["`+string(f.userID)+`"]`) {
+		t.Fatalf("tokens_revoked body=%s", bodies[0])
+	}
+	other, err := events.SlackEventBodies(announcements[0], "A-other")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("another app received the revocation: %q err=%v", other, err)
+	}
+}
+
+// The app.uninstalled record commits with the uninstall and stays readable
+// by the app it announces, even though the read scope for app events is
+// otherwise the app's ENABLED installations. Every profile must carve the
+// topic out identically, or an app on one storage profile learns why its
+// tokens died and an app on another never does.
+func uninstallAnnouncementOutlivesTheInstallation(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	appID := domain.AppID("A-gone-" + f.suffix)
+	now := time.Now().UTC()
+	if err := f.repository.CreateApp(ctx, domain.App{
+		ID: appID, DevelopmentWorkspaceID: f.workspaceID, OwnerID: f.userID, Name: "Doomed", ClientID: "client-" + f.suffix,
+		SigningSecretHash: "signing", SigningSecretCiphertext: "cipher", VerificationTokenHash: "verify",
+		VerificationTokenCiphertext: "cipher", ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: appID, Version: 1, CreatedBy: f.userID, CreatedAt: now,
+		Manifest: `{"display_information":{"name":"Doomed"}}`,
+	}, domain.OAuthClient{ID: "client-" + f.suffix, SecretHash: "secret", AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: appID, WorkspaceID: f.workspaceID, Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	// A live connection has claimed before, so its durable cursor exists —
+	// the shape an open Socket Mode connection is in when the uninstall lands.
+	// Anything the priming claim leased is acknowledged immediately, so no
+	// lease can outlive this setup and stall the loop below.
+	if record, _, _, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute); err != nil {
+		t.Fatal(err)
+	} else if claimed {
+		if err := f.repository.AckAppEvent(ctx, appID, "socket", "conn-1", record.Sequence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	announcementID, err := domain.NewEventID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	announcement, err := events.New(announcementID, f.workspaceID, "", events.NewPayload("app.uninstalled",
+		events.String("app_id", string(appID)),
+		events.String("target_app_id", string(appID)),
+	), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.UninstallApp(ctx, f.workspaceID, appID, announcement); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := f.repository.ListAppEventsAfter(ctx, appID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, record := range listed {
+		if record.Event.Topic == "app.uninstalled" {
+			found = true
+		} else {
+			t.Fatalf("a disabled installation leaked topic %s to the app", record.Event.Topic)
+		}
+	}
+	if !found {
+		t.Fatal("the uninstall announcement is invisible to the app it announces")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		record, _, _, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claimed && record.Event.Topic == "app.uninstalled" {
+			if err := f.repository.AckAppEvent(ctx, appID, "socket", "conn-1", record.Sequence); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		if claimed {
+			if err := f.repository.AckAppEvent(ctx, appID, "socket", "conn-1", record.Sequence); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the open connection never received the uninstall announcement")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
