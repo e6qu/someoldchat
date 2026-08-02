@@ -884,6 +884,113 @@ func (preferences ConversationNotificationPreferences) EffectiveLevel(workspace 
 	return preferences.Level
 }
 
+// RetentionMaximumDays is Slack's documented upper bound on a retention
+// duration: an integer greater than 0 and less than 36500 days.
+const RetentionMaximumDays = 36500
+
+// RetentionPolicy is a workspace's default for the two kinds of bulk content
+// it stores. Messages and files carry separate durations because Slack
+// configures them separately, and a workspace that wants to keep the
+// conversation but not the attachments is an ordinary choice.
+//
+// Zero means keep forever. Slack's per-channel API cannot express forever —
+// its duration must be positive — so forever is reached by having no override
+// and a workspace default of zero, which is also the default for a workspace
+// nobody has configured.
+type RetentionPolicy struct {
+	MessageDays int
+	FileDays    int
+}
+
+// ValidRetentionDays reports whether a duration may be stored. Zero is
+// permitted here and means forever; the API layer refuses zero separately,
+// because Slack's setCustomRetention has no way to say it.
+func ValidRetentionDays(days int) bool {
+	return days >= 0 && days < RetentionMaximumDays
+}
+
+func (policy RetentionPolicy) Valid() bool {
+	return ValidRetentionDays(policy.MessageDays) && ValidRetentionDays(policy.FileDays)
+}
+
+// ConversationRetention is one channel's override of the workspace message
+// retention. It exists as its own record rather than a column on
+// ConversationPrefs because ConversationPrefs is the response body of
+// admin.conversations.getConversationPrefs, and Slack does not report
+// retention there.
+type ConversationRetention struct {
+	ConversationID ConversationID
+	// DurationDays is always positive when the record exists: an override that
+	// meant "forever" would be indistinguishable from having no override, and
+	// removing the override is how a channel returns to the workspace default.
+	DurationDays int
+	UpdatedAt    time.Time
+}
+
+// Effective resolves the duration that actually governs a conversation's
+// messages, in the shape ConversationNotificationPreferences.EffectiveLevel
+// already established: the override wins when it exists, and the workspace
+// default applies when it does not.
+func (override ConversationRetention) Effective(workspace RetentionPolicy) int {
+	if override.DurationDays > 0 {
+		return override.DurationDays
+	}
+	return workspace.MessageDays
+}
+
+// RetentionHorizon is the instant before which content governed by this
+// duration has expired. A zero duration keeps everything, and returns the zero
+// time so a caller can test it with IsZero rather than comparing against a
+// sentinel far in the past.
+func RetentionHorizon(days int, now time.Time) time.Time {
+	if days <= 0 {
+		return time.Time{}
+	}
+	return now.UTC().Add(-time.Duration(days) * 24 * time.Hour)
+}
+
+// RetentionSweepRequest is one pass over one conversation. The horizons are
+// computed by the caller rather than derived from a policy here, so the store
+// never has to resolve an override against a workspace default — and a test
+// can ask for an exact horizon instead of arranging a clock.
+type RetentionSweepRequest struct {
+	WorkspaceID    WorkspaceID
+	ConversationID ConversationID
+	// MessageHorizon and FileHorizon are zero when that kind of content is
+	// kept forever, which the store reads as "sweep nothing of this kind".
+	MessageHorizon time.Time
+	FileHorizon    time.Time
+	SweptAt        time.Time
+	// Limit bounds how many messages one pass may delete, so a workspace with
+	// years of backlog drains over many cycles instead of holding one
+	// transaction open across all of it.
+	Limit int
+}
+
+// RetentionSweep is what one pass over one conversation removed. The counts
+// are what the sweep event carries and what the administration page reports,
+// so an operator can see the policy doing something rather than infer it.
+type RetentionSweep struct {
+	ConversationID ConversationID
+	Messages       int
+	Files          int
+	SweptAt        time.Time
+	// Complete is false when the batch limit was reached, so the caller knows
+	// this conversation still has expired content and should not advance its
+	// watermark past the work it did not do.
+	Complete bool
+	// ExpiredBlobs names the bytes the sweep orphaned. The store removes the
+	// rows; the caller journals one blob-delete event per entry so the
+	// existing blob cleanup worker reclaims the storage, which is the path an
+	// ordinary file deletion already takes.
+	ExpiredBlobs []ExpiredBlob
+}
+
+type ExpiredBlob struct {
+	FileID  FileID
+	BlobKey string
+}
+
 func NormalizeNotificationKeywords(keywords []string) []string {
 	unique := make(map[string]struct{}, len(keywords))
 	for _, keyword := range keywords {
