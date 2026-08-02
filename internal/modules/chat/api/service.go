@@ -330,6 +330,14 @@ type Service interface {
 	UserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.UserID, error)
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroup, error)
 	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.UserID) (domain.Call, error)
+	// The huddle family takes a conversation rather than a call identifier: a
+	// conversation has at most one running huddle, and naming the conversation
+	// is what lets two concurrent starts converge on one.
+	StartHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Call, error)
+	JoinHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
+	LeaveHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
+	EndHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
+	ActiveHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
 	GetCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, string, string, string) (domain.Call, error)
 	EndCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, int64) error

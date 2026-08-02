@@ -315,6 +315,14 @@ var topicRules = []topicRule{
 	{topic: "call.updated", note: "not pinned: calls postdate the snapshot"},
 	{topic: "call.ended", note: "not pinned: calls postdate the snapshot"},
 	{topic: "call.participants_changed", note: "not pinned: calls postdate the snapshot"},
+	// Huddles are first-party. Slack has no documented event for them at all —
+	// the pinned snapshot predates huddles and the current reference documents
+	// none — so these are named as this product's own facts rather than mapped
+	// onto a Slack event they are not.
+	{topic: "huddle.started", note: "not pinned: Slack documents no huddle event"},
+	{topic: "huddle.joined", note: "not pinned: Slack documents no huddle event"},
+	{topic: "huddle.left", note: "not pinned: Slack documents no huddle event"},
+	{topic: "huddle.ended", note: "not pinned: Slack documents no huddle event"},
 	{topic: "canvas.created", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.deleted", note: "not pinned: canvases postdate the snapshot"},

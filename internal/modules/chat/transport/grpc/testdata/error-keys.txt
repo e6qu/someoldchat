@@ -30,6 +30,7 @@ service.conversation_not_archived
 service.emoji_already_exists
 service.function_access_denied
 service.function_not_running
+service.huddle_not_owned
 service.invalid_access_log
 service.invalid_app_approval
 service.invalid_app_manifest

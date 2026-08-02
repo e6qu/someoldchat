@@ -109,6 +109,7 @@ var errorClasses = []errorClass{
 	// the invitation is real; it is the state that refuses, and retrying with a
 	// corrected argument cannot help.
 	{key: "service.invitation_expired", code: codes.FailedPrecondition, sentinel: service.ErrInvitationExpired},
+	{key: "service.huddle_not_owned", code: codes.PermissionDenied, sentinel: service.ErrHuddleNotOwned},
 	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppApproval},
 	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidView},
 	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkflowStep},

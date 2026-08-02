@@ -542,6 +542,7 @@ func sentinelDrivenCodes() map[string]string {
 		"is_archived":               "postMessageError's name for service.ErrConversationAlreadyArchived on a message write",
 		"no_text":                   "postMessageError's name for service.ErrInvalidMessage",
 		"invitation_expired":        "mutationErrorCode's name for service.ErrInvitationExpired: the invitation is real and the request well formed, so neither not_found nor an invalid-argument code describes it",
+		"not_allowed":               "mutationErrorCode's name for service.ErrHuddleNotOwned: ending a huddle removes everyone else from it, so it is an authorization answer rather than a malformed request",
 	}
 }
 

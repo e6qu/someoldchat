@@ -35,6 +35,8 @@ type Call struct {
 	StartedAt         int64                  `protobuf:"varint,10,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	EndedAt           int64                  `protobuf:"varint,11,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
 	DurationSeconds   int64                  `protobuf:"varint,12,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"`
+	Kind              string                 `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
+	ConversationId    string                 `protobuf:"bytes,14,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -153,6 +155,88 @@ func (x *Call) GetDurationSeconds() int64 {
 	return 0
 }
 
+func (x *Call) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Call) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+type HuddleRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Title          string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *HuddleRequest) Reset() {
+	*x = HuddleRequest{}
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HuddleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HuddleRequest) ProtoMessage() {}
+
+func (x *HuddleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HuddleRequest.ProtoReflect.Descriptor instead.
+func (*HuddleRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *HuddleRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *HuddleRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *HuddleRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *HuddleRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
 type AddCallRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -170,7 +254,7 @@ type AddCallRequest struct {
 
 func (x *AddCallRequest) Reset() {
 	*x = AddCallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -182,7 +266,7 @@ func (x *AddCallRequest) String() string {
 func (*AddCallRequest) ProtoMessage() {}
 
 func (x *AddCallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -195,7 +279,7 @@ func (x *AddCallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddCallRequest.ProtoReflect.Descriptor instead.
 func (*AddCallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{1}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AddCallRequest) GetWorkspaceId() string {
@@ -272,7 +356,7 @@ type CallRequest struct {
 
 func (x *CallRequest) Reset() {
 	*x = CallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -284,7 +368,7 @@ func (x *CallRequest) String() string {
 func (*CallRequest) ProtoMessage() {}
 
 func (x *CallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -297,7 +381,7 @@ func (x *CallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallRequest.ProtoReflect.Descriptor instead.
 func (*CallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{2}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CallRequest) GetWorkspaceId() string {
@@ -333,7 +417,7 @@ type EndCallRequest struct {
 
 func (x *EndCallRequest) Reset() {
 	*x = EndCallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -345,7 +429,7 @@ func (x *EndCallRequest) String() string {
 func (*EndCallRequest) ProtoMessage() {}
 
 func (x *EndCallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -358,7 +442,7 @@ func (x *EndCallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndCallRequest.ProtoReflect.Descriptor instead.
 func (*EndCallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{3}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *EndCallRequest) GetWorkspaceId() string {
@@ -403,7 +487,7 @@ type UpdateCallRequest struct {
 
 func (x *UpdateCallRequest) Reset() {
 	*x = UpdateCallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -415,7 +499,7 @@ func (x *UpdateCallRequest) String() string {
 func (*UpdateCallRequest) ProtoMessage() {}
 
 func (x *UpdateCallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +512,7 @@ func (x *UpdateCallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCallRequest.ProtoReflect.Descriptor instead.
 func (*UpdateCallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateCallRequest) GetWorkspaceId() string {
@@ -485,7 +569,7 @@ type CallParticipantsRequest struct {
 
 func (x *CallParticipantsRequest) Reset() {
 	*x = CallParticipantsRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +581,7 @@ func (x *CallParticipantsRequest) String() string {
 func (*CallParticipantsRequest) ProtoMessage() {}
 
 func (x *CallParticipantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +594,7 @@ func (x *CallParticipantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallParticipantsRequest.ProtoReflect.Descriptor instead.
 func (*CallParticipantsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CallParticipantsRequest) GetWorkspaceId() string {
@@ -545,7 +629,7 @@ var File_sameoldchat_chat_v1_calls_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/calls.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xa1\x03\n" +
+	"\x1fsameoldchat/chat/v1/calls.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xde\x03\n" +
 	"\x04Call\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12,\n" +
@@ -561,7 +645,14 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"started_at\x18\n" +
 	" \x01(\x03R\tstartedAt\x12\x19\n" +
 	"\bended_at\x18\v \x01(\x03R\aendedAt\x12)\n" +
-	"\x10duration_seconds\x18\f \x01(\x03R\x0fdurationSeconds\"\xcf\x02\n" +
+	"\x10duration_seconds\x18\f \x01(\x03R\x0fdurationSeconds\x12\x12\n" +
+	"\x04kind\x18\r \x01(\tR\x04kind\x12'\n" +
+	"\x0fconversation_id\x18\x0e \x01(\tR\x0econversationId\"\x8a\x01\n" +
+	"\rHuddleRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"\xcf\x02\n" +
 	"\x0eAddCallRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12,\n" +
@@ -593,9 +684,15 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
 	"\acall_id\x18\x03 \x01(\tR\x06callId\x12\"\n" +
-	"\fparticipants\x18\x04 \x03(\tR\fparticipants2\xa5\x04\n" +
+	"\fparticipants\x18\x04 \x03(\tR\fparticipants2\xac\a\n" +
 	"\fCallsService\x12I\n" +
-	"\aAddCall\x12#.sameoldchat.chat.v1.AddCallRequest\x1a\x19.sameoldchat.chat.v1.Call\x12U\n" +
+	"\aAddCall\x12#.sameoldchat.chat.v1.AddCallRequest\x1a\x19.sameoldchat.chat.v1.Call\x12L\n" +
+	"\vStartHuddle\x12\".sameoldchat.chat.v1.HuddleRequest\x1a\x19.sameoldchat.chat.v1.Call\x12K\n" +
+	"\n" +
+	"JoinHuddle\x12\".sameoldchat.chat.v1.HuddleRequest\x1a\x19.sameoldchat.chat.v1.Call\x12L\n" +
+	"\vLeaveHuddle\x12\".sameoldchat.chat.v1.HuddleRequest\x1a\x19.sameoldchat.chat.v1.Call\x12J\n" +
+	"\tEndHuddle\x12\".sameoldchat.chat.v1.HuddleRequest\x1a\x19.sameoldchat.chat.v1.Call\x12P\n" +
+	"\x0fGetActiveHuddle\x12\".sameoldchat.chat.v1.HuddleRequest\x1a\x19.sameoldchat.chat.v1.Call\x12U\n" +
 	"\aEndCall\x12#.sameoldchat.chat.v1.EndCallRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12G\n" +
 	"\bCallInfo\x12 .sameoldchat.chat.v1.CallRequest\x1a\x19.sameoldchat.chat.v1.Call\x12O\n" +
 	"\n" +
@@ -615,34 +712,45 @@ func file_sameoldchat_chat_v1_calls_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_calls_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_sameoldchat_chat_v1_calls_proto_goTypes = []any{
 	(*Call)(nil),                    // 0: sameoldchat.chat.v1.Call
-	(*AddCallRequest)(nil),          // 1: sameoldchat.chat.v1.AddCallRequest
-	(*CallRequest)(nil),             // 2: sameoldchat.chat.v1.CallRequest
-	(*EndCallRequest)(nil),          // 3: sameoldchat.chat.v1.EndCallRequest
-	(*UpdateCallRequest)(nil),       // 4: sameoldchat.chat.v1.UpdateCallRequest
-	(*CallParticipantsRequest)(nil), // 5: sameoldchat.chat.v1.CallParticipantsRequest
-	(*MutationResponse)(nil),        // 6: sameoldchat.chat.v1.MutationResponse
+	(*HuddleRequest)(nil),           // 1: sameoldchat.chat.v1.HuddleRequest
+	(*AddCallRequest)(nil),          // 2: sameoldchat.chat.v1.AddCallRequest
+	(*CallRequest)(nil),             // 3: sameoldchat.chat.v1.CallRequest
+	(*EndCallRequest)(nil),          // 4: sameoldchat.chat.v1.EndCallRequest
+	(*UpdateCallRequest)(nil),       // 5: sameoldchat.chat.v1.UpdateCallRequest
+	(*CallParticipantsRequest)(nil), // 6: sameoldchat.chat.v1.CallParticipantsRequest
+	(*MutationResponse)(nil),        // 7: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_calls_proto_depIdxs = []int32{
-	1, // 0: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
-	3, // 1: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
-	2, // 2: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
-	4, // 3: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
-	5, // 4: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	5, // 5: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	0, // 6: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
-	6, // 7: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
-	0, // 8: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
-	0, // 9: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
-	6, // 10: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	6, // 11: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	6, // [6:12] is the sub-list for method output_type
-	0, // [0:6] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	2,  // 0: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
+	1,  // 1: sameoldchat.chat.v1.CallsService.StartHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 2: sameoldchat.chat.v1.CallsService.JoinHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 3: sameoldchat.chat.v1.CallsService.LeaveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 4: sameoldchat.chat.v1.CallsService.EndHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 5: sameoldchat.chat.v1.CallsService.GetActiveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	4,  // 6: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
+	3,  // 7: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
+	5,  // 8: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
+	6,  // 9: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	6,  // 10: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	0,  // 11: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
+	0,  // 12: sameoldchat.chat.v1.CallsService.StartHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 13: sameoldchat.chat.v1.CallsService.JoinHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 14: sameoldchat.chat.v1.CallsService.LeaveHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 15: sameoldchat.chat.v1.CallsService.EndHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 16: sameoldchat.chat.v1.CallsService.GetActiveHuddle:output_type -> sameoldchat.chat.v1.Call
+	7,  // 17: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 18: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
+	0,  // 19: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
+	7,  // 20: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 21: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	11, // [11:22] is the sub-list for method output_type
+	0,  // [0:11] is the sub-list for method input_type
+	0,  // [0:0] is the sub-list for extension type_name
+	0,  // [0:0] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_calls_proto_init() }
@@ -657,7 +765,7 @@ func file_sameoldchat_chat_v1_calls_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_calls_proto_rawDesc), len(file_sameoldchat_chat_v1_calls_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

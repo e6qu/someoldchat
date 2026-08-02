@@ -252,6 +252,36 @@ func (r Remote) AdminAddUserGroupTeams(ctx context.Context, workspaceID domain.W
 	return requireAcknowledgement(out.GetOk(), "user group team add")
 }
 
+// The huddle family shares one request shape and one response, so the four
+// mutations and the read differ only in which rpc they call.
+func (r Remote) huddle(ctx context.Context, call func(context.Context, *chatv1.HuddleRequest, ...grpc.CallOption) (*chatv1.Call, error), workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title string) (domain.Call, error) {
+	out, err := call(ctx, &chatv1.HuddleRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Title: title})
+	if err != nil {
+		return domain.Call{}, err
+	}
+	return decodeProtoCall(out)
+}
+
+func (r Remote) StartHuddle(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title string) (domain.Call, error) {
+	return r.huddle(ctx, r.calls.StartHuddle, workspaceID, userID, conversationID, title)
+}
+
+func (r Remote) JoinHuddle(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	return r.huddle(ctx, r.calls.JoinHuddle, workspaceID, userID, conversationID, "")
+}
+
+func (r Remote) LeaveHuddle(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	return r.huddle(ctx, r.calls.LeaveHuddle, workspaceID, userID, conversationID, "")
+}
+
+func (r Remote) EndHuddle(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	return r.huddle(ctx, r.calls.EndHuddle, workspaceID, userID, conversationID, "")
+}
+
+func (r Remote) ActiveHuddle(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	return r.huddle(ctx, r.calls.GetActiveHuddle, workspaceID, userID, conversationID, "")
+}
+
 func (r Remote) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.UserID) (domain.Call, error) {
 	users := make([]string, 0, len(participants))
 	for _, value := range participants {
@@ -4363,6 +4393,36 @@ func (s *Server) AdminAddUserGroupTeams(ctx context.Context, input *chatv1.Admin
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) StartHuddle(ctx context.Context, input *chatv1.HuddleRequest) (*chatv1.Call, error) {
+	return huddleResponse(s.implementation.StartHuddle(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetTitle()))
+}
+
+func (s *Server) JoinHuddle(ctx context.Context, input *chatv1.HuddleRequest) (*chatv1.Call, error) {
+	return huddleResponse(s.implementation.JoinHuddle(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId())))
+}
+
+func (s *Server) LeaveHuddle(ctx context.Context, input *chatv1.HuddleRequest) (*chatv1.Call, error) {
+	return huddleResponse(s.implementation.LeaveHuddle(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId())))
+}
+
+func (s *Server) EndHuddle(ctx context.Context, input *chatv1.HuddleRequest) (*chatv1.Call, error) {
+	return huddleResponse(s.implementation.EndHuddle(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId())))
+}
+
+// GetActiveHuddle is the transport name; an rpc named ActiveHuddle would be
+// fine here, but the Get prefix keeps it beside GetReadCursor and
+// GetWorkspaceAnalytics, which had to take it to avoid shadowing their types.
+func (s *Server) GetActiveHuddle(ctx context.Context, input *chatv1.HuddleRequest) (*chatv1.Call, error) {
+	return huddleResponse(s.implementation.ActiveHuddle(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId())))
+}
+
+func huddleResponse(value domain.Call, err error) (*chatv1.Call, error) {
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCall(value), nil
 }
 
 func (s *Server) AddCall(ctx context.Context, input *chatv1.AddCallRequest) (*chatv1.Call, error) {
@@ -9328,7 +9388,7 @@ func encodeProtoCall(value domain.Call) *chatv1.Call {
 	for _, user := range value.Participants {
 		participants = append(participants, string(user))
 	}
-	result := &chatv1.Call{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ExternalUniqueId: value.ExternalUniqueID, ExternalDisplayId: value.ExternalDisplayID, JoinUrl: value.JoinURL, DesktopAppJoinUrl: value.DesktopAppJoinURL, Title: value.Title, CreatedBy: string(value.CreatedBy), Participants: participants, StartedAt: value.StartedAt.Unix(), DurationSeconds: value.DurationSeconds}
+	result := &chatv1.Call{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ExternalUniqueId: value.ExternalUniqueID, ExternalDisplayId: value.ExternalDisplayID, JoinUrl: value.JoinURL, DesktopAppJoinUrl: value.DesktopAppJoinURL, Title: value.Title, CreatedBy: string(value.CreatedBy), Participants: participants, StartedAt: value.StartedAt.Unix(), DurationSeconds: value.DurationSeconds, Kind: string(value.Kind), ConversationId: string(value.ConversationID)}
 	if !value.EndedAt.IsZero() {
 		result.EndedAt = value.EndedAt.Unix()
 	}
@@ -9338,8 +9398,27 @@ func encodeProtoCall(value domain.Call) *chatv1.Call {
 func decodeProtoCall(value *chatv1.Call) (domain.Call, error) {
 	// started_at is not required to be positive: it is a Unix timestamp, and the
 	// local path returns calls whose start is unset or predates the epoch.
-	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetExternalUniqueId() == "" || value.GetJoinUrl() == "" || value.GetCreatedBy() == "" {
+	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetCreatedBy() == "" {
 		return domain.Call{}, errors.New("typed call response is incomplete")
+	}
+	// The external identity is required of an external call and meaningless for
+	// a huddle, which has a conversation instead. Requiring it of both refused
+	// every huddle that crossed the seam.
+	kind := domain.CallKind(value.GetKind())
+	if kind == "" {
+		kind = domain.CallKindExternal
+	}
+	switch kind {
+	case domain.CallKindExternal:
+		if value.GetExternalUniqueId() == "" || value.GetJoinUrl() == "" {
+			return domain.Call{}, errors.New("typed external call response is incomplete")
+		}
+	case domain.CallKindHuddle:
+		if value.GetConversationId() == "" {
+			return domain.Call{}, errors.New("typed huddle response carries no conversation")
+		}
+	default:
+		return domain.Call{}, errors.New("typed call response names an unknown kind")
 	}
 	participants := make([]domain.UserID, 0, len(value.GetParticipants()))
 	for _, user := range value.GetParticipants() {
@@ -9348,7 +9427,7 @@ func decodeProtoCall(value *chatv1.Call) (domain.Call, error) {
 		}
 		participants = append(participants, domain.UserID(user))
 	}
-	result := domain.Call{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.CallID(value.GetId()), ExternalUniqueID: value.GetExternalUniqueId(), ExternalDisplayID: value.GetExternalDisplayId(), JoinURL: value.GetJoinUrl(), DesktopAppJoinURL: value.GetDesktopAppJoinUrl(), Title: value.GetTitle(), CreatedBy: domain.UserID(value.GetCreatedBy()), Participants: participants, StartedAt: time.Unix(value.GetStartedAt(), 0).UTC(), DurationSeconds: value.GetDurationSeconds()}
+	result := domain.Call{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.CallID(value.GetId()), ExternalUniqueID: value.GetExternalUniqueId(), ExternalDisplayID: value.GetExternalDisplayId(), JoinURL: value.GetJoinUrl(), DesktopAppJoinURL: value.GetDesktopAppJoinUrl(), Title: value.GetTitle(), CreatedBy: domain.UserID(value.GetCreatedBy()), Participants: participants, StartedAt: time.Unix(value.GetStartedAt(), 0).UTC(), DurationSeconds: value.GetDurationSeconds(), Kind: kind, ConversationID: domain.ConversationID(value.GetConversationId())}
 	if value.GetEndedAt() != 0 {
 		result.EndedAt = time.Unix(value.GetEndedAt(), 0).UTC()
 	}

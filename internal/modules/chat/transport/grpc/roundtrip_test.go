@@ -691,6 +691,10 @@ func fillString(path string) string {
 		return string(domain.PresenceAway)
 	case "Type", "BookmarkType":
 		return "link"
+	case "Kind":
+		// A call's kind is a closed set the decoder validates, and the external
+		// kind is the one whose other required fields this generator also fills.
+		return string(domain.CallKindExternal)
 	}
 	return "value-" + strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(path, "."), ".", "-"))
 }

@@ -193,20 +193,48 @@ type DoNotDisturb struct {
 	NextEndAt   time.Time
 }
 
+// CallKind separates the two things a call record can be. An external call is
+// one an app registered through calls.add: the media lives with the app, which
+// is why ExternalUniqueID and JoinURL are required for it. A huddle is started
+// inside a conversation by a person here, so it has a conversation and no
+// external identity at all — the two could not share one shape without one of
+// them carrying required fields it has no value for.
+type CallKind string
+
+const (
+	CallKindExternal CallKind = "external"
+	CallKindHuddle   CallKind = "huddle"
+)
+
+func (kind CallKind) Valid() bool {
+	return kind == CallKindExternal || kind == CallKindHuddle
+}
+
 type Call struct {
-	ID                CallID
-	WorkspaceID       WorkspaceID
+	ID          CallID
+	WorkspaceID WorkspaceID
+	Kind        CallKind
+	// ConversationID is the conversation a huddle belongs to, and empty for an
+	// external call. At most one huddle per conversation may be active at a
+	// time; see Store.StartHuddle.
+	ConversationID    ConversationID
 	ExternalUniqueID  string
 	ExternalDisplayID string
 	JoinURL           string
 	DesktopAppJoinURL string
 	Title             string
 	CreatedBy         UserID
-	Participants      []UserID
-	StartedAt         time.Time
-	EndedAt           time.Time
-	DurationSeconds   int64
+	// Participants are the people currently in the call, not everyone who ever
+	// was. Someone who leaves is removed; the record of their having been there
+	// is the huddle.joined and huddle.left pair in the durable journal.
+	Participants    []UserID
+	StartedAt       time.Time
+	EndedAt         time.Time
+	DurationSeconds int64
 }
+
+// Active reports whether the call is still running.
+func (call Call) Active() bool { return call.EndedAt.IsZero() }
 
 // View stores the validated Slack view envelope without imposing a closed
 // schema on Block Kit, whose fields are intentionally extensible.

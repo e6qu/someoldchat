@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1387,8 +1388,12 @@ func TestTimelineFragmentServesTheLiveRegion(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("fragment %s status=%d body=%s", target, response.Code, response.Body)
 		}
-		requireContains(t, "fragment "+target, response.Body.String(), `class="message"`, "hello")
+		// Every live region must answer a bare fragment rather than a whole
+		// document; only the message regions carry messages.
 		requireMissing(t, "fragment "+target, response.Body.String(), "<html", "<body")
+		if strings.HasPrefix(target, "/app/timeline") {
+			requireContains(t, "fragment "+target, response.Body.String(), `class="message"`, "hello")
+		}
 	}
 	if !strings.Contains(page, `data-live="true"`) {
 		t.Fatalf("the timeline is not marked live: %s", page)
@@ -1711,14 +1716,32 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if err := s.DeleteView(ctx, "T1", "U1", firstView.ID, false, viewEvent("event-view-closed", "view.closed", now.Add(4*time.Second))); err != nil {
 		t.Fatal(err)
 	}
-	records, err := s.ListEventsAfter(ctx, "T1", 0, 100)
+	// A huddle is started, joined by a second person and then left by both, so
+	// all four huddle topics are emitted by real mutations rather than asserted
+	// from a list.
+	messages := service.Messages{Store: s}
+	if _, err := messages.StartHuddle(ctx, "T1", "U1", "Cdev", ""); err != nil {
+		t.Fatal(err)
+	}
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second"})
+	s.SeedConversationMember("Cdev", "U2")
+	if _, err := messages.JoinHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.LeaveHuddle(ctx, "T1", "U1", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := s.ListEventsAfter(ctx, "T1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "huddle.") {
 			emitted[topic] = true
 		}
 	}
@@ -4263,4 +4286,132 @@ func TestRemoteFilesAreVisibleAndNeverClaimToBeHosted(t *testing.T) {
 		t.Fatalf("share=%d: %s", shared.Code, shared.Body)
 	}
 	requireContains(t, "shared remote file", get(t, mux, "/app/remote-files?channel=Cdev").Body.String(), "Shared in", "#general")
+}
+
+// HUDDLE-01 and HUDDLE-03: the huddle bar offers a real lifecycle and says, in
+// the same breath, that this deployment carries no audio. A control named
+// "Join huddle" that silently connected nothing would be exactly the promise
+// the universal contract forbids.
+func TestTheHuddleBarRunsTheLifecycleAndNeverPromisesAudio(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second", RealName: "Second Person"})
+	store.SeedConversationMember("Cdev", "U2")
+
+	idle := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "idle huddle bar", idle, "Start a huddle", "carries no voice or video")
+	requireMissing(t, "idle huddle bar", idle, "Leave huddle", "End for everyone")
+
+	started := postForm(t, mux, "/app/huddle/start?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if started.Code != http.StatusSeeOther {
+		t.Fatalf("start=%d: %s", started.Code, started.Body)
+	}
+	active := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "active huddle bar", active,
+		"Huddle in", "Leave huddle", "End for everyone",
+		"No audio here", "Joining puts your name in the huddle and nothing else")
+	requireMissing(t, "active huddle bar", active, "Start a huddle")
+
+	// A second person joins through the service; the bar is a live fragment,
+	// so the participant list follows without a page load.
+	messages := service.Messages{Store: store}
+	if _, err := messages.JoinHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	fragment := get(t, mux, "/app/huddle?channel=Cdev").Body.String()
+	requireContains(t, "huddle fragment", fragment, "Second Person")
+	requireMissing(t, "huddle fragment", fragment, "<html", "<body")
+
+	left := postForm(t, mux, "/app/huddle/leave?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if left.Code != http.StatusSeeOther {
+		t.Fatalf("leave=%d: %s", left.Code, left.Body)
+	}
+	// One participant remains, so the huddle is still running and this reader
+	// is offered the way back in rather than a way to start a second one.
+	afterLeaving := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "after leaving", afterLeaving, "Join huddle")
+	requireMissing(t, "after leaving", afterLeaving, "Start a huddle")
+
+	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	// The last person left, so the huddle ended with them: a conversation must
+	// never show a huddle nobody can be in.
+	if _, err := store.ActiveHuddle(ctx, "T1", "Cdev"); err == nil {
+		t.Fatal("the huddle outlived its last participant")
+	}
+	requireContains(t, "after the last person left", get(t, mux, "/app?channel=Cdev").Body.String(), "Start a huddle")
+}
+
+// HUDDLE-01: two people pressing start at the same moment must end up in one
+// huddle. A read-then-create would give them one each, and the second would be
+// the one nobody else joined.
+func TestConcurrentHuddleStartsConvergeOnOne(t *testing.T) {
+	store, _ := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+	starters := []domain.UserID{"U1"}
+	for index := 2; index <= 6; index++ {
+		id := domain.UserID("U" + strconv.Itoa(index))
+		store.SeedUser(domain.User{ID: id, WorkspaceID: "T1", Name: "member" + strconv.Itoa(index)})
+		store.SeedConversationMember("Cdev", id)
+		starters = append(starters, id)
+	}
+	results := make(chan domain.CallID, len(starters))
+	var wait sync.WaitGroup
+	for _, starter := range starters {
+		wait.Add(1)
+		go func(actor domain.UserID) {
+			defer wait.Done()
+			call, err := messages.StartHuddle(ctx, "T1", actor, "Cdev", "")
+			if err != nil {
+				results <- ""
+				return
+			}
+			results <- call.ID
+		}(starter)
+	}
+	wait.Wait()
+	close(results)
+	seen := map[domain.CallID]struct{}{}
+	for id := range results {
+		if id == "" {
+			t.Fatal("a concurrent start failed")
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != 1 {
+		t.Fatalf("%d huddles were started concurrently in one conversation, want 1", len(seen))
+	}
+	call, err := store.ActiveHuddle(ctx, "T1", "Cdev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(call.Participants) != len(starters) {
+		t.Fatalf("participants=%v, want everyone who pressed start", call.Participants)
+	}
+}
+
+// Ending a huddle removes everyone else from it, so a participant who did not
+// start it is offered a way out rather than a way to end it for the others.
+func TestOnlyTheStarterIsOfferedTheEndControl(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second"})
+	store.SeedConversationMember("Cdev", "U2")
+	messages := service.Messages{Store: store}
+	if _, err := messages.StartHuddle(ctx, "T1", "U2", "Cdev", ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "someone else's huddle", body, "Join huddle")
+	requireMissing(t, "someone else's huddle", body, "End for everyone")
+
+	refused := postForm(t, mux, "/app/huddle/end?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if refused.Code != http.StatusForbidden {
+		t.Fatalf("end=%d: %s", refused.Code, refused.Body)
+	}
+	if _, err := store.ActiveHuddle(ctx, "T1", "Cdev"); err != nil {
+		t.Fatalf("a refused end still ended the huddle: %v", err)
+	}
 }

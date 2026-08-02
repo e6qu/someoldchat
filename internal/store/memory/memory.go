@@ -6949,6 +6949,92 @@ func (s *Store) CreateCall(_ context.Context, value domain.Call, event events.Ev
 	return nil
 }
 
+func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joined events.Event) (domain.Call, bool, error) {
+	if value.Kind != domain.CallKindHuddle || value.ConversationID == "" || value.CreatedBy == "" {
+		return domain.Call{}, false, store.InvalidArgument("a huddle requires a conversation and a creator")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if conversation, ok := s.conversations[value.ConversationID]; !ok || conversation.WorkspaceID != value.WorkspaceID {
+		return domain.Call{}, false, store.ErrNotFound
+	}
+	for id, existing := range s.calls {
+		if existing.WorkspaceID != value.WorkspaceID || existing.Kind != domain.CallKindHuddle || existing.ConversationID != value.ConversationID || !existing.Active() {
+			continue
+		}
+		if !slices.Contains(existing.Participants, value.CreatedBy) {
+			existing.Participants = append(existing.Participants, value.CreatedBy)
+			s.calls[id] = existing
+			s.outbox = append(s.outbox, joined)
+		}
+		return cloneCall(existing), false, nil
+	}
+	if _, exists := s.calls[value.ID]; exists {
+		return domain.Call{}, false, store.ErrAlreadyExists
+	}
+	value.Participants = []domain.UserID{value.CreatedBy}
+	s.calls[value.ID] = cloneCall(value)
+	s.outbox = append(s.outbox, started)
+	return cloneCall(value), true, nil
+}
+
+func (s *Store) ActiveHuddle(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) (domain.Call, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, existing := range s.calls {
+		if existing.WorkspaceID == workspace && existing.Kind == domain.CallKindHuddle && existing.ConversationID == conversation && existing.Active() {
+			return cloneCall(existing), nil
+		}
+	}
+	return domain.Call{}, store.ErrNotFound
+}
+
+func (s *Store) JoinCall(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, event events.Event) (domain.Call, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.calls[id]
+	if !ok || value.WorkspaceID != workspace {
+		return domain.Call{}, store.ErrNotFound
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	if slices.Contains(value.Participants, user) {
+		return cloneCall(value), nil
+	}
+	value.Participants = append(value.Participants, user)
+	s.calls[id] = value
+	s.outbox = append(s.outbox, event)
+	return cloneCall(value), nil
+}
+
+func (s *Store) LeaveCall(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, left, ended events.Event) (domain.Call, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.calls[id]
+	if !ok || value.WorkspaceID != workspace {
+		return domain.Call{}, store.ErrNotFound
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	if !slices.Contains(value.Participants, user) {
+		return cloneCall(value), nil
+	}
+	value.Participants = slices.DeleteFunc(append([]domain.UserID(nil), value.Participants...), func(candidate domain.UserID) bool { return candidate == user })
+	s.outbox = append(s.outbox, left)
+	if len(value.Participants) == 0 {
+		value.EndedAt = ended.CreatedAt.UTC()
+		value.DurationSeconds = int64(value.EndedAt.Sub(value.StartedAt).Seconds())
+		if value.DurationSeconds < 0 {
+			value.DurationSeconds = 0
+		}
+		s.outbox = append(s.outbox, ended)
+	}
+	s.calls[id] = value
+	return cloneCall(value), nil
+}
+
 func (s *Store) GetCall(_ context.Context, workspace domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

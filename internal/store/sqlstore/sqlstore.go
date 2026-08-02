@@ -449,9 +449,13 @@ CREATE TABLE IF NOT EXISTS calls (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), external_unique_id TEXT NOT NULL,
  external_display_id TEXT NOT NULL DEFAULT '', join_url TEXT NOT NULL, desktop_app_join_url TEXT NOT NULL DEFAULT '',
  title TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL REFERENCES users(id), started_at INTEGER NOT NULL,
- ended_at INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER NOT NULL DEFAULT 0
+ ended_at INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER NOT NULL DEFAULT 0,
+ kind TEXT NOT NULL DEFAULT 'external', conversation_id TEXT NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id, external_unique_id);
+-- The external identity is unique among external calls and absent from every
+-- huddle, so the uniqueness must not span the empty string: without the
+-- predicate the second huddle in a workspace collided with the first.
+CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id, external_unique_id) WHERE external_unique_id <> '';
 CREATE TABLE IF NOT EXISTS call_participants (
  call_id TEXT NOT NULL REFERENCES calls(id), user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY (call_id, user_id)
 );
@@ -480,7 +484,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 129
+const schemaVersion = 130
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2898,6 +2902,44 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index invite request addresses: %w", err)
 		}
 	}
+	if version < 130 {
+		// A call record could not express a huddle: it had no conversation and
+		// no way to say which of the two kinds it was, so the two would have
+		// shared a shape in which each carried fields the other has no value
+		// for.
+		columns, err := s.tableColumns(ctx, db, "calls")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"kind TEXT NOT NULL DEFAULT 'external'",
+			"conversation_id TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate call %s: %w", name, err)
+			}
+		}
+		// A huddle has no external identity, so every huddle carries the empty
+		// string and the old unqualified uniqueness made the second huddle in
+		// a workspace collide with the first. The index is replaced rather
+		// than dropped: it is still the rule for external calls.
+		if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS calls_workspace_external`); err != nil {
+			return fmt.Errorf("replace the external call index: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id, external_unique_id) WHERE external_unique_id <> ''`); err != nil {
+			return fmt.Errorf("index external calls: %w", err)
+		}
+		// At most one huddle per conversation may be running. The partial
+		// unique index is what makes two concurrent starts converge rather
+		// than producing one huddle each — a read-then-create cannot.
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS calls_active_huddle ON calls(workspace_id, conversation_id) WHERE kind = 'huddle' AND ended_at = 0`); err != nil {
+			return fmt.Errorf("index active huddles: %w", err)
+		}
+	}
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -3298,9 +3340,49 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 	return s.tableColumns(ctx, db, "sessions")
 }
 
+// migratableTables is every table a migration may inspect the columns of. It
+// is a closed list because tableColumns interpolates the name into a PRAGMA and
+// an information_schema query; an unlisted name is a programming error, not a
+// caller's input.
+var migratableTables = []string{
+	"calls",
+	"canvases",
+	"conversations",
+	"draft_attachments",
+	"drafts",
+	"ephemeral_messages",
+	"external_uploads",
+	"files",
+	"invite_requests",
+	"later_reminders",
+	"lifecycle_state",
+	"list_downloads",
+	"list_items",
+	"lists",
+	"messages",
+	"oauth_codes",
+	"outbox",
+	"recent_searches",
+	"scheduled_message_files",
+	"scheduled_messages",
+	"schema_backfills",
+	"sessions",
+	"slack_apps",
+	"socket_mode_connections",
+	"tokens",
+	"users",
+	"views",
+	"workflow_revisions",
+	"workflow_steps",
+	"workflow_triggers",
+	"workflows",
+	"workspace_members",
+	"workspaces",
+}
+
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflows" && table != "workflow_steps" && table != "workflow_triggers" && table != "workflow_revisions" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
-		return nil, errors.New("unsupported schema table")
+	if !slices.Contains(migratableTables, table) {
+		return nil, fmt.Errorf("unsupported schema table %q", table)
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
@@ -12015,6 +12097,12 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
+// rowQuerier is *sql.DB and *sql.Tx alike, so a read that a transaction must
+// also perform is written once rather than duplicated per caller.
+type rowQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
 	var value domain.ScheduledMessage
 	var postAt, createdAt, deliveredAt, failedAt int64
@@ -13012,7 +13100,11 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.ExternalUniqueID, value.ExternalDisplayID, value.JoinURL, value.DesktopAppJoinURL, value.Title, value.CreatedBy, value.StartedAt.Unix())
+	kind := value.Kind
+	if kind == "" {
+		kind = domain.CallKindExternal
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, kind, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.ExternalUniqueID, value.ExternalDisplayID, value.JoinURL, value.DesktopAppJoinURL, value.Title, value.CreatedBy, value.StartedAt.Unix(), kind, value.ConversationID)
 	if err != nil {
 		return classify(err)
 	}
@@ -13027,33 +13119,216 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 	return tx.Commit()
 }
 
-func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
+// callSelectColumns is the one column list every call read uses.
+const callSelectColumns = `id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, ended_at, duration_seconds, kind, conversation_id`
+
+func scanCall(row rowScanner) (domain.Call, error) {
 	var value domain.Call
 	var started, ended int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, ended_at, duration_seconds FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&value.ID, &value.WorkspaceID, &value.ExternalUniqueID, &value.ExternalDisplayID, &value.JoinURL, &value.DesktopAppJoinURL, &value.Title, &value.CreatedBy, &started, &ended, &value.DurationSeconds)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Call{}, store.ErrNotFound
-	}
-	if err != nil {
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.ExternalUniqueID, &value.ExternalDisplayID, &value.JoinURL, &value.DesktopAppJoinURL, &value.Title, &value.CreatedBy, &started, &ended, &value.DurationSeconds, &value.Kind, &value.ConversationID); err != nil {
 		return domain.Call{}, err
 	}
 	value.StartedAt = time.Unix(started, 0).UTC()
 	if ended != 0 {
 		value.EndedAt = time.Unix(ended, 0).UTC()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT user_id FROM call_participants WHERE call_id = ? ORDER BY user_id`, id)
+	return value, nil
+}
+
+func callParticipants(ctx context.Context, query rowQuerier, id domain.CallID) ([]domain.UserID, error) {
+	rows, err := query.QueryContext(ctx, `SELECT user_id FROM call_participants WHERE call_id = ? ORDER BY user_id`, id)
 	if err != nil {
-		return domain.Call{}, err
+		return nil, err
 	}
 	defer rows.Close()
+	var participants []domain.UserID
 	for rows.Next() {
 		var userID domain.UserID
 		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+		participants = append(participants, userID)
+	}
+	return participants, rows.Err()
+}
+
+func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joined events.Event) (domain.Call, bool, error) {
+	if value.Kind != domain.CallKindHuddle || value.ConversationID == "" || value.CreatedBy == "" {
+		return domain.Call{}, false, store.InvalidArgument("a huddle requires a conversation and a creator")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Call{}, false, err
+	}
+	defer tx.Rollback()
+	var conversationWorkspace string
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, value.ConversationID).Scan(&conversationWorkspace); err != nil {
+		return domain.Call{}, false, translateNotFound(err)
+	}
+	if domain.WorkspaceID(conversationWorkspace) != value.WorkspaceID {
+		return domain.Call{}, false, store.ErrNotFound
+	}
+	existing, err := scanCall(tx.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND conversation_id = ? AND kind = ? AND ended_at = 0`, value.WorkspaceID, value.ConversationID, domain.CallKindHuddle))
+	switch {
+	case err == nil:
+		joinedNow, joinErr := addCallParticipantTx(ctx, tx, existing.ID, value.CreatedBy, value.WorkspaceID)
+		if joinErr != nil {
+			return domain.Call{}, false, joinErr
+		}
+		if joinedNow {
+			if err := insertOutbox(ctx, tx, joined); err != nil {
+				return domain.Call{}, false, err
+			}
+		}
+		existing.Participants, err = callParticipants(ctx, tx, existing.ID)
+		if err != nil {
+			return domain.Call{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.Call{}, false, err
+		}
+		return existing, false, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return domain.Call{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, kind, conversation_id) VALUES (?, ?, '', '', '', '', ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkspaceID, value.Title, value.CreatedBy, value.StartedAt.Unix(), domain.CallKindHuddle, value.ConversationID); err != nil {
+		return domain.Call{}, false, classify(err)
+	}
+	if _, err := addCallParticipantTx(ctx, tx, value.ID, value.CreatedBy, value.WorkspaceID); err != nil {
+		return domain.Call{}, false, err
+	}
+	if err := insertOutbox(ctx, tx, started); err != nil {
+		return domain.Call{}, false, err
+	}
+	value.Participants = []domain.UserID{value.CreatedBy}
+	if err := tx.Commit(); err != nil {
+		return domain.Call{}, false, err
+	}
+	return value, true, nil
+}
+
+func addCallParticipantTx(ctx context.Context, tx *sql.Tx, id domain.CallID, user domain.UserID, workspace domain.WorkspaceID) (bool, error) {
+	result, err := tx.ExecContext(ctx, `INSERT INTO call_participants(call_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(call_id, user_id) DO NOTHING`, id, user, workspace)
+	if err != nil {
+		return false, classify(err)
+	}
+	added, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return added == 1, nil
+}
+
+func (s *Store) ActiveHuddle(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) (domain.Call, error) {
+	value, err := scanCall(s.db.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND conversation_id = ? AND kind = ? AND ended_at = 0`, workspace, conversation, domain.CallKindHuddle))
+	if err != nil {
+		return domain.Call{}, translateNotFound(err)
+	}
+	value.Participants, err = callParticipants(ctx, s.db, value.ID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) JoinCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, event events.Event) (domain.Call, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	defer tx.Rollback()
+	value, err := scanCall(tx.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id))
+	if err != nil {
+		return domain.Call{}, translateNotFound(err)
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	joined, err := addCallParticipantTx(ctx, tx, id, user, workspace)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if joined {
+		if err := insertOutbox(ctx, tx, event); err != nil {
 			return domain.Call{}, err
 		}
-		value.Participants = append(value.Participants, userID)
 	}
-	if err := rows.Err(); err != nil {
+	value.Participants, err = callParticipants(ctx, tx, id)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Call{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, left, ended events.Event) (domain.Call, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	defer tx.Rollback()
+	value, err := scanCall(tx.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id))
+	if err != nil {
+		return domain.Call{}, translateNotFound(err)
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM call_participants WHERE call_id = ? AND user_id = ?`, id, user)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if removed == 0 {
+		value.Participants, err = callParticipants(ctx, tx, id)
+		if err != nil {
+			return domain.Call{}, err
+		}
+		return value, tx.Commit()
+	}
+	if err := insertOutbox(ctx, tx, left); err != nil {
+		return domain.Call{}, err
+	}
+	value.Participants, err = callParticipants(ctx, tx, id)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if len(value.Participants) == 0 {
+		endedAt := ended.CreatedAt.UTC()
+		duration := int64(endedAt.Sub(value.StartedAt).Seconds())
+		if duration < 0 {
+			duration = 0
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE calls SET ended_at = ?, duration_seconds = ? WHERE workspace_id = ? AND id = ?`, endedAt.Unix(), duration, workspace, id); err != nil {
+			return domain.Call{}, err
+		}
+		if err := insertOutbox(ctx, tx, ended); err != nil {
+			return domain.Call{}, err
+		}
+		value.EndedAt, value.DurationSeconds = endedAt, duration
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Call{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
+	value, err := scanCall(s.db.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Call{}, store.ErrNotFound
+	}
+	if err != nil {
+		return domain.Call{}, err
+	}
+	value.Participants, err = callParticipants(ctx, s.db, id)
+	if err != nil {
 		return domain.Call{}, err
 	}
 	return value, nil

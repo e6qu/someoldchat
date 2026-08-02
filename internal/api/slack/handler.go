@@ -8840,6 +8840,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, service.ErrInvitationExpired) {
 		return "invitation_expired"
 	}
+	// Ending a huddle removes everyone else from it, so only the person who
+	// started it or an administrator may. That is an authorization answer, not
+	// a malformed request.
+	if errors.Is(err, service.ErrHuddleNotOwned) {
+		return "not_allowed"
+	}
 	// An Idempotency-Key replayed with a different body is a permanently
 	// unsatisfiable request: the recorded body will never match. It used to be
 	// reported as `rate_limited`, which is the one Slack code whose handling is

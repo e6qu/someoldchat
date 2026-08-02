@@ -1728,6 +1728,84 @@ func workspaceAnalyticsCountTheSameOnEveryProfile(t *testing.T, open opener) {
 	}
 }
 
+// A conversation has at most one running huddle, and everyone who presses
+// start joins that one. The convergence is the store's job: a read-then-create
+// gives two concurrent starters one huddle each, and the second is the one
+// nobody else is in. Every profile must converge the same way, and must end the
+// huddle when the last person leaves.
+func huddlesConvergeAndEndWithTheirLastParticipant(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	second := domain.UserID("U-huddler-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: second, WorkspaceID: f.workspaceID, Name: "huddler"}); err != nil {
+		t.Fatal(err)
+	}
+	start := func(name string, actor domain.UserID) (domain.Call, bool) {
+		t.Helper()
+		call := domain.Call{
+			ID: domain.CallID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Kind: domain.CallKindHuddle,
+			ConversationID: f.channelID, CreatedBy: actor, StartedAt: time.Unix(1_700_000_900, 0).UTC(),
+		}
+		value, created, err := f.repository.StartHuddle(ctx, call,
+			f.event(name+"-started", "huddle.started", string(call.ID)),
+			f.event(name+"-joined", "huddle.joined", string(call.ID)))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return value, created
+	}
+
+	first, created := start("huddle-a", f.userID)
+	if !created {
+		t.Fatal("the first start did not create the huddle")
+	}
+	joinedExisting, createdAgain := start("huddle-b", second)
+	if createdAgain {
+		t.Fatal("a second huddle was started in a conversation that already had one")
+	}
+	if joinedExisting.ID != first.ID {
+		t.Fatalf("the second starter joined %s, want the running huddle %s", joinedExisting.ID, first.ID)
+	}
+	if len(joinedExisting.Participants) != 2 {
+		t.Fatalf("participants=%v, want both starters", joinedExisting.Participants)
+	}
+
+	active, err := f.repository.ActiveHuddle(ctx, f.workspaceID, f.channelID)
+	if err != nil || active.ID != first.ID {
+		t.Fatalf("active=%+v err=%v", active, err)
+	}
+
+	after, err := f.repository.LeaveCall(ctx, f.workspaceID, first.ID, second,
+		f.event("huddle-left-one", "huddle.left", string(first.ID)),
+		f.event("huddle-ended-one", "huddle.ended", string(first.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Active() || len(after.Participants) != 1 {
+		t.Fatalf("after one left the huddle reads %+v, want it still running with one person", after)
+	}
+
+	ended, err := f.repository.LeaveCall(ctx, f.workspaceID, first.ID, f.userID,
+		f.event("huddle-left-two", "huddle.left", string(first.ID)),
+		f.event("huddle-ended-two", "huddle.ended", string(first.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ended.Active() || len(ended.Participants) != 0 {
+		t.Fatalf("the huddle outlived its last participant: %+v", ended)
+	}
+	if _, err := f.repository.ActiveHuddle(ctx, f.workspaceID, f.channelID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an ended huddle is still the conversation's active one: %v", err)
+	}
+	// The conversation is free for a new huddle, which is the point of ending
+	// it rather than leaving it running and empty.
+	if _, createdAfter := start("huddle-c", f.userID); !createdAfter {
+		t.Fatal("a new huddle could not be started after the previous one ended")
+	}
+}
+
 // A timeline renders many parents at once, so thread summaries are read in
 // one batched call rather than one read per parent. Every profile must return
 // the same counts, the same participant list in the same order, and the same

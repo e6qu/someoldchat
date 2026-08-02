@@ -154,6 +154,10 @@ var liveEventTopics = []string{
 	"view.updated",
 	"view.submitted",
 	"view.closed",
+	"huddle.started",
+	"huddle.joined",
+	"huddle.left",
+	"huddle.ended",
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +318,8 @@ type conversationDetailsView struct {
 }
 
 type pageData struct {
+	Huddle          huddleView
+	HuddleURL       string
 	Timeline        messageList
 	Thread          messageList
 	ThreadTimestamp string
@@ -1007,6 +1013,15 @@ const workspaceRefinements = `<style>
 .membership-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
+.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.huddle-bar.active{background:var(--hover)}
+.huddle-state{display:grid;gap:2px;min-width:0}
+.huddle-people{color:var(--text)}
+.huddle-media{color:var(--muted)}
+.huddle-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto}
+.huddle-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
+.huddle-actions button:hover{background:var(--hover)}
+.huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
 .channel-actions button:hover{background:var(--hover)}
 .timeline{padding-top:12px}
 .message{position:relative;border-radius:6px;padding-top:8px;padding-bottom:8px}
@@ -1455,6 +1470,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </header>
       <div class="timeline-wrap">
         {{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}
+        <div id="huddle" data-fragment="{{.HuddleURL}}" data-live="true">{{template "huddle" .Huddle}}</div>
         <section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>
         {{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
       </div>
@@ -1702,9 +1718,39 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 </div>
 {{end}}
 {{end}}
-` + messagesPartial
+` + messagesPartial + huddlePartial
 
 var pageTemplate = mustPage(pageMarkup)
+
+// huddlePartial renders the conversation's huddle bar. HUDDLE-01 forbids
+// fabricating a connected state, and this deployment carries no audio
+// transport at all, so the bar says so in the same breath as it says who is
+// in the huddle: the lifecycle is real and durable, the media is not here.
+//
+// It is a fragment for the same reason the timeline is: presence changes when
+// other people join and leave, and the existing data-fragment/data-live
+// refresh already reacts to the durable event stream, so this needs no new
+// transport.
+const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{{if .Active}} active{{end}}">
+{{if .Active}}
+<div class="huddle-state" role="status">
+  <strong>Huddle in {{.ChannelName}}</strong>
+  <span class="huddle-people">{{if .Participants}}{{range $index, $name := .Participants}}{{if $index}}, {{end}}{{$name}}{{end}}{{else}}nobody yet{{end}}</span>
+  <span class="huddle-media">No audio here — this deployment carries no voice or video. Joining puts your name in the huddle and nothing else.</span>
+</div>
+<div class="huddle-actions">
+  {{if .Joined}}<form method="post" action="{{.LeaveURL}}" hx-post="{{.LeaveURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Leave huddle</button></form>
+  {{else}}<form method="post" action="{{.JoinURL}}" hx-post="{{.JoinURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Join huddle</button></form>{{end}}
+  {{if .CanEnd}}<form method="post" action="{{.EndURL}}" hx-post="{{.EndURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-end" type="submit">End for everyone</button></form>{{end}}
+</div>
+{{else}}
+<div class="huddle-actions">
+  <form method="post" action="{{.StartURL}}" hx-post="{{.StartURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Start a huddle</button></form>
+  <span class="huddle-media">A huddle here is a shared presence, not a call: this deployment carries no voice or video.</span>
+</div>
+{{end}}
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+</div>{{end}}{{end}}`
 
 const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -3362,6 +3408,11 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/message/forward", h.forwardMessage)
 	mux.HandleFunc("POST /app/files/delete", h.deleteFile)
 	mux.HandleFunc("GET /app/remote-files", h.remoteFiles)
+	mux.HandleFunc("GET /app/huddle", h.huddleFragment)
+	mux.HandleFunc("POST /app/huddle/start", h.huddleMutation("started", h.startHuddle, "Huddle started"))
+	mux.HandleFunc("POST /app/huddle/join", h.huddleMutation("joined", h.joinHuddle, "You joined the huddle"))
+	mux.HandleFunc("POST /app/huddle/leave", h.huddleMutation("left", h.leaveHuddle, "You left the huddle"))
+	mux.HandleFunc("POST /app/huddle/end", h.huddleMutation("ended", h.endHuddle, "Huddle ended"))
 	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
 	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)
 	mux.HandleFunc("POST /app/read/unread", h.markUnreadFromHere)
@@ -4234,6 +4285,11 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if canJoin {
 		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
 	}
+	// The huddle bar is a live fragment, so the page renders the same partial
+	// the refresh fetches: a first paint that disagreed with the first refresh
+	// would flicker the control set for anyone reading it.
+	data.HuddleURL = "/app/huddle?channel=" + url.QueryEscape(string(channel))
+	data.Huddle = h.huddleFor(r.Context(), principal, conversation, data.CSRFToken, "", names)
 	if isMember && threadTimestamp != "" {
 		following, followErr := h.Messages.ThreadFollowed(
 			r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp),
@@ -9462,10 +9518,17 @@ func (h Handler) writeHTMLWithPolicy(w http.ResponseWriter, page *template.Templ
 }
 
 func (h Handler) writeFragment(w http.ResponseWriter, list messageList) {
+	h.writePartial(w, "messages", list, "the conversation could not be rendered")
+}
+
+// writePartial renders one named partial of the workspace page as a fragment
+// response. Every live region the client refreshes goes through it, so they
+// cannot disagree about the policy or the content type.
+func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unavailable string) {
 	var output bytes.Buffer
-	if err := pageTemplate.ExecuteTemplate(&output, "messages", list); err != nil {
+	if err := pageTemplate.ExecuteTemplate(&output, name, data); err != nil {
 		secureHeaders(w, workspaceContentSecurityPolicy)
-		http.Error(w, "the conversation could not be rendered", http.StatusServiceUnavailable)
+		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
 	}
 	secureHeaders(w, workspaceContentSecurityPolicy)

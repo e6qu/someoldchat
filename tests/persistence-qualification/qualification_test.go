@@ -72,6 +72,7 @@ func runQualification(t *testing.T, open opener) {
 		{"deleting the last carrier retracts the file share", deletingTheLastCarrierRetractsTheFileShare},
 		{"accepting an invitation commits the whole membership", acceptingAnInvitationCommitsTheWholeMembership},
 		{"workspace analytics count the same on every profile", workspaceAnalyticsCountTheSameOnEveryProfile},
+		{"huddles converge and end with their last participant", huddlesConvergeAndEndWithTheirLastParticipant},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

@@ -61,6 +61,8 @@ var (
 	// person reading it needs to know whether to ask for a new invitation or
 	// to check which address they signed in with.
 	ErrInvitationExpired = errors.New("invitation has expired")
+	// ErrHuddleNotOwned refuses to end a huddle on everyone else's behalf.
+	ErrHuddleNotOwned = errors.New("huddle is not owned by this actor")
 	ErrInvalidAppApproval          = errors.New("app approval is invalid")
 	ErrInvalidView                 = errors.New("view payload is invalid")
 	ErrAppHomeNotEnabled           = errors.New("app home tab is not enabled")
@@ -5913,6 +5915,122 @@ func (m Messages) validateCallUsers(ctx context.Context, workspaceID domain.Work
 	return nil
 }
 
+// StartHuddle starts, or joins, the conversation's huddle.
+//
+// Membership of the conversation is the authority: a huddle happens inside a
+// conversation and is visible to the people in it, so being able to read the
+// conversation is exactly the right to be in its huddle. AddCall checks neither
+// membership nor posting rights because an app-registered call has no
+// conversation to check against — the two operations are deliberately not the
+// same check.
+func (m Messages) StartHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, title string) (domain.Call, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, actor, conversationID); err != nil {
+		return domain.Call{}, err
+	}
+	id, err := domain.NewCallID()
+	if err != nil {
+		return domain.Call{}, err
+	}
+	now := time.Now().UTC()
+	value := domain.Call{
+		ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindHuddle, ConversationID: conversationID,
+		Title: strings.TrimSpace(title), CreatedBy: actor, StartedAt: now,
+	}
+	started, err := huddleEvent(workspaceID, actor, "huddle.started", id, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", id, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	call, _, err := m.Store.StartHuddle(ctx, value, started, joined)
+	return call, err
+}
+
+// JoinHuddle adds the actor to the conversation's running huddle. It is
+// separate from StartHuddle so a client can express "join what is there"
+// without the risk of starting a second one if it has just ended.
+func (m Messages) JoinHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	call, err := m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", call.ID, conversationID, time.Now().UTC())
+	if err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.JoinCall(ctx, workspaceID, call.ID, actor, joined)
+}
+
+// LeaveHuddle removes the actor. The store ends the huddle when the last person
+// leaves, in the same transaction, so a conversation never shows a huddle
+// nobody is in.
+func (m Messages) LeaveHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	call, err := m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	now := time.Now().UTC()
+	left, err := huddleEvent(workspaceID, actor, "huddle.left", call.ID, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.LeaveCall(ctx, workspaceID, call.ID, actor, left, ended)
+}
+
+// EndHuddle ends it for everyone. Only the person who started it or a workspace
+// administrator may: ending a huddle removes everyone else from it, which is
+// not a thing any participant should be able to do to the others.
+func (m Messages) EndHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	call, err := m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if call.CreatedBy != actor {
+		if adminErr := m.requireWorkspaceAdmin(ctx, workspaceID, actor); adminErr != nil {
+			return domain.Call{}, ErrHuddleNotOwned
+		}
+	}
+	now := time.Now().UTC()
+	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	duration := int64(now.Sub(call.StartedAt).Seconds())
+	if duration < 0 {
+		duration = 0
+	}
+	if err := m.Store.EndCall(ctx, workspaceID, call.ID, duration, ended); err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.GetCall(ctx, workspaceID, call.ID)
+}
+
+// ActiveHuddle reports the conversation's running huddle, or ErrNotFound.
+func (m Messages) ActiveHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	return m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+}
+
+func (m Messages) activeHuddleFor(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, actor, conversationID); err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.ActiveHuddle(ctx, workspaceID, conversationID)
+}
+
+func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic string, id domain.CallID, conversationID domain.ConversationID, at time.Time) (events.Event, error) {
+	return newEvent(workspaceID, actor, events.NewPayload(topic,
+		events.String("call_id", string(id)),
+		events.String("channel_id", string(conversationID)),
+		events.String("user_id", string(actor)),
+	), at)
+}
+
 func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, users []domain.UserID) (domain.Call, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
@@ -5937,7 +6055,7 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if err != nil {
 		return domain.Call{}, err
 	}
-	value := domain.Call{ID: id, WorkspaceID: workspaceID, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, StartedAt: startedAt}
+	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, StartedAt: startedAt}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("call.created", events.String("call_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err

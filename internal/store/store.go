@@ -694,6 +694,26 @@ type Store interface {
 	UpdateCall(context.Context, domain.Call, events.Event) error
 	EndCall(context.Context, domain.WorkspaceID, domain.CallID, int64, events.Event) error
 	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, events.Event) error
+	// StartHuddle returns the conversation's active huddle, creating it only if
+	// there is none, and adds the caller to it either way. It is one atomic
+	// upsert because two people pressing start at the same moment must end up
+	// in the same huddle: a read-then-create would give them one each, and the
+	// second would silently be the one nobody else joined.
+	//
+	// The returned bool reports whether this call created the huddle, so the
+	// caller knows whether to announce a start or a join.
+	StartHuddle(context.Context, domain.Call, events.Event, events.Event) (domain.Call, bool, error)
+	// ActiveHuddle returns the conversation's running huddle, or ErrNotFound.
+	ActiveHuddle(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.Call, error)
+	// JoinCall and LeaveCall move one participant, rather than replacing the
+	// whole set as SetCallParticipants does. Two people joining concurrently
+	// through a whole-set write lose one of the two additions.
+	//
+	// LeaveCall ends the call when the last participant leaves: a huddle with
+	// nobody in it is over, and leaving it running would let the conversation
+	// show a huddle nobody can be in.
+	JoinCall(context.Context, domain.WorkspaceID, domain.CallID, domain.UserID, events.Event) (domain.Call, error)
+	LeaveCall(context.Context, domain.WorkspaceID, domain.CallID, domain.UserID, events.Event, events.Event) (domain.Call, error)
 	CreateFile(context.Context, domain.File, events.Event) error
 	CreateExternalUpload(context.Context, domain.ExternalUpload) error
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)
