@@ -5441,6 +5441,14 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM stars WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		// saved_items.message_id carries an enforced foreign key, so deleting a
+		// conversation in which anyone had saved a message failed outright
+		// until this line existed. activity_items and idempotency have no key
+		// to enforce it, so they orphaned silently instead.
+		`DELETE FROM saved_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM activity_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM idempotency WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM thread_follows WHERE conversation_id = ?`,
 		`DELETE FROM message_files WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM messages WHERE conversation = ?`,
 		`DELETE FROM conversation_members WHERE conversation_id = ?`,
@@ -9286,6 +9294,27 @@ type expiredMessage struct {
 	ID      domain.MessageID
 	Created domain.StoredTime
 	Thread  domain.MessageTimestamp
+}
+
+func (s *Store) AppendRetentionEvents(ctx context.Context, workspace domain.WorkspaceID, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var present int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, workspace).Scan(&present); err != nil {
+		return translateNotFound(err)
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) GetConversationPrefs(ctx context.Context, conversation domain.ConversationID) (domain.ConversationPrefs, error) {

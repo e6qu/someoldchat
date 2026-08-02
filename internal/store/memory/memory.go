@@ -4734,6 +4734,19 @@ func (s *Store) sweepFilesLocked(request domain.RetentionSweepRequest) []domain.
 	return expired
 }
 
+func (s *Store) AppendRetentionEvents(_ context.Context, workspace domain.WorkspaceID, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[workspace]; !exists {
+		return store.ErrNotFound
+	}
+	s.outbox = append(s.outbox, emitted...)
+	return nil
+}
+
 func (s *Store) GetConversationPrefs(_ context.Context, conversation domain.ConversationID) (domain.ConversationPrefs, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

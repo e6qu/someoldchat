@@ -555,6 +555,9 @@ type Store interface {
 	// nothing here, and deleting a root while its replies survive would leave
 	// replies with no parent to render under.
 	SweepRetention(context.Context, domain.RetentionSweepRequest) (domain.RetentionSweep, error)
+	// AppendRetentionEvents journals a completed sweep's announcements. See
+	// scheduler.RetentionSource for why this is separate from the deletion.
+	AppendRetentionEvents(context.Context, domain.WorkspaceID, []events.Event) error
 	AddEmoji(context.Context, domain.CustomEmoji, events.Event) error
 	ListEmojis(context.Context, domain.WorkspaceID) ([]domain.CustomEmoji, error)
 	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error

@@ -170,6 +170,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure scheduled status worker", "error", err)
 		return exitConfiguration
 	}
+	retentionWorker, err := scheduler.NewRetentionWorker(runtime.Store, *limit)
+	if err != nil {
+		logger.Error("configure retention worker", "error", err)
+		return exitConfiguration
+	}
 	workflowScheduleWorker, err := scheduler.NewWorkflowScheduleWorker(runtime.Store, runtime.Service, *limit)
 	if err != nil {
 		logger.Error("configure workflow schedule worker", "error", err)
@@ -221,6 +226,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if statusErr != nil {
 				logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
 			}
+			retentionCount, retentionErr := retentionWorker.RunOnce(cycleContext, "")
+			if retentionErr != nil {
+				logger.Error("retention sweep failed", "count", retentionCount, "error", retentionErr)
+			}
 			workflowScheduleCount, workflowScheduleErr := workflowScheduleWorker.RunOnce(cycleContext, "")
 			if workflowScheduleErr != nil {
 				logger.Error("workflow schedule execution failed", "count", workflowScheduleCount, "error", workflowScheduleErr)
@@ -233,7 +242,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if deadlineErr != nil {
 				logger.Error("wake deadline publication failed", "error", deadlineErr)
 			}
-			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, errors.Join(eventErr, scheduledErr, reminderErr, scheduledStatusErr, statusErr, workflowScheduleErr, workflowEventErr, deadlineErr)
+			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || retentionCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, errors.Join(eventErr, scheduledErr, reminderErr, scheduledStatusErr, statusErr, retentionErr, workflowScheduleErr, workflowEventErr, deadlineErr)
 		}
 		var failures error
 		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
@@ -261,6 +270,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, statusErr)
 			logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
 		}
+		retentionCount, retentionErr := retentionWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if retentionErr != nil {
+			failures = errors.Join(failures, retentionErr)
+			logger.Error("retention sweep failed", "count", retentionCount, "error", retentionErr)
+		}
 		workflowScheduleCount, workflowScheduleErr := workflowScheduleWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if workflowScheduleErr != nil {
 			failures = errors.Join(failures, workflowScheduleErr)
@@ -276,7 +290,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, deadlineErr)
 			logger.Error("wake deadline publication failed", "error", deadlineErr)
 		}
-		return count > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, failures
+		return count > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || retentionCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, failures
 	}
 	return pollWithinFailureBudget(workerContext, logger, cycle, *poll, *failureBudget)
 }
