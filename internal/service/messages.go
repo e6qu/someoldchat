@@ -57,6 +57,10 @@ var (
 	ErrEmojiAlreadyExists          = errors.New("custom emoji already exists")
 	ErrInvalidRemoteFile           = errors.New("remote file metadata is invalid")
 	ErrInvalidInviteRequest        = errors.New("invite request is invalid")
+	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
+	// person reading it needs to know whether to ask for a new invitation or
+	// to check which address they signed in with.
+	ErrInvitationExpired = errors.New("invitation has expired")
 	ErrInvalidAppApproval          = errors.New("app approval is invalid")
 	ErrInvalidView                 = errors.New("view payload is invalid")
 	ErrAppHomeNotEnabled           = errors.New("app home tab is not enabled")
@@ -1641,7 +1645,24 @@ func (m Messages) AdminApproveInviteRequest(ctx context.Context, workspaceID dom
 	return m.changeInviteRequestStatus(ctx, workspaceID, actorID, id, domain.InviteRequestApproved)
 }
 
+// AdminDenyInviteRequest answers a pending request, and withdraws an approved
+// invitation nobody has accepted yet. The two are different facts and are
+// recorded as different statuses: denied is the answer to a request, revoked is
+// the withdrawal of an answer already given.
 func (m Messages) AdminDenyInviteRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.InviteRequestID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if id == "" {
+		return ErrInvalidInviteRequest
+	}
+	request, err := m.Store.GetInviteRequest(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	if request.Status == domain.InviteRequestApproved {
+		return m.reviewInviteRequest(ctx, workspaceID, actorID, id, domain.InviteRequestApproved, domain.InviteRequestRevoked)
+	}
 	return m.changeInviteRequestStatus(ctx, workspaceID, actorID, id, domain.InviteRequestDenied)
 }
 
@@ -1659,15 +1680,99 @@ func (m Messages) changeInviteRequestStatus(ctx context.Context, workspaceID dom
 	if request.Status != domain.InviteRequestPending {
 		return ErrInvalidInviteRequest
 	}
+	return m.reviewInviteRequest(ctx, workspaceID, actorID, id, domain.InviteRequestPending, status)
+}
+
+func (m Messages) reviewInviteRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.InviteRequestID, from, status domain.InviteRequestStatus) error {
 	topic := "invite_request.approved"
-	if status == domain.InviteRequestDenied {
+	switch status {
+	case domain.InviteRequestDenied:
 		topic = "invite_request.denied"
+	case domain.InviteRequestRevoked:
+		topic = "invite_request.revoked"
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload(topic, events.String("invite_request_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetInviteRequestStatus(ctx, workspaceID, id, status, time.Now().UTC(), event)
+	return m.Store.SetInviteRequestStatus(ctx, workspaceID, id, from, status, time.Now().UTC(), event)
+}
+
+// InvitationLifetime bounds how long an invitation may be accepted for. It runs
+// from when the invitation is recorded: an invitation that sat in the queue for
+// a month is not made fresh by someone finally approving it.
+const InvitationLifetime = 14 * 24 * time.Hour
+
+// InvitationPreview reads one invitation with no authority check, because the
+// person it is for has no account and no session yet — that is the whole point
+// of the page it feeds. It is safe to read without authority because it grants
+// nothing: acceptance is decided against an address the identity provider has
+// verified, so knowing an invitation exists does not let anyone redeem it.
+func (m Messages) InvitationPreview(ctx context.Context, workspaceID domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
+	if strings.TrimSpace(string(id)) == "" {
+		return domain.InviteRequest{}, ErrInvalidInviteRequest
+	}
+	return m.Store.GetInviteRequest(ctx, workspaceID, id)
+}
+
+// AcceptInvitationForEmail redeems the approved invitation for a
+// provider-verified address, creating the member it promised at the recorded
+// guest tier and joining every channel it recorded.
+//
+// The caller MUST have verified the address with the identity provider first.
+// The address is the whole authorization: this method has no session and no
+// actor behind it, exactly like ProvisionExternalUser, and the invitation is
+// the standing decision an administrator already made about that address.
+func (m Messages) AcceptInvitationForEmail(ctx context.Context, workspaceID domain.WorkspaceID, email, displayName string) (domain.User, error) {
+	email = domain.NormalizeEmail(email)
+	if workspaceID == "" || email == "" {
+		return domain.User{}, ErrInvalidInviteRequest
+	}
+	request, err := m.Store.FindInviteRequestByEmail(ctx, workspaceID, email, domain.InviteRequestApproved)
+	if err != nil {
+		return domain.User{}, err
+	}
+	now := time.Now().UTC()
+	if !request.Acceptable(now) {
+		return domain.User{}, ErrInvitationExpired
+	}
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		name = strings.TrimSpace(request.RealName)
+	}
+	if name == "" {
+		name = email
+	}
+	id, err := domain.NewUserID()
+	if err != nil {
+		return domain.User{}, err
+	}
+	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: name, RealName: name, Presence: domain.PresenceAuto}
+	membership := domain.WorkspaceMembership{
+		WorkspaceID: workspaceID, UserID: id, Role: domain.WorkspaceRoleMember, Active: true,
+		Restricted: request.Restricted, UltraRestricted: request.UltraRestricted,
+	}
+	createdPayload, err := events.UserChangePayload("user.created", user, false, false, now)
+	if err != nil {
+		return domain.User{}, err
+	}
+	created, err := newEvent(workspaceID, "", createdPayload, now)
+	if err != nil {
+		return domain.User{}, err
+	}
+	accepted, err := newEvent(workspaceID, id, events.NewPayload("invite_request.accepted",
+		events.String("invite_request_id", string(request.ID)), events.String("user_id", string(id))), now)
+	if err != nil {
+		return domain.User{}, err
+	}
+	acceptance := domain.InviteRequestAcceptance{
+		WorkspaceID: workspaceID, RequestID: request.ID, User: user, Membership: membership,
+		Channels: append([]domain.ConversationID(nil), request.ChannelIDs...), AcceptedAt: now,
+	}
+	if err := m.Store.AcceptInviteRequest(ctx, acceptance, []events.Event{created, accepted}); err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
 }
 
 func (m Messages) AdminListInviteRequests(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, status domain.InviteRequestStatus, request domain.PageRequest) (domain.InviteRequestPage, error) {
@@ -1719,7 +1824,7 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 		return err
 	}
 	now := time.Now().UTC()
-	value := domain.InviteRequest{ID: domain.InviteRequestID(id), WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: normalizedChannels, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(), Status: domain.InviteRequestPending, CreatedAt: now}
+	value := domain.InviteRequest{ID: domain.InviteRequestID(id), WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: normalizedChannels, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(), Status: domain.InviteRequestPending, CreatedAt: now, ExpiresAt: now.Add(InvitationLifetime)}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("invite_request.created", events.String("invite_request_id", string(value.ID))), now)
 	if err != nil {
 		return err

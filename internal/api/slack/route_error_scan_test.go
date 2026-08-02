@@ -541,6 +541,7 @@ func sentinelDrivenCodes() map[string]string {
 		"channel_not_found":         "postMessageError's name for store.ErrNotFound on a message write",
 		"is_archived":               "postMessageError's name for service.ErrConversationAlreadyArchived on a message write",
 		"no_text":                   "postMessageError's name for service.ErrInvalidMessage",
+		"invitation_expired":        "mutationErrorCode's name for service.ErrInvitationExpired: the invitation is real and the request well formed, so neither not_found nor an invalid-argument code describes it",
 	}
 }
 

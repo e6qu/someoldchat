@@ -8835,6 +8835,11 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrInvalidInviteRequest) {
 		return invalidReason
 	}
+	// An expired invitation is not a malformed request: nothing the caller can
+	// correct will make it work, and a new invitation is the only remedy.
+	if errors.Is(err, service.ErrInvitationExpired) {
+		return "invitation_expired"
+	}
 	// An Idempotency-Key replayed with a different body is a permanently
 	// unsatisfiable request: the recorded body will never match. It used to be
 	// reported as `rate_limited`, which is the one Slack code whose handling is

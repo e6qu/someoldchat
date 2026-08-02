@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	store2 "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -618,8 +620,19 @@ func TestAdminPageDecidesPendingInvitationsAndAppRequests(t *testing.T) {
 		t.Fatalf("restricted apps=%+v err=%v", restricted.Apps, err)
 	}
 	after := body()
-	if strings.Contains(after, "guest@example.test") || strings.Contains(after, "AR1") {
-		t.Fatalf("a decided request is still queued: %s", after)
+	if strings.Contains(after, "AR1") {
+		t.Fatalf("a decided app request is still queued: %s", after)
+	}
+	// The approved invitation leaves the pending queue and appears in the one
+	// waiting to be accepted, with the link to send.
+	if !strings.Contains(after, "Approved, waiting to be accepted") || !strings.Contains(after, "/app/invite/"+string(invites.Requests[0].ID)) {
+		t.Fatalf("the approved invitation carries no link to send: %s", after)
+	}
+	if strings.Contains(after, `aria-label="Approve the invitation for guest@example.test"`) {
+		t.Fatalf("an approved invitation is still offered for approval: %s", after)
+	}
+	if !strings.Contains(after, `aria-label="Withdraw the invitation for guest@example.test"`) {
+		t.Fatalf("an approved invitation cannot be withdrawn: %s", after)
 	}
 }
 
@@ -673,5 +686,190 @@ func TestAuthAdminDocumentAndItsPolicyAgree(t *testing.T) {
 	}
 	if strings.Contains(policy, "script-src 'unsafe-inline'") {
 		t.Fatalf("the administration page allows any inline script: %s", policy)
+	}
+}
+
+// AUTH-05: approving an invitation used to flip a status and do nothing else.
+// The invited person still had no account, no membership and none of the
+// channels the invitation recorded, so the whole promise was inert.
+func TestAcceptingAnInvitationCreatesTheMemberItPromised(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	_ = handler
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "guest@example.test", []domain.ConversationID{"C1", "C2"}, "", "Guest", false, true, false, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", page.Requests, err)
+	}
+	invitation := page.Requests[0]
+
+	// Nothing can be accepted before it is approved: recording an invitation
+	// and issuing it are deliberately distinct transitions.
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "guest@example.test", "Guest Person"); !errors.Is(err, store2.ErrNotFound) {
+		t.Fatalf("an unapproved invitation was accepted: %v", err)
+	}
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	user, err := messages.AcceptInvitationForEmail(ctx, "T1", "GUEST@example.test", "Guest Person")
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if user.Email != "guest@example.test" || user.RealName != "Guest Person" {
+		t.Fatalf("user=%+v", user)
+	}
+	membership, err := store.GetWorkspaceMembership(ctx, "T1", user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !membership.Active || !membership.Restricted || membership.UltraRestricted || membership.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("membership=%+v, want an active multi-channel guest", membership)
+	}
+	for _, channelID := range []domain.ConversationID{"C1", "C2"} {
+		members, err := store.ListConversationMembers(ctx, channelID, domain.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := false
+		for _, member := range members.Users {
+			if member.ID == user.ID {
+				joined = true
+			}
+		}
+		if !joined {
+			t.Fatalf("the accepted member did not join %s, which the invitation recorded", channelID)
+		}
+	}
+	// Single use: the transition to accepted is the same transaction that
+	// created the member, so a second acceptance finds nothing approved.
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "guest@example.test", "Guest Person"); !errors.Is(err, store2.ErrNotFound) {
+		t.Fatalf("an invitation was accepted twice: %v", err)
+	}
+	stored, err := store.GetInviteRequest(ctx, "T1", invitation.ID)
+	if err != nil || stored.Status != domain.InviteRequestAccepted || stored.AcceptedBy != user.ID || stored.AcceptedAt.IsZero() {
+		t.Fatalf("invitation=%+v err=%v", stored, err)
+	}
+}
+
+// An invitation is valid for a bounded time from when it was recorded, and an
+// expired one has to say so: the remedy is a new invitation, not a retry.
+func TestAnExpiredInvitationIsRefusedDistinctly(t *testing.T) {
+	_, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	stale := domain.InviteRequest{
+		ID: "IR_stale", WorkspaceID: "T1", Email: "late@example.test", RequestedBy: "U1",
+		ChannelIDs: []domain.ConversationID{"C1"}, RealName: "Late", Status: domain.InviteRequestPending,
+		CreatedAt: time.Now().UTC().Add(-30 * 24 * time.Hour), ExpiresAt: time.Now().UTC().Add(-16 * 24 * time.Hour),
+	}
+	if err := store.CreateInviteRequest(ctx, stale, events.Event{ID: "Estale", WorkspaceID: "T1", Topic: "invite_request.created", Payload: `{"type":"invite_request.created"}`, CreatedAt: stale.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	messages := service.Messages{Store: store}
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "late@example.test", "Late"); !errors.Is(err, service.ErrInvitationExpired) {
+		t.Fatalf("an expired invitation was not refused as expired: %v", err)
+	}
+}
+
+// The invitation page is reached signed-out, on purpose, and every terminal
+// state says something different: the reader has to be able to tell whether to
+// wait, to sign in, or to ask for a new invitation.
+func TestTheInvitationPageAnswersEveryOutcomeSignedOut(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "guest@example.test", []domain.ConversationID{"C1"}, "", "Guest", false, false, true, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", page.Requests, err)
+	}
+	invitation := page.Requests[0]
+	visit := func(id domain.InviteRequestID) (int, string) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		// No session cookie: this is what an invited person actually has.
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app/invite/"+string(id), nil))
+		return response.Code, response.Body.String()
+	}
+
+	status, body := visit(invitation.ID)
+	if status != http.StatusOK || !strings.Contains(body, "waiting for approval") {
+		t.Fatalf("pending invitation status=%d body=%s", status, body)
+	}
+	// The address is masked: an invitation identifier is workspace-visible.
+	if strings.Contains(body, "guest@example.test") {
+		t.Fatalf("the invited address was handed to whoever holds the link: %s", body)
+	}
+	if !strings.Contains(body, "g•••@example.test") {
+		t.Fatalf("the invited person cannot recognise their own address: %s", body)
+	}
+
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, body = visit(invitation.ID)
+	if status != http.StatusOK || !strings.Contains(body, "Sign in to accept") || !strings.Contains(body, "Guest in one channel") || !strings.Contains(body, "#general") {
+		t.Fatalf("approved invitation status=%d body=%s", status, body)
+	}
+	if !strings.Contains(body, "/login?return_to=") {
+		t.Fatalf("the invitation page does not lead anywhere: %s", body)
+	}
+
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "guest@example.test", "Guest"); err != nil {
+		t.Fatal(err)
+	}
+	status, body = visit(invitation.ID)
+	if status != http.StatusGone || !strings.Contains(body, "already been accepted") {
+		t.Fatalf("accepted invitation status=%d body=%s", status, body)
+	}
+
+	status, body = visit("IR_missing")
+	if status != http.StatusNotFound || !strings.Contains(body, "does not exist") {
+		t.Fatalf("unknown invitation status=%d body=%s", status, body)
+	}
+}
+
+// An approved invitation nobody accepted can be withdrawn, and withdrawing is
+// recorded as its own status: denied answers a request, revoked withdraws an
+// answer already given, and an administrator reading the record needs both.
+func TestWithdrawingAnApprovedInvitationIsItsOwnOutcome(t *testing.T) {
+	_, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "gone@example.test", []domain.ConversationID{"C1"}, "", "Gone", false, false, false, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	page, _ := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	invitation := page.Requests[0]
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.AdminDenyInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetInviteRequest(ctx, "T1", invitation.ID)
+	if err != nil || stored.Status != domain.InviteRequestRevoked {
+		t.Fatalf("invitation=%+v err=%v, want it revoked rather than denied", stored, err)
+	}
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "gone@example.test", "Gone"); !errors.Is(err, store2.ErrNotFound) {
+		t.Fatalf("a withdrawn invitation was accepted: %v", err)
 	}
 }

@@ -73,6 +73,7 @@ service.invalid_user_group
 service.invalid_view
 service.invalid_workflow_step
 service.invalid_workspace
+service.invitation_expired
 service.last_workspace_owner
 service.message_already_deleted
 service.message_not_owned

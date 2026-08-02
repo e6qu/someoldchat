@@ -1277,6 +1277,15 @@ const (
 	InviteRequestPending  InviteRequestStatus = "pending"
 	InviteRequestApproved InviteRequestStatus = "approved"
 	InviteRequestDenied   InviteRequestStatus = "denied"
+	// InviteRequestAccepted is terminal and is what makes an invitation
+	// single-use: the transition to it is the same transaction that creates
+	// the member, so a second acceptance finds nothing approved.
+	InviteRequestAccepted InviteRequestStatus = "accepted"
+	// InviteRequestRevoked is an approved invitation withdrawn before anyone
+	// accepted it. Denied is the answer to a request; revoked is the
+	// withdrawal of an answer already given, and an administrator reading the
+	// record needs to tell those apart.
+	InviteRequestRevoked InviteRequestStatus = "revoked"
 )
 
 type InviteRequest struct {
@@ -1294,6 +1303,52 @@ type InviteRequest struct {
 	Status            InviteRequestStatus
 	CreatedAt         time.Time
 	ReviewedAt        time.Time
+	// ExpiresAt bounds how long the invitation may be accepted for. It is set
+	// when the invitation is recorded, not when it is approved, because it is
+	// the promise made to the invited person that ages — an invitation that
+	// sat in the queue for a month is not fresh because someone finally
+	// clicked approve.
+	ExpiresAt  time.Time
+	AcceptedAt time.Time
+	AcceptedBy UserID
+}
+
+// InviteRequestAcceptance is everything one acceptance writes. It travels as a
+// value because the store applies all of it or none of it.
+type InviteRequestAcceptance struct {
+	WorkspaceID WorkspaceID
+	RequestID   InviteRequestID
+	User        User
+	Membership  WorkspaceMembership
+	Channels    []ConversationID
+	AcceptedAt  time.Time
+}
+
+// InviteRequestReviewable reports whether an administrator may move an
+// invitation from one status to another. Approving and denying answer a
+// pending request; revoking withdraws an approval nobody has accepted yet.
+// Accepting is not a review — it is the invited person's transition, and it
+// only happens inside the transaction that creates the member.
+func InviteRequestReviewable(from, to InviteRequestStatus) bool {
+	switch {
+	case from == InviteRequestPending && (to == InviteRequestApproved || to == InviteRequestDenied):
+		return true
+	case from == InviteRequestApproved && to == InviteRequestRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Acceptable reports whether this invitation can still become a member at the
+// given instant. Only an approved invitation can be accepted: recording an
+// invitation and issuing it are deliberately distinct transitions, so an
+// invitation nobody has approved confers nothing.
+func (request InviteRequest) Acceptable(at time.Time) bool {
+	if request.Status != InviteRequestApproved {
+		return false
+	}
+	return request.ExpiresAt.IsZero() || !at.After(request.ExpiresAt)
 }
 
 type InviteRequestPage struct {

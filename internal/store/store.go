@@ -342,8 +342,28 @@ type Store interface {
 	ListConversationAccessGroups(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.UserGroupID, error)
 	CreateInviteRequest(context.Context, domain.InviteRequest, events.Event) error
 	GetInviteRequest(context.Context, domain.WorkspaceID, domain.InviteRequestID) (domain.InviteRequest, error)
-	SetInviteRequestStatus(context.Context, domain.WorkspaceID, domain.InviteRequestID, domain.InviteRequestStatus, time.Time, events.Event) error
+	// SetInviteRequestStatus is a compare-and-set: the caller names the status
+	// it read and the status it wants. The previous status used to be an
+	// implicit "pending", which is why an approved invitation could not be
+	// withdrawn — the update matched no row and reported not found.
+	SetInviteRequestStatus(context.Context, domain.WorkspaceID, domain.InviteRequestID, domain.InviteRequestStatus, domain.InviteRequestStatus, time.Time, events.Event) error
 	ListInviteRequests(context.Context, domain.WorkspaceID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
+	// FindInviteRequestByEmail returns the one invitation for an address in a
+	// given state, or ErrNotFound. The address is the whole match: acceptance
+	// is decided against an email a provider has verified, so an invitation
+	// nobody has that address cannot be redeemed.
+	FindInviteRequestByEmail(context.Context, domain.WorkspaceID, string, domain.InviteRequestStatus) (domain.InviteRequest, error)
+	// AcceptInviteRequest turns an approved invitation into the member it
+	// promised, in one transaction: the invitation becomes accepted, the user
+	// and the workspace membership are created at the recorded guest tier, and
+	// every channel the invitation named is joined.
+	//
+	// Approval used to flip a status and do nothing else, so an accepted
+	// invitation produced no user, no membership and no channel: the whole
+	// promise was inert. Splitting the work across calls would let a crash
+	// leave a member with none of the channels they were invited to, or an
+	// invitation consumed with no member behind it.
+	AcceptInviteRequest(context.Context, domain.InviteRequestAcceptance, []events.Event) error
 	SetAppApproval(context.Context, domain.WorkspaceID, domain.AppID, domain.AppRequestID, domain.AppApprovalStatus, time.Time, events.Event) error
 	ListAppApprovals(context.Context, domain.WorkspaceID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	CreateAppConfigurationToken(context.Context, string, string, domain.AppConfigurationToken) error

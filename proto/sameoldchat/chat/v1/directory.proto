@@ -319,6 +319,25 @@ message InviteRequest {
   bool restricted = 12;
   bool ultra_restricted = 13;
   int64 guest_expiration_at = 14;
+  int64 expires_at = 15;
+  int64 accepted_at = 16;
+  string accepted_by = 17;
+}
+
+// InvitationPreviewRequest and AcceptInvitationRequest carry no actor. The
+// person they serve has no account yet; see the contract on
+// service.Messages.AcceptInvitationForEmail for why the verified address is
+// the whole authorization. These RPCs must only be reached over the mutually
+// authenticated chat connection.
+message InvitationPreviewRequest {
+  string workspace_id = 1;
+  string invite_request_id = 2;
+}
+
+message AcceptInvitationRequest {
+  string workspace_id = 1;
+  string email = 2;
+  string display_name = 3;
 }
 
 message InviteRequestsRequest {
@@ -404,6 +423,8 @@ service DirectoryService {
   rpc AdminApproveInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
   rpc AdminDenyInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
   rpc AdminListInviteRequests(InviteRequestsRequest) returns (InviteRequestPage);
+  rpc InvitationPreview(InvitationPreviewRequest) returns (InviteRequest);
+  rpc AcceptInvitationForEmail(AcceptInvitationRequest) returns (User);
   rpc AdminApproveApp(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminRestrictApp(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminListApps(AppApprovalsRequest) returns (AppApprovalPage);

@@ -3337,6 +3337,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /auth/validation", h.validation)
 		mux.HandleFunc("GET /me", h.me)
 		mux.HandleFunc("GET /app/admin/auth", h.authAdminPage)
+		// Deliberately reachable signed-out: the person it is for has no
+		// account yet. See internal/web/invite.go for why it carries no secret.
+		mux.HandleFunc("GET /app/invite/{inviteRequestID}", h.invitationPage)
 		mux.HandleFunc("GET /api/admin.auth.methods.list", h.authMethodsList)
 		mux.HandleFunc("POST /api/admin.auth.methods.set", h.authMethodSet)
 		mux.HandleFunc("POST /api/admin.auth.users.invite", h.authUserInvite)
@@ -9432,13 +9435,21 @@ func secureHeaders(w http.ResponseWriter, policy string) {
 }
 
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
+	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy)
+}
+
+// writeHTMLWithPolicy serves a page under a policy of its own. A page outside
+// the workspace shell carries a different set of inline scripts and a different
+// set of things it is allowed to do, and serving it under the workspace policy
+// would either allow more than it needs or block the scripts it has.
+func (h Handler) writeHTMLWithPolicy(w http.ResponseWriter, page *template.Template, data any, status int, unavailable, policy string) {
 	var output bytes.Buffer
 	if err := page.Execute(&output, data); err != nil {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, policy)
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, policy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(output.Bytes())

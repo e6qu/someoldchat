@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
  can_thread_types TEXT NOT NULL DEFAULT '[]', can_thread_users TEXT NOT NULL DEFAULT '[]',
  who_can_post_types TEXT NOT NULL DEFAULT '[]', who_can_post_users TEXT NOT NULL DEFAULT '[]'
 );
-CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0, accepted_by TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS app_bot_tokens (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), token_ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
@@ -480,7 +480,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 128
+const schemaVersion = 129
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2872,6 +2872,32 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index message threads: %w", err)
 		}
 	}
+	if version < 129 {
+		// An invitation now has a lifetime and a terminal accepted state.
+		// Before this, approving one flipped a status and produced nothing:
+		// no user, no membership and none of the channels it recorded.
+		columns, err := s.tableColumns(ctx, db, "invite_requests")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"expires_at INTEGER NOT NULL DEFAULT 0",
+			"accepted_at INTEGER NOT NULL DEFAULT 0",
+			"accepted_by TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE invite_requests ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate invite request %s: %w", name, err)
+			}
+		}
+		// Acceptance matches an invitation to a provider-verified address.
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS invite_requests_email ON invite_requests(workspace_id, status, email)`); err != nil {
+			return fmt.Errorf("index invite request addresses: %w", err)
+		}
+	}
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -3475,6 +3501,24 @@ func (s *Store) GetUser(ctx context.Context, id domain.UserID) (domain.User, err
 }
 
 func (s *Store) CreateUser(ctx context.Context, user domain.User, membership domain.WorkspaceMembership, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := createUserTx(ctx, tx, user, membership); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// createUserTx is CreateUser without its transaction, so a larger one —
+// accepting an invitation — creates the member it promised, joins the channels
+// it recorded and consumes the invitation together or not at all.
+func createUserTx(ctx context.Context, tx *sql.Tx, user domain.User, membership domain.WorkspaceMembership) error {
 	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
 		return store.InvalidArgument("user and active workspace membership are required")
 	}
@@ -3484,11 +3528,6 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 	if (membership.Restricted && membership.UltraRestricted) || (membership.Guest() && membership.Role != domain.WorkspaceRoleMember) {
 		return store.InvalidArgument("guest membership must have exactly one guest tier and the member role")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	var workspaceExists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, user.WorkspaceID).Scan(&workspaceExists); err != nil {
 		return translateNotFound(err)
@@ -3509,8 +3548,56 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, active, restricted, ultra_restricted) VALUES (?, ?, ?, 1, ?, ?)`, membership.WorkspaceID, membership.UserID, membership.Role, boolInt(membership.Restricted), boolInt(membership.UltraRestricted)); err != nil {
 		return classify(err)
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
+	return nil
+}
+
+func (s *Store) AcceptInviteRequest(ctx context.Context, acceptance domain.InviteRequestAcceptance, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return store.InvalidArgument("accepting an invitation requires at least one event")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
+	}
+	defer tx.Rollback()
+	request, err := scanInviteRequest(tx.QueryRowContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE id = ? AND workspace_id = ?`, acceptance.RequestID, acceptance.WorkspaceID))
+	if err != nil {
+		return translateNotFound(err)
+	}
+	if !request.Acceptable(acceptance.AcceptedAt) {
+		return store.ErrInvalidInviteRequest
+	}
+	if err := createUserTx(ctx, tx, acceptance.User, acceptance.Membership); err != nil {
+		return err
+	}
+	for _, channelID := range acceptance.Channels {
+		var conversationWorkspace string
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, channelID).Scan(&conversationWorkspace); err != nil {
+			return translateNotFound(err)
+		}
+		if domain.WorkspaceID(conversationWorkspace) != acceptance.WorkspaceID {
+			return store.ErrNotFound
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members (conversation_id, user_id) VALUES (?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`, channelID, acceptance.User.ID); err != nil {
+			return classify(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE invite_requests SET status = ?, accepted_at = ?, accepted_by = ? WHERE id = ? AND workspace_id = ? AND status = ?`,
+		domain.InviteRequestAccepted, acceptance.AcceptedAt.UTC().Unix(), acceptance.User.ID, acceptance.RequestID, acceptance.WorkspaceID, domain.InviteRequestApproved)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrInvalidInviteRequest
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -5248,7 +5335,7 @@ func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequ
 	if value.Status != domain.InviteRequestPending {
 		return store.ErrAlreadyExists
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO invite_requests(id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, value.ID, value.WorkspaceID, value.Email, value.RequestedBy, string(channelIDs), value.CustomMessage, value.RealName, boolInt(value.Resend), boolInt(value.Restricted), boolInt(value.UltraRestricted), unixSeconds(value.GuestExpirationAt), value.Status, value.CreatedAt.UTC().Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO invite_requests(id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, value.ID, value.WorkspaceID, value.Email, value.RequestedBy, string(channelIDs), value.CustomMessage, value.RealName, boolInt(value.Resend), boolInt(value.Restricted), boolInt(value.UltraRestricted), unixSeconds(value.GuestExpirationAt), value.Status, value.CreatedAt.UTC().Unix(), unixSeconds(value.ExpiresAt)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -5257,31 +5344,63 @@ func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequ
 	return tx.Commit()
 }
 
-func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
+// inviteRequestSelectColumns is the one column list every invitation read
+// uses. Three readers each carried their own copy and their own scan, so a
+// column added to one was silently missing from the others.
+const inviteRequestSelectColumns = `id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at, expires_at, accepted_at, accepted_by`
+
+func scanInviteRequest(row rowScanner) (domain.InviteRequest, error) {
 	var value domain.InviteRequest
-	var created, reviewed, expiration int64
+	var created, reviewed, guestExpiration, expires, accepted int64
 	var channelIDs string
 	var resend, restricted, ultraRestricted int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at FROM invite_requests WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.RequestedBy, &channelIDs, &value.CustomMessage, &value.RealName, &resend, &restricted, &ultraRestricted, &expiration, &value.Status, &created, &reviewed)
-	if err != nil {
-		return domain.InviteRequest{}, translateNotFound(err)
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.RequestedBy, &channelIDs, &value.CustomMessage, &value.RealName, &resend, &restricted, &ultraRestricted, &guestExpiration, &value.Status, &created, &reviewed, &expires, &accepted, &value.AcceptedBy); err != nil {
+		return domain.InviteRequest{}, err
 	}
 	if err := json.Unmarshal([]byte(channelIDs), &value.ChannelIDs); err != nil {
 		return domain.InviteRequest{}, fmt.Errorf("decode invite request channels: %w", err)
 	}
 	value.Resend, value.Restricted, value.UltraRestricted = resend != 0, restricted != 0, ultraRestricted != 0
-	if expiration != 0 {
-		value.GuestExpirationAt = time.Unix(expiration, 0).UTC()
+	if guestExpiration != 0 {
+		value.GuestExpirationAt = time.Unix(guestExpiration, 0).UTC()
 	}
 	value.CreatedAt = time.Unix(created, 0).UTC()
 	if reviewed != 0 {
 		value.ReviewedAt = time.Unix(reviewed, 0).UTC()
 	}
+	if expires != 0 {
+		value.ExpiresAt = time.Unix(expires, 0).UTC()
+	}
+	if accepted != 0 {
+		value.AcceptedAt = time.Unix(accepted, 0).UTC()
+	}
 	return value, nil
 }
 
-func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
-	if status != domain.InviteRequestApproved && status != domain.InviteRequestDenied {
+func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
+	value, err := scanInviteRequest(s.db.QueryRowContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE id = ? AND workspace_id = ?`, id, workspace))
+	if err != nil {
+		return domain.InviteRequest{}, translateNotFound(err)
+	}
+	return value, nil
+}
+
+func (s *Store) FindInviteRequestByEmail(ctx context.Context, workspace domain.WorkspaceID, email string, status domain.InviteRequestStatus) (domain.InviteRequest, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return domain.InviteRequest{}, store.ErrNotFound
+	}
+	// Newest first: an address invited twice is being re-invited, and the
+	// older record is the stale one.
+	value, err := scanInviteRequest(s.db.QueryRowContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE workspace_id = ? AND status = ? AND lower(email) = ? ORDER BY created_at DESC, id DESC LIMIT 1`, workspace, status, normalized))
+	if err != nil {
+		return domain.InviteRequest{}, translateNotFound(err)
+	}
+	return value, nil
+}
+
+func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, from, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
+	if !domain.InviteRequestReviewable(from, status) {
 		return store.ErrInvalidInviteRequest
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -5289,7 +5408,7 @@ func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.Wor
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE invite_requests SET status = ?, reviewed_at = ? WHERE id = ? AND workspace_id = ? AND status = ?`, status, reviewedAt.UTC().Unix(), id, workspace, domain.InviteRequestPending)
+	result, err := tx.ExecContext(ctx, `UPDATE invite_requests SET status = ?, reviewed_at = ? WHERE id = ? AND workspace_id = ? AND status = ?`, status, reviewedAt.UTC().Unix(), id, workspace, from)
 	if err != nil {
 		return err
 	}
@@ -5314,30 +5433,16 @@ func (s *Store) ListInviteRequests(ctx context.Context, workspace domain.Workspa
 	if err != nil {
 		return domain.InviteRequestPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at FROM invite_requests WHERE workspace_id = ? AND status = ? AND id > ? ORDER BY id LIMIT ?`, workspace, status, after, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE workspace_id = ? AND status = ? AND id > ? ORDER BY id LIMIT ?`, workspace, status, after, request.Limit+1)
 	if err != nil {
 		return domain.InviteRequestPage{}, err
 	}
 	defer rows.Close()
 	values := make([]domain.InviteRequest, 0, request.Limit+1)
 	for rows.Next() {
-		var value domain.InviteRequest
-		var created, reviewed, expiration int64
-		var channelIDs string
-		var resend, restricted, ultraRestricted int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.RequestedBy, &channelIDs, &value.CustomMessage, &value.RealName, &resend, &restricted, &ultraRestricted, &expiration, &value.Status, &created, &reviewed); err != nil {
+		value, err := scanInviteRequest(rows)
+		if err != nil {
 			return domain.InviteRequestPage{}, err
-		}
-		if err := json.Unmarshal([]byte(channelIDs), &value.ChannelIDs); err != nil {
-			return domain.InviteRequestPage{}, fmt.Errorf("decode invite request channels: %w", err)
-		}
-		value.Resend, value.Restricted, value.UltraRestricted = resend != 0, restricted != 0, ultraRestricted != 0
-		if expiration != 0 {
-			value.GuestExpirationAt = time.Unix(expiration, 0).UTC()
-		}
-		value.CreatedAt = time.Unix(created, 0).UTC()
-		if reviewed != 0 {
-			value.ReviewedAt = time.Unix(reviewed, 0).UTC()
 		}
 		values = append(values, value)
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -595,6 +596,18 @@ func safeLocalReturn(raw string) string {
 // when the assertion is absent, not only when it is explicitly false.
 var ErrUnverifiedProviderEmail = errors.New("authorization provider did not assert a verified email address")
 
+// identityDisplayName is the name to show for a provider identity, preferring
+// what the provider asserts and falling back to the address it verified.
+func identityDisplayName(identity externalIdentity) string {
+	if identity.Name != "" {
+		return identity.Name
+	}
+	if identity.PreferredUsername != "" {
+		return identity.PreferredUsername
+	}
+	return identity.Email
+}
+
 func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, identity externalIdentity) (domain.User, domain.WorkspaceRole, error) {
 	link, err := h.service.GetExternalIdentity(ctx, h.workspace, provider, identity.Subject)
 	if err == nil {
@@ -617,18 +630,28 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 	}
 
 	user, err := h.service.UserByEmail(ctx, h.workspace, h.lookupUser, identity.Email)
+	if errors.Is(err, store.ErrNotFound) {
+		// An approved invitation is a standing decision an administrator made
+		// about exactly this address, so it outranks provider-driven
+		// provisioning and applies to every provider. Approving one used to
+		// change a status and nothing else: the invited person still could not
+		// sign in, and the channels the invitation recorded were never joined.
+		invited, inviteErr := h.service.AcceptInvitationForEmail(ctx, h.workspace, identity.Email, identityDisplayName(identity))
+		switch {
+		case inviteErr == nil:
+			user, err = invited, nil
+		case errors.Is(inviteErr, service.ErrInvitationExpired):
+			return domain.User{}, "", inviteErr
+		case !errors.Is(inviteErr, store.ErrNotFound):
+			return domain.User{}, "", inviteErr
+		}
+	}
 	if errors.Is(err, store.ErrNotFound) && provider == "oidc" {
 		role, roleErr := oidcWorkspaceRole(identity.Role)
 		if roleErr != nil {
 			return domain.User{}, "", roleErr
 		}
-		displayName := identity.Name
-		if displayName == "" {
-			displayName = identity.PreferredUsername
-		}
-		if displayName == "" {
-			displayName = identity.Email
-		}
+		displayName := identityDisplayName(identity)
 		// First-login provisioning has no administrator behind it and no
 		// session for the user it creates, so it runs as the system operation
 		// whose authority is the provider assertion verified above — not as the

@@ -1016,6 +1016,13 @@ func (s *Store) GetUser(_ context.Context, id domain.UserID) (domain.User, error
 func (s *Store) CreateUser(_ context.Context, user domain.User, membership domain.WorkspaceMembership, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createUserLocked(user, membership, &event)
+}
+
+// createUserLocked is CreateUser without the lock or the event, so a larger
+// transaction — accepting an invitation — can create the member it promised
+// under the same lock as the rest of its writes.
+func (s *Store) createUserLocked(user domain.User, membership domain.WorkspaceMembership, event *events.Event) error {
 	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
 		return store.InvalidArgument("user and active workspace membership are required")
 	}
@@ -1048,7 +1055,9 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 	}
 	s.users[user.ID] = user
 	s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)] = membership
-	s.outbox = append(s.outbox, event)
+	if event != nil {
+		s.outbox = append(s.outbox, *event)
+	}
 	return nil
 }
 
@@ -2150,15 +2159,18 @@ func (s *Store) GetInviteRequest(_ context.Context, workspace domain.WorkspaceID
 	return cloneInviteRequest(value), nil
 }
 
-func (s *Store) SetInviteRequestStatus(_ context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
+func (s *Store) SetInviteRequestStatus(_ context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, from, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.inviteRequests[id]
 	if !ok || value.WorkspaceID != workspace {
 		return store.ErrNotFound
 	}
-	if value.Status != domain.InviteRequestPending || (status != domain.InviteRequestApproved && status != domain.InviteRequestDenied) {
+	if !domain.InviteRequestReviewable(from, status) {
 		return store.ErrInvalidInviteRequest
+	}
+	if value.Status != from {
+		return store.ErrNotFound
 	}
 	value.Status = status
 	value.ReviewedAt = reviewedAt.UTC()
@@ -2190,6 +2202,65 @@ func (s *Store) ListInviteRequests(_ context.Context, workspace domain.Workspace
 	}
 	page.Requests = values
 	return page, err
+}
+
+func (s *Store) FindInviteRequestByEmail(_ context.Context, workspace domain.WorkspaceID, email string, status domain.InviteRequestStatus) (domain.InviteRequest, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return domain.InviteRequest{}, store.ErrNotFound
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	found := domain.InviteRequest{}
+	exists := false
+	for _, value := range s.inviteRequests {
+		if value.WorkspaceID != workspace || value.Status != status || domain.NormalizeEmail(value.Email) != normalized {
+			continue
+		}
+		// The newest invitation wins: an address invited twice is being
+		// re-invited, and the older record is the stale one.
+		if !exists || value.CreatedAt.After(found.CreatedAt) || (value.CreatedAt.Equal(found.CreatedAt) && value.ID > found.ID) {
+			found, exists = value, true
+		}
+	}
+	if !exists {
+		return domain.InviteRequest{}, store.ErrNotFound
+	}
+	return cloneInviteRequest(found), nil
+}
+
+func (s *Store) AcceptInviteRequest(_ context.Context, acceptance domain.InviteRequestAcceptance, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return store.InvalidArgument("accepting an invitation requires at least one event")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	request, exists := s.inviteRequests[acceptance.RequestID]
+	if !exists || request.WorkspaceID != acceptance.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if !request.Acceptable(acceptance.AcceptedAt) {
+		return store.ErrInvalidInviteRequest
+	}
+	if err := s.createUserLocked(acceptance.User, acceptance.Membership, nil); err != nil {
+		return err
+	}
+	for _, channelID := range acceptance.Channels {
+		conversation, ok := s.conversations[channelID]
+		if !ok || conversation.WorkspaceID != acceptance.WorkspaceID {
+			return store.ErrNotFound
+		}
+		if s.memberships[channelID] == nil {
+			s.memberships[channelID] = make(map[domain.UserID]struct{})
+		}
+		s.memberships[channelID][acceptance.User.ID] = struct{}{}
+	}
+	request.Status = domain.InviteRequestAccepted
+	request.AcceptedAt = acceptance.AcceptedAt.UTC()
+	request.AcceptedBy = acceptance.User.ID
+	s.inviteRequests[acceptance.RequestID] = request
+	s.outbox = append(s.outbox, emitted...)
+	return nil
 }
 
 func validAppApprovalStatus(status domain.AppApprovalStatus) bool {

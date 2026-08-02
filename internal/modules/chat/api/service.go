@@ -122,6 +122,11 @@ type Service interface {
 	AdminApproveInviteRequest(context.Context, domain.WorkspaceID, domain.UserID, domain.InviteRequestID) error
 	AdminDenyInviteRequest(context.Context, domain.WorkspaceID, domain.UserID, domain.InviteRequestID) error
 	AdminListInviteRequests(context.Context, domain.WorkspaceID, domain.UserID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
+	// InvitationPreview and AcceptInvitationForEmail carry no actor: the person
+	// they serve has no account and no session yet. See the contracts on
+	// service.Messages, which explain why each is safe without one.
+	InvitationPreview(context.Context, domain.WorkspaceID, domain.InviteRequestID) (domain.InviteRequest, error)
+	AcceptInvitationForEmail(context.Context, domain.WorkspaceID, string, string) (domain.User, error)
 	AdminInviteUser(context.Context, domain.WorkspaceID, domain.UserID, string, []domain.ConversationID, string, string, bool, bool, bool, time.Time) error
 	AdminCreateUser(context.Context, domain.WorkspaceID, domain.UserID, string, string, domain.WorkspaceRole) (domain.User, error)
 	AdminListUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.AdminUserPage, error)

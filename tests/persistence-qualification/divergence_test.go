@@ -1590,6 +1590,88 @@ func deletingTheLastCarrierRetractsTheFileShare(t *testing.T, open opener) {
 	}
 }
 
+// Accepting an invitation creates a member, a membership at the recorded guest
+// tier and every channel join the invitation named. All of it commits together
+// or none of it does: a partial acceptance would leave a member who cannot see
+// the channels they were invited to, or consume an invitation with no member
+// behind it, and either state is unrecoverable without an administrator.
+func acceptingAnInvitationCommitsTheWholeMembership(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	second := domain.ConversationID("C-invited-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: second, WorkspaceID: f.workspaceID, Name: "invited"}); err != nil {
+		t.Fatal(err)
+	}
+	invitation := domain.InviteRequest{
+		ID: domain.InviteRequestID("IR-" + f.suffix), WorkspaceID: f.workspaceID,
+		Email: "invited-" + f.suffix + "@example.com", RequestedBy: f.userID,
+		ChannelIDs: []domain.ConversationID{f.channelID, second}, RealName: "Invited",
+		Restricted: true, Status: domain.InviteRequestPending,
+		CreatedAt: time.Unix(1_700_000_700, 0).UTC(), ExpiresAt: time.Unix(1_800_000_000, 0).UTC(),
+	}
+	if err := f.repository.CreateInviteRequest(ctx, invitation, f.event("invite-create", "invite_request.created", string(invitation.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	newcomer := domain.UserID("U-invited-" + f.suffix)
+	acceptance := domain.InviteRequestAcceptance{
+		WorkspaceID: f.workspaceID, RequestID: invitation.ID,
+		User:       domain.User{ID: newcomer, WorkspaceID: f.workspaceID, Email: invitation.Email, Name: "Invited", RealName: "Invited"},
+		Membership: domain.WorkspaceMembership{WorkspaceID: f.workspaceID, UserID: newcomer, Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
+		Channels:   invitation.ChannelIDs,
+		AcceptedAt: time.Unix(1_700_000_800, 0).UTC(),
+	}
+	accept := func() error {
+		return f.repository.AcceptInviteRequest(ctx, acceptance, []events.Event{f.event("invite-accept", "invite_request.accepted", string(invitation.ID))})
+	}
+
+	// Nothing is acceptable until it is approved, and nothing may be written
+	// on the way to finding that out.
+	if err := accept(); err == nil {
+		t.Fatal("an unapproved invitation was accepted")
+	}
+	if _, err := f.repository.FindUserByEmail(ctx, f.workspaceID, invitation.Email); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a refused acceptance created a user anyway: %v", err)
+	}
+
+	if err := f.repository.SetInviteRequestStatus(ctx, f.workspaceID, invitation.ID, domain.InviteRequestPending, domain.InviteRequestApproved, time.Unix(1_700_000_750, 0).UTC(), f.event("invite-approve", "invite_request.approved", string(invitation.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := accept(); err != nil {
+		t.Fatal(err)
+	}
+
+	membership, err := f.repository.GetWorkspaceMembership(ctx, f.workspaceID, newcomer)
+	if err != nil || !membership.Active || !membership.Restricted || membership.UltraRestricted {
+		t.Fatalf("membership=%+v err=%v, want an active multi-channel guest", membership, err)
+	}
+	for _, channelID := range invitation.ChannelIDs {
+		members, listErr := f.repository.ListConversationMembers(ctx, channelID, domain.PageRequest{Limit: 50})
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		joined := false
+		for _, member := range members.Users {
+			if member.ID == newcomer {
+				joined = true
+			}
+		}
+		if !joined {
+			t.Fatalf("the accepted member did not join %s", channelID)
+		}
+	}
+	stored, err := f.repository.GetInviteRequest(ctx, f.workspaceID, invitation.ID)
+	if err != nil || stored.Status != domain.InviteRequestAccepted || stored.AcceptedBy != newcomer || stored.AcceptedAt.IsZero() {
+		t.Fatalf("invitation=%+v err=%v", stored, err)
+	}
+	// Single use.
+	if err := accept(); err == nil {
+		t.Fatal("an invitation was accepted twice")
+	}
+}
+
 // A timeline renders many parents at once, so thread summaries are read in
 // one batched call rather than one read per parent. Every profile must return
 // the same counts, the same participant list in the same order, and the same

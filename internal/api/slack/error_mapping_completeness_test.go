@@ -214,6 +214,7 @@ func recordedNonPinnedCodes() map[string]string {
 		"emoji_not_found":                "admin.emoji.* declares no error enum",
 		"emoji_already_exists":           "admin.emoji.add declares no error enum",
 		"invite_request_not_found":       "admin.inviteRequests.* declares no error enum",
+		"invitation_expired":             "admin.inviteRequests.* declares no error enum; an invitation that has aged out is a distinct outcome from a malformed one and the remedy differs",
 		"app_not_found":                  "admin.apps.* declares no error enum",
 		"usergroup_not_found":            "no pinned enum declares a subteam-not-found code, not even no_such_subteam",
 		"view_not_found":                 "views.* declares no error enum",

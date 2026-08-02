@@ -105,6 +105,10 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_emoji", code: codes.InvalidArgument, sentinel: service.ErrInvalidEmoji},
 	{key: "service.invalid_remote_file", code: codes.InvalidArgument, sentinel: service.ErrInvalidRemoteFile},
 	{key: "service.invalid_invite_request", code: codes.InvalidArgument, sentinel: service.ErrInvalidInviteRequest},
+	// FailedPrecondition, not InvalidArgument: the request is well formed and
+	// the invitation is real; it is the state that refuses, and retrying with a
+	// corrected argument cannot help.
+	{key: "service.invitation_expired", code: codes.FailedPrecondition, sentinel: service.ErrInvitationExpired},
 	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppApproval},
 	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidView},
 	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkflowStep},

@@ -1802,6 +1802,22 @@ func (r Remote) AdminListInviteRequests(ctx context.Context, workspaceID domain.
 	return domain.InviteRequestPage{Requests: values, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
 }
 
+func (r Remote) InvitationPreview(ctx context.Context, workspaceID domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
+	out, err := r.directory.InvitationPreview(ctx, &chatv1.InvitationPreviewRequest{WorkspaceId: string(workspaceID), InviteRequestId: string(id)})
+	if err != nil {
+		return domain.InviteRequest{}, err
+	}
+	return decodeProtoInviteRequest(out), nil
+}
+
+func (r Remote) AcceptInvitationForEmail(ctx context.Context, workspaceID domain.WorkspaceID, email, displayName string) (domain.User, error) {
+	out, err := r.directory.AcceptInvitationForEmail(ctx, &chatv1.AcceptInvitationRequest{WorkspaceId: string(workspaceID), Email: email, DisplayName: displayName})
+	if err != nil {
+		return domain.User{}, err
+	}
+	return decodeProtoUser(out)
+}
+
 func (r Remote) AdminApproveApp(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
 	out, err := r.directory.AdminApproveApp(ctx, &chatv1.AppApprovalMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), RequestId: string(requestID)})
 	if err != nil {
@@ -4698,6 +4714,22 @@ func (s *Server) AdminDenyInviteRequest(ctx context.Context, input *chatv1.Invit
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) InvitationPreview(ctx context.Context, input *chatv1.InvitationPreviewRequest) (*chatv1.InviteRequest, error) {
+	value, err := s.implementation.InvitationPreview(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.InviteRequestID(input.GetInviteRequestId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoInviteRequest(value), nil
+}
+
+func (s *Server) AcceptInvitationForEmail(ctx context.Context, input *chatv1.AcceptInvitationRequest) (*chatv1.User, error) {
+	user, err := s.implementation.AcceptInvitationForEmail(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetEmail(), input.GetDisplayName())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoUser(user), nil
 }
 
 func (s *Server) AdminListInviteRequests(ctx context.Context, input *chatv1.InviteRequestsRequest) (*chatv1.InviteRequestPage, error) {
@@ -7758,6 +7790,13 @@ func encodeProtoInviteRequest(value domain.InviteRequest) *chatv1.InviteRequest 
 	if !value.ReviewedAt.IsZero() {
 		result.ReviewedAt = value.ReviewedAt.Unix()
 	}
+	if !value.ExpiresAt.IsZero() {
+		result.ExpiresAt = value.ExpiresAt.Unix()
+	}
+	if !value.AcceptedAt.IsZero() {
+		result.AcceptedAt = value.AcceptedAt.Unix()
+	}
+	result.AcceptedBy = string(value.AcceptedBy)
 	return result
 }
 
@@ -7781,6 +7820,13 @@ func decodeProtoInviteRequest(value *chatv1.InviteRequest) domain.InviteRequest 
 	if value.GetReviewedAt() != 0 {
 		result.ReviewedAt = time.Unix(value.GetReviewedAt(), 0).UTC()
 	}
+	if value.GetExpiresAt() != 0 {
+		result.ExpiresAt = time.Unix(value.GetExpiresAt(), 0).UTC()
+	}
+	if value.GetAcceptedAt() != 0 {
+		result.AcceptedAt = time.Unix(value.GetAcceptedAt(), 0).UTC()
+	}
+	result.AcceptedBy = domain.UserID(value.GetAcceptedBy())
 	return result
 }
 

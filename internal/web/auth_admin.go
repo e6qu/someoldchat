@@ -106,8 +106,12 @@ const authAdminMarkup = `{{define "title"}}Workspace administration · SameOldCh
 <button class="toggle" type="submit">Record invitation</button>
 </form>
 <p class="read-only">A guest expiry applies only to the two guest tiers. A full member never expires.</p>{{end}}
-<div class="table-scroll"><table><thead><tr><th scope="col">Invited</th><th scope="col">Access</th><th scope="col">Channels</th><th scope="col">Requested</th><th scope="col">Actions</th></tr></thead><tbody>{{range .InviteRequests}}<tr><td><strong>{{.RealName}}</strong><br><span class="user-email">{{.Email}}</span></td><td>{{.Tier}}{{if .Expires}}<br><span class="status">until <time datetime="{{.ExpiresMachine}}" data-local-time>{{.Expires}}</time></span>{{end}}</td><td>{{if .Channels}}{{range .Channels}}#{{.Name}} {{end}}{{else}}<span class="read-only">None recorded</span>{{end}}</td><td><time datetime="{{.RequestedMachine}}" data-local-time>{{.Requested}}</time><br><span class="status">by {{.RequestedBy}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/app/admin/invites/approve"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_request_id" value="{{.ID}}"><button class="toggle" type="submit" aria-label="Approve the invitation for {{.Email}}">Approve</button></form><form class="inline-form" method="post" action="/app/admin/invites/deny"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_request_id" value="{{.ID}}"><button class="toggle danger" type="submit" aria-label="Deny the invitation for {{.Email}}">Deny</button></form>{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{else}}<tr><td colspan="5"><p class="empty">No invitation is waiting for a decision.</p></td></tr>{{end}}</tbody></table></div>
-{{if .MoreInvitesURL}}<p class="pager"><a href="{{.MoreInvitesURL}}">More invitations</a></p>{{end}}</section>{{end}}
+<div class="table-scroll"><table><thead><tr><th scope="col">Invited</th><th scope="col">Access</th><th scope="col">Channels</th><th scope="col">Requested</th><th scope="col">Actions</th></tr></thead><tbody>{{range .InviteRequests}}<tr><td><strong>{{.RealName}}</strong><br><span class="user-email">{{.Email}}</span></td><td>{{.Tier}}{{if .GuestExpires}}<br><span class="status">guest until {{.GuestExpires}}</span>{{end}}</td><td>{{if .Channels}}{{range .Channels}}#{{.Name}} {{end}}{{else}}<span class="read-only">None recorded</span>{{end}}</td><td><time datetime="{{.RequestedMachine}}" data-local-time>{{.Requested}}</time><br><span class="status">by {{.RequestedBy}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/app/admin/invites/approve"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_request_id" value="{{.ID}}"><button class="toggle" type="submit" aria-label="Approve the invitation for {{.Email}}">Approve</button></form><form class="inline-form" method="post" action="/app/admin/invites/deny"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_request_id" value="{{.ID}}"><button class="toggle danger" type="submit" aria-label="Deny the invitation for {{.Email}}">Deny</button></form>{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{else}}<tr><td colspan="5"><p class="empty">No invitation is waiting for a decision.</p></td></tr>{{end}}</tbody></table></div>
+{{if .MoreInvitesURL}}<p class="pager"><a href="{{.MoreInvitesURL}}">More invitations</a></p>{{end}}
+<h3>Approved, waiting to be accepted</h3>
+<p class="read-only">There is no mail transport here, so send the link yourself. Opening it grants nothing on its own: the account is created only when someone signs in with the invited address, verified by the identity provider.</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">Invited</th><th scope="col">Access</th><th scope="col">Link to send</th><th scope="col">Valid until</th><th scope="col">Actions</th></tr></thead><tbody>{{range .ApprovedInvites}}<tr><td><strong>{{.RealName}}</strong><br><span class="user-email">{{.Email}}</span></td><td>{{.Tier}}{{if .GuestExpires}}<br><span class="status">guest until {{.GuestExpires}}</span>{{end}}</td><td><a href="{{.Link}}">{{.Link}}</a></td><td>{{if .Expires}}<time datetime="{{.ExpiresMachine}}" data-local-time>{{.Expires}}</time>{{else}}<span class="read-only">No expiry</span>{{end}}</td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/app/admin/invites/deny"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_request_id" value="{{.ID}}"><button class="toggle danger" type="submit" aria-label="Withdraw the invitation for {{.Email}}">Withdraw</button></form>{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{else}}<tr><td colspan="5"><p class="empty">No approved invitation is waiting to be accepted.</p></td></tr>{{end}}</tbody></table></div>
+</section>{{end}}
 {{if .CanReadApps}}<section class="card" aria-labelledby="apps-heading"><div class="section-head"><h2 id="apps-heading">App requests</h2><p>An app a member asked to install. Approving it lets the app be installed; restricting it refuses the request and keeps the record.</p></div>
 <div class="table-scroll"><table><thead><tr><th scope="col">App</th><th scope="col">Status</th><th scope="col">Requested</th><th scope="col">Actions</th></tr></thead><tbody>{{range .AppRequests}}<tr><td><strong>{{.ID}}</strong></td><td><span class="status">{{.Status}}</span></td><td><time datetime="{{.RequestedMachine}}" data-local-time>{{.Requested}}</time></td><td><div class="actions">{{if $.CanWriteApps}}<form class="inline-form" method="post" action="/app/admin/apps/approve"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{.ID}}"><input type="hidden" name="request_id" value="{{.RequestID}}"><button class="toggle" type="submit" aria-label="Approve {{.ID}}">Approve</button></form><form class="inline-form" method="post" action="/app/admin/apps/restrict"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{.ID}}"><input type="hidden" name="request_id" value="{{.RequestID}}"><button class="toggle danger" type="submit" aria-label="Restrict {{.ID}}">Restrict</button></form>{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{else}}<tr><td colspan="4"><p class="empty">No app is waiting for a decision.</p></td></tr>{{end}}</tbody></table></div>
 {{if .MoreAppsURL}}<p class="pager"><a href="{{.MoreAppsURL}}">More app requests</a></p>{{end}}</section>{{end}}
@@ -134,8 +138,9 @@ type authAdminPageData struct {
 	NextPageURL    string
 	InviteTiers    []authAdminTierOption
 	InviteChannels []conversationView
-	InviteRequests []authAdminInviteView
-	MoreInvitesURL string
+	InviteRequests  []authAdminInviteView
+	ApprovedInvites []authAdminInviteView
+	MoreInvitesURL  string
 	AppRequests    []authAdminAppView
 	MoreAppsURL    string
 }
@@ -168,6 +173,12 @@ func authAdminTierLabel(request domain.InviteRequest) string {
 
 type authAdminInviteView struct {
 	ID               domain.InviteRequestID
+	// Link is the page to send to the invited person. It is only set for an
+	// approved invitation, because that is the only state the page can be
+	// acted on from.
+	Link             string
+	Expires          string
+	ExpiresMachine   string
 	Email            string
 	RealName         string
 	Tier             string
@@ -175,8 +186,7 @@ type authAdminInviteView struct {
 	Requested        string
 	RequestedMachine string
 	RequestedBy      string
-	Expires          string
-	ExpiresMachine   string
+	GuestExpires     string
 }
 
 // authAdminAppView names the app by its identifier: an approval record carries
@@ -411,31 +421,51 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 				data.InviteChannels = options
 			}
 		}
-		invites, invitesErr := h.Messages.AdminListInviteRequests(r.Context(), principal.WorkspaceID, principal.UserID, domain.InviteRequestPending, domain.PageRequest{Limit: 25})
-		if invitesErr != nil && !errors.Is(invitesErr, service.ErrNotWorkspaceAdmin) {
-			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "invitations_unavailable", Title: "Temporarily unavailable", Message: "Pending invitations could not be read."})
+		queue := func(status domain.InviteRequestStatus) ([]authAdminInviteView, domain.Cursor, bool) {
+			page, pageErr := h.Messages.AdminListInviteRequests(r.Context(), principal.WorkspaceID, principal.UserID, status, domain.PageRequest{Limit: 25})
+			if pageErr != nil && !errors.Is(pageErr, service.ErrNotWorkspaceAdmin) {
+				h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "invitations_unavailable", Title: "Temporarily unavailable", Message: "Invitations could not be read."})
+				return nil, "", false
+			}
+			views := make([]authAdminInviteView, 0, len(page.Requests))
+			for _, request := range page.Requests {
+				view := authAdminInviteView{
+					ID: request.ID, Email: request.Email, RealName: request.RealName,
+					Tier:             authAdminTierLabel(request),
+					Requested:        formatTime(request.CreatedAt),
+					RequestedMachine: request.CreatedAt.UTC().Format(time.RFC3339Nano),
+					RequestedBy:      names.name(request.RequestedBy),
+				}
+				if !request.GuestExpirationAt.IsZero() {
+					view.GuestExpires = formatTime(request.GuestExpirationAt)
+				}
+				if !request.ExpiresAt.IsZero() {
+					view.Expires = formatTime(request.ExpiresAt)
+					view.ExpiresMachine = request.ExpiresAt.UTC().Format(time.RFC3339Nano)
+				}
+				if status == domain.InviteRequestApproved {
+					view.Link = h.invitationLink(request.ID)
+				}
+				for _, channelID := range request.ChannelIDs {
+					view.Channels = append(view.Channels, conversationView{ID: string(channelID), Name: names.channelName(channelID)})
+				}
+				views = append(views, view)
+			}
+			return views, page.NextCursor, true
+		}
+		pending, nextPending, ok := queue(domain.InviteRequestPending)
+		if !ok {
 			return
 		}
-		for _, request := range invites.Requests {
-			view := authAdminInviteView{
-				ID: request.ID, Email: request.Email, RealName: request.RealName,
-				Tier:             authAdminTierLabel(request),
-				Requested:        formatTime(request.CreatedAt),
-				RequestedMachine: request.CreatedAt.UTC().Format(time.RFC3339Nano),
-				RequestedBy:      names.name(request.RequestedBy),
-			}
-			if !request.GuestExpirationAt.IsZero() {
-				view.Expires = formatTime(request.GuestExpirationAt)
-				view.ExpiresMachine = request.GuestExpirationAt.UTC().Format(time.RFC3339Nano)
-			}
-			for _, channelID := range request.ChannelIDs {
-				view.Channels = append(view.Channels, conversationView{ID: string(channelID), Name: names.channelName(channelID)})
-			}
-			data.InviteRequests = append(data.InviteRequests, view)
+		data.InviteRequests = pending
+		if nextPending != "" {
+			data.MoreInvitesURL = "/app/admin/auth?invites_cursor=" + url.QueryEscape(string(nextPending))
 		}
-		if invites.NextCursor != "" {
-			data.MoreInvitesURL = "/app/admin/auth?invites_cursor=" + url.QueryEscape(string(invites.NextCursor))
+		approved, _, approvedOK := queue(domain.InviteRequestApproved)
+		if !approvedOK {
+			return
 		}
+		data.ApprovedInvites = approved
 	}
 	if canReadApps {
 		apps, appsErr := h.Messages.AdminListApps(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppApprovalRequested, domain.PageRequest{Limit: 25})
@@ -465,6 +495,17 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(rendered.Bytes())
 }
 
+
+// invitationLink is the address to hand to the invited person. It is absolute
+// when the deployment knows its own public URL, because the link leaves this
+// browser and a relative path is useless once it does.
+func (h Handler) invitationLink(id domain.InviteRequestID) string {
+	path := "/app/invite/" + url.PathEscape(string(id))
+	if strings.TrimSpace(h.PublicURL) == "" {
+		return path
+	}
+	return strings.TrimRight(h.PublicURL, "/") + path
+}
 
 func (h Handler) authProviderNames() []string {
 	names := make([]string, 0, len(h.Login.providers))
