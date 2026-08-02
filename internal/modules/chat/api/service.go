@@ -96,6 +96,7 @@ type Service interface {
 	// resolve them differently from the sweep.
 	WorkspaceRetention(context.Context, domain.WorkspaceID, domain.UserID) (domain.RetentionPolicy, error)
 	SetWorkspaceRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.RetentionPolicy) (domain.RetentionPolicy, error)
+	LastRetentionSweep(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
 	ConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationRetention, int, error)
 	SetConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) error
 	RemoveConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error

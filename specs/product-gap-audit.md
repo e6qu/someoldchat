@@ -9,11 +9,12 @@ Measured on 2026-08-02:
 
 - 236 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
-- 208 current methods are recorded as behavior-compatible, 35 as
+- 211 current methods are recorded as behavior-compatible, 35 as
   SDK-compatible, two as schema-compatible, and none as live-differential
-  `verified-against-slack`. The nine `conversations.*SharedInvite*` methods
-  moved from unimplemented to behavior-compatible with this change, bounded to
-  organizations inside one deployment;
+  `verified-against-slack`. The three
+  `admin.conversations.*CustomRetention` methods moved from unimplemented to
+  behavior-compatible with this change, bounded to messages and files and to
+  the workspace administrator role rather than Slack's Enterprise plan gate;
 - the Events API surface emits 40 event names: the message family (with the
   message_changed/message_deleted subtypes and the projection-derived
   app_mention), reactions, pins, stars, membership, app_home_opened,
@@ -108,6 +109,7 @@ implementation MUST NOT narrow the target.
 
 | Journey | What now exists |
 | --- | --- |
+| Retention (ADMIN-05) | Workspace and per-conversation retention with a real sweep. Deletion is permanent and cascades through everything referencing a message; a thread is retained until its newest reply expires; files expire on their own date and only when no other conversation still shares them. `admin.conversations.{get,set,remove}CustomRetention` are behavior-compatible. Canvases and lists remain a bounded gap. |
 | Message chrome | Copy link and a resolvable `/archives` permalink, forward with a destination picker, an edited marker from a durable fact, thread reply summaries read in one batched call, date separators and the unread divider, mark-unread-from-here, broadcast-to-channel, and system join/topic/name notices committed with the change they describe. |
 | Files | The uploader's delete control, a remote-file surface that never claims to host the bytes, and `file.unshared` produced when deleting the last message that shared a file — which also retracts the share the file's visibility is derived from. |
 | Invitations (AUTH-05) | Recording, issuing and accepting are three distinct transitions. Acceptance creates the user, the membership at the recorded guest tier and every channel join in one transaction, matched against a provider-verified address, and `GET /app/invite/{id}` answers every terminal state distinctly to a signed-out visitor. |

@@ -9296,6 +9296,17 @@ type expiredMessage struct {
 	Thread  domain.MessageTimestamp
 }
 
+func (s *Store) LastRetentionSweep(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	var swept sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MAX(retention_swept_at) FROM conversations WHERE workspace_id = ?`, workspace).Scan(&swept); err != nil {
+		return time.Time{}, err
+	}
+	if !swept.Valid || swept.Int64 == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(swept.Int64, 0).UTC(), nil
+}
+
 func (s *Store) AppendRetentionEvents(ctx context.Context, workspace domain.WorkspaceID, emitted []events.Event) error {
 	if len(emitted) == 0 {
 		return nil

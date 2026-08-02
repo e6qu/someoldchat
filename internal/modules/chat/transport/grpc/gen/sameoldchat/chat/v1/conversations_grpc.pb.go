@@ -31,6 +31,7 @@ const (
 	ConversationsService_SetExternalInvitePermissions_FullMethodName = "/sameoldchat.chat.v1.ConversationsService/SetExternalInvitePermissions"
 	ConversationsService_GetWorkspaceRetention_FullMethodName        = "/sameoldchat.chat.v1.ConversationsService/GetWorkspaceRetention"
 	ConversationsService_SetWorkspaceRetention_FullMethodName        = "/sameoldchat.chat.v1.ConversationsService/SetWorkspaceRetention"
+	ConversationsService_GetLastRetentionSweep_FullMethodName        = "/sameoldchat.chat.v1.ConversationsService/GetLastRetentionSweep"
 	ConversationsService_GetConversationRetention_FullMethodName     = "/sameoldchat.chat.v1.ConversationsService/GetConversationRetention"
 	ConversationsService_SetConversationRetention_FullMethodName     = "/sameoldchat.chat.v1.ConversationsService/SetConversationRetention"
 	ConversationsService_RemoveConversationRetention_FullMethodName  = "/sameoldchat.chat.v1.ConversationsService/RemoveConversationRetention"
@@ -54,6 +55,7 @@ type ConversationsServiceClient interface {
 	// shadow the RetentionPolicy message type for every later return here.
 	GetWorkspaceRetention(ctx context.Context, in *RetentionPolicyRequest, opts ...grpc.CallOption) (*RetentionPolicy, error)
 	SetWorkspaceRetention(ctx context.Context, in *RetentionPolicyRequest, opts ...grpc.CallOption) (*RetentionPolicy, error)
+	GetLastRetentionSweep(ctx context.Context, in *RetentionPolicyRequest, opts ...grpc.CallOption) (*LastRetentionSweepResponse, error)
 	GetConversationRetention(ctx context.Context, in *ConversationRetentionRequest, opts ...grpc.CallOption) (*ConversationRetentionResponse, error)
 	SetConversationRetention(ctx context.Context, in *ConversationRetentionRequest, opts ...grpc.CallOption) (*RetentionMutationResponse, error)
 	RemoveConversationRetention(ctx context.Context, in *ConversationRetentionRequest, opts ...grpc.CallOption) (*RetentionMutationResponse, error)
@@ -187,6 +189,16 @@ func (c *conversationsServiceClient) SetWorkspaceRetention(ctx context.Context, 
 	return out, nil
 }
 
+func (c *conversationsServiceClient) GetLastRetentionSweep(ctx context.Context, in *RetentionPolicyRequest, opts ...grpc.CallOption) (*LastRetentionSweepResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LastRetentionSweepResponse)
+	err := c.cc.Invoke(ctx, ConversationsService_GetLastRetentionSweep_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *conversationsServiceClient) GetConversationRetention(ctx context.Context, in *ConversationRetentionRequest, opts ...grpc.CallOption) (*ConversationRetentionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ConversationRetentionResponse)
@@ -235,6 +247,7 @@ type ConversationsServiceServer interface {
 	// shadow the RetentionPolicy message type for every later return here.
 	GetWorkspaceRetention(context.Context, *RetentionPolicyRequest) (*RetentionPolicy, error)
 	SetWorkspaceRetention(context.Context, *RetentionPolicyRequest) (*RetentionPolicy, error)
+	GetLastRetentionSweep(context.Context, *RetentionPolicyRequest) (*LastRetentionSweepResponse, error)
 	GetConversationRetention(context.Context, *ConversationRetentionRequest) (*ConversationRetentionResponse, error)
 	SetConversationRetention(context.Context, *ConversationRetentionRequest) (*RetentionMutationResponse, error)
 	RemoveConversationRetention(context.Context, *ConversationRetentionRequest) (*RetentionMutationResponse, error)
@@ -282,6 +295,9 @@ func (UnimplementedConversationsServiceServer) GetWorkspaceRetention(context.Con
 }
 func (UnimplementedConversationsServiceServer) SetWorkspaceRetention(context.Context, *RetentionPolicyRequest) (*RetentionPolicy, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetWorkspaceRetention not implemented")
+}
+func (UnimplementedConversationsServiceServer) GetLastRetentionSweep(context.Context, *RetentionPolicyRequest) (*LastRetentionSweepResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLastRetentionSweep not implemented")
 }
 func (UnimplementedConversationsServiceServer) GetConversationRetention(context.Context, *ConversationRetentionRequest) (*ConversationRetentionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversationRetention not implemented")
@@ -528,6 +544,24 @@ func _ConversationsService_SetWorkspaceRetention_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConversationsService_GetLastRetentionSweep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetentionPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).GetLastRetentionSweep(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_GetLastRetentionSweep_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).GetLastRetentionSweep(ctx, req.(*RetentionPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConversationsService_GetConversationRetention_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ConversationRetentionRequest)
 	if err := dec(in); err != nil {
@@ -636,6 +670,10 @@ var ConversationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetWorkspaceRetention",
 			Handler:    _ConversationsService_SetWorkspaceRetention_Handler,
+		},
+		{
+			MethodName: "GetLastRetentionSweep",
+			Handler:    _ConversationsService_GetLastRetentionSweep_Handler,
 		},
 		{
 			MethodName: "GetConversationRetention",

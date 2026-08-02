@@ -529,6 +529,50 @@ func (x *RetentionMutationResponse) GetOk() bool {
 	return false
 }
 
+type LastRetentionSweepResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SweptAt       int64                  `protobuf:"varint,1,opt,name=swept_at,json=sweptAt,proto3" json:"swept_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastRetentionSweepResponse) Reset() {
+	*x = LastRetentionSweepResponse{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastRetentionSweepResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastRetentionSweepResponse) ProtoMessage() {}
+
+func (x *LastRetentionSweepResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastRetentionSweepResponse.ProtoReflect.Descriptor instead.
+func (*LastRetentionSweepResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *LastRetentionSweepResponse) GetSweptAt() int64 {
+	if x != nil {
+		return x.SweptAt
+	}
+	return 0
+}
+
 type ConversationRetentionRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -541,7 +585,7 @@ type ConversationRetentionRequest struct {
 
 func (x *ConversationRetentionRequest) Reset() {
 	*x = ConversationRetentionRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -553,7 +597,7 @@ func (x *ConversationRetentionRequest) String() string {
 func (*ConversationRetentionRequest) ProtoMessage() {}
 
 func (x *ConversationRetentionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -566,7 +610,7 @@ func (x *ConversationRetentionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationRetentionRequest.ProtoReflect.Descriptor instead.
 func (*ConversationRetentionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ConversationRetentionRequest) GetWorkspaceId() string {
@@ -610,7 +654,7 @@ type ConversationRetentionResponse struct {
 
 func (x *ConversationRetentionResponse) Reset() {
 	*x = ConversationRetentionResponse{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +666,7 @@ func (x *ConversationRetentionResponse) String() string {
 func (*ConversationRetentionResponse) ProtoMessage() {}
 
 func (x *ConversationRetentionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +679,7 @@ func (x *ConversationRetentionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationRetentionResponse.ProtoReflect.Descriptor instead.
 func (*ConversationRetentionResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ConversationRetentionResponse) GetDurationDays() int32 {
@@ -678,7 +722,7 @@ type SharedInvite struct {
 
 func (x *SharedInvite) Reset() {
 	*x = SharedInvite{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -690,7 +734,7 @@ func (x *SharedInvite) String() string {
 func (*SharedInvite) ProtoMessage() {}
 
 func (x *SharedInvite) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -703,7 +747,7 @@ func (x *SharedInvite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedInvite.ProtoReflect.Descriptor instead.
 func (*SharedInvite) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SharedInvite) GetId() string {
@@ -794,7 +838,7 @@ type SharedInvitePage struct {
 
 func (x *SharedInvitePage) Reset() {
 	*x = SharedInvitePage{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -806,7 +850,7 @@ func (x *SharedInvitePage) String() string {
 func (*SharedInvitePage) ProtoMessage() {}
 
 func (x *SharedInvitePage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -819,7 +863,7 @@ func (x *SharedInvitePage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedInvitePage.ProtoReflect.Descriptor instead.
 func (*SharedInvitePage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SharedInvitePage) GetInvites() []*SharedInvite {
@@ -856,7 +900,7 @@ type InviteSharedRequest struct {
 
 func (x *InviteSharedRequest) Reset() {
 	*x = InviteSharedRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -868,7 +912,7 @@ func (x *InviteSharedRequest) String() string {
 func (*InviteSharedRequest) ProtoMessage() {}
 
 func (x *InviteSharedRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -881,7 +925,7 @@ func (x *InviteSharedRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteSharedRequest.ProtoReflect.Descriptor instead.
 func (*InviteSharedRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{11}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *InviteSharedRequest) GetWorkspaceId() string {
@@ -930,7 +974,7 @@ type SharedInviteMutationRequest struct {
 
 func (x *SharedInviteMutationRequest) Reset() {
 	*x = SharedInviteMutationRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -942,7 +986,7 @@ func (x *SharedInviteMutationRequest) String() string {
 func (*SharedInviteMutationRequest) ProtoMessage() {}
 
 func (x *SharedInviteMutationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -955,7 +999,7 @@ func (x *SharedInviteMutationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedInviteMutationRequest.ProtoReflect.Descriptor instead.
 func (*SharedInviteMutationRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SharedInviteMutationRequest) GetWorkspaceId() string {
@@ -992,7 +1036,7 @@ type SharedInvitesRequest struct {
 
 func (x *SharedInvitesRequest) Reset() {
 	*x = SharedInvitesRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1004,7 +1048,7 @@ func (x *SharedInvitesRequest) String() string {
 func (*SharedInvitesRequest) ProtoMessage() {}
 
 func (x *SharedInvitesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1017,7 +1061,7 @@ func (x *SharedInvitesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedInvitesRequest.ProtoReflect.Descriptor instead.
 func (*SharedInvitesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SharedInvitesRequest) GetWorkspaceId() string {
@@ -1068,7 +1112,7 @@ type ExternalInvitePermissionsRequest struct {
 
 func (x *ExternalInvitePermissionsRequest) Reset() {
 	*x = ExternalInvitePermissionsRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1080,7 +1124,7 @@ func (x *ExternalInvitePermissionsRequest) String() string {
 func (*ExternalInvitePermissionsRequest) ProtoMessage() {}
 
 func (x *ExternalInvitePermissionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1093,7 +1137,7 @@ func (x *ExternalInvitePermissionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalInvitePermissionsRequest.ProtoReflect.Descriptor instead.
 func (*ExternalInvitePermissionsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{14}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ExternalInvitePermissionsRequest) GetWorkspaceId() string {
@@ -1177,7 +1221,9 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12<\n" +
 	"\x06policy\x18\x03 \x01(\v2$.sameoldchat.chat.v1.RetentionPolicyR\x06policy\"+\n" +
 	"\x19RetentionMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xa8\x01\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"7\n" +
+	"\x1aLastRetentionSweepResponse\x12\x19\n" +
+	"\bswept_at\x18\x01 \x01(\x03R\asweptAt\"\xa8\x01\n" +
 	"\x1cConversationRetentionRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -1233,7 +1279,7 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12.\n" +
 	"\x13target_workspace_id\x18\x04 \x01(\tR\x11targetWorkspaceId\x12\x1d\n" +
 	"\n" +
-	"can_invite\x18\x05 \x01(\bR\tcanInvite2\x91\r\n" +
+	"can_invite\x18\x05 \x01(\bR\tcanInvite2\x88\x0e\n" +
 	"\x14ConversationsService\x12c\n" +
 	"\x10ConversationInfo\x12,.sameoldchat.chat.v1.ConversationInfoRequest\x1a!.sameoldchat.chat.v1.Conversation\x12a\n" +
 	"\rConversations\x12).sameoldchat.chat.v1.ConversationsRequest\x1a%.sameoldchat.chat.v1.ConversationPage\x12[\n" +
@@ -1246,7 +1292,8 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x11ListSharedInvites\x12).sameoldchat.chat.v1.SharedInvitesRequest\x1a%.sameoldchat.chat.v1.SharedInvitePage\x12x\n" +
 	"\x1cSetExternalInvitePermissions\x125.sameoldchat.chat.v1.ExternalInvitePermissionsRequest\x1a!.sameoldchat.chat.v1.Conversation\x12j\n" +
 	"\x15GetWorkspaceRetention\x12+.sameoldchat.chat.v1.RetentionPolicyRequest\x1a$.sameoldchat.chat.v1.RetentionPolicy\x12j\n" +
-	"\x15SetWorkspaceRetention\x12+.sameoldchat.chat.v1.RetentionPolicyRequest\x1a$.sameoldchat.chat.v1.RetentionPolicy\x12\x81\x01\n" +
+	"\x15SetWorkspaceRetention\x12+.sameoldchat.chat.v1.RetentionPolicyRequest\x1a$.sameoldchat.chat.v1.RetentionPolicy\x12u\n" +
+	"\x15GetLastRetentionSweep\x12+.sameoldchat.chat.v1.RetentionPolicyRequest\x1a/.sameoldchat.chat.v1.LastRetentionSweepResponse\x12\x81\x01\n" +
 	"\x18GetConversationRetention\x121.sameoldchat.chat.v1.ConversationRetentionRequest\x1a2.sameoldchat.chat.v1.ConversationRetentionResponse\x12}\n" +
 	"\x18SetConversationRetention\x121.sameoldchat.chat.v1.ConversationRetentionRequest\x1a..sameoldchat.chat.v1.RetentionMutationResponse\x12\x80\x01\n" +
 	"\x1bRemoveConversationRetention\x121.sameoldchat.chat.v1.ConversationRetentionRequest\x1a..sameoldchat.chat.v1.RetentionMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
@@ -1263,7 +1310,7 @@ func file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_conversations_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_sameoldchat_chat_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_sameoldchat_chat_v1_conversations_proto_goTypes = []any{
 	(*Conversation)(nil),                     // 0: sameoldchat.chat.v1.Conversation
 	(*ConversationPage)(nil),                 // 1: sameoldchat.chat.v1.ConversationPage
@@ -1272,51 +1319,54 @@ var file_sameoldchat_chat_v1_conversations_proto_goTypes = []any{
 	(*RetentionPolicy)(nil),                  // 4: sameoldchat.chat.v1.RetentionPolicy
 	(*RetentionPolicyRequest)(nil),           // 5: sameoldchat.chat.v1.RetentionPolicyRequest
 	(*RetentionMutationResponse)(nil),        // 6: sameoldchat.chat.v1.RetentionMutationResponse
-	(*ConversationRetentionRequest)(nil),     // 7: sameoldchat.chat.v1.ConversationRetentionRequest
-	(*ConversationRetentionResponse)(nil),    // 8: sameoldchat.chat.v1.ConversationRetentionResponse
-	(*SharedInvite)(nil),                     // 9: sameoldchat.chat.v1.SharedInvite
-	(*SharedInvitePage)(nil),                 // 10: sameoldchat.chat.v1.SharedInvitePage
-	(*InviteSharedRequest)(nil),              // 11: sameoldchat.chat.v1.InviteSharedRequest
-	(*SharedInviteMutationRequest)(nil),      // 12: sameoldchat.chat.v1.SharedInviteMutationRequest
-	(*SharedInvitesRequest)(nil),             // 13: sameoldchat.chat.v1.SharedInvitesRequest
-	(*ExternalInvitePermissionsRequest)(nil), // 14: sameoldchat.chat.v1.ExternalInvitePermissionsRequest
+	(*LastRetentionSweepResponse)(nil),       // 7: sameoldchat.chat.v1.LastRetentionSweepResponse
+	(*ConversationRetentionRequest)(nil),     // 8: sameoldchat.chat.v1.ConversationRetentionRequest
+	(*ConversationRetentionResponse)(nil),    // 9: sameoldchat.chat.v1.ConversationRetentionResponse
+	(*SharedInvite)(nil),                     // 10: sameoldchat.chat.v1.SharedInvite
+	(*SharedInvitePage)(nil),                 // 11: sameoldchat.chat.v1.SharedInvitePage
+	(*InviteSharedRequest)(nil),              // 12: sameoldchat.chat.v1.InviteSharedRequest
+	(*SharedInviteMutationRequest)(nil),      // 13: sameoldchat.chat.v1.SharedInviteMutationRequest
+	(*SharedInvitesRequest)(nil),             // 14: sameoldchat.chat.v1.SharedInvitesRequest
+	(*ExternalInvitePermissionsRequest)(nil), // 15: sameoldchat.chat.v1.ExternalInvitePermissionsRequest
 }
 var file_sameoldchat_chat_v1_conversations_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.ConversationPage.conversations:type_name -> sameoldchat.chat.v1.Conversation
 	4,  // 1: sameoldchat.chat.v1.RetentionPolicyRequest.policy:type_name -> sameoldchat.chat.v1.RetentionPolicy
-	9,  // 2: sameoldchat.chat.v1.SharedInvitePage.invites:type_name -> sameoldchat.chat.v1.SharedInvite
+	10, // 2: sameoldchat.chat.v1.SharedInvitePage.invites:type_name -> sameoldchat.chat.v1.SharedInvite
 	2,  // 3: sameoldchat.chat.v1.ConversationsService.ConversationInfo:input_type -> sameoldchat.chat.v1.ConversationInfoRequest
 	3,  // 4: sameoldchat.chat.v1.ConversationsService.Conversations:input_type -> sameoldchat.chat.v1.ConversationsRequest
-	11, // 5: sameoldchat.chat.v1.ConversationsService.InviteShared:input_type -> sameoldchat.chat.v1.InviteSharedRequest
-	12, // 6: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	12, // 7: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	12, // 8: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	12, // 9: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	12, // 10: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	13, // 11: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:input_type -> sameoldchat.chat.v1.SharedInvitesRequest
-	14, // 12: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:input_type -> sameoldchat.chat.v1.ExternalInvitePermissionsRequest
+	12, // 5: sameoldchat.chat.v1.ConversationsService.InviteShared:input_type -> sameoldchat.chat.v1.InviteSharedRequest
+	13, // 6: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	13, // 7: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	13, // 8: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	13, // 9: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	13, // 10: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	14, // 11: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:input_type -> sameoldchat.chat.v1.SharedInvitesRequest
+	15, // 12: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:input_type -> sameoldchat.chat.v1.ExternalInvitePermissionsRequest
 	5,  // 13: sameoldchat.chat.v1.ConversationsService.GetWorkspaceRetention:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
 	5,  // 14: sameoldchat.chat.v1.ConversationsService.SetWorkspaceRetention:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
-	7,  // 15: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
-	7,  // 16: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
-	7,  // 17: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
-	0,  // 18: sameoldchat.chat.v1.ConversationsService.ConversationInfo:output_type -> sameoldchat.chat.v1.Conversation
-	1,  // 19: sameoldchat.chat.v1.ConversationsService.Conversations:output_type -> sameoldchat.chat.v1.ConversationPage
-	9,  // 20: sameoldchat.chat.v1.ConversationsService.InviteShared:output_type -> sameoldchat.chat.v1.SharedInvite
-	9,  // 21: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	9,  // 22: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	9,  // 23: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	9,  // 24: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	0,  // 25: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:output_type -> sameoldchat.chat.v1.Conversation
-	10, // 26: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:output_type -> sameoldchat.chat.v1.SharedInvitePage
-	0,  // 27: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:output_type -> sameoldchat.chat.v1.Conversation
-	4,  // 28: sameoldchat.chat.v1.ConversationsService.GetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
-	4,  // 29: sameoldchat.chat.v1.ConversationsService.SetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
-	8,  // 30: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:output_type -> sameoldchat.chat.v1.ConversationRetentionResponse
-	6,  // 31: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
-	6,  // 32: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
-	18, // [18:33] is the sub-list for method output_type
-	3,  // [3:18] is the sub-list for method input_type
+	5,  // 15: sameoldchat.chat.v1.ConversationsService.GetLastRetentionSweep:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
+	8,  // 16: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
+	8,  // 17: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
+	8,  // 18: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
+	0,  // 19: sameoldchat.chat.v1.ConversationsService.ConversationInfo:output_type -> sameoldchat.chat.v1.Conversation
+	1,  // 20: sameoldchat.chat.v1.ConversationsService.Conversations:output_type -> sameoldchat.chat.v1.ConversationPage
+	10, // 21: sameoldchat.chat.v1.ConversationsService.InviteShared:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 22: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 23: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 24: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 25: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	0,  // 26: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:output_type -> sameoldchat.chat.v1.Conversation
+	11, // 27: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:output_type -> sameoldchat.chat.v1.SharedInvitePage
+	0,  // 28: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:output_type -> sameoldchat.chat.v1.Conversation
+	4,  // 29: sameoldchat.chat.v1.ConversationsService.GetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
+	4,  // 30: sameoldchat.chat.v1.ConversationsService.SetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
+	7,  // 31: sameoldchat.chat.v1.ConversationsService.GetLastRetentionSweep:output_type -> sameoldchat.chat.v1.LastRetentionSweepResponse
+	9,  // 32: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:output_type -> sameoldchat.chat.v1.ConversationRetentionResponse
+	6,  // 33: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
+	6,  // 34: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
+	19, // [19:35] is the sub-list for method output_type
+	3,  // [3:19] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -1333,7 +1383,7 @@ func file_sameoldchat_chat_v1_conversations_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_conversations_proto_rawDesc), len(file_sameoldchat_chat_v1_conversations_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

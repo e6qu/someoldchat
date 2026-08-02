@@ -1946,6 +1946,17 @@ func (r Remote) SetWorkspaceRetention(ctx context.Context, workspaceID domain.Wo
 	return decodeProtoRetentionPolicy(out)
 }
 
+func (r Remote) LastRetentionSweep(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (time.Time, error) {
+	out, err := r.conversations.GetLastRetentionSweep(ctx, &chatv1.RetentionPolicyRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return time.Time{}, err
+	}
+	if out.GetSweptAt() == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(out.GetSweptAt(), 0).UTC(), nil
+}
+
 func (r Remote) ConversationRetention(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationRetention, int, error) {
 	out, err := r.conversations.GetConversationRetention(ctx, &chatv1.ConversationRetentionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
 	if err != nil {
@@ -5026,6 +5037,20 @@ func (s *Server) SetWorkspaceRetention(ctx context.Context, input *chatv1.Retent
 		return nil, mapError(err)
 	}
 	return encodeProtoRetentionPolicy(saved), nil
+}
+
+// GetLastRetentionSweep is the transport name; the Get prefix keeps it beside
+// GetWorkspaceRetention, which had to take one to avoid shadowing its type.
+func (s *Server) GetLastRetentionSweep(ctx context.Context, input *chatv1.RetentionPolicyRequest) (*chatv1.LastRetentionSweepResponse, error) {
+	swept, err := s.implementation.LastRetentionSweep(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	response := &chatv1.LastRetentionSweepResponse{}
+	if !swept.IsZero() {
+		response.SweptAt = swept.Unix()
+	}
+	return response, nil
 }
 
 func (s *Server) GetConversationRetention(ctx context.Context, input *chatv1.ConversationRetentionRequest) (*chatv1.ConversationRetentionResponse, error) {

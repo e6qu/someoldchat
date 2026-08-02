@@ -57,6 +57,7 @@ service ConversationsService {
   // shadow the RetentionPolicy message type for every later return here.
   rpc GetWorkspaceRetention(RetentionPolicyRequest) returns (RetentionPolicy);
   rpc SetWorkspaceRetention(RetentionPolicyRequest) returns (RetentionPolicy);
+  rpc GetLastRetentionSweep(RetentionPolicyRequest) returns (LastRetentionSweepResponse);
   rpc GetConversationRetention(ConversationRetentionRequest) returns (ConversationRetentionResponse);
   rpc SetConversationRetention(ConversationRetentionRequest) returns (RetentionMutationResponse);
   rpc RemoveConversationRetention(ConversationRetentionRequest) returns (RetentionMutationResponse);
@@ -75,6 +76,10 @@ message RetentionPolicyRequest {
 
 message RetentionMutationResponse {
   bool ok = 1;
+}
+
+message LastRetentionSweepResponse {
+  int64 swept_at = 1;
 }
 
 message ConversationRetentionRequest {

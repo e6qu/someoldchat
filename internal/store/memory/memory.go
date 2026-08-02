@@ -4734,6 +4734,22 @@ func (s *Store) sweepFilesLocked(request domain.RetentionSweepRequest) []domain.
 	return expired
 }
 
+func (s *Store) LastRetentionSweep(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	latest := time.Time{}
+	for id, swept := range s.retentionSweptAt {
+		conversation, exists := s.conversations[id]
+		if !exists || conversation.WorkspaceID != workspace {
+			continue
+		}
+		if swept.After(latest) {
+			latest = swept
+		}
+	}
+	return latest, nil
+}
+
 func (s *Store) AppendRetentionEvents(_ context.Context, workspace domain.WorkspaceID, emitted []events.Event) error {
 	if len(emitted) == 0 {
 		return nil

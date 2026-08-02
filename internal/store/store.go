@@ -555,6 +555,12 @@ type Store interface {
 	// nothing here, and deleting a root while its replies survive would leave
 	// replies with no parent to render under.
 	SweepRetention(context.Context, domain.RetentionSweepRequest) (domain.RetentionSweep, error)
+	// LastRetentionSweep is the most recent instant any conversation in the
+	// workspace was swept, which is the signal that the worker is alive. The
+	// oldest watermark would say how far behind it is, but the newest is what
+	// distinguishes "running" from "stopped", and a stopped sweep is the
+	// failure that silently breaks the promise the policy makes.
+	LastRetentionSweep(context.Context, domain.WorkspaceID) (time.Time, error)
 	// AppendRetentionEvents journals a completed sweep's announcements. See
 	// scheduler.RetentionSource for why this is separate from the deletion.
 	AppendRetentionEvents(context.Context, domain.WorkspaceID, []events.Event) error

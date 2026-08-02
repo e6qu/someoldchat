@@ -60,6 +60,17 @@ func (m Messages) SetWorkspaceRetention(ctx context.Context, workspaceID domain.
 	return policy, nil
 }
 
+// LastRetentionSweep reports when the sweep last ran, so an administration
+// page can show that the policy is actually being applied. Without it a
+// workspace could believe retention was working for weeks after the worker
+// stopped, which is precisely the failure a scheduled deletion hides.
+func (m Messages) LastRetentionSweep(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (time.Time, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return time.Time{}, err
+	}
+	return m.Store.LastRetentionSweep(ctx, workspaceID)
+}
+
 // ConversationRetention reports a channel's override and the duration that
 // actually governs it, so a caller never has to resolve the two itself and
 // cannot resolve them differently from the sweep.

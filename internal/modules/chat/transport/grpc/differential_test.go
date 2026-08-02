@@ -2669,6 +2669,7 @@ var parityGaps = map[string]struct{}{
 	"JoinConversation":                        {},
 	"JoinHuddle":                              {},
 	"KickConversationMember":                  {},
+	"LastRetentionSweep":                      {},
 	"LeaveConversation":                       {},
 	"LeaveHuddle":                             {},
 	"ListSharedInvites":                       {},

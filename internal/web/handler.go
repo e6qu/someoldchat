@@ -3519,6 +3519,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /app/admin/analytics", h.analyticsPage)
 		mux.HandleFunc("POST /app/admin/settings/identity", h.workspaceIdentitySet)
 		mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
+		mux.HandleFunc("POST /app/admin/settings/retention", h.workspaceRetentionSet)
 		mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
 		// Deliberately reachable signed-out: the person it is for has no
 		// account yet. See internal/web/invite.go for why it carries no secret.
