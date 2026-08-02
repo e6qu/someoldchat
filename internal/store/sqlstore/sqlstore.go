@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
 );
 CREATE INDEX IF NOT EXISTS oauth_refresh_identity ON oauth_refresh_tokens(client_id, workspace_id, user_id, bot_id, token_type, created_at DESC);
 CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL, cursor INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_admission (app_id TEXT PRIMARY KEY, ticket INTEGER NOT NULL DEFAULT 0);
@@ -506,7 +506,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 133
+const schemaVersion = 134
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3016,6 +3016,20 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index files by age: %w", err)
 		}
 	}
+	if version < 134 {
+		// An RTM ticket now carries the journal position its stream opens at.
+		// Without it the stream started at zero and replayed the whole
+		// workspace journal to an official client on every connect.
+		columns, err := s.tableColumns(ctx, db, "rtm_connections")
+		if err != nil {
+			return err
+		}
+		if !columns["cursor"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE rtm_connections ADD COLUMN cursor INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate RTM connection cursor: %w", err)
+			}
+		}
+	}
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -3440,6 +3454,7 @@ var migratableTables = []string{
 	"oauth_codes",
 	"outbox",
 	"recent_searches",
+	"rtm_connections",
 	"scheduled_message_files",
 	"scheduled_messages",
 	"schema_backfills",
@@ -8220,11 +8235,22 @@ func (s *Store) exchangeOpenIDRefreshTokenOnce(ctx context.Context, clientID, ol
 	return token, nil
 }
 
+func (s *Store) LatestEventSequence(ctx context.Context, workspace domain.WorkspaceID) (uint64, error) {
+	var sequence sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MAX(sequence) FROM outbox WHERE workspace_id = ?`, workspace).Scan(&sequence); err != nil {
+		return 0, err
+	}
+	if !sequence.Valid || sequence.Int64 < 0 {
+		return 0, nil
+	}
+	return uint64(sequence.Int64), nil
+}
+
 func (s *Store) CreateRTMConnection(ctx context.Context, value domain.RTMConnection) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.ExpiresAt.IsZero() {
 		return store.InvalidArgument("invalid RTM connection")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO rtm_connections(id, workspace_id, user_id, expires_at) VALUES (?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.ExpiresAt.UTC().UnixNano())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO rtm_connections(id, workspace_id, user_id, expires_at, cursor) VALUES (?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.ExpiresAt.UTC().UnixNano(), value.Cursor)
 	return classify(err)
 }
 
@@ -8236,7 +8262,7 @@ func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTM
 	defer tx.Rollback()
 	var value domain.RTMConnection
 	var expiresAt int64
-	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, user_id, expires_at FROM rtm_connections WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.UserID, &expiresAt); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, user_id, expires_at, cursor FROM rtm_connections WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.UserID, &expiresAt, &value.Cursor); err != nil {
 		return domain.RTMConnection{}, translateNotFound(err)
 	}
 	value.ExpiresAt = time.Unix(0, expiresAt).UTC()

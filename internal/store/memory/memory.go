@@ -4064,6 +4064,24 @@ func (s *Store) enforceOAuthActiveTokenLimit(current domain.OAuthRefreshGrant) {
 	}
 }
 
+func (s *Store) LatestEventSequence(_ context.Context, workspace domain.WorkspaceID) (uint64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	latest := uint64(0)
+	for index, event := range s.outbox {
+		if event.WorkspaceID != workspace {
+			continue
+		}
+		// The memory profile's sequence is the one-based index the outbox
+		// readers already hand out, so the tail must be derived the same way
+		// or a cursor taken here would not line up with what a stream reads.
+		if sequence := uint64(index + 1); sequence > latest {
+			latest = sequence
+		}
+	}
+	return latest, nil
+}
+
 func (s *Store) CreateRTMConnection(_ context.Context, value domain.RTMConnection) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.ExpiresAt.IsZero() {
 		return store.InvalidArgument("invalid RTM connection")

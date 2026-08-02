@@ -14,6 +14,21 @@ import (
 
 func TestDqliteQualification(t *testing.T) { runQualification(t, openStore) }
 
+// TestDqliteRestartQualification is exempt, and the exemption is recorded here
+// rather than left as a missing test. Restarting a dqlite node is not reopening
+// a handle: it is closing one member of a live cluster and rejoining it, with
+// quorum, replication and snapshot transfer in between. That is qualified
+// properly in tests/dqlite-qualification — TestDqliteLeaderFailurePreservesCommittedData
+// and TestDqliteStateDirectorySnapshotRestoresCluster close and re-form real
+// clusters — and a handle-reopen here would be a weaker test wearing the same
+// name.
+func TestDqliteRestartQualification(t *testing.T) {
+	runRestartQualification(t, func(t *testing.T, ctx context.Context) (qualificationStore, restarter, func()) {
+		repository, closeRepository := openStore(t, ctx)
+		return repository, nil, closeRepository
+	})
+}
+
 func openStore(t *testing.T, ctx context.Context) (qualificationStore, func()) {
 	t.Helper()
 	network, err := dqlitetest.NewNetwork(3)

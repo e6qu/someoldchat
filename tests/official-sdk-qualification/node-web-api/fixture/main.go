@@ -273,9 +273,6 @@ func main() {
 	}); err != nil {
 		panic(err)
 	}
-	if _, err := messages.Post(context.Background(), "T1", "U1", "C1", "rtm qualification event", "", "rtm-qualification"); err != nil {
-		panic(err)
-	}
 	if _, err := messages.Post(context.Background(), "T1", "U1", "C1", "socket qualification event", "", "socket-qualification"); err != nil {
 		panic(err)
 	}

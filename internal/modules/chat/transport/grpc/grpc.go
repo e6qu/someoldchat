@@ -8775,11 +8775,11 @@ func decodeProtoThreadSummary(value *chatv1.ThreadSummary) (domain.ThreadSummary
 }
 
 func encodeProtoRTMConnection(value domain.RTMConnection) *chatv1.RTMConnection {
-	return &chatv1.RTMConnection{Id: value.ID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ExpiresAtUnixNano: value.ExpiresAt.UnixNano()}
+	return &chatv1.RTMConnection{Id: value.ID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ExpiresAtUnixNano: value.ExpiresAt.UnixNano(), Cursor: value.Cursor}
 }
 
 func decodeProtoRTMConnection(value *chatv1.RTMConnection) domain.RTMConnection {
-	return domain.RTMConnection{ID: value.GetId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), ExpiresAt: time.Unix(0, value.GetExpiresAtUnixNano()).UTC()}
+	return domain.RTMConnection{ID: value.GetId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), ExpiresAt: time.Unix(0, value.GetExpiresAtUnixNano()).UTC(), Cursor: value.GetCursor()}
 }
 
 func encodeProtoEphemeralMessage(value domain.EphemeralMessage) *chatv1.EphemeralMessage {

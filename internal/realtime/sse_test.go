@@ -811,3 +811,119 @@ func TestRTMWebSocketSaysGoodbyeWhenTheStreamEnds(t *testing.T) {
 		t.Fatalf("farewell=%v, want goodbye", farewell)
 	}
 }
+
+// recordingEventSource remembers the cursor each read was asked for, so a test
+// can assert where a stream actually started rather than inferring it from
+// what happened to be delivered.
+type recordingEventSource struct {
+	mu      sync.Mutex
+	after   []uint64
+	records []events.Record
+}
+
+func (s *recordingEventSource) ListEventsAfter(_ context.Context, _ domain.WorkspaceID, after uint64, _ int) ([]events.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.after = append(s.after, after)
+	delivered := make([]events.Record, 0, len(s.records))
+	for _, record := range s.records {
+		if record.Sequence > after {
+			delivered = append(delivered, record)
+		}
+	}
+	s.records = nil
+	return delivered, nil
+}
+
+func (s *recordingEventSource) firstCursor() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.after) == 0 {
+		return 0
+	}
+	return s.after[0]
+}
+
+// An official RTM client sends no Last-Event-ID and has no argument to pass a
+// cursor, so the ticket has to carry one. Without it the stream started at zero
+// and replayed the entire workspace journal as live events on every connect —
+// which, after a restart, means every connected client re-processes every
+// message ever sent.
+func TestRTMStreamOpensAtTheTicketCursorRatherThanReplayingTheJournal(t *testing.T) {
+	source := &recordingEventSource{records: []events.Record{{
+		Sequence: 7,
+		Event:    events.Event{ID: "E-old", WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message.created","message_id":"M-old"}`, CreatedAt: time.Unix(1700000000, 0).UTC()},
+	}}}
+	handler, err := NewRTMHandler(source, testRTMConnectionSource{connection: domain.RTMConnection{
+		ID: "session-1", WorkspaceID: "T1", UserID: "U1", Cursor: 12,
+	}}, &testRTMMessageService{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.RegisterRTM(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"/rtm?session_id=session-1", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	var hello map[string]any
+	if err := websocket.JSON.Receive(connection, &hello); err != nil {
+		t.Fatal(err)
+	}
+	if hello["type"] != "hello" {
+		t.Fatalf("hello=%v", hello)
+	}
+	// Give the stream a moment to perform its first read.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && source.firstCursor() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if cursor := source.firstCursor(); cursor != 12 {
+		t.Fatalf("the stream opened at %d, want the ticket's cursor 12 — a lower value replays history the client already had", cursor)
+	}
+}
+
+// A client that knows where it left off still wins: the ticket is the default,
+// not an override of an explicit request.
+func TestRTMStreamPrefersAnExplicitCursorOverTheTicket(t *testing.T) {
+	source := &recordingEventSource{}
+	handler, err := NewRTMHandler(source, testRTMConnectionSource{connection: domain.RTMConnection{
+		ID: "session-1", WorkspaceID: "T1", UserID: "U1", Cursor: 12,
+	}}, &testRTMMessageService{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.RegisterRTM(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"/rtm?session_id=session-1&last_event_id=4", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	var hello map[string]any
+	if err := websocket.JSON.Receive(connection, &hello); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && source.firstCursor() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if cursor := source.firstCursor(); cursor != 4 {
+		t.Fatalf("the stream opened at %d, want the client's own cursor 4", cursor)
+	}
+}

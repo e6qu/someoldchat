@@ -2747,7 +2747,15 @@ func (m Messages) CreateRTMConnection(ctx context.Context, workspaceID domain.Wo
 	if err != nil {
 		return domain.RTMConnection{}, err
 	}
-	value := domain.RTMConnection{ID: id, WorkspaceID: workspaceID, UserID: userID, ExpiresAt: time.Now().UTC().Add(30 * time.Second)}
+	// The ticket carries the journal tail as it is at this moment, so the
+	// stream opens on what happens next rather than replaying everything that
+	// already happened. Taking it here — not when the socket opens — means the
+	// dial is not a gap: events posted while the client connects are delivered.
+	cursor, err := m.Store.LatestEventSequence(ctx, workspaceID)
+	if err != nil {
+		return domain.RTMConnection{}, err
+	}
+	value := domain.RTMConnection{ID: id, WorkspaceID: workspaceID, UserID: userID, ExpiresAt: time.Now().UTC().Add(30 * time.Second), Cursor: cursor}
 	if err := m.Store.CreateRTMConnection(ctx, value); err != nil {
 		return domain.RTMConnection{}, err
 	}

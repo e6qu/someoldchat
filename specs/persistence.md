@@ -17,7 +17,10 @@ restart through the normal startup/recovery path. Correctness MUST NOT depend
 on a graceful shutdown sequence. Committed state MUST survive a process or
 node crash, unfinished outbox work MUST be replayable, and stale writers MUST
 be fenced after recovery. Crash and restart tests are release gates for
-persistence and lifecycle changes.
+persistence and lifecycle changes: `tests/process-fault` kills the real server
+process and restarts it on the same database, `tests/persistence-qualification`
+runs the restart contracts against every storage profile, and
+`tests/dqlite-qualification` covers node failure and snapshot restore.
 
 ## Core schema
 

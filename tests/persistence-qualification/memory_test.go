@@ -21,6 +21,16 @@ func TestMemoryQualification(t *testing.T) {
 	})
 }
 
+// TestMemoryRestartQualification records, rather than skips silently, why the
+// in-memory profile is exempt: it holds everything in the process, so "survives
+// the process" is not a promise it can make. It is a selectable profile, so the
+// exemption is stated here rather than left to be inferred from its absence.
+func TestMemoryRestartQualification(t *testing.T) {
+	runRestartQualification(t, func(t *testing.T, _ context.Context) (qualificationStore, restarter, func()) {
+		return memoryQualificationStore{Store: memory.New()}, nil, func() {}
+	})
+}
+
 // memoryQualificationStore adapts the in-memory seed helpers to the suite's
 // context-and-error signature. The in-memory helpers cannot take a context: they
 // are called from roughly two hundred test call sites in packages this change

@@ -2280,6 +2280,19 @@ type RTMConnection struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	ExpiresAt   time.Time
+	// Cursor is the journal position the stream opens at, captured when
+	// rtm.connect issued the ticket.
+	//
+	// Without it the stream had nowhere to start and began at sequence zero,
+	// so an official RTM client — which sends no Last-Event-ID and has no
+	// argument to pass one — received the entire workspace journal as live
+	// events on every connect. Real Slack sends hello and then only what
+	// happens next.
+	//
+	// It is captured at rtm.connect rather than when the socket opens so the
+	// gap between the two loses nothing: whatever is posted while the client
+	// is dialling is delivered, exactly once, when it arrives.
+	Cursor uint64
 }
 
 type SocketModeConnection struct {
