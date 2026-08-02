@@ -214,6 +214,7 @@ func recordedNonPinnedCodes() map[string]string {
 		"emoji_not_found":                "admin.emoji.* declares no error enum",
 		"emoji_already_exists":           "admin.emoji.add declares no error enum",
 		"invite_request_not_found":       "admin.inviteRequests.* declares no error enum",
+		"invalid_duration":               "admin.conversations.setCustomRetention declares no error enum in the pinned snapshot; the current reference names this code for a duration outside 0 < days < 36500",
 		"invite_not_found":               "conversations.acceptSharedInvite and its siblings declare no error enum; an invitation that does not exist is neither a channel nor a user",
 		"already_resolved":               "conversations.approveSharedInvite and its siblings declare no error enum; an invitation somebody else already decided is neither malformed nor missing",
 		"too_many_teams":                 "conversations.acceptSharedInvite declares no error enum; the 250-organization capacity is a documented hard limit rather than a temporary failure",

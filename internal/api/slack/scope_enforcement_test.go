@@ -46,6 +46,9 @@ type scopedRoute struct {
 // how conversations.info and users.info came to enforce nothing at all.
 func scopedRoutes() []scopedRoute {
 	return []scopedRoute{
+		{http.MethodPost, "/api/admin.conversations.getCustomRetention", auth.ScopeAdminConversationsRead},
+		{http.MethodPost, "/api/admin.conversations.setCustomRetention", auth.ScopeAdminConversationsWrite},
+		{http.MethodPost, "/api/admin.conversations.removeCustomRetention", auth.ScopeAdminConversationsWrite},
 		{http.MethodPost, "/api/conversations.inviteShared", auth.ScopeConversationsConnectWrite},
 		{http.MethodPost, "/api/conversations.acceptSharedInvite", auth.ScopeConversationsConnectWrite},
 		{http.MethodPost, "/api/conversations.approveSharedInvite", auth.ScopeConversationsConnectManage},

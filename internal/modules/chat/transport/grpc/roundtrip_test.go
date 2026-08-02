@@ -343,6 +343,7 @@ func conversionCases() map[string]conversionCase {
 		"ListItem":                   {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
 		"ListItemPage":               {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
 		"ListDownload":               {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
+		"RetentionPolicy":            {sample: &domain.RetentionPolicy{}, through: through(encodeProtoRetentionPolicy, decodeProtoRetentionPolicy)},
 		"AccessLog":                  {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
 		"SharedInvite":               {sample: &domain.SharedInvite{}, through: through(encodeProtoSharedInvite, decodeProtoSharedInvite)},
 		"WorkspaceMembershipSummary": {sample: &domain.WorkspaceMembershipSummary{}, through: through(encodeProtoWorkspaceMembershipSummary, decodeProtoWorkspaceMembershipSummary)},

@@ -211,6 +211,10 @@ func main() {
 	}
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "lifecycle"})
+	// A channel of its own for retention: C2 is archived and converted by
+	// earlier steps in the walk, and a retention assertion should fail because
+	// retention is wrong, not because an unrelated step moved its channel.
+	store.SeedConversation(domain.Conversation{ID: "C-retention", WorkspaceID: "T1", Name: "retention"})
 	store.SeedConversationMember("C1", "U1")
 	blobRoot, err := os.MkdirTemp("", "sameoldchat-sdk-files-")
 	if err != nil {

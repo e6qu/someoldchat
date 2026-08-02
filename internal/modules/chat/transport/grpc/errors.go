@@ -115,6 +115,10 @@ var errorClasses = []errorClass{
 	// state — already decided, or already full — that refuses.
 	{key: "service.shared_invite_settled", code: codes.FailedPrecondition, sentinel: service.ErrSharedInviteSettled},
 	{key: "service.slack_connect_full", code: codes.FailedPrecondition, sentinel: service.ErrSlackConnectFull},
+	{key: "service.invalid_retention_duration", code: codes.InvalidArgument, sentinel: service.ErrInvalidRetentionDuration},
+	// FailedPrecondition: the request is well formed and the conversation is
+	// real; it is the conversation's type that carries no retention policy.
+	{key: "service.retention_not_supported", code: codes.FailedPrecondition, sentinel: service.ErrRetentionNotSupported},
 	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppApproval},
 	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidView},
 	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkflowStep},
