@@ -2732,7 +2732,7 @@ func TestApplicationRedirectsUnauthenticatedBrowserToLogin(t *testing.T) {
 // never leak into the web tree.
 func TestDeepApplicationPagesRedirectAnonymousVisitorsToSignIn(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	for _, target := range []string{"/app/members", "/app/later", "/app/workflows", "/app/canvases"} {
+	for _, target := range []string{"/app/members", "/app/later", "/app/workflows", "/app/canvases", "/archives/Cdev/p1700000000000000"} {
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
 		if response.Code != http.StatusSeeOther {
@@ -4031,4 +4031,133 @@ func TestArchivePermalinkOpensTheWindowContainingItsMessage(t *testing.T) {
 	if malformed.Code != http.StatusNotFound {
 		t.Fatalf("malformed permalink status=%d, want %d", malformed.Code, http.StatusNotFound)
 	}
+}
+
+// The fittings Slack shows around a message — the edited marker, the thread
+// summary, day separators, the unread divider, the broadcast marker, and the
+// system-message rendering — are all computed server-side, because the
+// fragment refresh re-renders this same partial and anything computed in the
+// browser is lost on the next live update. MSG-01 requires every one of them.
+func TestTimelineRendersSlackMessageChrome(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: store}
+	ctx := context.Background()
+	yesterday := time.Now().UTC().Add(-26 * time.Hour)
+
+	older := seedMessage(t, store, "Mold", "posted yesterday", yesterday)
+	parent, err := messages.Post(ctx, "T1", "U1", "Cdev", "a message with replies", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentTS := domain.NewMessageTimestamp(parent.CreatedAt)
+	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{
+		Conversation: "Cdev", Text: "a threaded reply", ThreadTimestamp: parentTS,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{
+		Conversation: "Cdev", Text: "also to the channel", ThreadTimestamp: parentTS, ReplyBroadcast: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := messages.Post(ctx, "T1", "U1", "Cdev", "before the edit", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := "after the edit"
+	if _, err := messages.UpdateMessage(ctx, "T1", "U1", "Cdev", domain.NewMessageTimestamp(edited.CreatedAt), domain.MessagePatch{Text: &changed}); err != nil {
+		t.Fatal(err)
+	}
+	// A join notice gives the system rendering something to show.
+	if _, err := messages.SetConversationTopic(ctx, "T1", "U1", "Cdev", "chrome topic"); err != nil {
+		t.Fatal(err)
+	}
+	// Read up to the older message only, so everything after it is unread.
+	if _, err := messages.MarkRead(ctx, "T1", "U1", "Cdev", domain.NewMessageTimestamp(older.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "message chrome", body,
+		`class="day-separator"`,
+		`class="unread-divider"`,
+		`(edited)`,
+		`class="thread-summary"`,
+		"2 replies",
+		"Also sent to the channel",
+		`class="message system-message"`,
+		`data-subtype="channel_topic"`,
+		"Copy link",
+		"Mark unread from here",
+		"Forward",
+		`/archives/Cdev/p`,
+	)
+	// A system message carries no author chrome and no actions: it is not
+	// something a person said, so there is nothing to reply to or react to.
+	systemStart := strings.Index(body, `class="message system-message"`)
+	if systemStart < 0 {
+		t.Fatal("no system message rendered")
+	}
+	systemEnd := strings.Index(body[systemStart:], "</article>")
+	systemBlock := body[systemStart : systemStart+systemEnd]
+	requireMissing(t, "system message", systemBlock, "message-actions", "Add reaction", `class="avatar`)
+	// The keyboard contract advertises the two new one-key actions.
+	requireContains(t, "message shortcuts", body, "aria-keyshortcuts=", " F", " U")
+}
+
+// Forwarding shares a message into another conversation with its original
+// attribution and a link back, and marking unread from a message moves only
+// this member's cursor so everything from there on is unread again.
+func TestForwardAndMarkUnreadFromAMessage(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: store}
+	ctx := context.Background()
+	if _, err := messages.CreateConversation(ctx, "T1", "U1", "elsewhere", false); err != nil {
+		t.Fatal(err)
+	}
+	target, err := messages.Post(ctx, "T1", "U1", "Cdev", "worth forwarding", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp := string(domain.NewMessageTimestamp(target.CreatedAt))
+	csrf := auth.CSRFToken("session")
+
+	conversations, err := messages.Conversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var destination domain.ConversationID
+	for _, conversation := range conversations.Conversations {
+		if conversation.Name == "elsewhere" {
+			destination = conversation.ID
+		}
+	}
+	if destination == "" {
+		t.Fatal("the destination channel was not created")
+	}
+	forwarded := postForm(t, mux, "/app/message/forward?channel=Cdev&ts="+url.QueryEscape(timestamp), url.Values{
+		"_csrf": {csrf}, "destination": {string(destination)}, "comment": {"look at this"},
+	}.Encode(), false)
+	if forwarded.Code != http.StatusSeeOther {
+		t.Fatalf("forward=%d: %s", forwarded.Code, forwarded.Body)
+	}
+	page := get(t, mux, "/app?channel="+string(destination))
+	requireContains(t, "forwarded message", page.Body.String(), "look at this", "worth forwarding", "Forwarded from")
+
+	// Mark unread from the message: the cursor moves to just before it.
+	if _, err := messages.MarkRead(ctx, "T1", "U1", "Cdev", domain.NewMessageTimestamp(target.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	unread := postForm(t, mux, "/app/read/unread?channel=Cdev&ts="+url.QueryEscape(timestamp), url.Values{"_csrf": {csrf}}.Encode(), false)
+	if unread.Code != http.StatusSeeOther {
+		t.Fatalf("mark unread=%d: %s", unread.Code, unread.Body)
+	}
+	cursor, err := messages.ReadCursor(ctx, "T1", "U1", "Cdev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.LastRead >= domain.NewMessageTimestamp(target.CreatedAt) {
+		t.Fatalf("cursor=%s, want it to sit before the message that was marked unread", cursor.LastRead)
+	}
+	requireContains(t, "timeline after marking unread", get(t, mux, "/app?channel=Cdev").Body.String(), `class="unread-divider"`)
 }

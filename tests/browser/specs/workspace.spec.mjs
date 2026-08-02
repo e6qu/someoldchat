@@ -787,9 +787,14 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   const workspaceSearch = page.locator('#workspace-search');
   await workspaceSearch.focus();
   await workspaceSearch.fill(needle);
-  const recent = page.getByRole('option', { name: `${needle} Recent search` });
+  const suggestions = page.getByRole('listbox', { name: 'Search suggestions' });
+  const recent = suggestions.getByRole('option', { name: `${needle} Recent search` });
   await expect(recent).toContainText('Recent search');
-  await expect(page.getByRole('option').filter({ hasText: 'general' })).toHaveCount(0);
+  // Scoped to the search listbox: this asserts that a needle matching nothing
+  // suggests no channel, not that the whole page contains no element with the
+  // option role — the message actions carry a destination <select> whose
+  // options are legitimately role=option.
+  await expect(suggestions.getByRole('option').filter({ hasText: 'general' })).toHaveCount(0);
   await workspaceSearch.press('ArrowDown');
   await workspaceSearch.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/app/search\\?.*q=${needle}`));

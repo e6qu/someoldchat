@@ -165,13 +165,17 @@ var liveEventTopics = []string{
 // so the partial cannot be reached with a value that is missing a field it
 // needs: that mismatch is what made every thread view fail to render.
 type messageList struct {
-	Messages    []messageView
-	ChannelName string
-	CSRFToken   string
-	IsMember    bool
-	CanReact    bool
-	CanPin      bool
-	CanReply    bool
+	// ForwardDestinations are the conversations this reader may forward into.
+	// They are the reader's own visible channels: ACT-03 requires a forward
+	// not to disclose a destination the actor cannot post to.
+	ForwardDestinations []conversationView
+	Messages            []messageView
+	ChannelName         string
+	CSRFToken           string
+	IsMember            bool
+	CanReact            bool
+	CanPin              bool
+	CanReply            bool
 }
 
 type messageView struct {
@@ -207,15 +211,39 @@ type messageView struct {
 	CanEdit       bool
 	CanDelete     bool
 	Permalink     string
-	Channel       string
-	ChannelName   string
-	ChannelPrefix string
-	AppID         string
-	CanInteract   bool
-	Streaming     bool
-	Ephemeral     bool
-	Shortcuts     []domain.AppShortcut
-	Files         []fileView
+	// Edited, ReplyCount and their neighbours are the fittings Slack shows
+	// around a message: whether it was edited, what its thread has
+	// accumulated, whether it was also sent to the channel, and whether it is
+	// a message the workspace generated rather than a person composing one.
+	Edited            bool
+	EditedTime        string
+	EditedMachineTime string
+	ReplyCount        int
+	ReplySummary      string
+	LastReplyTime     string
+	Broadcast         bool
+	System            bool
+	Subtype           string
+	// DaySeparator is set on the first message of each day in the rendered
+	// window, and FirstUnread on the first message the reader has not read.
+	// Both are computed server-side: the fragment refresh re-renders this
+	// same partial, so anything computed in the browser is lost on every
+	// live update.
+	DaySeparator        string
+	DaySeparatorMachine string
+	FirstUnread         bool
+	CopyLinkURL         string
+	ForwardURL          string
+	MarkUnreadURL       string
+	Channel             string
+	ChannelName         string
+	ChannelPrefix       string
+	AppID               string
+	CanInteract         bool
+	Streaming           bool
+	Ephemeral           bool
+	Shortcuts           []domain.AppShortcut
+	Files               []fileView
 }
 
 type fileView struct {
@@ -1064,6 +1092,16 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .membership-pill{display:none}
 .message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1;visibility:visible}
 .message-actions details[open]>form{left:0;right:auto}
+.day-separator{display:flex;align-items:center;gap:8px;margin:14px 0 6px;color:var(--muted);font-size:12px}
+.day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
+.unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
+.unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
+.system-message{opacity:.85}
+.system-text{margin:0;color:var(--muted);font-size:13px}
+.edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
+.thread-summary{margin:2px 0 0;font-size:12px}
+.thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
+.thread-last-reply{color:var(--muted);margin-left:6px}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
@@ -1091,12 +1129,18 @@ const attachmentPartial = `{{define "attachment"}}
 
 const messagesPartial = `{{define "messages"}}
 {{range $message := .Messages}}
-<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if not $message.Ephemeral}} A M{{end}}{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
+{{if $message.DaySeparator}}<div class="day-separator" role="separator"><time datetime="{{$message.DaySeparatorMachine}}">{{$message.DaySeparator}}</time></div>{{end}}
+{{if $message.FirstUnread}}<div class="unread-divider" role="separator" aria-label="New messages"><span>New</span></div>{{end}}
+{{if $message.System}}<article class="message system-message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" data-subtype="{{$message.Subtype}}" tabindex="-1" aria-label="{{$message.DisplayText}}">
+  <div class="message-body"><p class="system-text">{{$message.DisplayText}}</p><time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></div>
+</article>
+{{else}}
+<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if not $message.Ephemeral}} A M F{{end}}{{if $message.MarkUnreadURL}} U{{end}}{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
   <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
   <div class="message-body">
     <div class="message-head">
       <span class="author">{{$message.AuthorName}}</span>{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
-      <time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
+      {{if $message.Permalink}}<a class="time" href="{{$message.Permalink}}"><time datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></a>{{else}}<time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{end}}{{if $message.Edited}}<span class="edited-label" title="Edited {{$message.EditedTime}}">(edited)</span>{{end}}{{if $message.Broadcast}}<span class="broadcast-label">Also sent to the channel</span>{{end}}{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
       {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
       {{if $message.Ephemeral}}<span class="ephemeral-label">Only visible to you</span>{{end}}
     </div>
@@ -1169,8 +1213,22 @@ const messagesPartial = `{{define "messages"}}
       {{end}}
     </ul>
     {{end}}
+    {{if $message.ReplyCount}}<p class="thread-summary"><a href="{{$message.ReplyURL}}">{{$message.ReplySummary}}</a>{{if $message.LastReplyTime}} <span class="thread-last-reply">Last reply {{$message.LastReplyTime}}</span>{{end}}</p>{{end}}
     {{if not $message.Ephemeral}}<div class="message-actions">
       <a href="{{$message.ReplyURL}}">{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}</a>
+      {{if $message.CopyLinkURL}}<a class="copy-link" href="{{$message.CopyLinkURL}}" data-copy-link="{{$message.CopyLinkURL}}">Copy link</a>{{end}}
+      {{if and $message.ForwardURL $.CanReply}}<details class="forward-menu"><summary>Forward</summary>
+        <form method="post" action="{{$message.ForwardURL}}" hx-post="{{$message.ForwardURL}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label>Forward to<select name="destination">{{range $.ForwardDestinations}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label>
+          <label>Add a message<input name="comment" maxlength="2000"></label>
+          <button type="submit">Forward</button>
+        </form>
+      </details>{{end}}
+      {{if $message.MarkUnreadURL}}<form method="post" action="{{$message.MarkUnreadURL}}" hx-post="{{$message.MarkUnreadURL}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <button type="submit">Mark unread from here</button>
+      </form>{{end}}
       {{if $.CanReact}}
       <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
@@ -1241,6 +1299,7 @@ const messagesPartial = `{{define "messages"}}
     </div>{{end}}
   </div>
 </article>
+{{end}}
 {{else}}
 <p class="empty">{{if .IsMember}}No messages yet. Start the conversation.{{else}}No messages have been posted in this channel yet.{{end}}</p>
 {{end}}
@@ -2291,6 +2350,12 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // them when it renders a script context, so the bytes the browser receives
 // would no longer match the Content-Security-Policy hash computed from this
 // constant, and the whole client would be silently blocked.
+//
+// Copying a message link is an enhancement layered on a real anchor: the
+// control is an <a> pointing at the permalink, and the handler below only
+// intercepts it where the clipboard API exists. A browser without clipboard
+// access, or one that refuses the write, follows the link instead of doing
+// nothing.
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
@@ -2780,6 +2845,15 @@ if(!ownPath(action))return;
 fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
 document.addEventListener('click',function(event){
+var copyLink=event.target.closest?event.target.closest('[data-copy-link]'):null;
+if(copyLink){
+if(navigator.clipboard&&navigator.clipboard.writeText){
+event.preventDefault();
+var absolute=new URL(copyLink.getAttribute('data-copy-link'),window.location.origin).toString();
+navigator.clipboard.writeText(absolute).then(function(){announce('Link copied.')}).catch(function(){window.location.assign(copyLink.getAttribute('href'))});
+}
+return;
+}
 var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-mention-group],[data-channel-id],[data-slash-command],[data-emoji-name],[data-open-emoji-picker]'):null;
 if(control&&control.hasAttribute('data-open-emoji-picker')){if(openEmojiPicker(control))event.preventDefault();return}
 if(control&&control.hasAttribute('data-emoji-name')){chooseEmoji(control,!!(emojiSuggestions&&emojiSuggestions.contains(control)));return}
@@ -3155,6 +3229,11 @@ if(event.key==='ArrowLeft'){
 var back=Array.prototype.slice.call(document.querySelectorAll('.channel-actions a')).find(function(link){return link.textContent.trim()==='Back to channel'});
 if(back&&ownPath(back.getAttribute('href'))){event.preventDefault();window.location.assign(back.getAttribute('href'));return}
 }
+if(key==='f'&&openMessageDetails(focusedMessage,'Forward','select,input,button')){event.preventDefault();return}
+if(key==='u'){
+var unread=Array.prototype.slice.call(focusedMessage.querySelectorAll('.message-actions button')).find(function(button){return button.textContent.trim()==='Mark unread from here'});
+if(unread){event.preventDefault();unread.click();return}
+}
 if(key==='e'&&openMessageDetails(focusedMessage,'Edit','textarea')){event.preventDefault();return}
 if(event.key==='Delete'&&openMessageDetails(focusedMessage,'Delete','button[type=submit]')){event.preventDefault();return}
 if(key==='r'){
@@ -3251,6 +3330,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /app", h.index)
 	mux.HandleFunc("GET /archives/{channelID}/{timestamp}", h.archivePermalink)
+	mux.HandleFunc("POST /app/message/forward", h.forwardMessage)
+	mux.HandleFunc("POST /app/read/unread", h.markUnreadFromHere)
 	mux.HandleFunc("GET /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("POST /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("GET /oauth/v2/authorize", h.oauthAuthorize)
@@ -3446,6 +3527,100 @@ func requireHistoryReader(principal auth.Principal) (historyReader, error) {
 // permalink to open the containing conversation, load a window containing the
 // target, and mark it; a removed or malformed target must be a distinct, safe
 // outcome rather than a broken page.
+// forwardMessage shares a message into another conversation, the way Slack's
+// forward does: the destination receives the original's attribution and a
+// link back to it, plus the forwarder's optional note.
+//
+// The original is quoted as an attachment rather than copied as text, so the
+// forwarded message never pretends the forwarder wrote it, and the
+// destination is validated as one this actor may post to — ACT-03 requires a
+// forward not to disclose a destination the actor cannot reach.
+func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the conversation and try again.")
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.URL.Query().Get("channel")))
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
+	destination := domain.ConversationID(strings.TrimSpace(fields["destination"]))
+	if channel == "" || timestamp == "" || destination == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The message was not forwarded", "Choose a destination and try again.")
+		return
+	}
+	original, lookupErr := h.Messages.MessageAt(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp)
+	if lookupErr != nil {
+		h.writeMessageMutationError(w, r, lookupErr, "forwarded")
+		return
+	}
+	names := h.newUserNames(r.Context(), principal)
+	permalink := "/archives/" + url.PathEscape(string(channel)) + "/p" + strings.ReplaceAll(string(timestamp), ".", "")
+	quoted := map[string]any{
+		"author_name": names.name(original.AuthorID),
+		"text":        original.Text,
+		"footer":      "Forwarded from " + conversationDisplayName(r.Context(), h, principal, channel),
+		"title":       "View the original message",
+		"title_link":  permalink,
+	}
+	encoded, encodeErr := json.Marshal([]any{quoted})
+	if encodeErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The message was not forwarded", "The original message could not be quoted.")
+		return
+	}
+	if _, err := h.Messages.PostMessageAs(r.Context(), principal.WorkspaceID, principal.UserID, domain.MessagePostRequest{
+		Conversation: destination,
+		Text:         strings.TrimSpace(fields["comment"]),
+		Attachments:  string(encoded),
+	}); err != nil {
+		h.writeMessageMutationError(w, r, err, "forwarded")
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(destination), "", "", "", "")+"&notice="+url.QueryEscape("Message forwarded"))
+}
+
+// conversationDisplayName names a conversation for a person, falling back to
+// its identifier when the reader cannot read its metadata.
+func conversationDisplayName(ctx context.Context, h Handler, principal auth.Principal, channel domain.ConversationID) string {
+	conversation, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		return string(channel)
+	}
+	return conversationName(conversation)
+}
+
+// markUnreadFromHere moves the reader's cursor to just before the named
+// message, which is how Slack's "mark unread from here" works: everything
+// from that message onward becomes unread again, for this member only.
+func (h Handler) markUnreadFromHere(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the conversation and try again."); !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.URL.Query().Get("channel")))
+	timestamp := strings.TrimSpace(r.URL.Query().Get("ts"))
+	instant, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(timestamp))
+	if channel == "" || parseErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The conversation was not marked unread", "Reload the conversation and try again.")
+		return
+	}
+	// One microsecond before the message: the cursor names the last message
+	// the reader HAS read, so the target itself must fall after it.
+	before := domain.NewMessageTimestamp(instant.Add(-time.Microsecond))
+	if _, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, channel, before); err != nil {
+		h.writeMessageMutationError(w, r, err, "marked unread")
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(channel), "", "", "", "")+"&notice="+url.QueryEscape("Marked unread"))
+}
+
 func (h Handler) archivePermalink(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
@@ -3740,7 +3915,14 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	names := h.newUserNames(r.Context(), principal)
 	notices := make([]string, 0, 3)
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "" && threadTimestamp == ""})
+	timelineSummaries, timelineLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, history.Messages, isMember)
+	forwardDestinations := []conversationView(nil)
+	if isMember && principal.HasScope(auth.ScopeChatWrite) {
+		if options, optionsErr := h.visibleChannelOptions(r.Context(), principal); optionsErr == nil {
+			forwardDestinations = options
+		}
+	}
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, ForwardDestinations: forwardDestinations})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -4079,7 +4261,8 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		}
 		messages = history.Messages
 	}
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "" && threadTimestamp == ""})
+	fragmentSummaries, fragmentLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, messages, isMember)
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead})
 	h.writeFragment(w, list)
 }
 
@@ -4129,15 +4312,114 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 // conversation it belongs to, the messages in it, and the view state that its
 // controls have to return to.
 type messageListRequest struct {
-	Conversation     domain.Conversation
-	CSRFToken        string
-	Messages         []domain.Message
-	Thread           string
-	Before           string
-	ThreadPane       bool
-	Member           bool
-	Names            *userNames
-	IncludeEphemeral bool
+	Conversation        domain.Conversation
+	CSRFToken           string
+	Messages            []domain.Message
+	Thread              string
+	Before              string
+	ThreadPane          bool
+	Member              bool
+	Names               *userNames
+	IncludeEphemeral    bool
+	ForwardDestinations []conversationView
+	// ThreadSummaries carries what each rendered parent's thread has
+	// accumulated, read once for the whole window rather than per message.
+	ThreadSummaries map[domain.MessageTimestamp]domain.ThreadSummary
+	// LastRead is the reader's cursor, used to place the unread divider. The
+	// zero value means the reader has read nothing in this conversation.
+	LastRead domain.MessageTimestamp
+}
+
+// timelineChrome reads the two per-window facts the chrome needs: what each
+// rendered parent's thread has accumulated, and where this reader has read
+// to. Both are one call for the whole window — the per-message alternative is
+// one read per rendered row — and both degrade to nothing rather than failing
+// the conversation: a missing summary hides a reply count, a missing cursor
+// hides the unread divider, and neither is worth a blank page.
+func (h Handler) timelineChrome(ctx context.Context, principal auth.Principal, conversation domain.ConversationID, messages []domain.Message, member bool) (map[domain.MessageTimestamp]domain.ThreadSummary, domain.MessageTimestamp) {
+	roots := make([]domain.MessageTimestamp, 0, len(messages))
+	for _, message := range messages {
+		if message.Deleted || message.ThreadTimestamp != "" {
+			continue
+		}
+		roots = append(roots, domain.NewMessageTimestamp(message.CreatedAt))
+	}
+	summaries, err := h.Messages.ThreadSummaries(ctx, principal.WorkspaceID, principal.UserID, conversation, roots)
+	if err != nil {
+		summaries = nil
+	}
+	if !member {
+		return summaries, ""
+	}
+	cursor, err := h.Messages.ReadCursor(ctx, principal.WorkspaceID, principal.UserID, conversation)
+	if err != nil {
+		return summaries, ""
+	}
+	return summaries, cursor.LastRead
+}
+
+// decodeMessageBroadcast reports whether a threaded reply was also sent to
+// the channel. The flag lives in the durable stream state, which the API
+// projects as subtype thread_broadcast; MSG-01 requires the two to be
+// distinguishable in the client too.
+func decodeMessageBroadcast(streamState string) bool {
+	if strings.TrimSpace(streamState) == "" {
+		return false
+	}
+	var state domain.MessageStreamState
+	if json.Unmarshal([]byte(streamState), &state) != nil {
+		return false
+	}
+	return state.ReplyBroadcast
+}
+
+// threadReplySummary is the sentence under a parent message: how many replies
+// and who wrote them, in Slack's phrasing.
+func threadReplySummary(summary domain.ThreadSummary, names *userNames) string {
+	replies := "1 reply"
+	if summary.ReplyCount != 1 {
+		replies = strconv.Itoa(summary.ReplyCount) + " replies"
+	}
+	if len(summary.Participants) == 0 {
+		return replies
+	}
+	people := make([]string, 0, len(summary.Participants))
+	for _, participant := range summary.Participants {
+		people = append(people, names.name(participant))
+	}
+	if len(people) > 3 {
+		people = append(people[:3], "and others")
+	}
+	return replies + " from " + strings.Join(people, ", ")
+}
+
+// markDaysAndFirstUnread annotates the rendered window with the two
+// boundaries a reader navigates by: where each day starts, and where their
+// unread messages begin.
+//
+// It runs after the ephemeral merge, because that merge re-sorts and can
+// truncate the slice — a divider computed before it would sit on the wrong
+// message. It is server-side for the same reason every other flag here is:
+// the fragment refresh re-renders this partial, and a boundary computed in
+// the browser would vanish on the next live update.
+func markDaysAndFirstUnread(views []messageView, messages []domain.Message, lastRead domain.MessageTimestamp) {
+	previousDay := ""
+	unreadMarked := lastRead == ""
+	for index := range views {
+		created := messages[index].CreatedAt.UTC()
+		day := created.Format("2006-01-02")
+		if day != previousDay {
+			views[index].DaySeparator = created.Format("Monday, 2 January 2006")
+			views[index].DaySeparatorMachine = day
+			previousDay = day
+		}
+		if !unreadMarked && !views[index].Ephemeral {
+			if domain.NewMessageTimestamp(messages[index].CreatedAt) > lastRead {
+				views[index].FirstUnread = true
+				unreadMarked = true
+			}
+		}
+	}
 }
 
 // newMessageList builds the single type the message partial renders. It also
@@ -4189,13 +4471,14 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	}
 	channel := string(conversation.ID)
 	list := messageList{
-		ChannelName: conversationName(conversation),
-		CSRFToken:   csrfToken,
-		IsMember:    request.Member,
-		CanReact:    request.Member && principal.HasScope(auth.ScopeReactionsWrite),
-		CanPin:      request.Member && principal.HasScope(auth.ScopePinsWrite),
-		CanReply:    request.Member && principal.HasScope(auth.ScopeChatWrite),
-		Messages:    make([]messageView, 0, len(messages)),
+		ForwardDestinations: request.ForwardDestinations,
+		ChannelName:         conversationName(conversation),
+		CSRFToken:           csrfToken,
+		IsMember:            request.Member,
+		CanReact:            request.Member && principal.HasScope(auth.ScopeReactionsWrite),
+		CanPin:              request.Member && principal.HasScope(auth.ScopePinsWrite),
+		CanReply:            request.Member && principal.HasScope(auth.ScopeChatWrite),
+		Messages:            make([]messageView, 0, len(messages)),
 	}
 	notice := ""
 	emojiImages := map[string]string{}
@@ -4243,6 +4526,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 	}
 	actionCatalog := appActionOptionCatalog{}
+	rendered := make([]domain.Message, 0, len(messages))
 	for _, message := range messages {
 		// Deletion is soft in the store and leaves the text in place, so every
 		// region has to drop the row rather than trust the read to have done it.
@@ -4300,6 +4584,30 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			CanInteract: request.Member && message.AppID != "",
 			Streaming:   messageStreamActive(message.StreamState),
 			Ephemeral:   ephemeral,
+			Subtype:     string(message.Subtype),
+			System:      message.Subtype.System(),
+			Broadcast:   decodeMessageBroadcast(message.StreamState),
+		}
+		if !message.EditedAt.IsZero() {
+			view.Edited = true
+			view.EditedTime = formatTime(message.EditedAt)
+			view.EditedMachineTime = message.EditedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if !ephemeral {
+			// Slack's permalink, and the two actions that need one.
+			view.Permalink = "/archives/" + url.PathEscape(channel) + "/p" + strings.ReplaceAll(timestamp, ".", "")
+			view.CopyLinkURL = view.Permalink
+			view.ForwardURL = mutationURL("/app/message/forward", channel, timestamp, threadTimestamp, before)
+			if request.Member {
+				view.MarkUnreadURL = mutationURL("/app/read/unread", channel, timestamp, threadTimestamp, before)
+			}
+		}
+		if summary, ok := request.ThreadSummaries[domain.MessageTimestamp(timestamp)]; ok && summary.ReplyCount > 0 {
+			view.ReplyCount = summary.ReplyCount
+			view.ReplySummary = threadReplySummary(summary, names)
+			if !summary.LastReplyAt.IsZero() {
+				view.LastReplyTime = formatTime(summary.LastReplyAt)
+			}
 		}
 		if item, ok := saved[message.ID]; ok {
 			view.Saved = true
@@ -4331,7 +4639,12 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			view.Reactions = summarizeReactions(reactions, principal.UserID, emojiImages)
 		}
 		list.Messages = append(list.Messages, view)
+		rendered = append(rendered, message)
 	}
+	// The day separators and the unread divider are placed over the messages
+	// that were actually rendered: the loop above drops soft-deleted rows, so
+	// the two slices only line up once both are built.
+	markDaysAndFirstUnread(list.Messages, rendered, request.LastRead)
 	return list, notice
 }
 
