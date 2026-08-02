@@ -1319,6 +1319,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1330,6 +1331,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1352,6 +1354,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1363,6 +1366,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1374,6 +1378,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1385,6 +1390,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1396,6 +1402,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1407,6 +1414,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1418,6 +1426,7 @@ operations:
       - internal/api/slack/connect_test.go
       - internal/service/connect_test.go
       - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
