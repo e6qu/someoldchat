@@ -4,6 +4,9 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+// MessageAt returns a Message, which this package defines.
+import "sameoldchat/chat/v1/messages.proto";
+
 message ReadCursor {
   string workspace_id = 1;
   string user_id = 2;
@@ -23,6 +26,13 @@ message ReadCursorRequest {
   string workspace_id = 1;
   string user_id = 2;
   string conversation_id = 3;
+}
+
+message MessageAtRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
 }
 
 message ThreadSummariesRequest {
@@ -201,6 +211,7 @@ service InteractionsService {
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);
   rpc ThreadSummaries(ThreadSummariesRequest) returns (ThreadSummariesResponse);
+  rpc MessageAt(MessageAtRequest) returns (Message);
   rpc DispatchSlashCommand(SlashCommandRequest) returns (InteractionMutationResponse);
   rpc DispatchBlockAction(BlockActionRequest) returns (InteractionMutationResponse);
   rpc DispatchViewBlockAction(ViewBlockActionRequest) returns (InteractionMutationResponse);

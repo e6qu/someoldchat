@@ -67,6 +67,7 @@ func runQualification(t *testing.T, open opener) {
 		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
 		{"a conversation change and its notice commit together", conversationNoticesCommitWithTheirChange},
 		{"thread summaries are batched and identical across profiles", threadSummariesAreBatchedAndIdentical},
+		{"activity follows the read cursor in both directions", activityFollowsTheReadCursorBothWays},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

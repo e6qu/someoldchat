@@ -4492,6 +4492,26 @@ func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain
 	return m.Store.RemoveConversationMember(ctx, conversationID, targetID, event)
 }
 
+// MessageAt resolves a message by its public timestamp, which is the
+// identifier every Slack permalink, action and API argument names it by. The
+// caller must be able to read the conversation; a message that does not exist
+// and one in a conversation the caller may not read are the same answer, so
+// the lookup cannot be used to probe for either.
+func (m Messages) MessageAt(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Message, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversation); err != nil {
+		return domain.Message{}, err
+	}
+	createdAt, err := domain.ParseMessageTimestamp(timestamp)
+	if err != nil {
+		return domain.Message{}, ErrInvalidTimestamp
+	}
+	message, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+	if err != nil || message.WorkspaceID != workspaceID || message.Deleted {
+		return domain.Message{}, store.ErrNotFound
+	}
+	return message, nil
+}
+
 // ReadCursor reports where a member has read to in a conversation. MarkRead
 // has always been on this seam; the reader was not, so nothing above the
 // store could render an unread divider or answer "which message is the first
@@ -5950,7 +5970,17 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 		return "", store.ErrNotFound
 	}
 	canonical := domain.NewMessageTimestamp(message.CreatedAt)
-	return "https://sameoldchat.local/archives/" + url.PathEscape(string(conversation)) + "/p" + strings.ReplaceAll(string(canonical), ".", ""), nil
+	// Slack's shape is <origin>/archives/<channel>/p<ts without the dot>, and
+	// internal/web serves exactly that path, redirecting into the window that
+	// contains the message.
+	//
+	// The origin is deliberately omitted rather than guessed. This used to
+	// return https://sameoldchat.local/..., a host that exists nowhere, so
+	// every permalink the product handed out was unfollowable. The service
+	// does not know what origin served the request — the web and API handlers
+	// do — and a relative permalink resolves correctly against whichever one
+	// did, which is the honest answer available here.
+	return "/archives/" + url.PathEscape(string(conversation)) + "/p" + strings.ReplaceAll(string(canonical), ".", ""), nil
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {

@@ -4511,10 +4511,19 @@ func (s *Store) SetReadCursor(_ context.Context, cursor domain.ReadCursor, event
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.readCursors[readCursorKey(cursor.WorkspaceID, cursor.UserID, cursor.Conversation)] = cursor
+	// Activity follows the cursor in BOTH directions: marking unread moves the
+	// cursor backwards, and items after it must reopen, or the sidebar and
+	// Activity disagree about the same conversation.
 	for id, item := range s.activityItems {
-		if item.WorkspaceID == cursor.WorkspaceID && item.UserID == cursor.UserID && item.Conversation == cursor.Conversation &&
-			!item.OccurredAt.After(readAt) && item.ReadAt.IsZero() {
+		if item.WorkspaceID != cursor.WorkspaceID || item.UserID != cursor.UserID || item.Conversation != cursor.Conversation {
+			continue
+		}
+		switch {
+		case !item.OccurredAt.After(readAt) && item.ReadAt.IsZero():
 			item.ReadAt = cursor.UpdatedAt.UTC()
+			s.activityItems[id] = item
+		case item.OccurredAt.After(readAt) && !item.ReadAt.IsZero():
+			item.ReadAt = time.Time{}
 			s.activityItems[id] = item
 		}
 	}

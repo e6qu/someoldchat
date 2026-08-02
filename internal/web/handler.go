@@ -280,62 +280,65 @@ type conversationDetailsView struct {
 }
 
 type pageData struct {
-	Timeline          messageList
-	Thread            messageList
-	ThreadTimestamp   string
-	Channels          []conversationView
-	Directs           []conversationView
-	MoreChannelsURL   string
-	Channel           string
-	ChannelName       string
-	ChannelPrefix     string
-	ChannelMeta       string
-	WorkspaceName     string
-	CSRFToken         string
-	ShowProfile       bool
-	ShowAdmin         bool
-	ReminderUnread    bool
-	IsMember          bool
-	CanPost           bool
-	CanSchedule       bool
-	CanUpload         bool
-	CanJoin           bool
-	CanCreate         bool
-	JoinURL           string
-	Username          string
-	UserInitial       string
-	OlderURL          string
+	Timeline        messageList
+	Thread          messageList
+	ThreadTimestamp string
+	Channels        []conversationView
+	Directs         []conversationView
+	MoreChannelsURL string
+	Channel         string
+	ChannelName     string
+	ChannelPrefix   string
+	ChannelMeta     string
+	WorkspaceName   string
+	CSRFToken       string
+	ShowProfile     bool
+	ShowAdmin       bool
+	ReminderUnread  bool
+	IsMember        bool
+	CanPost         bool
+	CanSchedule     bool
+	CanUpload       bool
+	CanJoin         bool
+	CanCreate       bool
+	JoinURL         string
+	Username        string
+	UserInitial     string
+	OlderURL        string
+	// LatestURL is set when the rendered window is not the newest one. It is
+	// both the "jump to the latest messages" pager and the composer's
+	// data-newest, so a post made while reading older history takes the
+	// reader to where the message actually landed instead of refreshing a
+	// window that cannot hold it. These were two fields assigned the same
+	// value, which is one drift away from the pager and the composer
+	// disagreeing about where "latest" is.
 	LatestURL         string
 	MarkReadURL       string
 	MarkReadTimestamp string
-	// NewestURL is set when the rendered window is not the newest one, so a
-	// post made while reading older history can take the reader to where the
-	// message actually landed instead of refreshing a window that cannot hold it.
-	NewestURL        string
-	AtLatest         bool
-	Notice           string
-	Error            string
-	Draft            string
-	DraftAttachments []draftAttachmentView
-	DraftJSON        string
-	ScheduleAt       string
-	ComposeURL       string
-	DraftURL         string
-	ScheduleURL      string
-	UploadURL        string
-	StageUploadURL   string
-	TimelineURL      string
-	ThreadURL        string
-	ThreadFollowURL  string
-	FollowingThread  bool
-	GlobalShortcuts  []domain.AppShortcut
-	SlashCommands    []domain.AppShortcut
-	ComposerMembers  []memberView
-	ComposerGroups   []userGroupView
-	ComposerChannels []conversationView
-	Apps             []domain.InstalledApp
-	Modal            *modalView
-	Details          *conversationDetailsView
+	AtLatest          bool
+	Notice            string
+	Error             string
+	Draft             string
+	DraftAttachments  []draftAttachmentView
+	DraftJSON         string
+	ScheduleAt        string
+	ComposeURL        string
+	DraftURL          string
+	ScheduleURL       string
+	UploadURL         string
+	StageUploadURL    string
+	TimelineURL       string
+	ThreadURL         string
+	ThreadFollowURL   string
+	FollowingThread   bool
+	GlobalShortcuts   []domain.AppShortcut
+	SlashCommands     []domain.AppShortcut
+	ComposerMembers   []memberView
+	ComposerGroups    []userGroupView
+	ComposerChannels  []conversationView
+	Apps              []domain.InstalledApp
+	Modal             *modalView
+	Details           *conversationDetailsView
 }
 
 type memberView struct {
@@ -1402,7 +1405,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button type="submit">Add to draft</button>
           </form>
         </details>{{end}}
-        <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}" data-draft-url="{{.DraftURL}}">
+        <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.LatestURL}}" data-draft-url="{{.DraftURL}}">
           <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
           <input type="hidden" name="timezone" data-browser-timezone value="UTC">
@@ -3247,6 +3250,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
 	}
 	mux.HandleFunc("GET /app", h.index)
+	mux.HandleFunc("GET /archives/{channelID}/{timestamp}", h.archivePermalink)
 	mux.HandleFunc("GET /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("POST /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("GET /oauth/v2/authorize", h.oauthAuthorize)
@@ -3430,6 +3434,56 @@ func requireHistoryReader(principal auth.Principal) (historyReader, error) {
 		return historyReader{}, auth.ErrMissingScope
 	}
 	return historyReader{principal: principal}, nil
+}
+
+// archivePermalink resolves Slack's permalink shape,
+// /archives/{channel}/p{ts-without-the-dot}, into the conversation window
+// that contains the message and anchors the message itself.
+//
+// Every permalink this deployment hands out — chat.getPermalink, the copy
+// link control, a link a member pastes to a colleague — used to point at a
+// path no route served, on a host that exists nowhere. NAV-05 requires a
+// permalink to open the containing conversation, load a window containing the
+// target, and mark it; a removed or malformed target must be a distinct, safe
+// outcome rather than a broken page.
+func (h Handler) archivePermalink(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.PathValue("channelID")))
+	raw := strings.TrimSpace(r.PathValue("timestamp"))
+	digits, ok := strings.CutPrefix(raw, "p")
+	if channel == "" || !ok || len(digits) < 7 {
+		http.NotFound(w, r)
+		return
+	}
+	// The permalink packs the timestamp without its dot; Slack's format is
+	// six fractional digits, so the split is from the right.
+	timestamp := domain.MessageTimestamp(digits[:len(digits)-6] + "." + digits[len(digits)-6:])
+	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	message, err := h.Messages.MessageAt(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp)
+	if err != nil {
+		// A message that no longer exists, or one in a conversation this
+		// member may not read, are the same answer: the link resolves to
+		// nothing they can see, and it must not disclose which.
+		h.writeStoreError(w, err, "That message is no longer available.")
+		return
+	}
+	// The window is built to CONTAIN the target: the cursor is one nanosecond
+	// after the message, which is the same trick search results use to land
+	// on a hit rather than just above it.
+	before := ""
+	boundary := message
+	boundary.CreatedAt = boundary.CreatedAt.Add(time.Nanosecond)
+	if cursor, cursorErr := domain.NewMessageCursor(boundary); cursorErr == nil {
+		before = string(cursor)
+	}
+	http.Redirect(w, r, appURL(string(channel), string(message.ThreadTimestamp), before, messageAnchor(message.ID), ""), http.StatusSeeOther)
 }
 
 func (h Handler) index(w http.ResponseWriter, r *http.Request) {
@@ -3963,7 +4017,6 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		data.OlderURL = appURL(string(channel), threadTimestamp, string(history.OlderCursor), "", "")
 	}
 	if !history.AtLatest {
-		data.NewestURL = appURL(string(channel), threadTimestamp, "", "", "")
 		data.LatestURL = appURL(string(channel), threadTimestamp, "", "", "")
 	}
 	status := state.Status

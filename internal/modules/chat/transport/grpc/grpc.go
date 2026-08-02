@@ -3085,6 +3085,16 @@ func (r Remote) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return decodeProtoReadCursor(out)
 }
 
+func (r Remote) MessageAt(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Message, error) {
+	out, err := r.interactions.MessageAt(ctx, &chatv1.MessageAtRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp),
+	})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
 func (r Remote) ThreadSummaries(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
 	timestamps := make([]string, 0, len(roots))
 	for _, root := range roots {
@@ -6153,6 +6163,14 @@ func (s *Server) GetReadCursor(ctx context.Context, input *chatv1.ReadCursorRequ
 		return nil, mapError(err)
 	}
 	return encodeProtoReadCursor(cursor), nil
+}
+
+func (s *Server) MessageAt(ctx context.Context, input *chatv1.MessageAtRequest) (*chatv1.Message, error) {
+	message, err := s.implementation.MessageAt(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(message), nil
 }
 
 func (s *Server) ThreadSummaries(ctx context.Context, input *chatv1.ThreadSummariesRequest) (*chatv1.ThreadSummariesResponse, error) {

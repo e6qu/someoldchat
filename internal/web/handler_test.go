@@ -3989,3 +3989,46 @@ type readCursorOutage struct {
 func (readCursorOutage) SetReadCursor(context.Context, domain.ReadCursor, events.Event) error {
 	return errors.New("read cursor store is unavailable")
 }
+
+// A permalink must open the conversation window that contains its target.
+// Every permalink this product handed out used to name /archives/... on a
+// host that exists nowhere AND a path no route served, so following one was
+// impossible from inside or outside the app. NAV-05 requires the link to open
+// the containing conversation and mark the target, with distinct safe
+// outcomes for a target that is gone.
+func TestArchivePermalinkOpensTheWindowContainingItsMessage(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	message := seedMessage(t, store, "Mperma", "the message a permalink names", time.Unix(1700000000, 0).UTC())
+	permalink, err := (service.Messages{Store: store}).Permalink(context.Background(), "T1", "U1", "Cdev", domain.NewMessageTimestamp(message.CreatedAt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(permalink, "/archives/Cdev/p") {
+		t.Fatalf("permalink=%q, want Slack's /archives/<channel>/p<ts> shape", permalink)
+	}
+	response := get(t, mux, permalink)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("permalink status=%d, want %d: %s", response.Code, http.StatusSeeOther, response.Body)
+	}
+	location := response.Header().Get("Location")
+	if !strings.HasPrefix(location, "/app?") || !strings.Contains(location, "channel=Cdev") ||
+		!strings.Contains(location, "before=") || !strings.HasSuffix(location, messageAnchor(message.ID)) {
+		t.Fatalf("permalink redirected to %q, want the containing window anchored on the message", location)
+	}
+	// Following the redirect actually shows the message: a window that does
+	// not contain the target is the defect this route exists to prevent.
+	// A browser sends the path and query and keeps the fragment to itself, so
+	// the follow-up request drops it exactly as one would.
+	page := get(t, mux, strings.Split(location, "#")[0])
+	requireContains(t, "permalink window", page.Body.String(), "the message a permalink names")
+
+	// A message that does not exist is a handled answer, not a broken page.
+	missing := get(t, mux, "/archives/Cdev/p1700000000000999")
+	if missing.Code == http.StatusOK || missing.Code >= http.StatusInternalServerError {
+		t.Fatalf("missing permalink status=%d, want a handled failure", missing.Code)
+	}
+	malformed := get(t, mux, "/archives/Cdev/notatimestamp")
+	if malformed.Code != http.StatusNotFound {
+		t.Fatalf("malformed permalink status=%d, want %d", malformed.Code, http.StatusNotFound)
+	}
+}

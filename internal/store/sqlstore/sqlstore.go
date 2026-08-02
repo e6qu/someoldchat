@@ -8887,6 +8887,15 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, domain.NewStoredTime(cursor.UpdatedAt)); err != nil {
 		return err
 	}
+	// Activity follows the cursor in BOTH directions. Marking read closed the
+	// items at or before the cursor, but marking unread — which moves the
+	// cursor backwards, and is how Slack's "mark unread from here" works —
+	// left them closed, so the sidebar showed unread messages while Activity
+	// insisted there was nothing to see. MSG-02 requires the two to agree.
+	if _, err := tx.ExecContext(ctx, `UPDATE activity_items SET read_at = 0 WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND occurred_at > ? AND read_at <> 0`,
+		cursor.WorkspaceID, cursor.UserID, cursor.Conversation, readAt.UTC().UnixNano()); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE activity_items SET read_at = ? WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND occurred_at <= ? AND read_at = 0`,
 		cursor.UpdatedAt.UTC().UnixNano(), cursor.WorkspaceID, cursor.UserID, cursor.Conversation, readAt.UTC().UnixNano()); err != nil {
 		return err

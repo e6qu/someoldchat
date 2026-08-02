@@ -1762,10 +1762,18 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				summary := summaries[timestampOf(message)]
+				// The permalink route resolves a message by its public
+				// timestamp, which is the identifier every Slack link and
+				// action names it by.
+				resolved, err := chat.MessageAt(ctx, "T1", "U1", "C1", timestampOf(message))
+				if err != nil {
+					return nil, err
+				}
 				return []any{
 					cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore, isMember,
 					readBack.Conversation, readBack.LastRead == cursor.LastRead,
 					summary.ReplyCount, summary.Participants, !summary.LastReplyAt.IsZero(),
+					resolved.ID == message.ID, resolved.Text,
 				}, nil
 			},
 		},

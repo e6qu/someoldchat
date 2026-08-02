@@ -2045,8 +2045,15 @@ func TestGetPermalink(t *testing.T) {
 	permalink.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, permalink)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "sameoldchat.local/archives/C1/p") {
+	// The permalink is Slack's shape on THIS deployment's origin. It used to
+	// name sameoldchat.local, a host that exists nowhere, so every permalink
+	// this product handed out was unfollowable; the path is now served by
+	// internal/web's /archives route.
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"permalink":"/archives/C1/p`) {
 		t.Fatalf("permalink status=%d body=%s", result.Code, result.Body)
+	}
+	if strings.Contains(result.Body.String(), "sameoldchat.local") {
+		t.Fatalf("permalink still names a host that does not exist: %s", result.Body)
 	}
 }
 

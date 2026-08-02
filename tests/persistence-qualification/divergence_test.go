@@ -1510,3 +1510,66 @@ func threadSummariesAreBatchedAndIdentical(t *testing.T, open opener) {
 		t.Fatalf("empty request summaries=%+v err=%v", empty, err)
 	}
 }
+
+// Moving the read cursor forward closes the Activity items it covers, and
+// moving it BACKWARDS — which is how Slack's "mark unread from here" works —
+// must reopen them. Only the forward half existed, so marking a conversation
+// unread left the sidebar showing unread messages while Activity insisted
+// there was nothing to see. MSG-02 requires the two to agree.
+func activityFollowsTheReadCursorBothWays(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	// The Activity item is produced by the mention itself, which is how every
+	// item in this system comes to exist. Both identifiers are Slack-shaped:
+	// the mention parser only recognizes <@Uxxxx> forms, so the fixture's own
+	// hyphenated identifiers cannot be mentioned.
+	recipient := domain.UserID("U" + f.suffix)
+	author := domain.UserID("UA" + f.suffix)
+	for _, user := range []domain.UserID{recipient, author} {
+		if err := f.repository.SeedUser(ctx, domain.User{ID: user, WorkspaceID: f.workspaceID, Name: string(user)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repository.SeedConversationMember(ctx, f.channelID, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := domain.MessageInstant(time.Unix(1_700_000_800, 0).UTC())
+	mention := domain.Message{
+		ID: domain.MessageID("M-activity-cursor-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: author, Text: "hello <@" + string(recipient) + ">", Attachments: "[]", CreatedAt: at,
+	}
+	if err := f.repository.CreateMessage(ctx, mention, f.event("activity-cursor", "message.created", string(mention.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
+	unread := func() int {
+		t.Helper()
+		page, err := f.repository.ListActivity(ctx, f.workspaceID, recipient, domain.ActivityQuery{UnreadOnly: true, Page: domain.PageRequest{Limit: 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Items)
+	}
+	if unread() != 1 {
+		t.Fatalf("a fresh mention is not unread")
+	}
+	read := domain.ReadCursor{WorkspaceID: f.workspaceID, UserID: recipient, Conversation: f.channelID,
+		LastRead: domain.NewMessageTimestamp(mention.CreatedAt), UpdatedAt: time.Now().UTC()}
+	if err := f.repository.SetReadCursor(ctx, read, f.event("cursor-read", "conversation.read", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	if unread() != 0 {
+		t.Fatalf("marking read left the mention unread")
+	}
+	// Mark unread from the message itself: the cursor moves to just before it.
+	back := read
+	back.LastRead = domain.NewMessageTimestamp(mention.CreatedAt.Add(-time.Microsecond))
+	back.UpdatedAt = time.Now().UTC()
+	if err := f.repository.SetReadCursor(ctx, back, f.event("cursor-unread", "conversation.read", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	if unread() != 1 {
+		t.Fatalf("marking unread did not reopen the Activity item: the sidebar and Activity now disagree")
+	}
+}
