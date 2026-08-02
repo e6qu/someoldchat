@@ -1,7 +1,11 @@
 # Browser qualification
 
-This suite runs 37 seeded journeys in Chromium, Firefox, and WebKit and
-exercises behavior that server-side tests cannot observe: session-authenticated
+This suite runs the seeded journeys in Chromium, Firefox, and WebKit. It
+deliberately does not state how many: the count went stale the first time
+somebody added a test and stayed wrong for months. `npx playwright test --list`
+answers it, always correctly.
+
+The suite exercises behavior that server-side tests cannot observe: session-authenticated
 workspace entry, public-channel preview and joining, message posting with the
 advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
 Slack-style message focus, chronological arrow/Home/End navigation, and

@@ -80,6 +80,38 @@ events include current shared-channel identity fields. Removing an organization
 follows Slack's history/copy/disconnect behavior and does not corrupt the
 remaining channel.
 
+## What this deployment implements, and what it does not
+
+**Slack Connect** is implemented as an invitation lifecycle inside one
+deployment. Approval and acceptance are distinct transitions taken by different
+organizations, denying (the host refusing to send) and declining (the invited
+organization's answer) are recorded as different facts, and the
+250-organization capacity is claimed inside the transaction that appends the
+organization — never from a count read earlier, which is stale by definition.
+
+An external organization here is **another workspace on this deployment**.
+Cross-deployment federation — an invitation that leaves this process and is
+accepted by a Slack workspace elsewhere — needs a federation transport this
+product does not have, and, as recorded below, a single-deployment mock cannot
+qualify it either way.
+
+**Administration** carries the settings with a durable backend and an enforced
+effect: workspace name, description, icon, discoverability and default
+channels; the invitation and app-request queues; analytics counted from the
+durable rows on each load; and an audit view over the durable event journal and
+the access log, whose export comes from the same query as the page.
+
+Absent, and named on the page rather than rendered as an inert control:
+
+- **Retention.** There is no retention policy, no storage for one, no
+  enforcement on read and no sweep. A toggle would promise deletion that never
+  happens, and an administrator who saw one would stop looking for the missing
+  capability.
+- **Audit visibility across private conversations.** The audit view reads the
+  journal through the same visibility-filtered path the event stream uses, so
+  it cannot show an administrator that a private conversation they are not in
+  exists. The page says so rather than implying it shows everything.
+
 ## Evidence
 
 - Multi-workspace browser and API fixtures use different administrators and

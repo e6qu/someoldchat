@@ -922,7 +922,7 @@ const pageStyle = `<style>
 .side-empty{margin:0;padding:6px 10px;color:#e8cbe9;font-size:13px}
 .side-more{padding:6px 10px;color:var(--on-accent);font-size:13px}
 .badge{margin-left:auto;background:var(--on-accent);color:var(--accent);border-radius:12px;min-width:20px;text-align:center;padding:1px 6px;font-size:12px;font-weight:800}
-.draft-badge{margin-left:auto;color:#e8cbe9;font-size:11px;font-style:italic}
+.draft-badge{margin-left:auto;color:#f3e3f4;font-size:11px;font-style:italic}
 .sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff5c;padding-top:12px}
 .signed-in{display:flex;align-items:center;gap:9px;padding:4px 10px 10px;min-width:0}
 .signed-in-avatar{flex:0 0 auto;width:24px;height:24px;border-radius:5px;display:grid;place-items:center;background:#ffffff42;font-size:11px;font-weight:800;text-transform:uppercase;overflow:hidden}
@@ -2189,7 +2189,7 @@ const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end
 <label class="check"><input type="checkbox" name="activity_channels" value="true"{{if .ActivityChannels}} checked{{end}}> Show channels set to All new posts in Activity</label>
 <label class="check"><input type="checkbox" name="activity_reminders" value="true"{{if .ActivityReminders}} checked{{end}}> Show due personal reminders in Activity</label>
 <label class="check"><input type="checkbox" id="browser-notifications" name="browser_notifications" value="true"{{if .BrowserNotifications}} checked{{end}}> Show desktop notifications while SameOldChat is open in a tab</label>
-<p class="muted" id="browser-notification-state" role="status">{{.BrowserNotificationState}}</p>
+<p class="muted" id="browser-notification-state" aria-live="polite">{{.BrowserNotificationState}}</p>
 <button type="submit">Save workspace defaults</button></form></section>
 <section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds and notification schedules.</strong> Pausing above is the only schedule.</li></ul></section>
 <section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time>. Messages and Activity remain available.</p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="resume" type="submit">Resume notifications</button></form>{{else}}<p>Pause banners and sounds for a preset or custom duration.</p><form class="actions" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><label for="dnd-minutes">Preset<select id="dnd-minutes" name="minutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="480">8 hours</option><option value="1440">24 hours</option></select></label><label for="dnd-custom-minutes">Custom minutes (optional)<input id="dnd-custom-minutes" type="number" name="custom_minutes" min="1" max="1440"></label><button type="submit">Pause notifications</button></form>{{end}}</section>
@@ -6063,6 +6063,7 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cursor domain.Cursor
+	unreadableExceptions := 0
 	for pageNumber := 0; pageNumber < 10; pageNumber++ {
 		page, listErr := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
 			Limit: 100, Cursor: cursor, MemberUserID: principal.UserID,
@@ -6082,8 +6083,14 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 				r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID,
 			)
 			if preferenceErr != nil {
-				h.writeStoreError(w, preferenceErr, "Conversation notification exceptions are temporarily unavailable.")
-				return
+				// One conversation whose override cannot be read must not take
+				// down the whole page. The workspace defaults, the pause
+				// control and every other exception have nothing to do with
+				// it, and refusing all of them leaves a person unable to
+				// change the settings that do work. The page says an exception
+				// is missing rather than pretending the list is complete.
+				unreadableExceptions++
+				continue
 			}
 			if override.Level == domain.NotificationInherit && !override.FollowEveryThread {
 				continue
@@ -6101,6 +6108,9 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 		if pageNumber == 9 {
 			data.Notice = strings.TrimSpace(data.Notice + " Only the first 1,000 conversation exceptions are shown.")
 		}
+	}
+	if unreadableExceptions > 0 {
+		data.Notice = strings.TrimSpace(data.Notice + " " + strconv.Itoa(unreadableExceptions) + " conversation exception(s) could not be read and are not listed.")
 	}
 	sort.Slice(data.Exceptions, func(left, right int) bool {
 		return strings.ToLower(data.Exceptions[left].Name) < strings.ToLower(data.Exceptions[right].Name)

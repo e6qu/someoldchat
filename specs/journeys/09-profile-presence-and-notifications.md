@@ -116,6 +116,25 @@ and updates read state according to Slack. Permission loss redacts future
 delivery and prevents stale notification content from reopening protected
 data.
 
+## What this deployment delivers, and what it does not
+
+A desktop notification needs three separate yeses, and this product owns two of
+them: the stored preference, and Do Not Disturb not being active. The third —
+the browser's own permission — belongs to the browser, and the preferences page
+reports what the browser actually says rather than folding all three into one
+silent "off". Its text comes from the timeline the client fetched under its own
+session, never from the event frame, because the durable payloads carry
+identifiers and no content by design.
+
+Unimplemented, and named as such on the page rather than rendered as a control
+that does nothing:
+
+- **Push to a mobile device.** There is no mobile application and no push
+  service.
+- **E-mail.** This deployment sends no mail at all, which is also why an
+  invitation link has to be handed over by an administrator.
+- **Sounds, and notification schedules.** Pausing is the only schedule.
+
 ## Evidence
 
 - Workspace trigger level, exact case-insensitive channel keywords, Activity

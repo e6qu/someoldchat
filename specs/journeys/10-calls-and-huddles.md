@@ -48,6 +48,29 @@ objects and never claims to carry media it does not host. App ownership,
 workspace visibility, participant identity, URL safety, and event projection
 match the current API contract.
 
+## What this deployment implements, and what it does not
+
+The huddle lifecycle is implemented and durable: one active huddle per
+conversation, with concurrent starts converging on it through an atomic upsert
+rather than a read-then-create; join and leave as single-participant moves;
+the last participant to leave ending it in the same transaction; and ending it
+for everyone reserved to the person who started it or a workspace
+administrator, because it removes everyone else. Conversation membership is the
+authority throughout, checked independently of posting permission — `calls.add`
+checks neither, because an app-registered call has no conversation to check
+against.
+
+**There is no media transport of any kind.** No WebRTC, no audio, no video, no
+screen sharing, no device permission request — because there is no device to
+request. The surface says so wherever it offers a control, so nobody presses
+"Join huddle" expecting sound. HUDDLE-02's audio, video, screen sharing and
+reactions are therefore unimplemented, and HUDDLE-01's device-permission
+outcomes cannot arise here.
+
+The alternative — hiding the surface until WebRTC exists — would leave the
+lifecycle unreachable and untestable, and would not make the missing media any
+more present.
+
 ## Evidence
 
 - Real browser/media qualification uses synthetic devices in Chromium, Firefox,

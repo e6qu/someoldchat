@@ -9,9 +9,11 @@ Measured on 2026-08-02:
 
 - 236 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
-- 199 current methods are recorded as behavior-compatible, 35 as
+- 208 current methods are recorded as behavior-compatible, 35 as
   SDK-compatible, two as schema-compatible, and none as live-differential
-  `verified-against-slack`;
+  `verified-against-slack`. The nine `conversations.*SharedInvite*` methods
+  moved from unimplemented to behavior-compatible with this change, bounded to
+  organizations inside one deployment;
 - the Events API surface emits 40 event names: the message family (with the
   message_changed/message_deleted subtypes and the projection-derived
   app_mention), reactions, pins, stars, membership, app_home_opened,
@@ -102,6 +104,18 @@ implementation MUST NOT narrow the target.
 - developer app creation, current-manifest validation/edit/delete, one-time
   credentials, app-level tokens, OAuth consent, and installed-app discovery.
 
+### Closed by this change
+
+| Journey | What now exists |
+| --- | --- |
+| Message chrome | Copy link and a resolvable `/archives` permalink, forward with a destination picker, an edited marker from a durable fact, thread reply summaries read in one batched call, date separators and the unread divider, mark-unread-from-here, broadcast-to-channel, and system join/topic/name notices committed with the change they describe. |
+| Files | The uploader's delete control, a remote-file surface that never claims to host the bytes, and `file.unshared` produced when deleting the last message that shared a file — which also retracts the share the file's visibility is derived from. |
+| Invitations (AUTH-05) | Recording, issuing and accepting are three distinct transitions. Acceptance creates the user, the membership at the recorded guest tier and every channel join in one transaction, matched against a provider-verified address, and `GET /app/invite/{id}` answers every terminal state distinctly to a signed-out visitor. |
+| Administration (ADMIN-02, ADMIN-03) | Invitation and app-request queues, workspace policy settings with a durable backend, analytics counted from the durable rows, and an audit view whose export comes from the same query as the page. Browser sign-ins now reach the access log at all. |
+| Huddles (HUDDLE-01, HUDDLE-03, HUDDLE-04) | The whole lifecycle, minus media, which is named rather than faked. |
+| Workspace switcher (AUTH-02) | A switch that mints an isolated session for the target workspace, and event streams that follow the credential that opened them rather than a construction-time workspace. |
+| Slack Connect (CONNECT-01..03) | The invitation lifecycle the post-connection half was missing, with the 250-organization capacity claimed transactionally. |
+
 ### Core Slack journeys still absent or incomplete
 
 | Priority | Journey | Concrete gap |
@@ -111,10 +125,11 @@ implementation MUST NOT narrow the target.
 | P0 | Composer depth | Formatting, member/user-group/channel autocomplete, a searchable standard/custom emoji picker backed by Slack's pinned catalog, durable recent/category/skin-tone choices, custom alias rendering, selected/pasted/dropped multi-file staging, permission-aware five-minute audio/video recording, atomic attachment-plus-text send, private durable conversation/thread attachment drafts, reload/restart recovery, Drafts & sent counts, sidebar indicators, browser-time-zone scheduled send with durable file-only/text-plus-file delivery, and a full searchable built-in/installed-app shortcuts browser work. Scheduled files retain private ownership beyond upload-ticket/draft expiry and promote through one idempotent file-share/message mutation in every storage and service composition. User-group selection uses Slack's subteam transport syntax and drives visibility-safe Activity. Slack video source/device controls, thumbnails, transcripts, exact emoji ranking, attachment reordering/image descriptions, and Slack's 1 GB per-file allowance versus the explicit 100 MiB deployment request limit remain. |
 | P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers; list pending, failed, and sent work in Drafts & sent; edit/reschedule; send now; and cancel without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. First-party reminders have a separate durable model, message-action presets/custom time, Later CRUD/filtering, named-weekday `/remind`, private channel-reminder listing, guest enforcement, worker recurrence/retry/failure fencing, Activity/source projection, and wake publication. Broader natural-language reminder parsing, month-end recurrence, deterministic deployed-worker browser delivery, and live-Slack differential outcomes remain. The five deprecated app-facing `reminders.*` methods remain only SDK-compatible and are not evidence for the first-party Later model. |
 | P1 | Direct-message lifecycle | Dedicated DMs navigation/search, one-to-one/group creation, naming, Slack's nine-person limit, durable per-member close, exact API no-op fields, canonical reopen, reviewed add-people with no/all-history choices and notices, and in-place private-channel conversion now work across memory/SQL/gRPC/browser paths. Current official SDKs also prove canonical exact-member group opening. Slack's help page does not enumerate its complete history-option list, so that exact live option inventory, Slack Connect/external conversion policy, and workspace-configurable restrictions remain differential gaps rather than inferred compatibility. |
-| P1 | Notifications and presence | Workspace and per-conversation notification preferences plus snooze/DND controls exist in the client and API. Status expiry and up-to-five future statuses with edit/cancel and atomic worker activation are durable and restart-safe; manual `auto`/`away` selection and truthful member affordances exist. Live activity-derived automatic presence and Slack's ten-minute idle transition, full status projection outside People/profile, workspace emoji validation, typing indicators, and deeper Activity/VIP/invitation policy remain. |
-| P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |
+| P1 | Notifications and presence | Desktop notifications are delivered under all three permissions they need — the stored preference, the browser's own grant, and Do Not Disturb not being active — with the page reporting which one is missing rather than one silent "off"; the text comes from an authorized fetch, never from the content-free event frame. Push, e-mail, sounds and schedules are absent and named as absent on the page. Workspace and per-conversation notification preferences plus snooze/DND controls exist in the client and API. Status expiry and up-to-five future statuses with edit/cancel and atomic worker activation are durable and restart-safe; manual `auto`/`away` selection and truthful member affordances exist. Live activity-derived automatic presence and Slack's ten-minute idle transition, full status projection outside People/profile, workspace emoji validation, typing indicators, and deeper Activity/VIP/invitation policy remain. |
+| P1 | Calls and huddles | The huddle lifecycle is first-class and durable: one active huddle per conversation with concurrent starts converging through an atomic upsert, single-participant join and leave, the last participant to leave ending it in the same transaction, and ending-for-everyone reserved to the starter or an administrator. Conversation membership is the authority, checked independently of posting permission. **There is no media transport of any kind** — no WebRTC, audio, video or screen sharing — and the surface says so wherever it offers a control. HUDDLE-02's media and CALL-01's rendering of app-created call objects remain. |
 | P1 | App administration | Manifest JSON editing and OAuth installation are real. A developer-owned hosted app can browse its manifest-declared datastore schema and durable items, execute Slack-compatible expression/cursor queries, count matches, replace/update JSON items, and delete them through the same local/gRPC/storage boundary as `apps.datastore.*`; ownership, installation, hosted-runtime, schema, and query failures remain explicit. App event administration now projects the real durable HTTP/Socket transport cursor—configuration, install state, acknowledged/in-flight sequence, queued evaluation, and retry time/count/reason—without exposing payloads or inventing history. Install-time incoming-webhook selection, retained delivery-attempt history/metrics, scope explanation, token inventory/revocation, distribution, and external-auth providers remain absent. |
 | P2 | Canvases, lists, and workflows | Canvases and lists are now first-class persisted workspace surfaces: access-filtered directories, read/write-grant-aware detail controls, atomic canvas title/content revision, list creation, item creation and complete/restore run through memory/SQL and the generated gRPC seam. Full structured canvas blocks/comments/history, sharing management, list schemas/views/assignments/comments/files, deletion, and workflow creation/execution remain incomplete. |
+| P1 | Administration reachability | The administration surfaces — access and invitations, workspace settings, analytics, audit — are registered only when an identity provider is configured, because their authority check is the login handler's. A deployment running on the static development session therefore has no administration at all, which is why ADMIN-01..03 have no browser citation: the browser suite runs in exactly that mode, and its shared session is a plain member by design. Decoupling the administrative authority check from the login handler would make them reachable and testable there. |
 | P2 | Client breadth | The semantic journeys now run in Chromium, Firefox, and WebKit, with automated WCAG checks for representative desktop, dialog, and narrow states. Performance budgets, screenshot differential, manual assistive-technology coverage, and live-Slack comparisons remain unqualified. |
 
 ## Web API and app-platform gaps
@@ -133,9 +148,11 @@ The 74 unimplemented current Web API methods are:
 
 App-platform work must remain dependency-ordered:
 
-1. finish `file_unshared` mutation production and retained authorization/
-   attempt history on top of the bot/user HTTP/Socket subscription, immutable
-   message create/change/delete, and file create/share projections now in place;
+1. finish retained authorization and attempt history on top of the bot/user
+   HTTP/Socket subscription, immutable message create/change/delete, and file
+   create/share projections now in place. `file_unshared` production is done:
+   deleting the last live message carrying a file retracts the file's share
+   into that conversation and journals the event, in one transaction;
 2. implement workflow execution and durable activity records;
 3. implement external OAuth provider configuration, browser consent, encrypted
    refresh/access tokens, and `apps.auth.external.*`/connection callbacks as one
