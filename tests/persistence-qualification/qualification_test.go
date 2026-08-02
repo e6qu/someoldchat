@@ -19,6 +19,42 @@ import (
 // production.
 type opener func(*testing.T, context.Context) (qualificationStore, func())
 
+// restarter opens a *second* handle onto the same durable target the first was
+// opened against, which is as close to losing the process as a test in this
+// package can get: the old handle is closed, every in-memory structure it held
+// is dropped, and the new one has nothing but what was committed to disk.
+//
+// It exists because the suite could not tell a durable write from a cached one.
+// Every contract here opened its target once and read back through the same
+// handle, so "durable" meant "committed and readable", not "survives the
+// process that wrote it". The reopen tests that did check that lived in
+// internal/store/sqlstore and were SQLite-only — which left PostgreSQL, the
+// profile the production Terraform requires, with no restart coverage at all.
+//
+// A profile that cannot outlive its process returns nil and is skipped with a
+// reason rather than silently passing a contract it cannot honour.
+type restarter func(*testing.T, context.Context) qualificationStore
+
+// restartOpener yields a profile together with the means to reopen it.
+type restartOpener func(*testing.T, context.Context) (qualificationStore, restarter, func())
+
+// runRestartQualification is the crash-only gate specs/persistence.md asks for:
+// "Committed state MUST survive a process or node crash". Each contract writes
+// through one handle, drops it, and reads through a new one.
+func runRestartQualification(t *testing.T, open restartOpener) {
+	t.Helper()
+	for _, contract := range []struct {
+		name string
+		run  func(*testing.T, restartOpener)
+	}{
+		{"committed conversation state survives a restart", committedStateSurvivesARestart},
+		{"unfinished outbox work is claimable after a restart", unfinishedOutboxWorkSurvivesARestart},
+		{"policy and lifecycle state survive a restart", policyStateSurvivesARestart},
+	} {
+		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
+	}
+}
+
 func runQualification(t *testing.T, open opener) {
 	t.Helper()
 	for _, contract := range []struct {

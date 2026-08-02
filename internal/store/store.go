@@ -500,6 +500,10 @@ type Store interface {
 	ExchangeOAuthAccessToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)
 	CreateOpenIDRefreshToken(context.Context, domain.OpenIDRefreshToken) error
 	ExchangeOpenIDRefreshToken(context.Context, string, string, string, string, domain.OpenIDToken) (domain.OpenIDToken, error)
+	// LatestEventSequence is the journal position a new reader should start
+	// after: the sequence of the most recent event in the workspace, or zero
+	// when the workspace has none.
+	LatestEventSequence(context.Context, domain.WorkspaceID) (uint64, error)
 	CreateRTMConnection(context.Context, domain.RTMConnection) error
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error

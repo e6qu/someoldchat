@@ -18,6 +18,7 @@ message RTMConnection {
   string workspace_id = 2;
   string user_id = 3;
   int64 expires_at_unix_nano = 4;
+  uint64 cursor = 5;
 }
 
 message SocketModeConnectionRequest {

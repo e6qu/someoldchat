@@ -15,7 +15,12 @@ against browser behavior, official Slack SDKs, and native dqlite behavior.
 - The PostgreSQL qualification runs the shared repository contract against a
   real PostgreSQL server when `SAMEOLDCHAT_POSTGRES_DSN` is set.
 - [Persistence qualification](persistence-qualification/README.md) runs the
-  same repository contract against SQLite, PostgreSQL, and dqlite.
+  same repository contract against SQLite, PostgreSQL, and dqlite, including
+  the restart contracts that drop the store handle and open it again.
+- [Process-fault qualification](process-fault/README.md) runs the real
+  `cmd/server` binary, kills it with `SIGKILL`, and starts it again on the same
+  database. It needs no external runtime, so it runs under a plain
+  `go test ./...` and therefore under `make check`.
 - [Load tests](load/README.md) exercise bounded concurrent writes and
   pagination invariants against the in-memory repository.
 

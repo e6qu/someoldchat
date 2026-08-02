@@ -123,6 +123,7 @@ type RTMConnection struct {
 	WorkspaceId       string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId            string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	ExpiresAtUnixNano int64                  `protobuf:"varint,4,opt,name=expires_at_unix_nano,json=expiresAtUnixNano,proto3" json:"expires_at_unix_nano,omitempty"`
+	Cursor            uint64                 `protobuf:"varint,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -181,6 +182,13 @@ func (x *RTMConnection) GetUserId() string {
 func (x *RTMConnection) GetExpiresAtUnixNano() int64 {
 	if x != nil {
 		return x.ExpiresAtUnixNano
+	}
+	return 0
+}
+
+func (x *RTMConnection) GetCursor() uint64 {
+	if x != nil {
+		return x.Cursor
 	}
 	return 0
 }
@@ -994,12 +1002,13 @@ const file_sameoldchat_chat_v1_rtm_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"(\n" +
 	"\x16RTMConnectionIDRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x8c\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xa4\x01\n" +
 	"\rRTMConnection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x03 \x01(\tR\x06userId\x12/\n" +
-	"\x14expires_at_unix_nano\x18\x04 \x01(\x03R\x11expiresAtUnixNano\"u\n" +
+	"\x14expires_at_unix_nano\x18\x04 \x01(\x03R\x11expiresAtUnixNano\x12\x16\n" +
+	"\x06cursor\x18\x05 \x01(\x04R\x06cursor\"u\n" +
 	"\x1bSocketModeConnectionRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12/\n" +

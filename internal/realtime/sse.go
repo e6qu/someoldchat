@@ -176,10 +176,20 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	if err := websocket.Message.Send(conn, `{"type":"hello"}`); err != nil {
 		return
 	}
-	after, err := lastEventID(request)
+	// The ticket's cursor is where this stream starts. An explicit
+	// last_event_id still wins, because a client that knows where it left off
+	// is a better authority than the ticket — but an official RTM client sends
+	// none and has no argument to pass one, which is exactly why the ticket
+	// carries it. Before it did, that client resumed at zero and was sent the
+	// whole workspace journal as live events on every connect.
+	after := connection.Cursor
+	requested, err := lastEventID(request)
 	if err != nil {
 		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":3,"msg":"invalid_event_cursor"}}`)
 		return
+	}
+	if requested > 0 {
+		after = requested
 	}
 	commands := make(chan string)
 	readerDone := make(chan error, 1)
