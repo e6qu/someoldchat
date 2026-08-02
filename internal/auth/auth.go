@@ -85,6 +85,13 @@ const (
 	ScopeAdminUsersRead          Scope = "admin.users:read"
 	ScopeAdminUsersWrite         Scope = "admin.users:write"
 	ScopeAdminConversationsWrite Scope = "admin.conversations:write"
+	// Slack Connect carries its own scopes: reading which organizations were
+	// invited, sending an invitation, and deciding one are three different
+	// authorities, and folding them into conversations:manage would let any
+	// channel manager admit an outside organization.
+	ScopeConversationsConnectRead   Scope = "conversations.connect:read"
+	ScopeConversationsConnectWrite  Scope = "conversations.connect:write"
+	ScopeConversationsConnectManage Scope = "conversations.connect:manage"
 	ScopeAdminConversationsRead  Scope = "admin.conversations:read"
 	ScopeAdminUserGroupsRead     Scope = "admin.usergroups:read"
 	ScopeAdminUserGroupsWrite    Scope = "admin.usergroups:write"
@@ -475,6 +482,9 @@ func multipartToken(r *http.Request, boundary string) string {
 // some operation's `token` parameter in
 // specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json.
 var allScopes = []Scope{
+	ScopeConversationsConnectRead,
+	ScopeConversationsConnectWrite,
+	ScopeConversationsConnectManage,
 	ScopeChatWrite,
 	ScopeChatWriteCustomize,
 	ScopeChannelsHistory,

@@ -30,6 +30,7 @@ type ScheduledMessageID string
 type ScheduledStatusID string
 type UserGroupID string
 type InviteRequestID string
+type SharedInviteID string
 type AppID string
 type AppRequestID string
 type CallID string

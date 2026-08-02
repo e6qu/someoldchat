@@ -19,8 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ConversationsService_ConversationInfo_FullMethodName = "/sameoldchat.chat.v1.ConversationsService/ConversationInfo"
-	ConversationsService_Conversations_FullMethodName    = "/sameoldchat.chat.v1.ConversationsService/Conversations"
+	ConversationsService_ConversationInfo_FullMethodName             = "/sameoldchat.chat.v1.ConversationsService/ConversationInfo"
+	ConversationsService_Conversations_FullMethodName                = "/sameoldchat.chat.v1.ConversationsService/Conversations"
+	ConversationsService_InviteShared_FullMethodName                 = "/sameoldchat.chat.v1.ConversationsService/InviteShared"
+	ConversationsService_ApproveSharedInvite_FullMethodName          = "/sameoldchat.chat.v1.ConversationsService/ApproveSharedInvite"
+	ConversationsService_DenySharedInvite_FullMethodName             = "/sameoldchat.chat.v1.ConversationsService/DenySharedInvite"
+	ConversationsService_RevokeSharedInvite_FullMethodName           = "/sameoldchat.chat.v1.ConversationsService/RevokeSharedInvite"
+	ConversationsService_DeclineSharedInvite_FullMethodName          = "/sameoldchat.chat.v1.ConversationsService/DeclineSharedInvite"
+	ConversationsService_AcceptSharedInvite_FullMethodName           = "/sameoldchat.chat.v1.ConversationsService/AcceptSharedInvite"
+	ConversationsService_ListSharedInvites_FullMethodName            = "/sameoldchat.chat.v1.ConversationsService/ListSharedInvites"
+	ConversationsService_SetExternalInvitePermissions_FullMethodName = "/sameoldchat.chat.v1.ConversationsService/SetExternalInvitePermissions"
 )
 
 // ConversationsServiceClient is the client API for ConversationsService service.
@@ -29,6 +37,14 @@ const (
 type ConversationsServiceClient interface {
 	ConversationInfo(ctx context.Context, in *ConversationInfoRequest, opts ...grpc.CallOption) (*Conversation, error)
 	Conversations(ctx context.Context, in *ConversationsRequest, opts ...grpc.CallOption) (*ConversationPage, error)
+	InviteShared(ctx context.Context, in *InviteSharedRequest, opts ...grpc.CallOption) (*SharedInvite, error)
+	ApproveSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error)
+	DenySharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error)
+	RevokeSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error)
+	DeclineSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error)
+	AcceptSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*Conversation, error)
+	ListSharedInvites(ctx context.Context, in *SharedInvitesRequest, opts ...grpc.CallOption) (*SharedInvitePage, error)
+	SetExternalInvitePermissions(ctx context.Context, in *ExternalInvitePermissionsRequest, opts ...grpc.CallOption) (*Conversation, error)
 }
 
 type conversationsServiceClient struct {
@@ -59,12 +75,100 @@ func (c *conversationsServiceClient) Conversations(ctx context.Context, in *Conv
 	return out, nil
 }
 
+func (c *conversationsServiceClient) InviteShared(ctx context.Context, in *InviteSharedRequest, opts ...grpc.CallOption) (*SharedInvite, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SharedInvite)
+	err := c.cc.Invoke(ctx, ConversationsService_InviteShared_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) ApproveSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SharedInvite)
+	err := c.cc.Invoke(ctx, ConversationsService_ApproveSharedInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) DenySharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SharedInvite)
+	err := c.cc.Invoke(ctx, ConversationsService_DenySharedInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) RevokeSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SharedInvite)
+	err := c.cc.Invoke(ctx, ConversationsService_RevokeSharedInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) DeclineSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*SharedInvite, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SharedInvite)
+	err := c.cc.Invoke(ctx, ConversationsService_DeclineSharedInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) AcceptSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, ConversationsService_AcceptSharedInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) ListSharedInvites(ctx context.Context, in *SharedInvitesRequest, opts ...grpc.CallOption) (*SharedInvitePage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SharedInvitePage)
+	err := c.cc.Invoke(ctx, ConversationsService_ListSharedInvites_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) SetExternalInvitePermissions(ctx context.Context, in *ExternalInvitePermissionsRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, ConversationsService_SetExternalInvitePermissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConversationsServiceServer is the server API for ConversationsService service.
 // All implementations should embed UnimplementedConversationsServiceServer
 // for forward compatibility.
 type ConversationsServiceServer interface {
 	ConversationInfo(context.Context, *ConversationInfoRequest) (*Conversation, error)
 	Conversations(context.Context, *ConversationsRequest) (*ConversationPage, error)
+	InviteShared(context.Context, *InviteSharedRequest) (*SharedInvite, error)
+	ApproveSharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error)
+	DenySharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error)
+	RevokeSharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error)
+	DeclineSharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error)
+	AcceptSharedInvite(context.Context, *SharedInviteMutationRequest) (*Conversation, error)
+	ListSharedInvites(context.Context, *SharedInvitesRequest) (*SharedInvitePage, error)
+	SetExternalInvitePermissions(context.Context, *ExternalInvitePermissionsRequest) (*Conversation, error)
 }
 
 // UnimplementedConversationsServiceServer should be embedded to have
@@ -79,6 +183,30 @@ func (UnimplementedConversationsServiceServer) ConversationInfo(context.Context,
 }
 func (UnimplementedConversationsServiceServer) Conversations(context.Context, *ConversationsRequest) (*ConversationPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method Conversations not implemented")
+}
+func (UnimplementedConversationsServiceServer) InviteShared(context.Context, *InviteSharedRequest) (*SharedInvite, error) {
+	return nil, status.Error(codes.Unimplemented, "method InviteShared not implemented")
+}
+func (UnimplementedConversationsServiceServer) ApproveSharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApproveSharedInvite not implemented")
+}
+func (UnimplementedConversationsServiceServer) DenySharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error) {
+	return nil, status.Error(codes.Unimplemented, "method DenySharedInvite not implemented")
+}
+func (UnimplementedConversationsServiceServer) RevokeSharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeSharedInvite not implemented")
+}
+func (UnimplementedConversationsServiceServer) DeclineSharedInvite(context.Context, *SharedInviteMutationRequest) (*SharedInvite, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeclineSharedInvite not implemented")
+}
+func (UnimplementedConversationsServiceServer) AcceptSharedInvite(context.Context, *SharedInviteMutationRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcceptSharedInvite not implemented")
+}
+func (UnimplementedConversationsServiceServer) ListSharedInvites(context.Context, *SharedInvitesRequest) (*SharedInvitePage, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSharedInvites not implemented")
+}
+func (UnimplementedConversationsServiceServer) SetExternalInvitePermissions(context.Context, *ExternalInvitePermissionsRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetExternalInvitePermissions not implemented")
 }
 func (UnimplementedConversationsServiceServer) testEmbeddedByValue() {}
 
@@ -136,6 +264,150 @@ func _ConversationsService_Conversations_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConversationsService_InviteShared_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InviteSharedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).InviteShared(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_InviteShared_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).InviteShared(ctx, req.(*InviteSharedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_ApproveSharedInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SharedInviteMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).ApproveSharedInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_ApproveSharedInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).ApproveSharedInvite(ctx, req.(*SharedInviteMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_DenySharedInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SharedInviteMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).DenySharedInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_DenySharedInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).DenySharedInvite(ctx, req.(*SharedInviteMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_RevokeSharedInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SharedInviteMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).RevokeSharedInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_RevokeSharedInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).RevokeSharedInvite(ctx, req.(*SharedInviteMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_DeclineSharedInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SharedInviteMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).DeclineSharedInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_DeclineSharedInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).DeclineSharedInvite(ctx, req.(*SharedInviteMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_AcceptSharedInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SharedInviteMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).AcceptSharedInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_AcceptSharedInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).AcceptSharedInvite(ctx, req.(*SharedInviteMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_ListSharedInvites_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SharedInvitesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).ListSharedInvites(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_ListSharedInvites_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).ListSharedInvites(ctx, req.(*SharedInvitesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_SetExternalInvitePermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExternalInvitePermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).SetExternalInvitePermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_SetExternalInvitePermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).SetExternalInvitePermissions(ctx, req.(*ExternalInvitePermissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ConversationsService_ServiceDesc is the grpc.ServiceDesc for ConversationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -150,6 +422,38 @@ var ConversationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Conversations",
 			Handler:    _ConversationsService_Conversations_Handler,
+		},
+		{
+			MethodName: "InviteShared",
+			Handler:    _ConversationsService_InviteShared_Handler,
+		},
+		{
+			MethodName: "ApproveSharedInvite",
+			Handler:    _ConversationsService_ApproveSharedInvite_Handler,
+		},
+		{
+			MethodName: "DenySharedInvite",
+			Handler:    _ConversationsService_DenySharedInvite_Handler,
+		},
+		{
+			MethodName: "RevokeSharedInvite",
+			Handler:    _ConversationsService_RevokeSharedInvite_Handler,
+		},
+		{
+			MethodName: "DeclineSharedInvite",
+			Handler:    _ConversationsService_DeclineSharedInvite_Handler,
+		},
+		{
+			MethodName: "AcceptSharedInvite",
+			Handler:    _ConversationsService_AcceptSharedInvite_Handler,
+		},
+		{
+			MethodName: "ListSharedInvites",
+			Handler:    _ConversationsService_ListSharedInvites_Handler,
+		},
+		{
+			MethodName: "SetExternalInvitePermissions",
+			Handler:    _ConversationsService_SetExternalInvitePermissions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

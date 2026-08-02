@@ -1335,7 +1335,46 @@ func (m Messages) ConversationInfo(ctx context.Context, workspaceID domain.Works
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.GetConversation(ctx, conversationID)
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.withSharedIdentity(ctx, conversation), nil
+}
+
+// withSharedIdentity fills the Slack Connect fields conversations.info emits.
+// They are derived from the teams already attached and the invitations still
+// outstanding, rather than stored as flags someone has to remember to clear: a
+// decided invitation that left a pending flag set would show a pending badge
+// forever, and the derived answer cannot drift from the rows it is read from.
+//
+// A failure to read either leaves the fields false rather than failing the
+// conversation: a channel that will not render because its sharing state could
+// not be read is a worse outcome than one whose Connect badge is missing.
+func (m Messages) withSharedIdentity(ctx context.Context, conversation domain.Conversation) domain.Conversation {
+	if conversation.ID == "" || conversation.IsDirect || conversation.IsGroupDirect {
+		return conversation
+	}
+	if teams, _, err := m.Store.ListConversationTeams(ctx, conversation.WorkspaceID, conversation.ID); err == nil {
+		for _, team := range teams {
+			if team != conversation.WorkspaceID {
+				conversation.IsExtShared = true
+				break
+			}
+		}
+	}
+	for _, status := range []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved} {
+		page, err := m.Store.ListSharedInvites(ctx, conversation.WorkspaceID, status, domain.PageRequest{Limit: 50})
+		if err != nil {
+			continue
+		}
+		for _, invite := range page.Invites {
+			if invite.ConversationID == conversation.ID {
+				conversation.IsPendingExtShared = true
+			}
+		}
+	}
+	return conversation
 }
 
 func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, requestedID domain.UserID) (domain.User, error) {

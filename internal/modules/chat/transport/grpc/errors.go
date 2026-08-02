@@ -110,6 +110,11 @@ var errorClasses = []errorClass{
 	// corrected argument cannot help.
 	{key: "service.invitation_expired", code: codes.FailedPrecondition, sentinel: service.ErrInvitationExpired},
 	{key: "service.huddle_not_owned", code: codes.PermissionDenied, sentinel: service.ErrHuddleNotOwned},
+	{key: "service.invalid_shared_invite", code: codes.InvalidArgument, sentinel: service.ErrInvalidSharedInvite},
+	// FailedPrecondition for both: the request is well formed and it is the
+	// state — already decided, or already full — that refuses.
+	{key: "service.shared_invite_settled", code: codes.FailedPrecondition, sentinel: service.ErrSharedInviteSettled},
+	{key: "service.slack_connect_full", code: codes.FailedPrecondition, sentinel: service.ErrSlackConnectFull},
 	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppApproval},
 	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidView},
 	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkflowStep},

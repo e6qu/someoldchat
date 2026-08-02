@@ -470,6 +470,25 @@ type Store interface {
 	SetConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, bool, events.Event) error
 	ListConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.WorkspaceID, bool, error)
 	DisconnectConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, events.Event) error
+	CreateSharedInvite(context.Context, domain.SharedInvite, events.Event) error
+	GetSharedInvite(context.Context, domain.SharedInviteID) (domain.SharedInvite, error)
+	// ListSharedInvites pages one workspace's invitations in a given status.
+	// The workspace matches either side: the host sees what it sent, and the
+	// invited organization sees what it was sent.
+	ListSharedInvites(context.Context, domain.WorkspaceID, domain.SharedInviteStatus, domain.PageRequest) (domain.SharedInvitePage, error)
+	// SetSharedInviteStatus is a compare-and-set over domain's transition
+	// table, so no caller can move an invitation somewhere the state machine
+	// does not allow, and two concurrent decisions cannot both win.
+	SetSharedInviteStatus(context.Context, domain.SharedInviteID, domain.SharedInviteStatus, domain.SharedInviteStatus, time.Time, events.Event) error
+	// AcceptSharedInvite appends the invited organization to the conversation
+	// and settles the invitation in one transaction, refusing when the channel
+	// is already at domain.SlackConnectCapacity.
+	//
+	// The capacity is checked here and nowhere else. CONNECT-01 forbids
+	// promising a place from a stale count, and a count read before the
+	// transaction is stale by definition: two organizations accepting the
+	// 250th place concurrently would both be told yes.
+	AcceptSharedInvite(context.Context, domain.SharedInviteID, time.Time, []events.Event) (domain.Conversation, error)
 	ListConnectedChannelInfo(context.Context, domain.WorkspaceID, []domain.ConversationID, []domain.WorkspaceID, domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error)
 	CreateOAuthClient(context.Context, domain.OAuthClient) error
 	GetOAuthClient(context.Context, string) (domain.OAuthClient, error)

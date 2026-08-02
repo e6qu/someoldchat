@@ -222,6 +222,15 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.getTeams", h.adminConversationGetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.setTeams", h.adminConversationSetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.disconnectShared", h.adminConversationDisconnectShared)
+	mux.HandleFunc("POST /api/conversations.inviteShared", h.conversationInviteShared)
+	mux.HandleFunc("POST /api/conversations.acceptSharedInvite", h.conversationAcceptSharedInvite)
+	mux.HandleFunc("POST /api/conversations.approveSharedInvite", h.conversationApproveSharedInvite)
+	mux.HandleFunc("POST /api/conversations.declineSharedInvite", h.conversationDeclineSharedInvite)
+	mux.HandleFunc("POST /api/conversations.requestSharedInvite.approve", h.conversationRequestSharedInviteApprove)
+	mux.HandleFunc("POST /api/conversations.requestSharedInvite.deny", h.conversationRequestSharedInviteDeny)
+	mux.HandleFunc("POST /api/conversations.requestSharedInvite.list", h.conversationRequestSharedInviteList)
+	mux.HandleFunc("POST /api/conversations.listConnectInvites", h.conversationListConnectInvites)
+	mux.HandleFunc("POST /api/conversations.externalInvitePermissions.set", h.conversationExternalInvitePermissionsSet)
 	mux.HandleFunc("GET /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
 	mux.HandleFunc("POST /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
 	mux.HandleFunc("POST /api/admin.emoji.add", h.adminEmojiAdd)
@@ -4461,7 +4470,12 @@ func profileResponse(user domain.User) map[string]any {
 }
 
 func conversationResponse(conversation domain.Conversation) map[string]any {
-	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.IsPrivate, "is_channel": !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect, "is_im": conversation.IsDirect, "is_mpim": conversation.IsGroupDirect, "is_member": true, "team_id": conversation.WorkspaceID}
+	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.IsPrivate, "is_channel": !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect, "is_im": conversation.IsDirect, "is_mpim": conversation.IsGroupDirect, "is_member": true, "team_id": conversation.WorkspaceID,
+		// The Slack Connect identity. Pending and shared are different facts —
+		// an outstanding invitation is not a connection — and a client renders
+		// each differently, so neither is derived from the other.
+		"is_ext_shared": conversation.IsExtShared, "is_pending_ext_shared": conversation.IsPendingExtShared,
+		"is_shared": conversation.IsExtShared}
 }
 
 func (h Handler) conversationsList(w http.ResponseWriter, r *http.Request) {
@@ -8770,7 +8784,7 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
 		return invalidReason
 	}
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {
@@ -8845,6 +8859,16 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	// a malformed request.
 	if errors.Is(err, service.ErrHuddleNotOwned) {
 		return "not_allowed"
+	}
+	// An invitation somebody else already decided is not a malformed request:
+	// the caller did nothing wrong and retrying cannot help.
+	if errors.Is(err, service.ErrSharedInviteSettled) {
+		return "already_resolved"
+	}
+	// The channel is full. Slack documents this as a hard capacity, so it is
+	// reported as one rather than as a temporary failure to retry.
+	if errors.Is(err, service.ErrSlackConnectFull) {
+		return "too_many_teams"
 	}
 	// An Idempotency-Key replayed with a different body is a permanently
 	// unsatisfiable request: the recorded body will never match. It used to be

@@ -1878,6 +1878,112 @@ func (r Remote) AdminListInviteRequests(ctx context.Context, workspaceID domain.
 	return domain.InviteRequestPage{Requests: values, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
 }
 
+func encodeProtoSharedInvite(value domain.SharedInvite) *chatv1.SharedInvite {
+	result := &chatv1.SharedInvite{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.ConversationID),
+		TargetWorkspaceId: string(value.TargetWorkspaceID), TargetEmail: value.TargetEmail,
+		InvitedBy: string(value.InvitedBy), Status: string(value.Status), CreatedAt: value.CreatedAt.Unix(),
+	}
+	if !value.ReviewedAt.IsZero() {
+		result.ReviewedAt = value.ReviewedAt.Unix()
+	}
+	if !value.SettledAt.IsZero() {
+		result.SettledAt = value.SettledAt.Unix()
+	}
+	if !value.ExpiresAt.IsZero() {
+		result.ExpiresAt = value.ExpiresAt.Unix()
+	}
+	return result
+}
+
+func decodeProtoSharedInvite(value *chatv1.SharedInvite) (domain.SharedInvite, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetConversationId() == "" {
+		return domain.SharedInvite{}, errors.New("typed shared invitation response is incomplete")
+	}
+	result := domain.SharedInvite{
+		ID: domain.SharedInviteID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		ConversationID: domain.ConversationID(value.GetConversationId()), TargetWorkspaceID: domain.WorkspaceID(value.GetTargetWorkspaceId()),
+		TargetEmail: value.GetTargetEmail(), InvitedBy: domain.UserID(value.GetInvitedBy()),
+		Status: domain.SharedInviteStatus(value.GetStatus()), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(),
+	}
+	if value.GetReviewedAt() != 0 {
+		result.ReviewedAt = time.Unix(value.GetReviewedAt(), 0).UTC()
+	}
+	if value.GetSettledAt() != 0 {
+		result.SettledAt = time.Unix(value.GetSettledAt(), 0).UTC()
+	}
+	if value.GetExpiresAt() != 0 {
+		result.ExpiresAt = time.Unix(value.GetExpiresAt(), 0).UTC()
+	}
+	return result, nil
+}
+
+func (r Remote) InviteShared(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID, email string) (domain.SharedInvite, error) {
+	out, err := r.conversations.InviteShared(ctx, &chatv1.InviteSharedRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), TargetWorkspaceId: string(target), TargetEmail: email})
+	if err != nil {
+		return domain.SharedInvite{}, err
+	}
+	return decodeProtoSharedInvite(out)
+}
+
+// The four decisions share one request shape and one response, so they differ
+// only in which rpc they call.
+func (r Remote) sharedInviteDecision(ctx context.Context, call func(context.Context, *chatv1.SharedInviteMutationRequest, ...grpc.CallOption) (*chatv1.SharedInvite, error), workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	out, err := call(ctx, &chatv1.SharedInviteMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SharedInviteId: string(id)})
+	if err != nil {
+		return domain.SharedInvite{}, err
+	}
+	return decodeProtoSharedInvite(out)
+}
+
+func (r Remote) ApproveSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	return r.sharedInviteDecision(ctx, r.conversations.ApproveSharedInvite, workspaceID, userID, id)
+}
+
+func (r Remote) DenySharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	return r.sharedInviteDecision(ctx, r.conversations.DenySharedInvite, workspaceID, userID, id)
+}
+
+func (r Remote) RevokeSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	return r.sharedInviteDecision(ctx, r.conversations.RevokeSharedInvite, workspaceID, userID, id)
+}
+
+func (r Remote) DeclineSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	return r.sharedInviteDecision(ctx, r.conversations.DeclineSharedInvite, workspaceID, userID, id)
+}
+
+func (r Remote) AcceptSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SharedInviteID) (domain.Conversation, error) {
+	out, err := r.conversations.AcceptSharedInvite(ctx, &chatv1.SharedInviteMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SharedInviteId: string(id)})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
+func (r Remote) ListSharedInvites(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
+	out, err := r.conversations.ListSharedInvites(ctx, &chatv1.SharedInvitesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Status: string(status), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.SharedInvitePage{}, err
+	}
+	values := make([]domain.SharedInvite, 0, len(out.GetInvites()))
+	for _, item := range out.GetInvites() {
+		value, decodeErr := decodeProtoSharedInvite(item)
+		if decodeErr != nil {
+			return domain.SharedInvitePage{}, decodeErr
+		}
+		values = append(values, value)
+	}
+	return domain.SharedInvitePage{Invites: values, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func (r Remote) SetExternalInvitePermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID, canInvite bool) (domain.Conversation, error) {
+	out, err := r.conversations.SetExternalInvitePermissions(ctx, &chatv1.ExternalInvitePermissionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), TargetWorkspaceId: string(target), CanInvite: canInvite})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
 func (r Remote) UserWorkspaces(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.WorkspaceMembershipSummary, error) {
 	out, err := r.directory.UserWorkspaces(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -4848,6 +4954,61 @@ func (s *Server) AdminDenyInviteRequest(ctx context.Context, input *chatv1.Invit
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) InviteShared(ctx context.Context, input *chatv1.InviteSharedRequest) (*chatv1.SharedInvite, error) {
+	return sharedInviteResponse(s.implementation.InviteShared(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.WorkspaceID(input.GetTargetWorkspaceId()), input.GetTargetEmail()))
+}
+
+func (s *Server) ApproveSharedInvite(ctx context.Context, input *chatv1.SharedInviteMutationRequest) (*chatv1.SharedInvite, error) {
+	return sharedInviteResponse(s.implementation.ApproveSharedInvite(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SharedInviteID(input.GetSharedInviteId())))
+}
+
+func (s *Server) DenySharedInvite(ctx context.Context, input *chatv1.SharedInviteMutationRequest) (*chatv1.SharedInvite, error) {
+	return sharedInviteResponse(s.implementation.DenySharedInvite(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SharedInviteID(input.GetSharedInviteId())))
+}
+
+func (s *Server) RevokeSharedInvite(ctx context.Context, input *chatv1.SharedInviteMutationRequest) (*chatv1.SharedInvite, error) {
+	return sharedInviteResponse(s.implementation.RevokeSharedInvite(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SharedInviteID(input.GetSharedInviteId())))
+}
+
+func (s *Server) DeclineSharedInvite(ctx context.Context, input *chatv1.SharedInviteMutationRequest) (*chatv1.SharedInvite, error) {
+	return sharedInviteResponse(s.implementation.DeclineSharedInvite(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SharedInviteID(input.GetSharedInviteId())))
+}
+
+func (s *Server) AcceptSharedInvite(ctx context.Context, input *chatv1.SharedInviteMutationRequest) (*chatv1.Conversation, error) {
+	value, err := s.implementation.AcceptSharedInvite(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SharedInviteID(input.GetSharedInviteId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(value), nil
+}
+
+func (s *Server) ListSharedInvites(ctx context.Context, input *chatv1.SharedInvitesRequest) (*chatv1.SharedInvitePage, error) {
+	page, err := s.implementation.ListSharedInvites(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SharedInviteStatus(input.GetStatus()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	values := make([]*chatv1.SharedInvite, 0, len(page.Invites))
+	for _, value := range page.Invites {
+		values = append(values, encodeProtoSharedInvite(value))
+	}
+	return &chatv1.SharedInvitePage{Invites: values, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) SetExternalInvitePermissions(ctx context.Context, input *chatv1.ExternalInvitePermissionsRequest) (*chatv1.Conversation, error) {
+	value, err := s.implementation.SetExternalInvitePermissions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.WorkspaceID(input.GetTargetWorkspaceId()), input.GetCanInvite())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(value), nil
+}
+
+func sharedInviteResponse(value domain.SharedInvite, err error) (*chatv1.SharedInvite, error) {
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSharedInvite(value), nil
 }
 
 func (s *Server) UserWorkspaces(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.UserWorkspacesResponse, error) {
@@ -8367,6 +8528,7 @@ func encodeProtoConversation(value domain.Conversation) *chatv1.Conversation {
 		Topic: value.Topic, Purpose: value.Purpose, Archived: value.Archived,
 		IsPrivate: value.IsPrivate, IsDirect: value.IsDirect, IsGroupDirect: value.IsGroupDirect,
 		UnreadCount: int64(value.UnreadCount),
+		IsExtShared: value.IsExtShared, IsPendingExtShared: value.IsPendingExtShared,
 	}
 }
 
@@ -8384,6 +8546,7 @@ func decodeProtoConversation(value *chatv1.Conversation) (domain.Conversation, e
 		Topic: value.GetTopic(), Purpose: value.GetPurpose(), Archived: value.GetArchived(),
 		IsPrivate: value.GetIsPrivate(), IsDirect: value.GetIsDirect(), IsGroupDirect: value.GetIsGroupDirect(),
 		UnreadCount: int(value.GetUnreadCount()),
+		IsExtShared: value.GetIsExtShared(), IsPendingExtShared: value.GetIsPendingExtShared(),
 	}, nil
 }
 

@@ -65,6 +65,7 @@ service.invalid_reminder
 service.invalid_remote_file
 service.invalid_scheduled_status
 service.invalid_search
+service.invalid_shared_invite
 service.invalid_snooze
 service.invalid_stream_chunks
 service.invalid_timestamp
@@ -90,6 +91,8 @@ service.scheduled_status_limit
 service.scheduled_time_in_past
 service.scheduled_time_too_far
 service.scheduled_too_many
+service.shared_invite_settled
+service.slack_connect_full
 service.slash_command_in_thread
 service.slash_command_not_found
 service.webhook_trigger_secret

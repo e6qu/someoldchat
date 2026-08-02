@@ -648,7 +648,85 @@ type Conversation struct {
 	IsDirect      bool
 	IsGroupDirect bool
 	UnreadCount   int
+	// The Slack Connect identity conversations.info must emit. A channel is
+	// externally shared once another organization has accepted an invitation
+	// to it, and pending while one is outstanding: the two are different facts
+	// and a client shows different chrome for each, so neither can be derived
+	// from the other.
+	IsExtShared        bool
+	IsPendingExtShared bool
 }
+
+// SharedInviteStatus is the state machine CONNECT-02 requires. Approval and
+// acceptance are deliberately distinct transitions: the host approves who may
+// be invited, and the invited organization decides separately whether to come.
+type SharedInviteStatus string
+
+const (
+	SharedInvitePending  SharedInviteStatus = "pending"
+	SharedInviteApproved SharedInviteStatus = "approved"
+	SharedInviteAccepted SharedInviteStatus = "accepted"
+	SharedInviteDeclined SharedInviteStatus = "declined"
+	SharedInviteRevoked  SharedInviteStatus = "revoked"
+)
+
+// SharedInviteTransition reports whether one status may follow another. A
+// pending invitation is approved or revoked by the host; an approved one is
+// accepted or declined by the invited organization, or revoked by the host
+// while it is still outstanding. Accepted and declined are terminal.
+func SharedInviteTransition(from, to SharedInviteStatus) bool {
+	switch from {
+	case SharedInvitePending:
+		return to == SharedInviteApproved || to == SharedInviteRevoked
+	case SharedInviteApproved:
+		return to == SharedInviteAccepted || to == SharedInviteDeclined || to == SharedInviteRevoked
+	default:
+		return false
+	}
+}
+
+// SharedInvite is one invitation for an external organization to join one
+// conversation. It is modelled on InviteRequest — the same recorded/issued/
+// redeemed shape — because it is the same kind of fact about a different
+// subject.
+type SharedInvite struct {
+	ID             SharedInviteID
+	WorkspaceID    WorkspaceID
+	ConversationID ConversationID
+	// TargetWorkspaceID is the organization invited. Within one deployment an
+	// organization is another workspace; a cross-deployment federation would
+	// carry an external team identifier here instead, and is a recorded gap.
+	TargetWorkspaceID WorkspaceID
+	// TargetEmail is the person invited, when the invitation names one. Slack
+	// allows either, and conversations.inviteShared takes both.
+	TargetEmail string
+	InvitedBy   UserID
+	Status      SharedInviteStatus
+	CreatedAt   time.Time
+	ReviewedAt  time.Time
+	SettledAt   time.Time
+	ExpiresAt   time.Time
+}
+
+// Acceptable reports whether the invitation can still be accepted or declined.
+func (invite SharedInvite) Acceptable(at time.Time) bool {
+	if invite.Status != SharedInviteApproved {
+		return false
+	}
+	return invite.ExpiresAt.IsZero() || !at.After(invite.ExpiresAt)
+}
+
+type SharedInvitePage struct {
+	Invites    []SharedInvite
+	NextCursor Cursor
+	HasMore    bool
+}
+
+// SlackConnectCapacity is the documented maximum number of organizations in
+// one Slack Connect channel, including the host. It is checked atomically when
+// an invitation is accepted, never from a count read earlier: CONNECT-01
+// forbids promising a place from a stale count.
+const SlackConnectCapacity = 250
 
 // DirectHistorySelection is the first-party choice Slack presents when people
 // are added to a DM. Slack's public Web API does not expose this transition;

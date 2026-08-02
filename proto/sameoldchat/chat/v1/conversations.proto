@@ -15,6 +15,8 @@ message Conversation {
   bool is_direct = 8;
   bool is_group_direct = 9;
   int64 unread_count = 10;
+  bool is_ext_shared = 11;
+  bool is_pending_ext_shared = 12;
 }
 
 message ConversationPage {
@@ -43,4 +45,62 @@ message ConversationsRequest {
 service ConversationsService {
   rpc ConversationInfo(ConversationInfoRequest) returns (Conversation);
   rpc Conversations(ConversationsRequest) returns (ConversationPage);
+  rpc InviteShared(InviteSharedRequest) returns (SharedInvite);
+  rpc ApproveSharedInvite(SharedInviteMutationRequest) returns (SharedInvite);
+  rpc DenySharedInvite(SharedInviteMutationRequest) returns (SharedInvite);
+  rpc RevokeSharedInvite(SharedInviteMutationRequest) returns (SharedInvite);
+  rpc DeclineSharedInvite(SharedInviteMutationRequest) returns (SharedInvite);
+  rpc AcceptSharedInvite(SharedInviteMutationRequest) returns (Conversation);
+  rpc ListSharedInvites(SharedInvitesRequest) returns (SharedInvitePage);
+  rpc SetExternalInvitePermissions(ExternalInvitePermissionsRequest) returns (Conversation);
+}
+
+message SharedInvite {
+  string id = 1;
+  string workspace_id = 2;
+  string conversation_id = 3;
+  string target_workspace_id = 4;
+  string target_email = 5;
+  string invited_by = 6;
+  string status = 7;
+  int64 created_at = 8;
+  int64 reviewed_at = 9;
+  int64 settled_at = 10;
+  int64 expires_at = 11;
+}
+
+message SharedInvitePage {
+  repeated SharedInvite invites = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message InviteSharedRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string target_workspace_id = 4;
+  string target_email = 5;
+}
+
+message SharedInviteMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string shared_invite_id = 3;
+}
+
+message SharedInvitesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string status = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message ExternalInvitePermissionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string target_workspace_id = 4;
+  bool can_invite = 5;
 }

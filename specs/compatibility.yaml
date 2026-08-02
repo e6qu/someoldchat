@@ -1312,13 +1312,27 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.stopStream/
   - method: conversations.acceptSharedInvite
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.acceptSharedInvite/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.approveSharedInvite
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.approveSharedInvite/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.canvases.create
     status: sdk-compatible
     provenance: slack-reference
@@ -1331,33 +1345,82 @@ operations:
     deviations:
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.declineSharedInvite
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.declineSharedInvite/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.externalInvitePermissions.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.externalInvitePermissions.set/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.inviteShared
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.inviteShared/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.listConnectInvites
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.listConnectInvites/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.requestSharedInvite.approve
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.approve/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.requestSharedInvite.deny
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.deny/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.requestSharedInvite.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.list/
+    evidence:
+      - internal/api/slack/connect_test.go
+      - internal/service/connect_test.go
+      - tests/persistence-qualification/divergence_test.go
+    deviations:
+      - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: functions.distributions.permissions.add
     status: sdk-compatible
     provenance: slack-reference

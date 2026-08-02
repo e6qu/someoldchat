@@ -88,6 +88,17 @@ type Service interface {
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
 	WorkspaceAnalytics(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (domain.WorkspaceAnalytics, error)
 	UserWorkspaces(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.WorkspaceMembershipSummary, error)
+	// The Slack Connect invitation lifecycle. Approval and acceptance are
+	// separate methods because CONNECT-02 makes them separate decisions, taken
+	// by different organizations.
+	InviteShared(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, string) (domain.SharedInvite, error)
+	ApproveSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	DenySharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	RevokeSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	DeclineSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	AcceptSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.Conversation, error)
+	ListSharedInvites(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteStatus, domain.PageRequest) (domain.SharedInvitePage, error)
+	SetExternalInvitePermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, bool) (domain.Conversation, error)
 	IntegrationLogs(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int, int) (domain.IntegrationLogPage, error)
 	Permalink(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (string, error)
 	Update(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) (domain.Message, error)

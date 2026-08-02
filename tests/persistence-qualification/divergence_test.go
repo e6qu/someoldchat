@@ -1877,6 +1877,69 @@ func workspacesForAnAddressAgreeOnEveryProfile(t *testing.T, open opener) {
 	}
 }
 
+// CONNECT-01 forbids promising a place in a Slack Connect channel from a stale
+// count, so the capacity is claimed inside the transaction that appends the
+// organization. Both profiles must refuse the same acceptance, and must leave
+// the refused invitation acceptable: being told there is no room must not
+// consume the invitation.
+func slackConnectCapacityIsClaimedTransactionally(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	// The host counts towards the capacity, so filling it takes one fewer.
+	teams := make([]domain.WorkspaceID, 0, domain.SlackConnectCapacity)
+	for index := 0; index < domain.SlackConnectCapacity-1; index++ {
+		id := domain.WorkspaceID(fmt.Sprintf("T-seat-%d-%s", index, f.suffix))
+		if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: id, Name: "seat"}); err != nil {
+			t.Fatal(err)
+		}
+		teams = append(teams, id)
+	}
+	if err := f.repository.SetConversationTeams(ctx, f.workspaceID, f.channelID, teams, false, f.event("seats", "conversation.connected", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+
+	late := domain.WorkspaceID("T-late-" + f.suffix)
+	if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: late, Name: "late"}); err != nil {
+		t.Fatal(err)
+	}
+	invite := domain.SharedInvite{
+		ID: domain.SharedInviteID("SI-" + f.suffix), WorkspaceID: f.workspaceID, ConversationID: f.channelID,
+		TargetWorkspaceID: late, InvitedBy: f.userID, Status: domain.SharedInvitePending,
+		CreatedAt: time.Unix(1_700_001_000, 0).UTC(), ExpiresAt: time.Unix(1_800_000_000, 0).UTC(),
+	}
+	if err := f.repository.CreateSharedInvite(ctx, invite, f.event("connect-created", "shared_invite.created", string(invite.ID))); err != nil {
+		t.Fatal(err)
+	}
+	// A second outstanding invitation for the same organization is refused:
+	// two would let two acceptances each claim the last place.
+	duplicate := invite
+	duplicate.ID = domain.SharedInviteID("SI-dup-" + f.suffix)
+	if err := f.repository.CreateSharedInvite(ctx, duplicate, f.event("connect-duplicate", "shared_invite.created", string(duplicate.ID))); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("a second outstanding invitation err=%v, want it refused", err)
+	}
+	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInvitePending, domain.SharedInviteApproved, time.Unix(1_700_001_100, 0).UTC(), f.event("connect-approved", "shared_invite.approved", string(invite.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.repository.AcceptSharedInvite(ctx, invite.ID, time.Unix(1_700_001_200, 0).UTC(),
+		[]events.Event{f.event("connect-accepted", "shared_invite.accepted", string(invite.ID))}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("acceptance into a full channel err=%v, want a conflict", err)
+	}
+	// Nothing was consumed by the refusal.
+	stored, err := f.repository.GetSharedInvite(ctx, invite.ID)
+	if err != nil || stored.Status != domain.SharedInviteApproved {
+		t.Fatalf("invitation=%+v err=%v, want it still approved", stored, err)
+	}
+
+	// A transition the state machine forbids is refused on both profiles, so
+	// no caller can move an invitation somewhere it may not go.
+	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInviteApproved, domain.SharedInvitePending, time.Unix(1_700_001_300, 0).UTC(), f.event("connect-back", "shared_invite.created", string(invite.ID))); err == nil {
+		t.Fatal("an approved invitation was moved back to pending")
+	}
+}
+
 // A timeline renders many parents at once, so thread summaries are read in
 // one batched call rather than one read per parent. Every profile must return
 // the same counts, the same participant list in the same order, and the same

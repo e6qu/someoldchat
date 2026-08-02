@@ -74,6 +74,7 @@ func runQualification(t *testing.T, open opener) {
 		{"workspace analytics count the same on every profile", workspaceAnalyticsCountTheSameOnEveryProfile},
 		{"huddles converge and end with their last participant", huddlesConvergeAndEndWithTheirLastParticipant},
 		{"workspaces for an address agree on every profile", workspacesForAnAddressAgreeOnEveryProfile},
+		{"Slack Connect capacity is claimed transactionally", slackConnectCapacityIsClaimedTransactionally},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
