@@ -73,8 +73,12 @@ leftovers.
 Browser back/forward returns through meaningful destinations without replaying
 mutations. A message or thread permalink opens the containing conversation,
 loads a window containing the target, marks the target, and exposes enough
-context to continue reading. Removed, inaccessible, malformed, and moved
-targets have distinct safe outcomes.
+context to continue reading. A malformed permalink is refused
+without a lookup. A removed target and one in a conversation the member may not
+read MUST answer identically and MUST NOT disclose which applies, because the
+difference is itself the disclosure — the answer names the message rather than
+the conversation, since for a permalink the conversation is usually readable and
+only the message is gone.
 
 ## NAV-06 — Change theme and density
 
