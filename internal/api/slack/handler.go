@@ -7258,7 +7258,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	message, err := h.postMessageValue(r, principal, fields)
+	message, err := h.postMessageValue(r, principal, fields, "")
 	if err != nil {
 		writeError(w, postMessageError(err))
 		return
@@ -7317,7 +7317,7 @@ func (h Handler) meMessage(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	message, err := h.postMessageValue(r, principal, fields)
+	message, err := h.postMessageValue(r, principal, fields, domain.MessageSubtypeMeMessage)
 	if err != nil {
 		writeError(w, postMessageError(err))
 		return
@@ -7396,7 +7396,7 @@ func checkMessageLength(fields map[string]string) error {
 	return nil
 }
 
-func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fields map[string]string) (domain.Message, error) {
+func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fields map[string]string, subtype domain.MessageSubtype) (domain.Message, error) {
 	// The service rejects an empty channel as ErrInvalidMessage, which
 	// postMessageError renames `no_text` — so a request with text and no channel
 	// was told its text was missing. Every sibling (normalizeHistoryRequest,
@@ -7497,7 +7497,7 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 			MarkdownText: markdownText != "", ReplyBroadcast: replyBroadcast != nil && *replyBroadcast,
 			Parse: parse, MrkdwnDisabled: mrkdwn != nil && !*mrkdwn, LinkNames: linkNames != nil && *linkNames,
 			UnfurlLinks: unfurlLinks, UnfurlMedia: unfurlMedia,
-			Username: username, IconEmoji: iconEmoji, IconURL: iconURL,
+			Username: username, IconEmoji: iconEmoji, IconURL: iconURL, Subtype: subtype,
 		},
 	)
 }
@@ -8635,6 +8635,19 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 
 func messageResponse(message domain.Message) map[string]any {
 	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt)}
+	// Slack's message object reports an edit through `edited`, and clients
+	// render "(edited)" from it. It was absent from every method that returns
+	// a message, so no caller could tell an edited message from an untouched
+	// one. The durable subtype travels for the same reason; the subtypes
+	// derived from other state (file_share below, thread_broadcast from the
+	// stream projection) keep overriding it, because they are computed facts
+	// about this same message.
+	if !message.EditedAt.IsZero() {
+		result["edited"] = map[string]any{"user": string(message.EditedBy), "ts": slackTimestamp(message.EditedAt)}
+	}
+	if message.Subtype != "" {
+		result["subtype"] = string(message.Subtype)
+	}
 	if len(message.Files) > 0 {
 		files := make([]map[string]any, 0, len(message.Files))
 		for _, file := range message.Files {

@@ -1709,13 +1709,59 @@ type Message struct {
 	StreamState     string
 	ThreadTimestamp MessageTimestamp
 	CreatedAt       time.Time
-	Deleted         bool
-	Unfurls         map[string]string
+	// EditedAt and EditedBy record the last edit. Slack's message object
+	// carries an `edited` sub-object, and clients render "(edited)" from it.
+	// The edit instant used to live only on the outbox event, so the fact was
+	// unavailable to any reader of the message itself and the two could
+	// disagree once an event was replayed.
+	EditedAt time.Time
+	EditedBy UserID
+	// Subtype is Slack's message subtype for the messages a workspace
+	// generates rather than a person composing them — joins, topic and
+	// purpose changes, renames, and /me. An empty subtype is an ordinary
+	// message. Subtypes a projection derives from other durable state
+	// (file_share, thread_broadcast, bot_message) are deliberately NOT stored
+	// here: they are computed where they are read.
+	Subtype MessageSubtype
+	Deleted bool
+	Unfurls map[string]string
 	// Files are the durable file shares carried by this message. A file that
 	// merely names a channel in its metadata is not visible conversation
 	// content; the message relationship supplies ordering, threads, events, API
 	// projection, and the first-party timeline.
 	Files []File
+}
+
+// MessageSubtype is the durable subtype vocabulary for workspace-generated
+// messages. Slack renders each of these differently from a composed message:
+// no avatar, no author column, and no message actions.
+type MessageSubtype string
+
+const (
+	MessageSubtypeChannelJoin    MessageSubtype = "channel_join"
+	MessageSubtypeChannelLeave   MessageSubtype = "channel_leave"
+	MessageSubtypeChannelTopic   MessageSubtype = "channel_topic"
+	MessageSubtypeChannelPurpose MessageSubtype = "channel_purpose"
+	MessageSubtypeChannelName    MessageSubtype = "channel_name"
+	MessageSubtypeMeMessage      MessageSubtype = "me_message"
+)
+
+// Valid reports whether a subtype is one this repository writes. An
+// unrecognized value is refused at the storage boundary rather than being
+// projected to clients as a subtype Slack does not define.
+func (s MessageSubtype) Valid() bool {
+	switch s {
+	case "", MessageSubtypeChannelJoin, MessageSubtypeChannelLeave, MessageSubtypeChannelTopic,
+		MessageSubtypeChannelPurpose, MessageSubtypeChannelName, MessageSubtypeMeMessage:
+		return true
+	}
+	return false
+}
+
+// System reports whether the subtype marks a message the workspace generated.
+// Such a message carries no author identity to render and no actions to take.
+func (s MessageSubtype) System() bool {
+	return s != "" && s != MessageSubtypeMeMessage
 }
 
 type MessageStreamStart struct {
@@ -1785,6 +1831,11 @@ type MessagePostRequest struct {
 	Username        string
 	IconEmoji       string
 	IconURL         string
+	// Subtype marks a message the workspace generated rather than a person
+	// composing it. chat.meMessage sets me_message; the conversation
+	// lifecycle mutations set their own. A caller cannot choose an arbitrary
+	// value — postMessageAs refuses one the vocabulary does not define.
+	Subtype MessageSubtype
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a

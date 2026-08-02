@@ -22,6 +22,12 @@ message Message {
   string metadata = 13;
   string stream_state = 14;
   repeated File files = 15;
+  // edited_at and edited_by carry Slack's `edited` sub-object; subtype carries
+  // the workspace-generated message vocabulary (channel_join, channel_topic,
+  // channel_purpose, channel_name, me_message).
+  string edited_at = 16;
+  string edited_by = 17;
+  string subtype = 18;
 }
 
 message PostRequest {

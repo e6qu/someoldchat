@@ -6880,7 +6880,8 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		(strings.TrimSpace(request.Text) == "" && normalizedBlocks == "" && normalizedAttachments == "") ||
 		messageTextTooLong(request.Text) || (request.MarkdownText && utf8.RuneCountInString(request.Text) > 12000) ||
 		(request.Parse != "" && request.Parse != "none" && request.Parse != "full") ||
-		(request.ReplyBroadcast && request.ThreadTimestamp == "") {
+		(request.ReplyBroadcast && request.ThreadTimestamp == "") ||
+		!request.Subtype.Valid() {
 		return domain.Message{}, ErrInvalidMessage
 	}
 	metadata := ""
@@ -6943,7 +6944,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		ID: id, WorkspaceID: workspaceID, Conversation: request.Conversation, AuthorID: authorID,
 		AppID: request.AppID, Text: request.Text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
 		Metadata: metadata, StreamState: streamState, ThreadTimestamp: threadTimestampValue,
-		CreatedAt: domain.MessageInstant(time.Now()),
+		CreatedAt: domain.MessageInstant(time.Now()), Subtype: request.Subtype,
 	}
 	// A message's ts is its public identifier and it carries microseconds, so two
 	// messages in one conversation may not be created on the same microsecond.
@@ -7030,6 +7031,13 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 		(strings.TrimSpace(message.Text) == "" && message.Blocks == "" && message.Attachments == "") {
 		return domain.Message{}, ErrInvalidMessage
 	}
+	// The edit is recorded on the message itself, not only on the event it
+	// emits. Slack's message object carries an `edited` sub-object, and every
+	// reader — history, replies, the first-party timeline — needs it; deriving
+	// it from an outbox event meant a replayed event and the message could
+	// disagree about when the edit happened.
+	message.EditedAt = time.Now().UTC()
+	message.EditedBy = userID
 	event, err := messageMutationEvent(workspaceID, "message.changed", message, previous)
 	if err != nil {
 		return domain.Message{}, err

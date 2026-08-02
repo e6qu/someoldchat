@@ -4226,3 +4226,64 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 		t.Fatalf("archived completion status=%d body=%s", refused.Code, refused.Body)
 	}
 }
+
+// Slack's message object reports an edit through `edited` and a
+// workspace-generated message through `subtype`. Neither appeared in any
+// method that returns a message, so no client could render "(edited)" or tell
+// a /me narration from an ordinary post.
+func TestMessageResponseCarriesEditedAndSubtype(t *testing.T) {
+	handler := testHandler()
+	post := httptest.NewRequest(http.MethodPost, "/api/chat.meMessage", strings.NewReader("channel=C1&text=waves"))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Authorization", "Bearer token")
+	posted := httptest.NewRecorder()
+	handler.ServeHTTP(posted, post)
+	var narration struct {
+		OK bool   `json:"ok"`
+		TS string `json:"ts"`
+	}
+	if err := json.Unmarshal(posted.Body.Bytes(), &narration); err != nil || !narration.OK {
+		t.Fatalf("meMessage=%s", posted.Body)
+	}
+	update := httptest.NewRequest(http.MethodPost, "/api/chat.update", strings.NewReader("channel=C1&ts="+narration.TS+"&text=waves+again"))
+	update.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	update.Header.Set("Authorization", "Bearer token")
+	updated := httptest.NewRecorder()
+	handler.ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"ok":true`) {
+		t.Fatalf("update=%s", updated.Body)
+	}
+	history := httptest.NewRequest(http.MethodGet, "/api/conversations.history?channel=C1", nil)
+	history.Header.Set("Authorization", "Bearer token")
+	read := httptest.NewRecorder()
+	handler.ServeHTTP(read, history)
+	var page struct {
+		Messages []struct {
+			TS      string `json:"ts"`
+			Subtype string `json:"subtype"`
+			Edited  *struct {
+				User string `json:"user"`
+				TS   string `json:"ts"`
+			} `json:"edited"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, message := range page.Messages {
+		if message.TS != narration.TS {
+			continue
+		}
+		found = true
+		if message.Subtype != "me_message" {
+			t.Fatalf("subtype=%q, want me_message", message.Subtype)
+		}
+		if message.Edited == nil || message.Edited.User == "" || message.Edited.TS == "" {
+			t.Fatalf("edited=%+v, want the editor and the instant", message.Edited)
+		}
+	}
+	if !found {
+		t.Fatalf("history did not contain the narrated message: %s", read.Body)
+	}
+}

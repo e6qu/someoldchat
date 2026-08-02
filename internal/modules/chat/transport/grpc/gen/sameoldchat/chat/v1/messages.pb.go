@@ -38,8 +38,14 @@ type Message struct {
 	Metadata        string                 `protobuf:"bytes,13,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	StreamState     string                 `protobuf:"bytes,14,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
 	Files           []*File                `protobuf:"bytes,15,rep,name=files,proto3" json:"files,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// edited_at and edited_by carry Slack's `edited` sub-object; subtype carries
+	// the workspace-generated message vocabulary (channel_join, channel_topic,
+	// channel_purpose, channel_name, me_message).
+	EditedAt      string `protobuf:"bytes,16,opt,name=edited_at,json=editedAt,proto3" json:"edited_at,omitempty"`
+	EditedBy      string `protobuf:"bytes,17,opt,name=edited_by,json=editedBy,proto3" json:"edited_by,omitempty"`
+	Subtype       string `protobuf:"bytes,18,opt,name=subtype,proto3" json:"subtype,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Message) Reset() {
@@ -175,6 +181,27 @@ func (x *Message) GetFiles() []*File {
 		return x.Files
 	}
 	return nil
+}
+
+func (x *Message) GetEditedAt() string {
+	if x != nil {
+		return x.EditedAt
+	}
+	return ""
+}
+
+func (x *Message) GetEditedBy() string {
+	if x != nil {
+		return x.EditedBy
+	}
+	return ""
+}
+
+func (x *Message) GetSubtype() string {
+	if x != nil {
+		return x.Subtype
+	}
+	return ""
 }
 
 type PostRequest struct {
@@ -2669,7 +2696,7 @@ var File_sameoldchat_chat_v1_messages_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/messages.proto\x12\x13sameoldchat.chat.v1\x1a\x1fsameoldchat/chat/v1/files.proto\"\xbc\x04\n" +
+	"\"sameoldchat/chat/v1/messages.proto\x12\x13sameoldchat.chat.v1\x1a\x1fsameoldchat/chat/v1/files.proto\"\x90\x05\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
@@ -2687,7 +2714,10 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x06app_id\x18\f \x01(\tR\x05appId\x12\x1a\n" +
 	"\bmetadata\x18\r \x01(\tR\bmetadata\x12!\n" +
 	"\fstream_state\x18\x0e \x01(\tR\vstreamState\x12/\n" +
-	"\x05files\x18\x0f \x03(\v2\x19.sameoldchat.chat.v1.FileR\x05files\x1a:\n" +
+	"\x05files\x18\x0f \x03(\v2\x19.sameoldchat.chat.v1.FileR\x05files\x12\x1b\n" +
+	"\tedited_at\x18\x10 \x01(\tR\beditedAt\x12\x1b\n" +
+	"\tedited_by\x18\x11 \x01(\tR\beditedBy\x12\x18\n" +
+	"\asubtype\x18\x12 \x01(\tR\asubtype\x1a:\n" +
 	"\fUnfurlsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xda\x01\n" +

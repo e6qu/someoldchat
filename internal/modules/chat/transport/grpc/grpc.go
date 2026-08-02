@@ -2218,6 +2218,15 @@ func (r Remote) WorkflowUpdateStep(ctx context.Context, workspaceID domain.Works
 	return nil
 }
 
+// optionalRFC3339 renders an instant a message may not have. The empty string
+// means "never edited", so a zero time cannot cross the seam as a real one.
+func optionalRFC3339(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
 func optionalUnixNano(value time.Time) int64 {
 	if value.IsZero() {
 		return 0
@@ -8132,6 +8141,7 @@ func encodeProtoMessage(value domain.Message) *chatv1.Message {
 		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, Unfurls: value.Unfurls,
 		Blocks: value.Blocks, Attachments: value.Attachments, AppId: string(value.AppID),
 		Metadata: value.Metadata, StreamState: value.StreamState, Files: files,
+		EditedAt: optionalRFC3339(value.EditedAt), EditedBy: string(value.EditedBy), Subtype: string(value.Subtype),
 	}
 }
 
@@ -8142,6 +8152,14 @@ func decodeProtoMessage(value *chatv1.Message) (domain.Message, error) {
 	created, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
 	if err != nil {
 		return domain.Message{}, errors.New("typed message created_at is invalid")
+	}
+	var edited time.Time
+	if raw := value.GetEditedAt(); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return domain.Message{}, errors.New("typed message edited_at is invalid")
+		}
+		edited = parsed.UTC()
 	}
 	files := make([]domain.File, 0, len(value.GetFiles()))
 	for _, encoded := range value.GetFiles() {
@@ -8157,6 +8175,7 @@ func decodeProtoMessage(value *chatv1.Message) (domain.Message, error) {
 		AppID: domain.AppID(value.GetAppId()), Text: value.GetText(), Blocks: value.GetBlocks(),
 		Attachments: value.GetAttachments(), Metadata: value.GetMetadata(), StreamState: value.GetStreamState(),
 		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(), Files: files,
+		EditedAt: edited, EditedBy: domain.UserID(value.GetEditedBy()), Subtype: domain.MessageSubtype(value.GetSubtype()),
 	}, nil
 }
 

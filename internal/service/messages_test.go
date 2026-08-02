@@ -2711,3 +2711,72 @@ func TestExternalUploadBatchKeepsEveryIdentifier(t *testing.T) {
 		}
 	}
 }
+
+// An edit is a durable fact about the message, not only about the event it
+// emitted. Slack's message object carries `edited`, and every reader needs
+// it; deriving it from the outbox meant a replayed event reported its replay
+// instant as the edit time, and a reader of the message could not tell an
+// edited message from an untouched one at all.
+func TestEditingAMessageRecordsWhoEditedItAndWhen(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+	posted, err := messages.Post(ctx, "T1", "U1", "C1", "before", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !posted.EditedAt.IsZero() || posted.EditedBy != "" {
+		t.Fatalf("a freshly posted message reports an edit: %+v", posted)
+	}
+	after := "after"
+	edited, err := messages.UpdateMessage(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(posted.CreatedAt), domain.MessagePatch{Text: &after})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.EditedAt.IsZero() || edited.EditedBy != "U1" {
+		t.Fatalf("edit=%+v, want an instant and the editor", edited)
+	}
+	// And the fact survives a read, which is the half the outbox event could
+	// never supply.
+	reread, err := s.GetMessage(ctx, posted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reread.EditedAt.IsZero() || reread.EditedBy != "U1" {
+		t.Fatalf("stored message lost its edit: %+v", reread)
+	}
+	if !reread.CreatedAt.Equal(posted.CreatedAt) {
+		t.Fatalf("an edit moved the message's identity from %s to %s", posted.CreatedAt, reread.CreatedAt)
+	}
+}
+
+// A subtype is vocabulary, not free text: a caller cannot invent one, and
+// chat.meMessage's narration is durably distinguishable from something a
+// person composed.
+func TestMessageSubtypeIsRefusedUnlessItIsVocabulary(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+	narrated, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{
+		Conversation: "C1", Text: "waves", Subtype: domain.MessageSubtypeMeMessage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if narrated.Subtype != domain.MessageSubtypeMeMessage {
+		t.Fatalf("subtype=%q, want me_message", narrated.Subtype)
+	}
+	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{
+		Conversation: "C1", Text: "hello", Subtype: domain.MessageSubtype("not_a_slack_subtype"),
+	}); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("invented subtype error=%v, want %v", err, ErrInvalidMessage)
+	}
+}
