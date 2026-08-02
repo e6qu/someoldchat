@@ -218,10 +218,11 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoExternalUpload, decodeProtoExternalUpload),
 		},
-		"RemoteFile":     {sample: &domain.RemoteFile{}, through: through(encodeProtoRemoteFile, decodeProtoRemoteFile)},
-		"RemoteFilePage": {sample: &domain.RemoteFilePage{}, through: through(encodeProtoRemoteFilePage, decodeProtoRemoteFilePage)},
-		"ReadCursor":     {sample: &domain.ReadCursor{}, through: through(encodeProtoReadCursor, decodeProtoReadCursor)},
-		"ThreadSummary":  {sample: &domain.ThreadSummary{}, through: through(encodeProtoThreadSummary, decodeProtoThreadSummary)},
+		"RemoteFile":         {sample: &domain.RemoteFile{}, through: through(encodeProtoRemoteFile, decodeProtoRemoteFile)},
+		"RemoteFilePage":     {sample: &domain.RemoteFilePage{}, through: through(encodeProtoRemoteFilePage, decodeProtoRemoteFilePage)},
+		"ReadCursor":         {sample: &domain.ReadCursor{}, through: through(encodeProtoReadCursor, decodeProtoReadCursor)},
+		"ThreadSummary":      {sample: &domain.ThreadSummary{}, through: through(encodeProtoThreadSummary, decodeProtoThreadSummary)},
+		"FollowedThreadPage": {sample: &domain.FollowedThreadPage{Threads: []domain.FollowedThread{{}}}, through: through(encodeProtoFollowedThreadPage, decodeProtoFollowedThreadPage)},
 		"WorkspaceNotificationPreferences": {
 			sample: &domain.WorkspaceNotificationPreferences{},
 			prepare: func(filled any) {

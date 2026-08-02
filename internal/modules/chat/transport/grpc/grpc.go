@@ -3362,6 +3362,19 @@ func (r Remote) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoReadCursor(out)
 }
 
+func (r Remote) RecordActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	_, err := r.interactions.RecordActivity(ctx, &chatv1.RecordActivityRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	return err
+}
+
+func (r Remote) FollowedThreads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.FollowedThreadPage, error) {
+	out, err := r.interactions.ListFollowedThreads(ctx, &chatv1.FollowedThreadsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.FollowedThreadPage{}, err
+	}
+	return decodeProtoFollowedThreadPage(out)
+}
+
 func (r Remote) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (int, error) {
 	out, err := r.interactions.MarkAllRead(ctx, &chatv1.MarkAllReadRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -6648,6 +6661,48 @@ func (s *Server) MarkAllRead(ctx context.Context, input *chatv1.MarkAllReadReque
 	return &chatv1.MarkAllReadResponse{Conversations: int32(count)}, nil
 }
 
+func (s *Server) RecordActivity(ctx context.Context, input *chatv1.RecordActivityRequest) (*chatv1.RecordActivityResponse, error) {
+	if err := s.implementation.RecordActivity(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.RecordActivityResponse{Ok: true}, nil
+}
+
+func (s *Server) ListFollowedThreads(ctx context.Context, input *chatv1.FollowedThreadsRequest) (*chatv1.FollowedThreadPage, error) {
+	page, err := s.implementation.FollowedThreads(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.PageRequest{Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor())})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoFollowedThreadPage(page), nil
+}
+
+func encodeProtoFollowedThreadPage(page domain.FollowedThreadPage) *chatv1.FollowedThreadPage {
+	threads := make([]*chatv1.FollowedThread, 0, len(page.Threads))
+	for _, thread := range page.Threads {
+		threads = append(threads, &chatv1.FollowedThread{
+			Conversation: string(thread.Conversation), ConversationName: thread.ConversationName,
+			Root: string(thread.Root), RootText: thread.RootText, RootAuthorId: string(thread.RootAuthorID),
+			ReplyCount: int32(thread.ReplyCount), UnreadReplies: int32(thread.UnreadReplies),
+			LastReplyAtUnixNano: thread.LastReplyAt.UnixNano(),
+		})
+	}
+	return &chatv1.FollowedThreadPage{Threads: threads, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+}
+
+func decodeProtoFollowedThreadPage(page *chatv1.FollowedThreadPage) (domain.FollowedThreadPage, error) {
+	threads := make([]domain.FollowedThread, 0, len(page.GetThreads()))
+	for _, thread := range page.GetThreads() {
+		threads = append(threads, domain.FollowedThread{
+			Conversation: domain.ConversationID(thread.GetConversation()), ConversationName: thread.GetConversationName(),
+			Root: domain.MessageTimestamp(thread.GetRoot()), RootText: thread.GetRootText(),
+			RootAuthorID: domain.UserID(thread.GetRootAuthorId()),
+			ReplyCount:   int(thread.GetReplyCount()), UnreadReplies: int(thread.GetUnreadReplies()),
+			LastReplyAt: time.Unix(0, thread.GetLastReplyAtUnixNano()).UTC(),
+		})
+	}
+	return domain.FollowedThreadPage{Threads: threads, NextCursor: domain.Cursor(page.GetNextCursor()), HasMore: page.GetHasMore()}, nil
+}
+
 func (s *Server) GetReadCursor(ctx context.Context, input *chatv1.ReadCursorRequest) (*chatv1.ReadCursor, error) {
 	cursor, err := s.implementation.ReadCursor(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
 	if err != nil {
@@ -8227,6 +8282,16 @@ func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsR
 	return encodeProtoEvents(records), nil
 }
 
+// unixNanoOrZero is the encoding a "no instant" time needs. UnixNano on a zero
+// time is not zero, and every field that forgets this turns "never" into a date
+// in 1754.
+func unixNanoOrZero(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UnixNano()
+}
+
 func encodeProtoUser(value domain.User) *chatv1.User {
 	return &chatv1.User{
 		Id:          string(value.ID),
@@ -8237,6 +8302,12 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		Profile:     encodeProtoProfile(value.Profile),
 		Presence:    string(value.Presence),
 		Deleted:     value.Deleted,
+
+		// A zero time must encode as zero. time.Time{}.UnixNano() is a large
+		// negative number, which the decoder would read back as an instant in
+		// 1754 — so a member who had never been seen would come back from the
+		// remote composition as having been seen, three centuries ago.
+		LastActiveAtUnixNano: unixNanoOrZero(value.LastActiveAt),
 	}
 }
 
@@ -9649,6 +9720,9 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 	}
 	if profile.GetStatusExpiration() != 0 {
 		result.Profile.StatusExpiration = time.Unix(profile.GetStatusExpiration(), 0).UTC()
+	}
+	if value.GetLastActiveAtUnixNano() != 0 {
+		result.LastActiveAt = time.Unix(0, value.GetLastActiveAtUnixNano()).UTC()
 	}
 	return result, nil
 }

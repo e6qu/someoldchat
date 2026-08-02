@@ -4791,6 +4791,27 @@ func (m Messages) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceI
 	return len(cursors), nil
 }
 
+// RecordActivity is the heartbeat behind automatic presence. It is
+// authorization-checked like any other write, and it deliberately reports
+// nothing: a client sends it and moves on.
+func (m Messages) RecordActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.TouchUserActivity(ctx, workspaceID, userID, time.Now().UTC())
+}
+
+// FollowedThreads is Slack's Threads view. Authorization is the workspace, and
+// the store answers only threads in conversations the member follows — a follow
+// can only be created by a member of the conversation, so a follow is itself
+// the membership proof.
+func (m Messages) FollowedThreads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.FollowedThreadPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.FollowedThreadPage{}, err
+	}
+	return m.Store.ListFollowedThreads(ctx, workspaceID, userID, request)
+}
+
 func (m Messages) WorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err

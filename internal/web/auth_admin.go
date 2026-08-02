@@ -665,10 +665,6 @@ func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request, scopes
 		h.writeAuthAdminProblem(w, r, problemNotAuthenticated)
 		return auth.Principal{}, false
 	}
-	if h.Login == nil || principal.WorkspaceID != h.Login.workspace {
-		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
-		return auth.Principal{}, false
-	}
 	held := false
 	for _, scope := range scopes {
 		if principal.HasScope(scope) {
@@ -695,8 +691,29 @@ func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request, scopes
 // derived from roles, or a statically seeded deployment credential — still cannot
 // reach the administration surface, and a demoted administrator loses it without
 // waiting for their session to expire.
+// authAdminRoleAllowed is the whole of administrative authority: an active
+// membership of the principal's OWN workspace, holding a control-plane role.
+//
+// It used to read the role through the login handler, against the workspace
+// that handler was configured with, and authAdminAllowed refused outright when
+// no login handler existed. Two things followed. A deployment with no identity
+// provider — which is every deployment running on the static development
+// session, including the browser qualification suite — had no administration at
+// all, which is why ADMIN-01..03 had no browser citation. And after AUTH-02's
+// workspace switch, an administrator of the workspace they had switched *to*
+// was measured against the workspace the process was configured with, so their
+// own administration was refused.
+//
+// Identity-provider administration still requires a provider, because there is
+// nothing to administer without one; that check stays where it belongs, on the
+// Authorization page.
 func (h Handler) authAdminRoleAllowed(w http.ResponseWriter, r *http.Request, principal auth.Principal) (domain.WorkspaceRole, bool) {
-	role, err := h.Login.workspaceRole(r.Context(), principal.UserID)
+	membership, err := h.Messages.WorkspaceMembership(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	role := membership.Role
+	if err == nil && !membership.Active {
+		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
+		return "", false
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			h.writeAuthAdminProblem(w, r, problemNotAuthorized)

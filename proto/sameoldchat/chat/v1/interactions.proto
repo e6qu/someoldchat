@@ -31,6 +31,39 @@ message MarkAllReadResponse {
   int32 conversations = 1;
 }
 
+message RecordActivityRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message RecordActivityResponse {
+  bool ok = 1;
+}
+
+message FollowedThreadsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message FollowedThread {
+  string conversation = 1;
+  string conversation_name = 2;
+  string root = 3;
+  string root_text = 4;
+  string root_author_id = 5;
+  int32 reply_count = 6;
+  int32 unread_replies = 7;
+  int64 last_reply_at_unix_nano = 8;
+}
+
+message FollowedThreadPage {
+  repeated FollowedThread threads = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
 message ReadCursorRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -217,6 +250,8 @@ message SocketModeInteractionResponseRequest {
 service InteractionsService {
   rpc MarkRead(MarkReadRequest) returns (ReadCursor);
   rpc MarkAllRead(MarkAllReadRequest) returns (MarkAllReadResponse);
+  rpc ListFollowedThreads(FollowedThreadsRequest) returns (FollowedThreadPage);
+  rpc RecordActivity(RecordActivityRequest) returns (RecordActivityResponse);
   // Named GetReadCursor because an rpc named ReadCursor would shadow the
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);

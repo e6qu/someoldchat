@@ -4944,6 +4944,86 @@ func threadFollowKey(workspace domain.WorkspaceID, user domain.UserID, conversat
 	return conversationNotificationKey(workspace, user, conversation) + "\x00" + string(root)
 }
 
+// ListFollowedThreads mirrors the SQL profile's Threads view. The key is
+// workspace, user, conversation and root joined by NUL, which no identifier can
+// contain, so splitting it back apart is exact rather than a guess.
+func (s *Store) ListFollowedThreads(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FollowedThreadPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.FollowedThreadPage{}, err
+	}
+	limit := request.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	prefix := workspaceNotificationKey(workspace, user) + "\x00"
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	threads := make([]domain.FollowedThread, 0, len(s.threadFollows))
+	for key := range s.threadFollows {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		parts := strings.Split(key, "\x00")
+		if len(parts) != 4 {
+			continue
+		}
+		conversation := domain.ConversationID(parts[2])
+		root := domain.MessageTimestamp(parts[3])
+		rootMessage, found := s.messageAtLocked(conversation, root)
+		if !found {
+			// The root was deleted; the thread leaves the view rather than
+			// becoming a row that opens onto nothing.
+			continue
+		}
+		var readAt time.Time
+		if cursor, ok := s.readCursors[readCursorKey(workspace, user, conversation)]; ok {
+			parsed, err := domain.ParseMessageTimestamp(cursor.LastRead)
+			if err != nil {
+				return domain.FollowedThreadPage{}, err
+			}
+			readAt = parsed
+		}
+		thread := domain.FollowedThread{
+			Conversation: conversation, ConversationName: s.conversations[conversation].Name,
+			Root: root, RootText: rootMessage.Text, RootAuthorID: rootMessage.AuthorID,
+		}
+		for _, message := range s.messages[conversation] {
+			if message.Deleted || message.ThreadTimestamp != root {
+				continue
+			}
+			thread.ReplyCount++
+			if message.CreatedAt.After(thread.LastReplyAt) {
+				thread.LastReplyAt = message.CreatedAt
+			}
+			if message.CreatedAt.After(readAt) {
+				thread.UnreadReplies++
+			}
+		}
+		threads = append(threads, thread)
+	}
+	sort.Slice(threads, func(left, right int) bool {
+		if !threads[left].LastReplyAt.Equal(threads[right].LastReplyAt) {
+			return threads[left].LastReplyAt.After(threads[right].LastReplyAt)
+		}
+		return threads[left].Root > threads[right].Root
+	})
+	page := domain.FollowedThreadPage{Threads: threads}
+	if len(page.Threads) > limit {
+		page.Threads = page.Threads[:limit]
+		page.HasMore = true
+	}
+	return page, nil
+}
+
+func (s *Store) messageAtLocked(conversation domain.ConversationID, at domain.MessageTimestamp) (domain.Message, bool) {
+	for _, message := range s.messages[conversation] {
+		if !message.Deleted && domain.NewMessageTimestamp(message.CreatedAt) == at {
+			return message, true
+		}
+	}
+	return domain.Message{}, false
+}
+
 func (s *Store) GetWorkspaceNotificationPreferences(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -5021,6 +5101,25 @@ func (s *Store) IsThreadFollowed(_ context.Context, workspace domain.WorkspaceID
 		return false, store.ErrNotFound
 	}
 	return s.threadFollows[threadFollowKey(workspace, user, conversation, root)], nil
+}
+
+// TouchUserActivity mirrors the SQL profile: forward-only, so a stale request
+// cannot drag a member's presence backwards.
+func (s *Store) TouchUserActivity(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, at time.Time) error {
+	if at.IsZero() {
+		return store.InvalidArgument("user activity requires an instant")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.users[user]
+	if !ok || value.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	if at.After(value.LastActiveAt) {
+		value.LastActiveAt = at.UTC()
+		s.users[user] = value
+	}
+	return nil
 }
 
 func (s *Store) SetThreadFollowed(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, root domain.MessageTimestamp, followed bool, event events.Event) error {

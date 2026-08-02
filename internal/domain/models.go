@@ -159,7 +159,11 @@ type User struct {
 	RealName    string
 	Profile     UserProfile
 	Presence    Presence
-	Deleted     bool
+	// LastActiveAt is the most recent moment this member was observed
+	// interacting. It drives automatic presence and nothing else; it is not a
+	// login record and carries no session identity.
+	LastActiveAt time.Time
+	Deleted      bool
 }
 
 type AdminUser struct {
@@ -187,8 +191,34 @@ const (
 	PresenceAway Presence = "away"
 )
 
+// PresenceIdleAfter is how long a member with automatic presence may be
+// inactive before Slack reports them away. Slack documents ten minutes.
+const PresenceIdleAfter = 10 * time.Minute
+
+// Current reports presence with no knowledge of activity, which means automatic
+// presence resolves to active. It is correct only where the caller genuinely
+// has no activity to consult.
+//
+// Prefer CurrentAt. This exists because `auto` used to be the *only* answer:
+// every reader called this, so a member who selected automatic presence and
+// then closed their laptop stayed "active" indefinitely, and automatic presence
+// was indistinguishable from a manual "always active".
 func (p Presence) Current() string {
+	return p.CurrentAt(time.Time{}, time.Time{})
+}
+
+// CurrentAt resolves automatic presence against the member's last observed
+// activity. A zero lastActive means nothing has ever been observed, which is
+// treated as active rather than away: reporting a member away because the
+// deployment has not yet seen them would make every member away at startup.
+func (p Presence) CurrentAt(lastActive, now time.Time) string {
 	if p == PresenceAway {
+		return "away"
+	}
+	if lastActive.IsZero() || now.IsZero() {
+		return "active"
+	}
+	if now.Sub(lastActive) >= PresenceIdleAfter {
 		return "away"
 	}
 	return "active"
@@ -2058,6 +2088,31 @@ type ThreadSummary struct {
 	ReplyCount   int
 	Participants []UserID
 	LastReplyAt  time.Time
+}
+
+// FollowedThread is one row of Slack's Threads view: a thread the member
+// follows, with enough context to decide whether to open it.
+//
+// Unread is the count of replies after the member's read position in the
+// containing conversation. It is deliberately not a separate per-thread cursor:
+// the product has one read position per conversation, and inventing a second
+// one here would let the Threads view and the conversation disagree about the
+// same replies.
+type FollowedThread struct {
+	Conversation     ConversationID
+	ConversationName string
+	Root             MessageTimestamp
+	RootText         string
+	RootAuthorID     UserID
+	ReplyCount       int
+	UnreadReplies    int
+	LastReplyAt      time.Time
+}
+
+type FollowedThreadPage struct {
+	Threads    []FollowedThread
+	NextCursor Cursor
+	HasMore    bool
 }
 
 type MessageStreamStart struct {

@@ -231,6 +231,73 @@ func batchReadCursorsAgreeWithTheNewestMessage(t *testing.T, open opener) {
 	}
 }
 
+// The Threads view is the first read of thread_follows there has ever been:
+// the table has stored follows since threads were built and nothing listed
+// them, so the two profiles had no opportunity to disagree until now.
+func followedThreadsAgreeAcrossProfiles(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	base := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
+	root := f.message(t, ctx, "M-thread-root", base)
+	rootTimestamp := domain.NewMessageTimestamp(base)
+	f.reply(t, ctx, "M-thread-reply-one", rootTimestamp, base.Add(time.Second))
+	f.reply(t, ctx, "M-thread-reply-two", rootTimestamp, base.Add(2*time.Second))
+
+	if err := f.repository.SetThreadFollowed(ctx, f.workspaceID, f.userID, f.channelID, rootTimestamp, true,
+		f.event("follow", "thread.followed", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.repository.ListFollowedThreads(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Threads) != 1 {
+		t.Fatalf("threads = %+v, want the one followed thread", page.Threads)
+	}
+	thread := page.Threads[0]
+	if thread.Conversation != f.channelID || thread.Root != rootTimestamp {
+		t.Fatalf("thread = %+v, want the followed root in %q", thread, f.channelID)
+	}
+	if thread.RootText != root.Text || thread.RootAuthorID != f.userID {
+		t.Fatalf("thread root = %q by %q, want %q by %q", thread.RootText, thread.RootAuthorID, root.Text, f.userID)
+	}
+	if thread.ReplyCount != 2 {
+		t.Fatalf("reply count = %d, want 2", thread.ReplyCount)
+	}
+	// With no read cursor everything is unread, which is what a member who has
+	// never opened the conversation should see.
+	if thread.UnreadReplies != 2 {
+		t.Fatalf("unread replies = %d, want 2 before any read cursor", thread.UnreadReplies)
+	}
+	if !thread.LastReplyAt.Equal(base.Add(2 * time.Second)) {
+		t.Fatalf("last reply = %s, want %s", thread.LastReplyAt, base.Add(2*time.Second))
+	}
+
+	// Reading up to the first reply leaves exactly one unread.
+	cursor := domain.ReadCursor{WorkspaceID: f.workspaceID, UserID: f.userID, Conversation: f.channelID,
+		LastRead: domain.NewMessageTimestamp(base.Add(time.Second)), UpdatedAt: base.Add(time.Second)}
+	if err := f.repository.SetReadCursor(ctx, cursor, f.event("thread-cursor", "conversation.read", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	page, err = f.repository.ListFollowedThreads(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Threads) != 1 || page.Threads[0].UnreadReplies != 1 {
+		t.Fatalf("threads = %+v err = %v, want one unread reply after the cursor moved", page.Threads, err)
+	}
+
+	// A deleted root leaves the view rather than becoming a row that opens onto
+	// nothing.
+	root.Deleted = true
+	if err := f.repository.DeleteMessage(ctx, root, f.event("thread-root-delete", "message.deleted", string(root.ID)), nil); err != nil {
+		t.Fatal(err)
+	}
+	page, err = f.repository.ListFollowedThreads(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Threads) != 0 {
+		t.Fatalf("threads = %+v err = %v, want the thread gone once its root was deleted", page.Threads, err)
+	}
+}
+
 func createMessageValidatesAndIsReferential(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

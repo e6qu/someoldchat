@@ -4070,7 +4070,7 @@ func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "presence": user.Presence.Current()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "presence": user.Presence.CurrentAt(user.LastActiveAt, time.Now().UTC())})
 }
 
 func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
