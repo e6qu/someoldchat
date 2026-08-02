@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
@@ -118,6 +119,56 @@ func (h Handler) writeConnectError(w http.ResponseWriter, r *http.Request, err e
 			"Reload to see the conversation as it is now.")
 	default:
 		h.writeMutationError(w, r, http.StatusServiceUnavailable, "The invitation could not be "+action,
+			"Nothing was changed. Try again in a moment.")
+	}
+}
+
+// Retention for one conversation. It lives beside the Slack Connect controls
+// because both answer "what governs this channel", and both are administrative
+// decisions taken from the same panel.
+
+func (h Handler) conversationRetentionSet(w http.ResponseWriter, r *http.Request) {
+	principal, fields, channel, ok := h.connectMutation(w, r, auth.ScopeAdminConversationsWrite)
+	if !ok {
+		return
+	}
+	days, err := strconv.Atoi(strings.TrimSpace(fields["duration_days"]))
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The limit was not changed", "A retention limit is a number of days.")
+		return
+	}
+	if err := h.Messages.SetConversationRetention(r.Context(), principal.WorkspaceID, principal.UserID, channel, days); err != nil {
+		h.writeRetentionError(w, r, err)
+		return
+	}
+	h.redirectConnect(w, r, channel, "Retention limit saved")
+}
+
+func (h Handler) conversationRetentionRemove(w http.ResponseWriter, r *http.Request) {
+	principal, _, channel, ok := h.connectMutation(w, r, auth.ScopeAdminConversationsWrite)
+	if !ok {
+		return
+	}
+	if err := h.Messages.RemoveConversationRetention(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		h.writeRetentionError(w, r, err)
+		return
+	}
+	h.redirectConnect(w, r, channel, "This channel follows the workspace default again")
+}
+
+func (h Handler) writeRetentionError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, service.ErrInvalidRetentionDuration):
+		h.writeMutationError(w, r, http.StatusBadRequest, "That limit is not allowed",
+			"A channel limit is between 1 and 36499 days. To keep messages forever, follow the workspace default instead.")
+	case errors.Is(err, service.ErrRetentionNotSupported):
+		h.writeMutationError(w, r, http.StatusConflict, "This conversation cannot have its own limit",
+			"Group direct messages and the workspace's default channel follow the workspace policy.")
+	case errors.Is(err, service.ErrNotWorkspaceAdmin):
+		h.writeMutationError(w, r, http.StatusForbidden, "You cannot change that limit",
+			"How long messages are kept is a workspace administrator's decision.")
+	default:
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "The limit was not changed",
 			"Nothing was changed. Try again in a moment.")
 	}
 }

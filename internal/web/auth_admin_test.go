@@ -1407,3 +1407,56 @@ func TestRetentionControlRefusesAnImpossibleLimit(t *testing.T) {
 		}
 	}
 }
+
+// A channel may be given a shorter limit than the workspace, from the panel
+// that already answers "what governs this channel". The control opens on the
+// duration actually being applied rather than an empty box, and says which of
+// the two it is.
+func TestAChannelCanTakeItsOwnRetentionLimit(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	if _, err := (service.Messages{Store: store}).SetWorkspaceRetention(ctx, "T1", "U1", domain.RetentionPolicy{MessageDays: 365}); err != nil {
+		t.Fatal(err)
+	}
+
+	details := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app?channel=C1&details=1", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	inherited := details()
+	if !strings.Contains(inherited, "follows the workspace default") || !strings.Contains(inherited, `value="365"`) {
+		t.Fatalf("the panel does not open on the governing duration: %s", inherited)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/conversation/retention?channel=C1", "duration_days=14"))
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("set=%d body=%s", response.Code, response.Body.String())
+	}
+	override, err := store.GetConversationRetention(ctx, "T1", "C1")
+	if err != nil || override.DurationDays != 14 {
+		t.Fatalf("override=%+v err=%v", override, err)
+	}
+	if !strings.Contains(details(), "This channel has its own limit") {
+		t.Fatalf("the panel does not say the channel now differs: %s", details())
+	}
+
+	removed := httptest.NewRecorder()
+	handler.ServeHTTP(removed, adminMutationRequest(http.MethodPost, "/app/conversation/retention/remove?channel=C1", ""))
+	if removed.Code != http.StatusSeeOther {
+		t.Fatalf("remove=%d body=%s", removed.Code, removed.Body.String())
+	}
+	after, err := store.GetConversationRetention(ctx, "T1", "C1")
+	if err != nil || after.DurationDays != 0 {
+		t.Fatalf("override after removal=%+v err=%v", after, err)
+	}
+}
