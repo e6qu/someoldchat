@@ -1277,3 +1277,65 @@ func TestEntraSignInTrustsAPinnedTenantAndRefusesAMultiTenantEndpoint(t *testing
 		}
 	}
 }
+
+// ADMIN-03 and AUTH-05: a browser sign-in is the fact an access log exists to
+// record, and none of them reached it — RecordAccess was wired only into the
+// Slack API authenticator, so an audit of a workspace whose people use the
+// browser was empty. It is recorded once per session rather than once per
+// request, because the client polls fragments continuously and a row per
+// request buries the sign-ins.
+func TestABrowserSignInIsRecordedInTheAccessLogOnce(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	messages := service.Messages{Store: store}
+	providerClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/token":
+			return providerResponse(r, `{"access_token":"provider-token"}`), nil
+		case "/userinfo":
+			return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","email_verified":true,"name":"Alice"}`), nil
+		default:
+			return providerResponse(r, "not found"), nil
+		}
+	})}
+	handler, err := NewLoginHandler(messages, "T1", "U1", "https://chat.example.test", "example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "google", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://accounts.google.com/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.client = providerClient
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	begin := httptest.NewRecorder()
+	mux.ServeHTTP(begin, httptest.NewRequest(http.MethodGet, "/auth/google", nil))
+	location, err := url.Parse(begin.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackRequest := httptest.NewRequest(http.MethodGet, "/auth/google/callback?code=one-time-code&state="+url.QueryEscape(location.Query().Get("state")), nil)
+	callbackRequest.Header.Set("User-Agent", "Mozilla/5.0 (browser qualification)")
+	callbackRequest.RemoteAddr = "198.51.100.9:52122"
+	for _, cookie := range begin.Result().Cookies() {
+		callbackRequest.AddCookie(cookie)
+	}
+	callback := httptest.NewRecorder()
+	mux.ServeHTTP(callback, callbackRequest)
+	if callback.Code != http.StatusSeeOther {
+		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
+	}
+
+	logs, _, err := store.ListAccessLogs(context.Background(), "T1", time.Time{}, 10, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("access log entries=%d, want exactly one for one sign-in: %+v", len(logs), logs)
+	}
+	entry := logs[0]
+	if entry.UserID != "U1" || entry.IP != "198.51.100.9:52122" || entry.UserAgent != "Mozilla/5.0 (browser qualification)" {
+		t.Fatalf("entry=%+v", entry)
+	}
+}

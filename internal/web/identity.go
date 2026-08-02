@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"mime"
 	"net"
 	"net/http"
@@ -564,6 +565,20 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// The access log is the record of who signed in, from where and when, and
+	// it had no browser sign-in in it at all: RecordAccess was wired only into
+	// the Slack API authenticator, so an administration audit of a workspace
+	// whose people use the browser was empty. It is recorded here rather than
+	// on every authenticated request because a session is issued once, while
+	// the client polls fragments continuously — a row per request would bury
+	// the sign-ins it exists to show.
+	//
+	// A failure here does not fail the sign-in: the session is already durable,
+	// and refusing to complete it would sign nobody in and still leave no
+	// record.
+	if err := h.service.RecordAccess(r.Context(), user.WorkspaceID, user.ID, truncateAccessValue(r.RemoteAddr, maxAccessLogIP), truncateAccessValue(r.UserAgent(), maxAccessLogUserAgent)); err != nil {
+		log.Printf("web: sign-in for %s was not recorded in the access log: %v", user.ID, err)
+	}
 	http.SetCookie(w, auth.SessionCookie(sessionToken, cookieMaxAge, h.cookieDomain))
 	http.SetCookie(w, &http.Cookie{Name: "sameoldchat_oauth_state", Value: "", Path: "/auth/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	target := safeLocalReturn(parts[4])
@@ -571,6 +586,22 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		target = "/app"
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// accessLogLimits mirror the durable column bounds service.Messages.RecordAccess
+// enforces. A client controls both values through the request, so they are
+// truncated rather than allowed to turn a completed sign-in into a failure.
+const (
+	maxAccessLogIP        = 128
+	maxAccessLogUserAgent = 1024
+)
+
+func truncateAccessValue(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func safeLocalReturn(raw string) string {

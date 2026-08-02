@@ -3337,6 +3337,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /auth/validation", h.validation)
 		mux.HandleFunc("GET /me", h.me)
 		mux.HandleFunc("GET /app/admin/auth", h.authAdminPage)
+		mux.HandleFunc("GET /app/admin/audit", h.auditPage)
 		// Deliberately reachable signed-out: the person it is for has no
 		// account yet. See internal/web/invite.go for why it carries no secret.
 		mux.HandleFunc("GET /app/invite/{inviteRequestID}", h.invitationPage)

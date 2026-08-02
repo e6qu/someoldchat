@@ -873,3 +873,94 @@ func TestWithdrawingAnApprovedInvitationIsItsOwnOutcome(t *testing.T) {
 		t.Fatalf("a withdrawn invitation was accepted: %v", err)
 	}
 }
+
+// ADMIN-03: the durable record and the access log both existed with no way to
+// look at either, and RecordAccess was wired only into the Slack API
+// authenticator — so an audit of a workspace whose people use the browser was
+// empty. The page and its JSON export come from one query, because two code
+// paths are how an export stops agreeing with the page it exports.
+func TestTheAuditPageShowsWhatWasDoneAndWhoSignedIn(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", "audited", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.RecordAccess(ctx, "T1", "U1", "203.0.113.7", "Mozilla/5.0 (test)"); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/app/admin/audit", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{"message.created", "Workspace Admin", "203.0.113.7", "Mozilla/5.0 (test)", "channel C1"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("the audit page is missing %q: %s", expected, body)
+		}
+	}
+	// The message text is not in the record and must not appear on the page:
+	// payloads carry identifiers, and the delivery snapshot is never rendered.
+	if strings.Contains(body, "audited") {
+		t.Fatalf("message content reached the audit page: %s", body)
+	}
+
+	exportRequest := httptest.NewRequest(http.MethodGet, "/app/admin/audit", nil)
+	exportRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	exportRequest.Header.Set("Accept", "application/json")
+	export := httptest.NewRecorder()
+	handler.ServeHTTP(export, exportRequest)
+	if export.Code != http.StatusOK {
+		t.Fatalf("export status=%d body=%s", export.Code, export.Body.String())
+	}
+	var decoded struct {
+		OK    bool `json:"ok"`
+		Audit struct {
+			Entries []struct {
+				Action string `json:"action"`
+				Actor  string `json:"actor"`
+				Target string `json:"target"`
+			} `json:"entries"`
+			Access []struct {
+				IP string `json:"ip"`
+			} `json:"access"`
+		} `json:"audit"`
+	}
+	if err := json.Unmarshal(export.Body.Bytes(), &decoded); err != nil || !decoded.OK {
+		t.Fatalf("export body=%s err=%v", export.Body.String(), err)
+	}
+	// Export and page agree: every entry the page rendered is in the export.
+	if len(decoded.Audit.Entries) == 0 || len(decoded.Audit.Access) != 1 {
+		t.Fatalf("export=%+v", decoded.Audit)
+	}
+	found := false
+	for _, entry := range decoded.Audit.Entries {
+		if entry.Action == "message.created" && entry.Target == "channel C1" && entry.Actor == "Workspace Admin" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the export does not carry what the page showed: %+v", decoded.Audit.Entries)
+	}
+	if decoded.Audit.Access[0].IP != "203.0.113.7" {
+		t.Fatalf("access export=%+v", decoded.Audit.Access)
+	}
+}
+
+// A member without an administrative scope must not read the audit record.
+func TestTheAuditPageRefusesAnUnprivilegedReader(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeChannelsHistory})
+	request := httptest.NewRequest(http.MethodGet, "/app/admin/audit", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
