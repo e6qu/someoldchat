@@ -6233,6 +6233,24 @@ const AnalyticsBusiestChannels = 10
 // it since an instant the caller chooses. It is administrative: the counts span
 // private conversations the actor is not in, which is why it requires the
 // workspace administrator role rather than mere membership.
+// UserWorkspaces lists the workspaces the actor may switch into. It resolves by
+// the actor's own verified address, and it is deliberately readable only about
+// oneself: which workspaces a given address belongs to is exactly the fact a
+// directory of one deployment must not hand out about other people.
+func (m Messages) UserWorkspaces(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) ([]domain.WorkspaceMembershipSummary, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	user, err := m.Store.GetUser(ctx, actorID)
+	if err != nil {
+		return nil, err
+	}
+	if user.WorkspaceID != workspaceID {
+		return nil, store.ErrNotFound
+	}
+	return m.Store.ListWorkspacesForEmail(ctx, user.Email)
+}
+
 func (m Messages) WorkspaceAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, since time.Time) (domain.WorkspaceAnalytics, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.WorkspaceAnalytics{}, err

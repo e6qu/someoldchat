@@ -74,6 +74,16 @@ message AuthorizedAppWorkspacesRequest {
   bool descending = 6;
 }
 
+message WorkspaceMembershipSummary {
+  Workspace workspace = 1;
+  string user_id = 2;
+  string role = 3;
+}
+
+message UserWorkspacesResponse {
+  repeated WorkspaceMembershipSummary workspaces = 1;
+}
+
 message WorkspacePage {
   repeated Workspace workspaces = 1;
   string next_cursor = 2;
@@ -423,6 +433,7 @@ service DirectoryService {
   rpc AdminApproveInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
   rpc AdminDenyInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
   rpc AdminListInviteRequests(InviteRequestsRequest) returns (InviteRequestPage);
+  rpc UserWorkspaces(WorkspaceRequest) returns (UserWorkspacesResponse);
   rpc InvitationPreview(InvitationPreviewRequest) returns (InviteRequest);
   rpc AcceptInvitationForEmail(AcceptInvitationRequest) returns (User);
   rpc AdminApproveApp(AppApprovalMutationRequest) returns (MutationResponse);

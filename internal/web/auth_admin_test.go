@@ -1102,3 +1102,108 @@ func TestAnalyticsCountsWhatTheWorkspaceHolds(t *testing.T) {
 		t.Fatalf("window status=%d", badResponse.Code)
 	}
 }
+
+// AUTH-02: switching workspaces must land the reader in an isolated session
+// context, with nothing about the target in browser history. The switch mints
+// a new session for the target workspace rather than rewriting the current
+// one — the same person is a different user row in each workspace, so a
+// rewritten session would name a user that does not belong to it.
+func TestSwitchingWorkspacesMintsAnIsolatedSession(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	// The same person in a second workspace: a different user row, the same
+	// address, and a plain member rather than an administrator.
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+	store.SeedUser(domain.User{ID: "U1-second", WorkspaceID: "T2", Email: "admin@example.test", Name: "Admin", RealName: "Workspace Admin"})
+	if err := store.SetWorkspaceRole(ctx, "T2", "U1-second", domain.WorkspaceRoleMember, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptest.NewRequest(http.MethodGet, "/app?channel=C1", nil)
+	page.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	rendered := httptest.NewRecorder()
+	handler.ServeHTTP(rendered, page)
+	body := rendered.Body.String()
+	if !strings.Contains(body, `value="T2"`) || !strings.Contains(body, "you are here") {
+		t.Fatalf("the switcher does not offer the second workspace: %s", body)
+	}
+
+	switched := adminMutationRequest(http.MethodPost, "/app/workspace/switch", "workspace_id=T2")
+	switched.Header.Del("Accept")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, switched)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("switch=%d body=%s", response.Code, response.Body.String())
+	}
+	// Nothing about the target may reach history: the redirect goes to the
+	// workspace page, not to a URL naming the workspace.
+	if location := response.Header().Get("Location"); strings.Contains(location, "T2") {
+		t.Fatalf("the switch leaked the target workspace into history: %q", location)
+	}
+	var issued *http.Cookie
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == auth.SessionCookieName {
+			issued = cookie
+		}
+	}
+	if issued == nil || issued.Value == "" || issued.Value == "session" {
+		t.Fatalf("the switch did not mint a new session: %+v", issued)
+	}
+	record, err := store.LookupSession(ctx, issued.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.WorkspaceID != "T2" || record.UserID != "U1-second" {
+		t.Fatalf("session=%+v, want the identity held in the target workspace", record)
+	}
+	// The scopes follow the role held there, not the one left behind.
+	for _, scope := range record.Scopes {
+		if scope == string(auth.ScopeAdminUsersWrite) {
+			t.Fatalf("the switched session carries administrative scope the target role does not justify: %v", record.Scopes)
+		}
+	}
+	// The session left behind is revoked rather than left as a live credential
+	// nothing references.
+	previous, err := store.LookupSession(ctx, "session")
+	if err == nil && !previous.Revoked {
+		t.Fatal("the previous session is still usable after switching away from it")
+	}
+}
+
+// A workspace the reader is not a member of is not switchable into, and the
+// refusal declines to confirm it exists.
+func TestSwitchingRefusesAWorkspaceYouAreNotIn(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedWorkspace(domain.Workspace{ID: "T3", Name: "Somebody else's"})
+	store.SeedUser(domain.User{ID: "U9", WorkspaceID: "T3", Email: "stranger@example.test", Name: "stranger"})
+	if err := store.SetWorkspaceRole(ctx, "T3", "U9", domain.WorkspaceRoleMember, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/workspace/switch", "workspace_id=T3"))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	kept, err := store.LookupSession(ctx, "session")
+	if err != nil || kept.Revoked {
+		t.Fatalf("a refused switch revoked the session it refused to leave: %+v err=%v", kept, err)
+	}
+}
+
+// One workspace is not a choice: a menu with a single entry implies there is
+// somewhere else to go.
+func TestASingleWorkspaceDrawsNoSwitcher(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	request := httptest.NewRequest(http.MethodGet, "/app?channel=C1", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if strings.Contains(response.Body.String(), "/app/workspace/switch") {
+		t.Fatalf("a lone workspace drew a switcher: %s", response.Body.String())
+	}
+}

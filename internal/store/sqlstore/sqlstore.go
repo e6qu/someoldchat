@@ -3412,6 +3412,42 @@ func (s *Store) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (domain
 	return s.withDefaultChannels(ctx, s.db, value)
 }
 
+func (s *Store) ListWorkspacesForEmail(ctx context.Context, email string) ([]domain.WorkspaceMembershipSummary, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT w.id, w.domain, w.name, w.description, w.discoverability, w.icon_url, u.id, m.role
+		FROM users u
+		JOIN workspace_members m ON m.workspace_id = u.workspace_id AND m.user_id = u.id
+		JOIN workspaces w ON w.id = u.workspace_id
+		WHERE u.email = ? AND u.deleted = 0 AND m.active = 1
+		ORDER BY w.id`, normalized)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.WorkspaceMembershipSummary, 0, 2)
+	for rows.Next() {
+		var summary domain.WorkspaceMembershipSummary
+		if err := rows.Scan(&summary.Workspace.ID, &summary.Workspace.Domain, &summary.Workspace.Name, &summary.Workspace.Description, &summary.Workspace.Discoverability, &summary.Workspace.IconURL, &summary.UserID, &summary.Role); err != nil {
+			return nil, err
+		}
+		result = append(result, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for index := range result {
+		workspace, err := s.withDefaultChannels(ctx, s.db, result[index].Workspace)
+		if err != nil {
+			return nil, err
+		}
+		result[index].Workspace = workspace
+	}
+	return result, nil
+}
+
 func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, event events.Event) error {
 	if value.ID == "" || strings.TrimSpace(value.Domain) == "" || strings.TrimSpace(value.Name) == "" || !value.Discoverability.Valid() {
 		return store.InvalidArgument("invalid workspace")

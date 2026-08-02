@@ -2748,6 +2748,7 @@ var parityGaps = map[string]struct{}{
 	"UserGroupChannels":                       {},
 	"UserGroupUsers":                          {},
 	"UserReactions":                           {},
+	"UserWorkspaces":                          {},
 	"WorkflowStepCompleted":                   {},
 	"WorkflowStepFailed":                      {},
 	"WorkflowUpdateStep":                      {},

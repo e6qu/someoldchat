@@ -99,6 +99,16 @@ func (membership WorkspaceMembership) Guest() bool {
 	return membership.Restricted || membership.UltraRestricted
 }
 
+// WorkspaceMembershipSummary is one workspace a person belongs to, with the
+// identity they hold there. A user row belongs to exactly one workspace, so the
+// same person in two workspaces is two rows sharing an email address — which is
+// why a switcher resolves by address and reports the local identity for each.
+type WorkspaceMembershipSummary struct {
+	Workspace Workspace
+	UserID    UserID
+	Role      WorkspaceRole
+}
+
 type BillableUser struct {
 	UserID        UserID
 	BillingActive bool

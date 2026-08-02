@@ -73,6 +73,7 @@ func runQualification(t *testing.T, open opener) {
 		{"accepting an invitation commits the whole membership", acceptingAnInvitationCommitsTheWholeMembership},
 		{"workspace analytics count the same on every profile", workspaceAnalyticsCountTheSameOnEveryProfile},
 		{"huddles converge and end with their last participant", huddlesConvergeAndEndWithTheirLastParticipant},
+		{"workspaces for an address agree on every profile", workspacesForAnAddressAgreeOnEveryProfile},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

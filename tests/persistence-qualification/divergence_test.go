@@ -1806,6 +1806,77 @@ func huddlesConvergeAndEndWithTheirLastParticipant(t *testing.T, open opener) {
 	}
 }
 
+// A user row belongs to one workspace, so the same person in two workspaces is
+// two rows sharing an address. The switcher resolves by that address, and both
+// profiles must agree on which workspaces it names, in what order, and with
+// which local identity — a switcher that listed a workspace on one profile and
+// not the other would offer a destination the switch then refuses.
+func workspacesForAnAddressAgreeOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	address := "shared-" + f.suffix + "@example.com"
+	local := domain.UserID("U-local-" + f.suffix)
+	if err := f.repository.CreateUser(ctx,
+		domain.User{ID: local, WorkspaceID: f.workspaceID, Email: address, Name: "shared", RealName: "Shared"},
+		domain.WorkspaceMembership{WorkspaceID: f.workspaceID, UserID: local, Role: domain.WorkspaceRoleAdmin, Active: true},
+		f.event("shared-local", "user.created", string(local))); err != nil {
+		t.Fatal(err)
+	}
+	second := domain.WorkspaceID("T-second-" + f.suffix)
+	if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: second, Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := domain.UserID("U-elsewhere-" + f.suffix)
+	if err := f.repository.CreateUser(ctx,
+		domain.User{ID: elsewhere, WorkspaceID: second, Email: address, Name: "shared", RealName: "Shared"},
+		domain.WorkspaceMembership{WorkspaceID: second, UserID: elsewhere, Role: domain.WorkspaceRoleMember, Active: true},
+		f.event("shared-elsewhere", "user.created", string(elsewhere))); err != nil {
+		t.Fatal(err)
+	}
+	// A third workspace the address was removed from must not be offered.
+	third := domain.WorkspaceID("T-third-" + f.suffix)
+	if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: third, Name: "Third"}); err != nil {
+		t.Fatal(err)
+	}
+	inactive := domain.UserID("U-inactive-" + f.suffix)
+	if err := f.repository.CreateUser(ctx,
+		domain.User{ID: inactive, WorkspaceID: third, Email: address, Name: "shared", RealName: "Shared"},
+		domain.WorkspaceMembership{WorkspaceID: third, UserID: inactive, Role: domain.WorkspaceRoleMember, Active: true},
+		f.event("shared-inactive", "user.created", string(inactive))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SetUserDeleted(ctx, third, inactive, true, f.event("shared-removed", "user.removed", string(inactive))); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries, err := f.repository.ListWorkspacesForEmail(ctx, strings.ToUpper(address))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("workspaces=%+v, want the two the address is an active member of", summaries)
+	}
+	// Ordered by workspace identifier, so two calls and two profiles agree.
+	if summaries[0].Workspace.ID >= summaries[1].Workspace.ID {
+		t.Fatalf("workspaces are not ordered: %+v", summaries)
+	}
+	byWorkspace := map[domain.WorkspaceID]domain.WorkspaceMembershipSummary{}
+	for _, summary := range summaries {
+		byWorkspace[summary.Workspace.ID] = summary
+	}
+	if got := byWorkspace[f.workspaceID]; got.UserID != local || got.Role != domain.WorkspaceRoleAdmin {
+		t.Fatalf("local membership=%+v", got)
+	}
+	if got := byWorkspace[second]; got.UserID != elsewhere || got.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("second membership=%+v, want the identity and role held there", got)
+	}
+	if _, offered := byWorkspace[third]; offered {
+		t.Fatal("a workspace the address was removed from was offered as a destination")
+	}
+}
+
 // A timeline renders many parents at once, so thread summaries are read in
 // one batched call rather than one read per parent. Every profile must return
 // the same counts, the same participant list in the same order, and the same

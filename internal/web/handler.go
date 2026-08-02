@@ -318,6 +318,7 @@ type conversationDetailsView struct {
 }
 
 type pageData struct {
+	Workspaces      []workspaceChoice
 	Huddle          huddleView
 	HuddleURL       string
 	Timeline        messageList
@@ -861,6 +862,15 @@ const pageStyle = `<style>
 .workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}
 .sidebar{background:var(--accent);color:var(--on-accent);padding:16px 10px;display:flex;flex-direction:column;gap:14px;overflow:auto}
 .workspace-name{font-weight:800;padding:0 10px}
+.workspace-switch summary{cursor:pointer;list-style:none}
+.workspace-switch summary::-webkit-details-marker{display:none}
+.workspace-switch summary::after{content:" ▾"}
+.workspace-list{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:2px}
+.workspace-list button{width:100%;text-align:left;border:0;border-radius:5px;background:transparent;color:var(--on-accent);padding:7px 10px;font:inherit}
+.workspace-list button:hover{background:#ffffff2b}
+.workspace-list small{display:block;color:#e8cbe9;font-weight:400}
+.workspace-current{display:block;padding:7px 10px;border-radius:5px;background:#ffffff2b;font-weight:700}
+.workspace-current small{display:block;color:#e8cbe9;font-weight:400}
 .workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}
 .side-section{display:grid;gap:2px}
 .side-label{color:#e8cbe9;font-size:12px;font-weight:700;padding:6px 10px;text-transform:uppercase;letter-spacing:.06em}
@@ -1385,7 +1395,13 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
   <div class="workspace">
     <aside class="sidebar" id="workspace-sidebar">
       <div>
-        <div class="workspace-name">{{.WorkspaceName}}</div>
+        {{if .Workspaces}}<details class="workspace-switch">
+          <summary class="workspace-name">{{.WorkspaceName}}</summary>
+          <form method="post" action="/app/workspace/switch">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+            <ul class="workspace-list" aria-label="Your workspaces">{{range .Workspaces}}<li>{{if .Current}}<span class="workspace-current">{{.Name}} <small>{{.Role}} · you are here</small></span>{{else}}<button type="submit" name="workspace_id" value="{{.ID}}">{{.Name}} <small>{{.Role}}</small></button>{{end}}</li>{{end}}</ul>
+          </form>
+        </details>{{else}}<div class="workspace-name">{{.WorkspaceName}}</div>{{end}}
         <div class="workspace-sub"><span class="presence-dot" aria-hidden="true"></span>{{.Username}}</div>
       </div>
       <nav class="side-section" aria-label="Workspace navigation">
@@ -3408,6 +3424,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/message/forward", h.forwardMessage)
 	mux.HandleFunc("POST /app/files/delete", h.deleteFile)
 	mux.HandleFunc("GET /app/remote-files", h.remoteFiles)
+	mux.HandleFunc("POST /app/workspace/switch", h.switchWorkspace)
 	mux.HandleFunc("GET /app/huddle", h.huddleFragment)
 	mux.HandleFunc("POST /app/huddle/start", h.huddleMutation("started", h.startHuddle, "Huddle started"))
 	mux.HandleFunc("POST /app/huddle/join", h.huddleMutation("joined", h.joinHuddle, "You joined the huddle"))
@@ -4288,6 +4305,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	// The huddle bar is a live fragment, so the page renders the same partial
 	// the refresh fetches: a first paint that disagreed with the first refresh
 	// would flicker the control set for anyone reading it.
+	data.Workspaces = h.workspaceChoices(r, principal)
 	data.HuddleURL = "/app/huddle?channel=" + url.QueryEscape(string(channel))
 	data.Huddle = h.huddleFor(r.Context(), principal, conversation, data.CSRFToken, "", names)
 	if isMember && threadTimestamp != "" {

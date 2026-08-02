@@ -348,6 +348,12 @@ type Store interface {
 	// withdrawn — the update matched no row and reported not found.
 	SetInviteRequestStatus(context.Context, domain.WorkspaceID, domain.InviteRequestID, domain.InviteRequestStatus, domain.InviteRequestStatus, time.Time, events.Event) error
 	ListInviteRequests(context.Context, domain.WorkspaceID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
+	// ListWorkspacesForEmail returns every workspace in which this address is
+	// an active, undeleted member, ordered by workspace identifier so two
+	// calls and two profiles list them alike. The address is the join: a user
+	// row belongs to one workspace, so the same person elsewhere is a
+	// different row with the same address.
+	ListWorkspacesForEmail(context.Context, string) ([]domain.WorkspaceMembershipSummary, error)
 	// WorkspaceAnalytics counts what one workspace holds, and what has
 	// happened in it since a caller-supplied instant. The instant is a
 	// parameter so the page and any export built from the same call describe

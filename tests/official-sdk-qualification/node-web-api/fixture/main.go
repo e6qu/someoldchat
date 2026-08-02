@@ -317,7 +317,7 @@ func main() {
 		_, _ = io.WriteString(w, value)
 	})
 	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
-	rtmHandler, err := realtime.NewRTMHandler(messages, "T1", messages, messages)
+	rtmHandler, err := realtime.NewRTMHandler(messages, messages, messages)
 	if err != nil {
 		panic(err)
 	}

@@ -2204,6 +2204,32 @@ func (s *Store) ListInviteRequests(_ context.Context, workspace domain.Workspace
 	return page, err
 }
 
+func (s *Store) ListWorkspacesForEmail(_ context.Context, email string) ([]domain.WorkspaceMembershipSummary, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]domain.WorkspaceMembershipSummary, 0, 2)
+	for _, user := range s.users {
+		if user.Deleted || domain.NormalizeEmail(user.Email) != normalized {
+			continue
+		}
+		membership, exists := s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)]
+		if !exists || !membership.Active {
+			continue
+		}
+		workspace, exists := s.workspaces[user.WorkspaceID]
+		if !exists {
+			continue
+		}
+		result = append(result, domain.WorkspaceMembershipSummary{Workspace: cloneWorkspace(workspace), UserID: user.ID, Role: membership.Role})
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].Workspace.ID < result[right].Workspace.ID })
+	return result, nil
+}
+
 func (s *Store) WorkspaceAnalytics(_ context.Context, workspace domain.WorkspaceID, since time.Time, busiest int) (domain.WorkspaceAnalytics, error) {
 	if busiest < 0 {
 		return domain.WorkspaceAnalytics{}, store.InvalidArgument("the busiest-channel bound must not be negative")

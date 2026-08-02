@@ -1878,6 +1878,34 @@ func (r Remote) AdminListInviteRequests(ctx context.Context, workspaceID domain.
 	return domain.InviteRequestPage{Requests: values, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
 }
 
+func (r Remote) UserWorkspaces(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.WorkspaceMembershipSummary, error) {
+	out, err := r.directory.UserWorkspaces(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.WorkspaceMembershipSummary, 0, len(out.GetWorkspaces()))
+	for _, item := range out.GetWorkspaces() {
+		summary, decodeErr := decodeProtoWorkspaceMembershipSummary(item)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		result = append(result, summary)
+	}
+	return result, nil
+}
+
+func encodeProtoWorkspaceMembershipSummary(value domain.WorkspaceMembershipSummary) *chatv1.WorkspaceMembershipSummary {
+	return &chatv1.WorkspaceMembershipSummary{Workspace: encodeProtoWorkspace(value.Workspace), UserId: string(value.UserID), Role: string(value.Role)}
+}
+
+func decodeProtoWorkspaceMembershipSummary(value *chatv1.WorkspaceMembershipSummary) (domain.WorkspaceMembershipSummary, error) {
+	workspace, err := decodeProtoWorkspace(value.GetWorkspace())
+	if err != nil {
+		return domain.WorkspaceMembershipSummary{}, err
+	}
+	return domain.WorkspaceMembershipSummary{Workspace: workspace, UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole())}, nil
+}
+
 func (r Remote) InvitationPreview(ctx context.Context, workspaceID domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
 	out, err := r.directory.InvitationPreview(ctx, &chatv1.InvitationPreviewRequest{WorkspaceId: string(workspaceID), InviteRequestId: string(id)})
 	if err != nil {
@@ -4820,6 +4848,18 @@ func (s *Server) AdminDenyInviteRequest(ctx context.Context, input *chatv1.Invit
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) UserWorkspaces(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.UserWorkspacesResponse, error) {
+	values, err := s.implementation.UserWorkspaces(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]*chatv1.WorkspaceMembershipSummary, 0, len(values))
+	for _, value := range values {
+		result = append(result, encodeProtoWorkspaceMembershipSummary(value))
+	}
+	return &chatv1.UserWorkspacesResponse{Workspaces: result}, nil
 }
 
 func (s *Server) InvitationPreview(ctx context.Context, input *chatv1.InvitationPreviewRequest) (*chatv1.InviteRequest, error) {
