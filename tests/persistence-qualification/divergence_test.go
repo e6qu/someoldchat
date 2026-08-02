@@ -175,6 +175,62 @@ func unreadCountFollowsTheReadCursor(t *testing.T, open opener) {
 	t.Fatalf("conversation %q missing from %+v", f.channelID, page.Conversations)
 }
 
+// Marking everything read is one action to the member and one transaction to
+// the store, and it is the only cursor write whose input is derived from the
+// store's own answer about what the newest message is. The two profiles have to
+// agree on both halves or the sidebar clears differently depending on which
+// storage a deployment chose.
+func batchReadCursorsAgreeWithTheNewestMessage(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	base := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	f.message(t, ctx, "M-batch-first", base)
+	newest := base.Add(2 * time.Second)
+	f.message(t, ctx, "M-batch-newest", newest)
+	// A deleted message must not become the read position: deleting the last
+	// message would otherwise park the cursor on something nobody can see.
+	deleted := f.message(t, ctx, "M-batch-deleted", base.Add(4*time.Second))
+	deleted.Deleted = true
+	if err := f.repository.DeleteMessage(ctx, deleted, f.event("batch-delete", "message.deleted", string(deleted.ID)), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	latest, err := f.repository.LatestMessageTimestamps(ctx, f.workspaceID, []domain.ConversationID{f.channelID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := domain.NewMessageTimestamp(newest)
+	if latest[f.channelID] != want {
+		t.Fatalf("latest = %q, want %q — the newest undeleted message", latest[f.channelID], want)
+	}
+	// A conversation nobody has posted in is absent, not zero.
+	empty, err := f.repository.LatestMessageTimestamps(ctx, f.workspaceID, []domain.ConversationID{domain.ConversationID("C-absent-" + f.suffix)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("latest = %+v, want no entry for a conversation with no messages", empty)
+	}
+
+	cursor := domain.ReadCursor{WorkspaceID: f.workspaceID, UserID: f.userID, Conversation: f.channelID, LastRead: want, UpdatedAt: newest}
+	if err := f.repository.SetReadCursors(ctx, []domain.ReadCursor{cursor}, []events.Event{f.event("batch-cursor", "conversation.read", string(f.channelID))}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.repository.GetReadCursor(ctx, f.workspaceID, f.userID, f.channelID)
+	if err != nil || stored.LastRead != want {
+		t.Fatalf("cursor = %+v err = %v, want the batch write to have landed", stored, err)
+	}
+
+	// Mismatched lengths are rejected rather than silently truncated: an
+	// unpaired cursor would move a read position with nothing in the journal to
+	// say it moved.
+	if err := f.repository.SetReadCursors(ctx, []domain.ReadCursor{cursor}, nil); err == nil {
+		t.Fatal("a cursor with no event was accepted")
+	}
+}
+
 func createMessageValidatesAndIsReferential(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

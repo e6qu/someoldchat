@@ -22,6 +22,15 @@ message MarkReadRequest {
   string timestamp = 4;
 }
 
+message MarkAllReadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message MarkAllReadResponse {
+  int32 conversations = 1;
+}
+
 message ReadCursorRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -207,6 +216,7 @@ message SocketModeInteractionResponseRequest {
 
 service InteractionsService {
   rpc MarkRead(MarkReadRequest) returns (ReadCursor);
+  rpc MarkAllRead(MarkAllReadRequest) returns (MarkAllReadResponse);
   // Named GetReadCursor because an rpc named ReadCursor would shadow the
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);

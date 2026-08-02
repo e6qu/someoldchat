@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	InteractionsService_MarkRead_FullMethodName                     = "/sameoldchat.chat.v1.InteractionsService/MarkRead"
+	InteractionsService_MarkAllRead_FullMethodName                  = "/sameoldchat.chat.v1.InteractionsService/MarkAllRead"
 	InteractionsService_GetReadCursor_FullMethodName                = "/sameoldchat.chat.v1.InteractionsService/GetReadCursor"
 	InteractionsService_ThreadSummaries_FullMethodName              = "/sameoldchat.chat.v1.InteractionsService/ThreadSummaries"
 	InteractionsService_MessageAt_FullMethodName                    = "/sameoldchat.chat.v1.InteractionsService/MessageAt"
@@ -41,6 +42,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type InteractionsServiceClient interface {
 	MarkRead(ctx context.Context, in *MarkReadRequest, opts ...grpc.CallOption) (*ReadCursor, error)
+	MarkAllRead(ctx context.Context, in *MarkAllReadRequest, opts ...grpc.CallOption) (*MarkAllReadResponse, error)
 	// Named GetReadCursor because an rpc named ReadCursor would shadow the
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(ctx context.Context, in *ReadCursorRequest, opts ...grpc.CallOption) (*ReadCursor, error)
@@ -71,6 +73,16 @@ func (c *interactionsServiceClient) MarkRead(ctx context.Context, in *MarkReadRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReadCursor)
 	err := c.cc.Invoke(ctx, InteractionsService_MarkRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) MarkAllRead(ctx context.Context, in *MarkAllReadRequest, opts ...grpc.CallOption) (*MarkAllReadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkAllReadResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_MarkAllRead_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +234,7 @@ func (c *interactionsServiceClient) HandleSocketModeResponse(ctx context.Context
 // for forward compatibility.
 type InteractionsServiceServer interface {
 	MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error)
+	MarkAllRead(context.Context, *MarkAllReadRequest) (*MarkAllReadResponse, error)
 	// Named GetReadCursor because an rpc named ReadCursor would shadow the
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error)
@@ -249,6 +262,9 @@ type UnimplementedInteractionsServiceServer struct{}
 
 func (UnimplementedInteractionsServiceServer) MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error) {
 	return nil, status.Error(codes.Unimplemented, "method MarkRead not implemented")
+}
+func (UnimplementedInteractionsServiceServer) MarkAllRead(context.Context, *MarkAllReadRequest) (*MarkAllReadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MarkAllRead not implemented")
 }
 func (UnimplementedInteractionsServiceServer) GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetReadCursor not implemented")
@@ -326,6 +342,24 @@ func _InteractionsService_MarkRead_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(InteractionsServiceServer).MarkRead(ctx, req.(*MarkReadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_MarkAllRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkAllReadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).MarkAllRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_MarkAllRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).MarkAllRead(ctx, req.(*MarkAllReadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -592,6 +626,10 @@ var InteractionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MarkRead",
 			Handler:    _InteractionsService_MarkRead_Handler,
+		},
+		{
+			MethodName: "MarkAllRead",
+			Handler:    _InteractionsService_MarkAllRead_Handler,
 		},
 		{
 			MethodName: "GetReadCursor",

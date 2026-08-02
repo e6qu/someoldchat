@@ -4716,6 +4716,81 @@ func (m Messages) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return cursor, nil
 }
 
+// markAllReadPage is how many conversations one page of the mark-all-read walk
+// reads. It matches the largest page the client already asks for elsewhere.
+const markAllReadPage = 200
+
+// MarkAllRead is Slack's "mark all messages as read": every conversation the
+// member belongs to advances to its newest message, and the count of
+// conversations that actually moved is returned.
+//
+// The read position is the newest message observed now, not "everything
+// forever". A message that arrives while this runs stays unread, which is both
+// what a member expects and the only answer that does not silently discard
+// something they have not seen.
+//
+// Conversations with nothing unread are skipped rather than rewritten, so the
+// journal records the conversations a member actually cleared instead of one
+// event per conversation they have ever joined.
+func (m Messages) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (int, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return 0, err
+	}
+	// Every conversation, not the first page of them: "mark all read" that
+	// stopped at a page boundary would leave badges up with no way to tell
+	// which ones it skipped.
+	unread := make([]domain.ConversationID, 0, markAllReadPage)
+	request := domain.ConversationListRequest{Limit: markAllReadPage, IncludeClosedDirects: true}
+	for {
+		page, err := m.Store.ListConversations(ctx, workspaceID, userID, request)
+		if err != nil {
+			return 0, err
+		}
+		for _, conversation := range page.Conversations {
+			if conversation.UnreadCount > 0 {
+				unread = append(unread, conversation.ID)
+			}
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		request.Cursor = page.NextCursor
+	}
+	if len(unread) == 0 {
+		return 0, nil
+	}
+	latest, err := m.Store.LatestMessageTimestamps(ctx, workspaceID, unread)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC()
+	cursors := make([]domain.ReadCursor, 0, len(unread))
+	batch := make([]events.Event, 0, len(unread))
+	for _, conversation := range unread {
+		timestamp, ok := latest[conversation]
+		if !ok {
+			// Unread without a message means the count and the messages
+			// disagree; skipping is the only safe reading, and inventing a
+			// cursor would be worse than leaving the badge up.
+			continue
+		}
+		event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.read",
+			events.String("channel_id", string(conversation)), events.String("user_id", string(userID)), events.String("ts", string(timestamp))), now)
+		if err != nil {
+			return 0, err
+		}
+		cursors = append(cursors, domain.ReadCursor{WorkspaceID: workspaceID, UserID: userID, Conversation: conversation, LastRead: timestamp, UpdatedAt: now})
+		batch = append(batch, event)
+	}
+	if len(cursors) == 0 {
+		return 0, nil
+	}
+	if err := m.Store.SetReadCursors(ctx, cursors, batch); err != nil {
+		return 0, err
+	}
+	return len(cursors), nil
+}
+
 func (m Messages) WorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err

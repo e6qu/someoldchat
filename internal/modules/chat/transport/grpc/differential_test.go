@@ -1722,6 +1722,41 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Mark-all-read is the one cursor write whose result is a count
+			// rather than a cursor, so the two compositions can disagree about
+			// how many conversations moved without any single cursor read
+			// noticing.
+			name: "mark every conversation read",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "unread one", "", ""); err != nil {
+					return nil, err
+				}
+				newest, err := chat.Post(ctx, "T1", "U1", "C1", "unread two", "", "")
+				if err != nil {
+					return nil, err
+				}
+				first, err := chat.MarkAllRead(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				cursor, err := chat.ReadCursor(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				// A second pass has nothing left to do, which is what proves
+				// the count means "conversations that moved" and not
+				// "conversations that exist".
+				second, err := chat.MarkAllRead(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// The cursor's own value is wall-clock and differs between the
+				// two runs by construction; what must agree is that both landed
+				// on the newest message.
+				return []any{first, second, cursor.Conversation, cursor.LastRead == timestampOf(newest)}, nil
+			},
+		},
+		{
 			name: "conversation membership and cursor",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U1", "C1", "read me", "", "")

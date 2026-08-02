@@ -3362,6 +3362,14 @@ func (r Remote) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoReadCursor(out)
 }
 
+func (r Remote) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (int, error) {
+	out, err := r.interactions.MarkAllRead(ctx, &chatv1.MarkAllReadRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetConversations()), nil
+}
+
 func (r Remote) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ReadCursor, error) {
 	out, err := r.interactions.GetReadCursor(ctx, &chatv1.ReadCursorRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
@@ -6630,6 +6638,14 @@ func (s *Server) UpdateRemoteFile(ctx context.Context, input *chatv1.UpdateRemot
 
 func (s *Server) MarkRead(ctx context.Context, input *chatv1.MarkReadRequest) (*chatv1.ReadCursor, error) {
 	return s.markReadProto(ctx, input)
+}
+
+func (s *Server) MarkAllRead(ctx context.Context, input *chatv1.MarkAllReadRequest) (*chatv1.MarkAllReadResponse, error) {
+	count, err := s.implementation.MarkAllRead(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MarkAllReadResponse{Conversations: int32(count)}, nil
 }
 
 func (s *Server) GetReadCursor(ctx context.Context, input *chatv1.ReadCursorRequest) (*chatv1.ReadCursor, error) {

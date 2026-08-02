@@ -371,17 +371,21 @@ type pageData struct {
 	CSRFToken            string
 	ShowProfile          bool
 	ShowAdmin            bool
-	ReminderUnread       bool
-	IsMember             bool
-	CanPost              bool
-	CanSchedule          bool
-	CanUpload            bool
-	CanJoin              bool
-	CanCreate            bool
-	JoinURL              string
-	Username             string
-	UserInitial          string
-	OlderURL             string
+	// Keyboard is the client's whole keyboard layer, rendered into the help
+	// dialog Command/Control+/ opens. It comes from keyboardSections so the
+	// dialog cannot describe a binding the page does not announce.
+	Keyboard       []keyboardSectionView
+	ReminderUnread bool
+	IsMember       bool
+	CanPost        bool
+	CanSchedule    bool
+	CanUpload      bool
+	CanJoin        bool
+	CanCreate      bool
+	JoinURL        string
+	Username       string
+	UserInitial    string
+	OlderURL       string
 	// LatestURL is set when the rendered window is not the newest one. It is
 	// both the "jump to the latest messages" pager and the composer's
 	// data-newest, so a post made while reading older history takes the
@@ -881,7 +885,13 @@ const themeToggleScript = `<script>(function(){var root=document.documentElement
 const layoutMarkup = `<!doctype html>
 <html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .}}</title><style>` + sharedStyle + `</style>{{block "styles" .}}{{end}}` + themeBootstrap + `</head><body>{{template "content" .}}` + themeToggleScript + `{{block "scripts" .}}{{end}}</body></html>`
 
-var layoutTemplate = template.Must(template.New("layout").Parse(layoutMarkup))
+// templateFunctions is deliberately tiny: it exists so a template cannot write
+// an aria-keyshortcuts value by hand. Every advertised chord is looked up in
+// keyboardSections, which is what keeps the announced binding, the documented
+// binding and the implemented binding the same thing.
+var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts}
+
+var layoutTemplate = template.Must(template.New("layout").Funcs(templateFunctions).Parse(layoutMarkup))
 
 func mustPage(markup string) *template.Template {
 	return template.Must(template.Must(layoutTemplate.Clone()).Parse(markup))
@@ -949,8 +959,9 @@ const pageStyle = `<style>
 .message:target{background:var(--hover);outline:2px solid var(--focus)}
 .avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}.avatar img{width:100%;height:100%;object-fit:cover}.avatar.avatar-emoji{font-size:10px;text-transform:none;overflow-wrap:anywhere}
 .message-body{min-width:0}
-.message-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
+.message-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
 .author{font-weight:800}
+a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;margin:0 -4px;border-radius:5px}a.time:hover{background:var(--hover)}
 .time{color:var(--muted);font-size:12px}
 .pinned{color:var(--muted);font-size:12px;font-weight:700}
 .message-text{margin:2px 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -996,7 +1007,7 @@ const pageStyle = `<style>
 .chip[aria-pressed=true]{border-color:var(--action);font-weight:800}
 .chip-count{font-variant-numeric:tabular-nums;font-weight:700}
 .message-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.message-actions a,.message-actions button{color:var(--muted);background:transparent;border:0;padding:2px 0;text-decoration:none;font-size:12px}
+.message-actions a,.message-actions button{display:inline-flex;align-items:center;min-height:24px;color:var(--muted);background:transparent;border:0;padding:2px 4px;margin:0 -4px;border-radius:5px;text-decoration:none;font-size:12px}
 .message-actions a:hover,.message-actions button:hover{color:var(--action);text-decoration:underline}
 .inline-form{display:inline-flex;gap:6px;align-items:center}
 .inline-form input[type=text]{width:130px;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:3px 6px}
@@ -1051,6 +1062,12 @@ const workspaceRefinements = `<style>
 .brand{max-width:220px}
 .search{height:34px;max-width:680px;padding:3px 8px;background:#ffffff20}
 .search-icon{width:16px;height:16px;flex:0 0 auto}
+.keyboard-help{width:min(720px,calc(100vw - 28px));max-height:min(680px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.keyboard-help::backdrop{background:#0008}
+.keyboard-help-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,220px) auto;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}.keyboard-help-head h2{margin:0;font-size:1.1rem}.keyboard-help-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:8px 10px}.keyboard-help-head button{border:0;background:transparent;color:var(--muted);font-size:22px;line-height:1}
+.keyboard-help-body{padding:6px 16px 16px;overflow:auto;max-height:calc(min(680px,100vh - 28px) - 74px)}.keyboard-help-body h3{margin:16px 0 6px;font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.keyboard-help-body dl{display:grid;gap:2px;margin:0}
+.keyboard-help-body dl>div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:14px;padding:7px 8px;border-radius:6px}.keyboard-help-body dl>div:nth-child(odd){background:var(--hover)}.keyboard-help-body dt{margin:0;min-width:0}.keyboard-help-body dt small{display:block;color:var(--muted);font-size:.78rem;font-weight:400}.keyboard-help-body dd{margin:0;display:flex;gap:6px;white-space:nowrap}
+.keyboard-help-body kbd{border:1px solid var(--field-line);border-bottom-width:2px;border-radius:5px;background:var(--panel);padding:2px 6px;font:600 12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+.keyboard-help-empty{padding:26px;text-align:center;color:var(--muted)}
 .search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
 .top-profile{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:7px;background:#ffffff35;font-weight:800;text-transform:uppercase}
 .workspace{grid-template-columns:260px minmax(0,1fr)}
@@ -1403,7 +1420,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
     <form class="search" method="get" action="/app/search" role="search" aria-label="Search {{.WorkspaceName}}">
       <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
       <label class="visually-hidden" for="workspace-search">Search {{.WorkspaceName}}</label>
-      <input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search {{.WorkspaceName}}" role="combobox" aria-keyshortcuts="Control+G Meta+G" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required>
+      <input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search {{.WorkspaceName}}" role="combobox" {{ariaKeyshortcuts "Search the workspace"}} autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required>
       <span class="search-shortcut" aria-hidden="true">⌘/Ctrl G</span>
       <button class="search-submit" type="submit">Search</button>
       <input type="hidden" name="channel" value="{{.Channel}}">
@@ -1432,6 +1449,26 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </form>{{end}}</div>
     <p class="shortcut-browser-empty" id="shortcut-browser-empty" role="status" hidden>No matching shortcuts.</p>
   </dialog>{{end}}
+  <dialog class="keyboard-help" id="keyboard-help" aria-labelledby="keyboard-help-title">
+    <div class="keyboard-help-head">
+      <h2 id="keyboard-help-title">Keyboard shortcuts</h2>
+      <label class="visually-hidden" for="keyboard-help-query">Search shortcuts</label>
+      <input id="keyboard-help-query" type="search" autocomplete="off" maxlength="80" placeholder="Search shortcuts">
+      <button id="keyboard-help-close" type="button" aria-label="Close keyboard shortcuts">&times;</button>
+    </div>
+    <div class="keyboard-help-body">{{range .Keyboard}}
+      <section data-keyboard-section aria-labelledby="keyboard-section-{{.Title}}">
+        <h3 id="keyboard-section-{{.Title}}">{{.Title}}</h3>
+        <dl>{{range .Shortcuts}}
+          <div data-keyboard-row data-keyboard-search="{{.Search}}">
+            <dt>{{.Action}}{{if .Note}}<small>{{.Note}}</small>{{end}}</dt>
+            <dd><kbd data-keyboard-apple>{{.Apple}}</kbd><kbd data-keyboard-other>{{.Other}}</kbd></dd>
+          </div>{{end}}
+        </dl>
+      </section>{{end}}
+    </div>
+    <p class="keyboard-help-empty" id="keyboard-help-empty" role="status" hidden>No matching shortcuts.</p>
+  </dialog>
   {{if and .CanPost .CanUpload}}<dialog class="clip-recorder" id="clip-recorder" aria-labelledby="clip-recorder-title" aria-describedby="clip-recorder-status">
     <h2 id="clip-recorder-title">Record a clip</h2>
     <p id="clip-recorder-status" role="status" aria-live="polite">Choose an audio or video clip from the composer.</p>
@@ -1452,11 +1489,11 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </div>
       <nav class="side-section" aria-label="Workspace navigation">
         <div class="side-label">Workspace</div>
-        <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" aria-keyshortcuts="Control+3 Control+Shift+3"><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
+        <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
         <a class="side-link" href="/app/notifications?channel={{.Channel}}" aria-label="Notification preferences"><span class="side-icon" aria-hidden="true">◌</span><span class="side-text">Notifications</span></a>
-        <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}"><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
+        <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
         {{if .CanSchedule}}<a class="side-link" href="/app/drafts?channel={{.Channel}}" aria-label="Drafts and sent"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Drafts &amp; sent</span></a>{{end}}
-        <a class="side-link" href="/app/dms" aria-label="Direct messages"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">DMs</span></a>
+        <a class="side-link" href="/app/dms" aria-label="Direct messages" {{ariaKeyshortcuts "Direct messages"}}><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">DMs</span></a>
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
         <a class="side-link" href="/app/remote-files?channel={{.Channel}}" aria-label="Remote files"><span class="side-icon" aria-hidden="true">⇗</span><span class="side-text">Remote files</span></a>
         <a class="side-link" href="/app/canvases" aria-label="Canvases"><span class="side-icon" aria-hidden="true">▤</span><span class="side-text">Canvases</span></a>
@@ -1526,8 +1563,13 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button type="submit">Mark as read</button>
           </form>
           {{end}}
+          <form class="inline-form" id="mark-all-read" method="post" action="/app/read/all?channel={{.Channel}}">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+            <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
+          </form>
           {{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to channel</a>{{end}}
-          <a href="/app?channel={{.Channel}}&amp;details=1" aria-label="Open conversation details">Details</a>
+          <a href="/app?channel={{.Channel}}&amp;details=1" aria-label="Open conversation details" {{ariaKeyshortcuts "Conversation details"}}>Details</a>
+          <button type="button" id="open-keyboard-help" aria-haspopup="dialog" aria-controls="keyboard-help" {{ariaKeyshortcuts "Keyboard shortcuts"}}>Keyboard shortcuts</button>
         </div>
       </header>
       <div class="timeline-wrap">
@@ -3366,6 +3408,63 @@ if(sending)return;
 if(typeof composer.requestSubmit==='function'){composer.requestSubmit();return}
 composer.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 })}
+var keyboardHelpDialog=document.getElementById('keyboard-help');
+var keyboardHelpQuery=document.getElementById('keyboard-help-query');
+var keyboardHelpEmpty=document.getElementById('keyboard-help-empty');
+function filterKeyboardHelp(){
+if(!keyboardHelpDialog)return;
+var term=keyboardHelpQuery?keyboardHelpQuery.value.trim().toLowerCase():'';
+var shown=0;
+Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-row]'),function(row){
+var match=!term||(row.getAttribute('data-keyboard-search')||'').indexOf(term)>=0;
+row.hidden=!match;
+if(match)shown++;
+});
+Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-section]'),function(section){
+section.hidden=!section.querySelector('[data-keyboard-row]:not([hidden])');
+});
+if(keyboardHelpEmpty)keyboardHelpEmpty.hidden=shown>0;
+}
+function openKeyboardHelp(){
+if(!keyboardHelpDialog||typeof keyboardHelpDialog.showModal!=='function'||keyboardHelpDialog.open)return false;
+Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-apple]'),function(node){node.hidden=!applePlatform});
+Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-other]'),function(node){node.hidden=applePlatform});
+if(keyboardHelpQuery)keyboardHelpQuery.value='';
+filterKeyboardHelp();
+keyboardHelpDialog.showModal();
+if(keyboardHelpQuery)keyboardHelpQuery.focus();
+return true;
+}
+if(keyboardHelpQuery)keyboardHelpQuery.addEventListener('input',filterKeyboardHelp);
+var keyboardHelpClose=document.getElementById('keyboard-help-close');
+if(keyboardHelpClose)keyboardHelpClose.addEventListener('click',function(){keyboardHelpDialog.close()});
+var keyboardHelpOpen=document.getElementById('open-keyboard-help');
+if(keyboardHelpOpen)keyboardHelpOpen.addEventListener('click',function(){openKeyboardHelp()});
+
+function sectionLandmarks(){
+return Array.prototype.slice.call(document.querySelectorAll('#workspace-sidebar,#workspace-search,#timeline,#thread-messages,#composer')).filter(function(node){return node&&node.offsetParent!==null||node===document.activeElement});
+}
+function moveSection(backwards){
+var landmarks=sectionLandmarks();
+if(landmarks.length<2)return false;
+var active=document.activeElement;
+var current=-1;
+for(var index=0;index<landmarks.length;index++){if(landmarks[index]===active||landmarks[index].contains(active)){current=index;break}}
+if(current<0)current=backwards?0:landmarks.length-1;
+var next=backwards?(current+landmarks.length-1)%landmarks.length:(current+1)%landmarks.length;
+var target=landmarks[next];
+var focusable=target.matches('input,textarea,select,button,a[href]')?target:target.querySelector('input:not([type=hidden]),textarea,select,button,a[href],[tabindex="-1"]');
+var destination=focusable||target;
+if(!destination.hasAttribute('tabindex')&&!destination.matches('input,textarea,select,button,a[href]'))destination.setAttribute('tabindex','-1');
+destination.focus();
+announce('Moved to '+(target.getAttribute('aria-label')||target.id.replace(/[-_]/g,' ')));
+return true;
+}
+function unreadLinks(){
+return Array.prototype.slice.call(document.querySelectorAll('.side-section[aria-label="Channels"] .side-link,.side-section[aria-label="Direct messages"] .side-link')).filter(function(link){
+return /unread messages/.test(link.getAttribute('aria-label')||'');
+});
+}
 document.addEventListener('keydown',function(event){
 var key=typeof event.key==='string'?event.key.toLowerCase():'';
 if(event.key==='Escape'){
@@ -3417,6 +3516,24 @@ if(openSwitcher()){event.preventDefault();return}
 if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='i'){
 var detailsLink=document.querySelector('a[aria-label="Open conversation details"]');
 if(detailsLink&&ownPath(detailsLink.getAttribute('href'))){event.preventDefault();window.location.assign(detailsLink.getAttribute('href'));return}
+}
+if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='/'){
+if(openKeyboardHelp()){event.preventDefault();return}
+}
+if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='k'){
+var directsLink=document.querySelector('.side-link[aria-label="Direct messages"]');
+if(directsLink&&ownPath(directsLink.getAttribute('href'))){event.preventDefault();window.location.assign(directsLink.getAttribute('href'));return}
+}
+if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='s'){
+var laterLink=document.querySelector('.side-link[aria-keyshortcuts~="Meta+Shift+S"]');
+if(laterLink&&ownPath(laterLink.getAttribute('href'))){event.preventDefault();window.location.assign(laterLink.getAttribute('href'));return}
+}
+if(primaryShortcut(event)&&!event.altKey&&event.key==='F6'){
+if(moveSection(event.shiftKey)){event.preventDefault();return}
+}
+if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='u'){
+var upload=document.querySelector('#composer input[type=file]');
+if(upload){event.preventDefault();upload.click();return}
 }
 var target=event.target;
 var editing=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA'||target.isContentEditable);
@@ -3471,7 +3588,28 @@ event.preventDefault();
 text.focus();
 return;
 }
-if(!event.altKey||event.ctrlKey||event.metaKey||(event.key!=='ArrowUp'&&event.key!=='ArrowDown'))return;
+if(event.key==='Escape'&&(event.shiftKey||!editing)&&!document.querySelector('dialog[open]')&&!(nav&&nav.classList.contains('is-open'))){
+var readForm=event.shiftKey?document.getElementById('mark-all-read'):document.getElementById('mark-read');
+if(readForm){
+event.preventDefault();
+announce(event.shiftKey?'Marking every conversation read.':'Marking this conversation read.');
+if(typeof readForm.requestSubmit==='function')readForm.requestSubmit();else readForm.submit();
+return;
+}
+}
+if(event.altKey&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&(event.key==='ArrowUp'||event.key==='ArrowDown')){
+var unread=unreadLinks();
+if(!unread.length){event.preventDefault();announce('No unread conversations.');return}
+var here=unread.findIndex(function(link){return link.getAttribute('aria-current')==='page'});
+var step=event.key==='ArrowDown'?1:-1;
+var choice=here<0?(event.key==='ArrowDown'?0:unread.length-1):(here+step+unread.length)%unread.length;
+var unreadHref=unread[choice].getAttribute('href');
+if(!ownPath(unreadHref))return;
+event.preventDefault();
+window.location.assign(unreadHref);
+return;
+}
+if(!event.altKey||event.shiftKey||event.ctrlKey||event.metaKey||(event.key!=='ArrowUp'&&event.key!=='ArrowDown'))return;
 var links=Array.prototype.slice.call(document.querySelectorAll('.side-section[aria-label="Channels"] .side-link,.side-section[aria-label="Direct messages"] .side-link'));
 if(links.length<2)return;
 var current=links.findIndex(function(link){return link.getAttribute('aria-current')==='page'});
@@ -3579,6 +3717,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oauth/v2/authorize", h.oauthAuthorize)
 	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("POST /app/read", h.markRead)
+	mux.HandleFunc("POST /app/read/all", h.markAllRead)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/search/suggestions", h.searchSuggestions)
 	mux.HandleFunc("GET /app/emoji/options", h.emojiOptions)
@@ -4133,6 +4272,38 @@ func (h Handler) markRead(w http.ResponseWriter, r *http.Request) {
 	h.completeMutation(w, r)
 }
 
+// markAllRead clears every unread conversation at once, which is Slack's
+// Shift+Escape and the sidebar's "mark all as read".
+//
+// Like markRead this is a durable write, so it is a POST with a CSRF check —
+// and more so: a forged GET here would wipe a member's entire unread state
+// across the workspace, not one conversation's.
+func (h Handler) markAllRead(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The request could not be read from the form. Reload the page and try again."); !ok {
+		return
+	}
+	cleared, err := h.Messages.MarkAllRead(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Unread counts are temporarily unavailable", "Nothing was marked read. Nothing else was changed.")
+		return
+	}
+	// The count is the whole feedback: clearing every badge at once is
+	// irreversible enough that "nothing happened" and "seventeen conversations
+	// were cleared" must not look the same.
+	notice := "Everything was already read"
+	if cleared == 1 {
+		notice = "Marked 1 conversation read"
+	} else if cleared > 1 {
+		notice = fmt.Sprintf("Marked %d conversations read", cleared)
+	}
+	h.redirectMutation(w, r, h.viewURL(r, "")+"&notice="+url.QueryEscape(notice))
+}
+
 // signInTarget starts the exact provider the deployment can complete. A
 // configured provider that the workspace has disabled would answer the bare
 // "authorization method is disabled" page, so entry falls back to the provider
@@ -4184,7 +4355,22 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		return
 	}
 	names := h.newUserNames(r.Context(), principal)
-	notices := make([]string, 0, 3)
+	notices := make([]string, 0, 4)
+	// Mutations redirect back here with ?notice=…, exactly as the canvas, list
+	// and document pages do. This page never read it, so every action that
+	// redirected here — marking unread, and now marking everything read —
+	// completed in total silence: the member saw the page reload and had no
+	// confirmation that anything had happened.
+	//
+	// The value is reflected, so it is bounded and escaped. Rendering is
+	// html/template's job; the bound is this function's, because a redirect is
+	// something any page can be sent to.
+	if notice := strings.TrimSpace(r.URL.Query().Get("notice")); notice != "" {
+		if len(notice) > 200 {
+			notice = notice[:200]
+		}
+		notices = append(notices, notice)
+	}
 	timelineSummaries, timelineLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, history.Messages, isMember)
 	forwardDestinations := []conversationView(nil)
 	if isMember && principal.HasScope(auth.ScopeChatWrite) {
@@ -4407,6 +4593,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		CSRFToken:        csrfToken,
 		ShowProfile:      h.canShowIdentity(),
 		ShowAdmin:        h.canShowAuthorizationAdmin(r.Context(), principal),
+		Keyboard:         keyboardHelp(),
 		ReminderUnread:   reminderUnread,
 		IsMember:         isMember,
 		CanPost:          canPost,
