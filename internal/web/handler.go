@@ -3343,6 +3343,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/admin.auth.users.create", h.authUserCreate)
 		mux.HandleFunc("GET /api/admin.auth.users.list", h.authUsersList)
 		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
+		mux.HandleFunc("POST /app/admin/invites/approve", h.authInviteRequestDecision(true))
+		mux.HandleFunc("POST /app/admin/invites/deny", h.authInviteRequestDecision(false))
+		mux.HandleFunc("POST /app/admin/apps/approve", h.authAppDecision(true))
+		mux.HandleFunc("POST /app/admin/apps/restrict", h.authAppDecision(false))
 	}
 	mux.HandleFunc("GET /app", h.index)
 	mux.HandleFunc("GET /archives/{channelID}/{timestamp}", h.archivePermalink)
@@ -9900,7 +9904,25 @@ func (h Handler) decodeMutation(w http.ResponseWriter, r *http.Request, invalid 
 	return fields, true
 }
 
+// decodeFormValues is decodeFormFields for a form with exactly one field the
+// caller expects to repeat — a set of checkboxes sharing a name. Every other
+// field must still occur once: the single-occurrence rule exists so a request
+// cannot carry two different values for one field and leave the reader to pick,
+// and naming the repeating field keeps that guarantee for all the rest.
+func decodeFormValues(w http.ResponseWriter, r *http.Request, repeated string) (map[string]string, []string, error) {
+	fields, err := decodeFormFieldsAllowing(w, r, repeated)
+	if err != nil {
+		return nil, nil, err
+	}
+	values := append([]string(nil), r.Form[repeated]...)
+	return fields, values, nil
+}
+
 func decodeFormFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
+	return decodeFormFieldsAllowing(w, r, "")
+}
+
+func decodeFormFieldsAllowing(w http.ResponseWriter, r *http.Request, repeated string) (map[string]string, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
 	var parseErr error
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
@@ -9913,6 +9935,10 @@ func decodeFormFields(w http.ResponseWriter, r *http.Request) (map[string]string
 	}
 	fields := make(map[string]string, len(r.Form))
 	for name, values := range r.Form {
+		if name == repeated && repeated != "" {
+			fields[name] = strings.Join(values, ",")
+			continue
+		}
 		if len(values) != 1 {
 			return nil, errors.New("form fields must occur once")
 		}

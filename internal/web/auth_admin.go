@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"html/template"
 	"net/http"
 	"net/url"
 	"sort"
@@ -28,8 +27,21 @@ import (
 // forms pointed at this origin; default-src 'none' means the page cannot pull in
 // script at all.
 func authAdminSecurityHeaders(w http.ResponseWriter) {
-	secureHeaders(w, "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	secureHeaders(w, authAdminContentSecurityPolicy)
 }
+
+// authAdminContentSecurityPolicy allows exactly the inline scripts this page
+// carries and nothing else. The page renders through the shared layout, so it
+// serves the theme bootstrap, the theme toggle and the local-time pass; under
+// the previous `default-src 'none'` with no script-src at all, the browser
+// would have blocked all three, leaving a theme button that does nothing.
+//
+// Unlike the workspace policy it keeps form-action 'self', because every form
+// here posts to this origin and is answered with a redirect back to this page.
+// It needs neither connect-src nor img-src: the page fetches nothing.
+var authAdminContentSecurityPolicy = "default-src 'none'; script-src " +
+	strings.Join(inlineScriptHashes(layoutMarkup, authAdminMarkup), " ") +
+	"; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
 	authAdminSecurityHeaders(w)
@@ -38,21 +50,145 @@ func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-const authAdminStyle = `:root{color-scheme:light dark;--bg:#f7f5f8;--panel:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--field:#6b6570;--accent:#611f69;--on-accent:#fff;--action:#1264a3;--danger:#a01133;--danger-button:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--shadow:0 8px 24px #1d1c1d1f}@media(prefers-color-scheme:dark){:root{--bg:#1a1d21;--panel:#222529;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--field:#8a8f96;--accent:#4a1750;--on-accent:#fff;--action:#8fd7f4;--danger:#ff9db4;--danger-button:#8f1838;--danger-bg:#3a1622;--ok:#3fbf95;--shadow:0 8px 24px #0006}}*{box-sizing:border-box}body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);margin:0}.bar{min-height:52px;display:flex;align-items:center;gap:18px;padding:10px max(18px,calc((100% - 960px)/2));background:var(--accent);color:var(--on-accent)}.bar strong{font-size:17px}.bar a{margin-left:auto;color:var(--on-accent);font-weight:700;text-decoration:none}.wrap{max-width:960px;margin:32px auto;padding:0 18px 48px}.heading{margin-bottom:22px}.heading h1{margin:0 0 4px;font-size:clamp(1.8rem,5vw,2.5rem)}.heading p,.section-head p{margin:0;color:var(--muted)}.card{margin:16px 0;padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}.section-head{margin-bottom:14px}.section-head h2{margin:0 0 3px;font-size:20px}.row{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid var(--line);padding:14px 0}.row:last-child{padding-bottom:0}.status{display:inline-block;margin-top:3px;color:var(--muted);font-size:12px;font-weight:700;text-transform:capitalize}.status.active{color:var(--ok)}button,select,input{font:inherit}.toggle{background:var(--accent);color:var(--on-accent);border:0;border-radius:6px;padding:8px 12px;font-weight:800;white-space:nowrap}.toggle.danger{background:var(--danger-button);color:#fff}.toggle.secondary{background:transparent;color:var(--action);border:1px solid var(--field)}button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--action);outline-offset:2px}.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;border-top:1px solid var(--line);padding:11px 8px;vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.user-email{color:var(--muted);overflow-wrap:anywhere}.actions{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}.inline-form{display:inline-flex;gap:7px;align-items:center}.inline-form label{display:inline-flex;gap:6px;align-items:center}.inline-form select,.setup input,.setup select{min-height:36px;border:1px solid var(--field);border-radius:6px;background:var(--panel);color:var(--text);padding:6px 8px}.read-only{color:var(--muted)}.pager{text-align:center;margin:16px 0 0}.pager a,a{color:var(--action);font-weight:700}.setup{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end;gap:12px}.setup label{display:grid;gap:5px;color:var(--muted);font-weight:700}.problem{border-left:4px solid var(--danger);background:var(--danger-bg);color:var(--danger);padding:12px 16px;border-radius:6px}@media(max-width:720px){.bar{padding:10px 14px}.wrap{margin-top:22px;padding:0 12px 32px}.card{padding:16px}.setup{grid-template-columns:minmax(0,1fr)}th:nth-child(2),td:nth-child(2){display:none}.actions{min-width:210px}}`
+// authAdminStyle carries only what this page adds to sharedStyle. The palette,
+// the reset, the focus ring and the theme tokens come from the layout: this
+// page used to define its own copy of all of them, which meant it honoured the
+// operating system's dark preference but ignored the theme the person had
+// actually chosen in the workspace, so an administrator on a dark workspace
+// arrived at a light administration page.
+const authAdminStyle = `<style>
+.bar{min-height:52px;display:flex;align-items:center;gap:18px;padding:10px max(18px,calc((100% - 960px)/2));background:var(--accent);color:var(--on-accent)}.bar strong{font-size:17px}.bar .bar-end{margin-left:auto;display:flex;align-items:center;gap:12px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}
+.wrap{max-width:960px;margin:32px auto;padding:0 18px 48px}
+.heading{margin-bottom:22px}.heading h1{margin:0 0 4px;font-size:clamp(1.8rem,5vw,2.5rem)}.heading p,.section-head p{margin:0;color:var(--muted)}
+.card{margin:16px 0;padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.section-head{margin-bottom:14px}.section-head h2{margin:0 0 3px;font-size:20px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid var(--line);padding:14px 0}.row:last-child{padding-bottom:0}
+.status{display:inline-block;margin-top:3px;color:var(--muted);font-size:12px;font-weight:700;text-transform:capitalize}.status.active{color:var(--ok)}
+select,input{font:inherit}
+.toggle{background:var(--accent);color:var(--on-accent);border:0;border-radius:6px;padding:8px 12px;font-weight:800;white-space:nowrap}
+.toggle.danger{background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger)}
+.toggle.secondary{background:transparent;color:var(--action);border:1px solid var(--field-line)}
+.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;border-top:1px solid var(--line);padding:11px 8px;vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.user-email{color:var(--muted);overflow-wrap:anywhere}
+.actions{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
+.inline-form{display:inline-flex;gap:7px;align-items:center}.inline-form label{display:inline-flex;gap:6px;align-items:center}
+.inline-form select,.setup input,.setup select{min-height:36px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:6px 8px}
+.read-only{color:var(--muted)}
+.pager{text-align:center;margin:16px 0 0}.pager a{font-weight:700}
+.setup{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end;gap:12px}.setup label{display:grid;gap:5px;color:var(--muted);font-weight:700}
+.setup .wide{grid-column:1/-1}
+.channel-choices{display:flex;flex-wrap:wrap;gap:10px;padding:8px 0}.channel-choices label{display:inline-flex;flex-direction:row;align-items:center;gap:6px;color:var(--text);font-weight:400}
+.problem{border-left:4px solid var(--danger);background:var(--danger-bg);color:var(--danger);padding:12px 16px;border-radius:6px}
+.empty{color:var(--muted);margin:0}
+@media(max-width:720px){.bar{padding:10px 14px}.wrap{margin-top:22px;padding:0 12px 32px}.card{padding:16px}.setup{grid-template-columns:minmax(0,1fr)}th:nth-child(2),td:nth-child(2){display:none}.actions{min-width:210px}}
+</style>`
 
-var authAdminTemplate = template.Must(template.New("authAdmin").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Workspace administration · SameOldChat</title><style>` + authAdminStyle + `</style></head><body><header class="bar"><strong>SameOldChat</strong><a href="/app">Back to chat</a></header><main class="wrap"><div class="heading"><h1>Workspace administration</h1><p>Manage access without leaving the workspace.</p></div>{{if .CanReadApps}}<section class="card" aria-labelledby="authorization-heading"><div class="section-head"><h2 id="authorization-heading">Authorization methods</h2><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p></div>{{range .Methods}}<div class="row"><span><strong>{{.Label}}</strong><br><span class="status{{if .Enabled}} active{{end}}">{{.State}}</span></span>{{if $.CanWriteApps}}<form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="provider" value="{{.Name}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="toggle{{if .Enabled}} danger{{end}}" type="submit" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Label}} authorization">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div>{{end}}</section>{{end}}{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Deactivating a user revokes their sessions and access tokens.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{.Role}}</td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{if .RoleOptions}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}{{if .CanWriteUsers}}<section class="card" aria-labelledby="setup-heading"><div class="section-head"><h2 id="setup-heading">Manual user setup</h2><p>Create an active workspace member directly. External authorization still requires a matching verified email.</p></div><form class="setup" method="post" action="/api/admin.auth.users.create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Email<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>Name<input name="real_name" maxlength="200" autocomplete="name" required></label><label>Role<select name="role"><option value="member">Member</option><option value="admin">Administrator</option></select></label><button class="toggle" type="submit">Create user</button></form></section>{{end}}</main></body></html>`))
+const authAdminBar = `<a class="skip-link" href="#admin-main">Skip to content</a><header class="bar"><strong>SameOldChat</strong><span class="bar-end"><a href="/app">Back to chat</a><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></span></header>`
 
-var authAdminErrorTemplate = template.Must(template.New("authAdminError").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>{{.Title}} · SameOldChat</title><style>` + authAdminStyle + `</style></head><body><header class="bar"><strong>SameOldChat</strong><a href="/app">Back to chat</a></header><main class="wrap"><section class="card"><h1>{{.Title}}</h1><p class="problem" role="alert">{{.Message}}</p><p><a href="/app/admin/auth">Back to workspace administration</a></p></section></main></body></html>`))
+const authAdminMarkup = `{{define "title"}}Workspace administration · SameOldChat{{end}}
+{{define "styles"}}` + authAdminStyle + `{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}` + authAdminBar + `<main class="wrap" id="admin-main">
+<div class="heading"><h1>Workspace administration</h1><p>Manage access without leaving the workspace.</p></div>
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if .CanReadApps}}<section class="card" aria-labelledby="authorization-heading"><div class="section-head"><h2 id="authorization-heading">Authorization methods</h2><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p></div>{{range .Methods}}<div class="row"><span><strong>{{.Label}}</strong><br><span class="status{{if .Enabled}} active{{end}}">{{.State}}</span></span>{{if $.CanWriteApps}}<form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="provider" value="{{.Name}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="toggle{{if .Enabled}} danger{{end}}" type="submit" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Label}} authorization">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div>{{end}}</section>{{end}}
+{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Deactivating a user revokes their sessions and access tokens.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{.Role}}</td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{if .RoleOptions}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}
+{{if .CanReadUsers}}<section class="card" aria-labelledby="invitations-heading"><div class="section-head"><h2 id="invitations-heading">Invitations</h2><p>An invitation records who may join, at what tier, and into which channels. It becomes an account when the person accepts it.</p></div>
+{{if .CanWriteUsers}}<form class="setup" method="post" action="/api/admin.auth.users.invite">
+<input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label>Email<input name="email" type="email" maxlength="320" autocomplete="email" required></label>
+<label>Name<input name="real_name" maxlength="200" autocomplete="name" required></label>
+<label>Access<select name="tier">{{range .InviteTiers}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select></label>
+<label>Guest access ends<input type="date" name="guest_expires_on"></label>
+<label class="wide">Message<input name="custom_message" maxlength="1000"></label>
+<fieldset class="wide channel-choices"><legend>Channels to join</legend>{{range .InviteChannels}}<label><input type="checkbox" name="channel_ids" value="{{.ID}}"> #{{.Name}}</label>{{else}}<span class="read-only">No channel is available to invite into.</span>{{end}}</fieldset>
+<label class="wide"><input type="checkbox" name="resend" value="true"> Send again if this address was already invited</label>
+<button class="toggle" type="submit">Record invitation</button>
+</form>
+<p class="read-only">A guest expiry applies only to the two guest tiers. A full member never expires.</p>{{end}}
+<div class="table-scroll"><table><thead><tr><th scope="col">Invited</th><th scope="col">Access</th><th scope="col">Channels</th><th scope="col">Requested</th><th scope="col">Actions</th></tr></thead><tbody>{{range .InviteRequests}}<tr><td><strong>{{.RealName}}</strong><br><span class="user-email">{{.Email}}</span></td><td>{{.Tier}}{{if .Expires}}<br><span class="status">until <time datetime="{{.ExpiresMachine}}" data-local-time>{{.Expires}}</time></span>{{end}}</td><td>{{if .Channels}}{{range .Channels}}#{{.Name}} {{end}}{{else}}<span class="read-only">None recorded</span>{{end}}</td><td><time datetime="{{.RequestedMachine}}" data-local-time>{{.Requested}}</time><br><span class="status">by {{.RequestedBy}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/app/admin/invites/approve"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_request_id" value="{{.ID}}"><button class="toggle" type="submit" aria-label="Approve the invitation for {{.Email}}">Approve</button></form><form class="inline-form" method="post" action="/app/admin/invites/deny"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_request_id" value="{{.ID}}"><button class="toggle danger" type="submit" aria-label="Deny the invitation for {{.Email}}">Deny</button></form>{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{else}}<tr><td colspan="5"><p class="empty">No invitation is waiting for a decision.</p></td></tr>{{end}}</tbody></table></div>
+{{if .MoreInvitesURL}}<p class="pager"><a href="{{.MoreInvitesURL}}">More invitations</a></p>{{end}}</section>{{end}}
+{{if .CanReadApps}}<section class="card" aria-labelledby="apps-heading"><div class="section-head"><h2 id="apps-heading">App requests</h2><p>An app a member asked to install. Approving it lets the app be installed; restricting it refuses the request and keeps the record.</p></div>
+<div class="table-scroll"><table><thead><tr><th scope="col">App</th><th scope="col">Status</th><th scope="col">Requested</th><th scope="col">Actions</th></tr></thead><tbody>{{range .AppRequests}}<tr><td><strong>{{.ID}}</strong></td><td><span class="status">{{.Status}}</span></td><td><time datetime="{{.RequestedMachine}}" data-local-time>{{.Requested}}</time></td><td><div class="actions">{{if $.CanWriteApps}}<form class="inline-form" method="post" action="/app/admin/apps/approve"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{.ID}}"><input type="hidden" name="request_id" value="{{.RequestID}}"><button class="toggle" type="submit" aria-label="Approve {{.ID}}">Approve</button></form><form class="inline-form" method="post" action="/app/admin/apps/restrict"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{.ID}}"><input type="hidden" name="request_id" value="{{.RequestID}}"><button class="toggle danger" type="submit" aria-label="Restrict {{.ID}}">Restrict</button></form>{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{else}}<tr><td colspan="4"><p class="empty">No app is waiting for a decision.</p></td></tr>{{end}}</tbody></table></div>
+{{if .MoreAppsURL}}<p class="pager"><a href="{{.MoreAppsURL}}">More app requests</a></p>{{end}}</section>{{end}}
+{{if .CanWriteUsers}}<section class="card" aria-labelledby="setup-heading"><div class="section-head"><h2 id="setup-heading">Manual user setup</h2><p>Create an active workspace member directly, without an invitation. External authorization still requires a matching verified email.</p></div><form class="setup" method="post" action="/api/admin.auth.users.create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Email<input name="email" type="email" maxlength="320" autocomplete="email" required></label><label>Name<input name="real_name" maxlength="200" autocomplete="name" required></label><label>Role<select name="role"><option value="member">Member</option><option value="admin">Administrator</option></select></label><button class="toggle" type="submit">Create user</button></form></section>{{end}}
+</main>{{end}}`
+
+var authAdminTemplate = mustPage(authAdminMarkup)
+
+const authAdminErrorMarkup = `{{define "title"}}{{.Title}} · SameOldChat{{end}}
+{{define "styles"}}` + authAdminStyle + `{{end}}
+{{define "content"}}` + authAdminBar + `<main class="wrap" id="admin-main"><section class="card"><h1>{{.Title}}</h1><p class="problem" role="alert">{{.Message}}</p><p><a href="/app/admin/auth">Back to workspace administration</a></p></section></main>{{end}}`
+
+var authAdminErrorTemplate = mustPage(authAdminErrorMarkup)
 
 type authAdminPageData struct {
-	CSRFToken     string
-	CanReadApps   bool
-	CanWriteApps  bool
-	CanReadUsers  bool
-	CanWriteUsers bool
-	Methods       []authAdminMethodView
-	Users         []authAdminUserView
-	NextPageURL   string
+	CSRFToken      string
+	Notice         string
+	CanReadApps    bool
+	CanWriteApps   bool
+	CanReadUsers   bool
+	CanWriteUsers  bool
+	Methods        []authAdminMethodView
+	Users          []authAdminUserView
+	NextPageURL    string
+	InviteTiers    []authAdminTierOption
+	InviteChannels []conversationView
+	InviteRequests []authAdminInviteView
+	MoreInvitesURL string
+	AppRequests    []authAdminAppView
+	MoreAppsURL    string
+}
+
+// authAdminTierOption is the invitation tier as one closed choice. The service
+// validates restricted and ultra_restricted as mutually exclusive and rejects a
+// guest expiry on a full member; two independent checkboxes could express both
+// of the states it refuses, so the page offers the three reachable ones.
+type authAdminTierOption struct {
+	Value string
+	Label string
+}
+
+var authAdminTiers = []authAdminTierOption{
+	{Value: "member", Label: "Full member"},
+	{Value: "multi_channel_guest", Label: "Guest, several channels"},
+	{Value: "single_channel_guest", Label: "Guest, one channel"},
+}
+
+func authAdminTierLabel(request domain.InviteRequest) string {
+	switch {
+	case request.UltraRestricted:
+		return "Guest, one channel"
+	case request.Restricted:
+		return "Guest, several channels"
+	default:
+		return "Full member"
+	}
+}
+
+type authAdminInviteView struct {
+	ID               domain.InviteRequestID
+	Email            string
+	RealName         string
+	Tier             string
+	Channels         []conversationView
+	Requested        string
+	RequestedMachine string
+	RequestedBy      string
+	Expires          string
+	ExpiresMachine   string
+}
+
+// authAdminAppView names the app by its identifier: an approval record carries
+// the app and request identifiers and nothing else, and the app itself is not
+// installed yet, so there is no name to read. Inventing one would be worse than
+// showing the identifier the request is actually about.
+type authAdminAppView struct {
+	ID               domain.AppID
+	RequestID        domain.AppRequestID
+	Status           string
+	Requested        string
+	RequestedMachine string
 }
 
 type authAdminMethodView struct {
@@ -173,6 +309,18 @@ func (h Handler) authAdminSuccess(w http.ResponseWriter, r *http.Request, status
 	http.Redirect(w, r, "/app/admin/auth", http.StatusSeeOther)
 }
 
+// authAdminSuccessWithNotice reports what was decided. A queue that empties one
+// row with no other change on screen leaves an administrator unsure whether the
+// approve or the deny was the one that landed.
+func (h Handler) authAdminSuccessWithNotice(w http.ResponseWriter, r *http.Request, notice string, value map[string]any) {
+	if wantsAuthAdminJSON(r) {
+		writeAuthAdminJSON(w, http.StatusOK, value)
+		return
+	}
+	authAdminSecurityHeaders(w)
+	http.Redirect(w, r, "/app/admin/auth?notice="+url.QueryEscape(notice), http.StatusSeeOther)
+}
+
 func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
 	if err != nil {
@@ -200,6 +348,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data := authAdminPageData{
 		CSRFToken:     auth.CSRFToken(sessionCookie.Value),
+		Notice:        strings.TrimSpace(r.URL.Query().Get("notice")),
 		CanReadApps:   canReadApps,
 		CanWriteApps:  principal.HasScope(auth.ScopeAdminAppsWrite),
 		CanReadUsers:  canReadUsers,
@@ -254,6 +403,58 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 			data.NextPageURL = "/app/admin/auth?limit=" + strconv.Itoa(request.Limit) + "&cursor=" + url.QueryEscape(string(page.NextCursor))
 		}
 	}
+	names := h.newUserNames(r.Context(), principal)
+	if canReadUsers {
+		data.InviteTiers = authAdminTiers
+		if data.CanWriteUsers {
+			if options, optionsErr := h.visibleChannelOptions(r.Context(), principal); optionsErr == nil {
+				data.InviteChannels = options
+			}
+		}
+		invites, invitesErr := h.Messages.AdminListInviteRequests(r.Context(), principal.WorkspaceID, principal.UserID, domain.InviteRequestPending, domain.PageRequest{Limit: 25})
+		if invitesErr != nil && !errors.Is(invitesErr, service.ErrNotWorkspaceAdmin) {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "invitations_unavailable", Title: "Temporarily unavailable", Message: "Pending invitations could not be read."})
+			return
+		}
+		for _, request := range invites.Requests {
+			view := authAdminInviteView{
+				ID: request.ID, Email: request.Email, RealName: request.RealName,
+				Tier:             authAdminTierLabel(request),
+				Requested:        formatTime(request.CreatedAt),
+				RequestedMachine: request.CreatedAt.UTC().Format(time.RFC3339Nano),
+				RequestedBy:      names.name(request.RequestedBy),
+			}
+			if !request.GuestExpirationAt.IsZero() {
+				view.Expires = formatTime(request.GuestExpirationAt)
+				view.ExpiresMachine = request.GuestExpirationAt.UTC().Format(time.RFC3339Nano)
+			}
+			for _, channelID := range request.ChannelIDs {
+				view.Channels = append(view.Channels, conversationView{ID: string(channelID), Name: names.channelName(channelID)})
+			}
+			data.InviteRequests = append(data.InviteRequests, view)
+		}
+		if invites.NextCursor != "" {
+			data.MoreInvitesURL = "/app/admin/auth?invites_cursor=" + url.QueryEscape(string(invites.NextCursor))
+		}
+	}
+	if canReadApps {
+		apps, appsErr := h.Messages.AdminListApps(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppApprovalRequested, domain.PageRequest{Limit: 25})
+		if appsErr != nil && !errors.Is(appsErr, service.ErrNotWorkspaceAdmin) {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "app_requests_unavailable", Title: "Temporarily unavailable", Message: "App requests could not be read."})
+			return
+		}
+		for _, approval := range apps.Apps {
+			data.AppRequests = append(data.AppRequests, authAdminAppView{
+				ID: approval.ID, RequestID: approval.RequestID,
+				Status:           string(approval.Status),
+				Requested:        formatTime(approval.CreatedAt),
+				RequestedMachine: approval.CreatedAt.UTC().Format(time.RFC3339Nano),
+			})
+		}
+		if apps.NextCursor != "" {
+			data.MoreAppsURL = "/app/admin/auth?apps_cursor=" + url.QueryEscape(string(apps.NextCursor))
+		}
+	}
 	var rendered bytes.Buffer
 	if err := authAdminTemplate.Execute(&rendered, data); err != nil {
 		h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "rendering_unavailable", Title: "Temporarily unavailable", Message: "The authorization page could not be rendered."})
@@ -263,6 +464,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(rendered.Bytes())
 }
+
 
 func (h Handler) authProviderNames() []string {
 	names := make([]string, 0, len(h.Login.providers))
@@ -506,7 +708,10 @@ func (h Handler) authUserInvite(w http.ResponseWriter, r *http.Request) {
 	if !h.requireCSRF(w, r) {
 		return
 	}
-	fields, err := decodeFormFields(w, r)
+	// channel_ids repeats: the page offers one checkbox per channel, and an
+	// invitation into several channels is the ordinary case. It still accepts
+	// the comma-separated single field the API callers send.
+	fields, channelValues, err := decodeFormValues(w, r, "channel_ids")
 	if err != nil {
 		h.writeAuthAdminProblem(w, r, problemInvalidForm)
 		return
@@ -515,12 +720,150 @@ func (h Handler) authUserInvite(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_user", Title: "Request rejected", Message: "An email address and a name are required."})
 		return
 	}
-	channels := normalizeAdminInviteChannels(fields["channel_ids"])
-	if err := h.Messages.AdminInviteUser(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"], channels, fields["custom_message"], fields["real_name"], false, false, false, time.Time{}); err != nil {
+	channels := normalizeAdminInviteChannels(strings.Join(channelValues, ","))
+	restricted, ultraRestricted, tierOK := adminInviteTier(fields)
+	if !tierOK {
+		h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_tier", Title: "Request rejected", Message: "An invitation is for a full member, a guest with several channels, or a guest with one channel."})
+		return
+	}
+	expiration, expirationErr := adminInviteExpiration(fields, restricted || ultraRestricted)
+	if expirationErr != nil {
+		h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_expiration", Title: "Request rejected", Message: expirationErr.Error()})
+		return
+	}
+	resend := adminInviteFlag(fields["resend"])
+	if err := h.Messages.AdminInviteUser(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"], channels, fields["custom_message"], fields["real_name"], resend, restricted, ultraRestricted, expiration); err != nil {
 		h.writeAuthAdminProblem(w, r, authAdminInvitationProblem(err))
 		return
 	}
 	h.authAdminSuccess(w, r, http.StatusOK, map[string]any{"ok": true})
+}
+
+// adminInviteTier reads the closed tier choice. The two boolean fields the
+// service takes can express a state it always rejects (both set), so the form
+// carries one value and this is the only place that widens it back out.
+// restricted and ultra_restricted are still read for the API callers that
+// predate the tier field.
+func adminInviteTier(fields map[string]string) (restricted, ultraRestricted, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(fields["tier"])) {
+	case "member":
+		return false, false, true
+	case "multi_channel_guest":
+		return true, false, true
+	case "single_channel_guest":
+		return false, true, true
+	case "":
+		restricted, ultraRestricted = adminInviteFlag(fields["restricted"]), adminInviteFlag(fields["ultra_restricted"])
+		return restricted, ultraRestricted, !(restricted && ultraRestricted)
+	default:
+		return false, false, false
+	}
+}
+
+// adminInviteExpiration reads the guest expiry as a calendar date, which is
+// what an administrator is choosing, and pins it to the end of that day in UTC
+// so the guest keeps access for the whole day they were promised. A full member
+// never expires, and the service refuses an expiry on one.
+func adminInviteExpiration(fields map[string]string, guest bool) (time.Time, error) {
+	raw := strings.TrimSpace(fields["guest_expires_on"])
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	if !guest {
+		return time.Time{}, errors.New("Only a guest invitation can expire. Choose a guest tier or clear the date.")
+	}
+	day, err := time.ParseInLocation("2006-01-02", raw, time.UTC)
+	if err != nil {
+		return time.Time{}, errors.New("The guest expiry must be a date.")
+	}
+	return day.Add(24*time.Hour - time.Nanosecond), nil
+}
+
+func adminInviteFlag(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "on", "1", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h Handler) authInviteRequestDecision(approve bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := h.authAdminAllowed(w, r, auth.ScopeAdminUsersWrite)
+		if !ok {
+			return
+		}
+		if !h.requireCSRF(w, r) {
+			return
+		}
+		fields, err := decodeFormFields(w, r)
+		if err != nil {
+			h.writeAuthAdminProblem(w, r, problemInvalidForm)
+			return
+		}
+		id := domain.InviteRequestID(strings.TrimSpace(fields["invite_request_id"]))
+		if id == "" {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_invite_request", Title: "Request rejected", Message: "An invitation is required."})
+			return
+		}
+		decide := h.Messages.AdminDenyInviteRequest
+		notice := "Invitation denied"
+		if approve {
+			decide = h.Messages.AdminApproveInviteRequest
+			notice = "Invitation approved"
+		}
+		if err := decide(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
+			h.writeAuthAdminProblem(w, r, authAdminInvitationProblem(err))
+			return
+		}
+		h.authAdminSuccessWithNotice(w, r, notice, map[string]any{"ok": true})
+	}
+}
+
+func (h Handler) authAppDecision(approve bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := h.authAdminAllowed(w, r, auth.ScopeAdminAppsWrite)
+		if !ok {
+			return
+		}
+		if !h.requireCSRF(w, r) {
+			return
+		}
+		fields, err := decodeFormFields(w, r)
+		if err != nil {
+			h.writeAuthAdminProblem(w, r, problemInvalidForm)
+			return
+		}
+		appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+		requestID := domain.AppRequestID(strings.TrimSpace(fields["request_id"]))
+		if appID == "" || requestID == "" {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_app_request", Title: "Request rejected", Message: "An app request is required."})
+			return
+		}
+		decide := h.Messages.AdminRestrictApp
+		notice := "App restricted"
+		if approve {
+			decide = h.Messages.AdminApproveApp
+			notice = "App approved"
+		}
+		if err := decide(r.Context(), principal.WorkspaceID, principal.UserID, appID, requestID); err != nil {
+			h.writeAuthAdminProblem(w, r, authAdminAppDecisionProblem(err))
+			return
+		}
+		h.authAdminSuccessWithNotice(w, r, notice, map[string]any{"ok": true})
+	}
+}
+
+func authAdminAppDecisionProblem(err error) authAdminProblem {
+	switch {
+	case errors.Is(err, service.ErrNotWorkspaceAdmin):
+		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not decide app requests. Nothing was changed."}
+	case errors.Is(err, store.ErrNotFound):
+		return authAdminProblem{Status: http.StatusNotFound, Code: "app_request_not_found", Title: "Request not found", Message: "That app request no longer exists. It may already have been decided."}
+	default:
+		return authAdminProblem{Status: http.StatusServiceUnavailable, Code: "app_decision_unavailable", Title: "Temporarily unavailable", Message: "The app request could not be decided. Nothing was changed."}
+	}
 }
 
 func (h Handler) authUserCreate(w http.ResponseWriter, r *http.Request) {

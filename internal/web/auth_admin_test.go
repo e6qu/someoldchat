@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -69,6 +71,17 @@ func newAuthAdminTestHandlerWithRole(t *testing.T, scopes []auth.Scope, role dom
 	return mux, store
 }
 
+// allAdminScopes is every scope this package knows, as the typed values the
+// fixture takes. auth.AllScopes reports strings.
+func allAdminScopes() []auth.Scope {
+	names := auth.AllScopes()
+	scopes := make([]auth.Scope, 0, len(names))
+	for _, name := range names {
+		scopes = append(scopes, auth.Scope(name))
+	}
+	return scopes
+}
+
 func authScopeStrings(scopes []auth.Scope) []string {
 	values := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -111,7 +124,11 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 		`href="/app">Back to chat</a>`,
 		`aria-label="Disable Workspace Admin"`,
 		`aria-label="Save role for Workspace Admin"`,
-		`<meta name="color-scheme" content="light dark">`,
+		// The page renders through the shared layout, so it honours the theme
+		// the administrator chose in the workspace instead of only the one the
+		// operating system reports.
+		`<html lang="en" data-theme="light">`,
+		`id="theme-toggle"`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("administration page is missing %q: %s", expected, body)
@@ -488,5 +505,173 @@ func TestAuthAdminPageEscapesUserControlledValuesInEveryContext(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;script&gt;") && !strings.Contains(body, "&#43;") && !strings.Contains(body, "&#34;") {
 		t.Fatalf("page did not escape the hostile values at all: %s", body)
+	}
+}
+
+// The invitation form is the only way a person reaches admin.auth.users.invite,
+// and the guest tiers are the point of it: the handler used to hardcode
+// resend, restricted, ultra_restricted and the expiry to their zero values, so
+// every invitation it could produce was a full permanent member no matter what
+// the service was willing to record.
+func TestAdminInvitationCarriesTheGuestTierAndExpiry(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, []auth.Scope{auth.ScopeAdminUsersWrite, auth.ScopeAdminUsersRead}, domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.invite",
+		"email=guest%40example.test&real_name=Guest&tier=multi_channel_guest&guest_expires_on=2026-09-01&resend=true&channel_ids=C1&channel_ids=C2"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("invite status=%d body=%s", response.Code, response.Body.String())
+	}
+	page, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Requests) != 1 {
+		t.Fatalf("requests=%+v err=%v", page.Requests, err)
+	}
+	recorded := page.Requests[0]
+	if !recorded.Restricted || recorded.UltraRestricted {
+		t.Fatalf("tier recorded as restricted=%v ultra=%v, want a multi-channel guest", recorded.Restricted, recorded.UltraRestricted)
+	}
+	if !recorded.Resend {
+		t.Fatal("resend was not recorded")
+	}
+	if len(recorded.ChannelIDs) != 2 {
+		t.Fatalf("channels=%v, want both checked channels", recorded.ChannelIDs)
+	}
+	// The expiry is a date, and the guest keeps the whole of the day chosen.
+	if recorded.GuestExpirationAt.UTC().Format("2006-01-02 15:04") != "2026-09-01 23:59" {
+		t.Fatalf("expiry=%s, want the end of the chosen day", recorded.GuestExpirationAt.UTC())
+	}
+}
+
+// A full member cannot expire, and the tier field cannot express the state the
+// service always refuses, so both wrong shapes are rejected as caller mistakes
+// rather than reported as an outage.
+func TestAdminInvitationRefusesAnExpiryOnAFullMember(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, []auth.Scope{auth.ScopeAdminUsersWrite}, domain.WorkspaceRoleAdmin)
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.invite",
+		"email=member%40example.test&real_name=Member&tier=member&guest_expires_on=2026-09-01&channel_ids=C1"))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil || decoded["error"] != "invalid_expiration" {
+		t.Fatalf("body=%s err=%v", response.Body.String(), err)
+	}
+}
+
+// ADMIN-02: the pending queues are the surface an administrator acts on. Both
+// were unreachable from any page, so an invitation or an app request could be
+// recorded and never decided.
+func TestAdminPageDecidesPendingInvitationsAndAppRequests(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "guest@example.test", []domain.ConversationID{"C1"}, "", "Guest", false, true, false, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetAppApproval(ctx, "T1", "A1", "AR1", domain.AppApprovalRequested, time.Now().UTC(), events.Event{ID: "Eapp", WorkspaceID: "T1", Topic: "app.requested", Payload: `{"type":"app.requested","app_id":"A1"}`, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	body := func() string {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, adminPageRequest())
+		if response.Code != http.StatusOK {
+			t.Fatalf("page status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	listed := body()
+	for _, expected := range []string{"guest@example.test", "Guest, several channels", "#general", "AR1", "/app/admin/invites/approve", "/app/admin/apps/restrict"} {
+		if !strings.Contains(listed, expected) {
+			t.Fatalf("the pending queues are missing %q: %s", expected, listed)
+		}
+	}
+
+	invites, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(invites.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", invites.Requests, err)
+	}
+	approve := httptest.NewRecorder()
+	handler.ServeHTTP(approve, adminMutationRequest(http.MethodPost, "/app/admin/invites/approve", "invite_request_id="+string(invites.Requests[0].ID)))
+	if approve.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", approve.Code, approve.Body.String())
+	}
+	restrict := httptest.NewRecorder()
+	handler.ServeHTTP(restrict, adminMutationRequest(http.MethodPost, "/app/admin/apps/restrict", "app_id=A1&request_id=AR1"))
+	if restrict.Code != http.StatusOK {
+		t.Fatalf("restrict status=%d body=%s", restrict.Code, restrict.Body.String())
+	}
+	remaining, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(remaining.Requests) != 0 {
+		t.Fatalf("pending invitations after approval=%+v err=%v", remaining.Requests, err)
+	}
+	restricted, err := store.ListAppApprovals(ctx, "T1", domain.AppApprovalRestricted, domain.PageRequest{Limit: 10})
+	if err != nil || len(restricted.Apps) != 1 {
+		t.Fatalf("restricted apps=%+v err=%v", restricted.Apps, err)
+	}
+	after := body()
+	if strings.Contains(after, "guest@example.test") || strings.Contains(after, "AR1") {
+		t.Fatalf("a decided request is still queued: %s", after)
+	}
+}
+
+// A decision that empties a row with nothing else on screen leaves the
+// administrator unsure which button landed.
+func TestAdminDecisionRedirectsWithANotice(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	if err := (service.Messages{Store: store}).AdminInviteUser(ctx, "T1", "U1", "denied@example.test", []domain.ConversationID{"C1"}, "", "Denied", false, false, false, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	invites, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(invites.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", invites.Requests, err)
+	}
+	request := adminMutationRequest(http.MethodPost, "/app/admin/invites/deny", "invite_request_id="+string(invites.Requests[0].ID))
+	request.Header.Del("Accept")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); !strings.Contains(location, "notice=Invitation+denied") {
+		t.Fatalf("location=%q, want the decision reported back", location)
+	}
+}
+
+// The administration page carries inline script through the shared layout, so
+// it needs the same document/policy agreement the workspace pages have: a hash
+// the policy omits disables the script in a browser and in nothing else.
+func TestAuthAdminDocumentAndItsPolicyAgree(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminPageRequest())
+	policy := response.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "form-action 'self'") || !strings.Contains(policy, "frame-ancestors 'none'") {
+		t.Fatalf("policy=%q, want the administration page to keep its framing and form restrictions", policy)
+	}
+	bodies := inlineScriptBodies(response.Body.String())
+	if len(bodies) == 0 {
+		t.Fatal("the administration page renders no inline script")
+	}
+	for _, body := range bodies {
+		digest := sha256.Sum256([]byte(body))
+		hash := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
+		if !strings.Contains(policy, hash) {
+			t.Fatalf("the administration page serves an inline script its policy blocks: %s\npolicy=%s", hash, policy)
+		}
+	}
+	if strings.Contains(policy, "script-src 'unsafe-inline'") {
+		t.Fatalf("the administration page allows any inline script: %s", policy)
 	}
 }
