@@ -9928,6 +9928,47 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 		return err
 	}
 	defer tx.Rollback()
+	if err := setReadCursorTx(ctx, tx, cursor, readAt, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetReadCursors is SetReadCursor for many conversations at once. The whole
+// batch is one transaction, so "mark everything read" either happens or does
+// not; there is no state in which half the sidebar cleared.
+func (s *Store) SetReadCursors(ctx context.Context, cursors []domain.ReadCursor, batch []events.Event) error {
+	if len(cursors) != len(batch) {
+		return store.InvalidArgument("each read cursor requires exactly one event")
+	}
+	if len(cursors) == 0 {
+		return nil
+	}
+	readAt := make([]time.Time, len(cursors))
+	for index, cursor := range cursors {
+		parsed, err := domain.ParseMessageTimestamp(cursor.LastRead)
+		if err != nil {
+			return err
+		}
+		readAt[index] = parsed
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for index, cursor := range cursors {
+		if err := setReadCursorTx(ctx, tx, cursor, readAt[index], batch[index]); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// setReadCursorTx is the body both cursor writers share. It was duplicated
+// between them for exactly one revision, which is one too many for a rule that
+// has to hold in both directions (see the activity note below).
+func setReadCursorTx(ctx context.Context, tx *sql.Tx, cursor domain.ReadCursor, readAt time.Time, event events.Event) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, domain.NewStoredTime(cursor.UpdatedAt)); err != nil {
 		return err
 	}
@@ -9944,10 +9985,43 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 		cursor.UpdatedAt.UTC().UnixNano(), cursor.WorkspaceID, cursor.UserID, cursor.Conversation, readAt.UTC().UnixNano()); err != nil {
 		return err
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
+	return insertOutbox(ctx, tx, event)
+}
+
+// LatestMessageTimestamps reports the newest undeleted message in each named
+// conversation. It reads created_at rather than deriving a position from the
+// row order, because the message timestamp Slack exposes is a function of the
+// creation instant and nothing else.
+func (s *Store) LatestMessageTimestamps(ctx context.Context, workspace domain.WorkspaceID, conversations []domain.ConversationID) (map[domain.ConversationID]domain.MessageTimestamp, error) {
+	latest := make(map[domain.ConversationID]domain.MessageTimestamp, len(conversations))
+	if len(conversations) == 0 {
+		return latest, nil
 	}
-	return tx.Commit()
+	placeholders := make([]string, len(conversations))
+	arguments := make([]any, 0, len(conversations)+1)
+	arguments = append(arguments, workspace)
+	for index, conversation := range conversations {
+		placeholders[index] = "?"
+		arguments = append(arguments, conversation)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT conversation, MAX(created_at) FROM messages WHERE workspace_id = ? AND deleted = 0 AND conversation IN (`+strings.Join(placeholders, ", ")+`) GROUP BY conversation`, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var conversation domain.ConversationID
+		var created domain.StoredTime
+		if err := rows.Scan(&conversation, &created); err != nil {
+			return nil, err
+		}
+		instant, err := created.Time()
+		if err != nil {
+			return nil, err
+		}
+		latest[conversation] = domain.NewMessageTimestamp(instant)
+	}
+	return latest, rows.Err()
 }
 
 func activityCursor(item domain.ActivityItem) string {

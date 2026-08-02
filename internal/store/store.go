@@ -588,6 +588,17 @@ type Store interface {
 	ThreadSummaries(context.Context, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
 	GetReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
+	// SetReadCursors advances several read cursors in one transaction, with one
+	// event per cursor and in the same order. It exists because "mark everything
+	// read" is one action to the member: doing it as N separate transactions
+	// would leave a partially-read workspace behind any failure, and a reader
+	// who retried would see the sidebar clear in pieces.
+	SetReadCursors(context.Context, []domain.ReadCursor, []events.Event) error
+	// LatestMessageTimestamps reports the newest undeleted message in each named
+	// conversation. Conversations with no messages are omitted rather than
+	// reported as empty, so a caller cannot mistake "nothing to read" for "read
+	// position zero".
+	LatestMessageTimestamps(context.Context, domain.WorkspaceID, []domain.ConversationID) (map[domain.ConversationID]domain.MessageTimestamp, error)
 	GetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceNotificationPreferences, events.Event) error
 	GetConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationNotificationPreferences, error)

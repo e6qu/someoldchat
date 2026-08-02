@@ -71,6 +71,7 @@ func runQualification(t *testing.T, open opener) {
 		{"durable event delivery repository", durableEventDeliveryRepositoryContract},
 		{"message order is chronological", messageOrderIsChronological},
 		{"unread count follows the read cursor", unreadCountFollowsTheReadCursor},
+		{"batch read cursors agree with the newest message", batchReadCursorsAgreeWithTheNewestMessage},
 		{"create message validates and is referential", createMessageValidatesAndIsReferential},
 		{"expired outbox lease is fenced", expiredOutboxLeaseIsFenced},
 		{"internal topics stay internal", internalTopicsStayInternal},

@@ -5108,6 +5108,35 @@ func (s *Store) SetReadCursor(_ context.Context, cursor domain.ReadCursor, event
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.setReadCursorLocked(cursor, readAt, event)
+	return nil
+}
+
+// SetReadCursors advances several cursors under one hold of the lock, so a
+// concurrent reader sees the whole batch or none of it — the in-memory profile
+// is a selectable profile, not a test double, and it owes the same all-or-
+// nothing guarantee the SQL profiles give.
+func (s *Store) SetReadCursors(_ context.Context, cursors []domain.ReadCursor, batch []events.Event) error {
+	if len(cursors) != len(batch) {
+		return store.InvalidArgument("each read cursor requires exactly one event")
+	}
+	readAt := make([]time.Time, len(cursors))
+	for index, cursor := range cursors {
+		parsed, err := domain.ParseMessageTimestamp(cursor.LastRead)
+		if err != nil {
+			return err
+		}
+		readAt[index] = parsed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, cursor := range cursors {
+		s.setReadCursorLocked(cursor, readAt[index], batch[index])
+	}
+	return nil
+}
+
+func (s *Store) setReadCursorLocked(cursor domain.ReadCursor, readAt time.Time, event events.Event) {
 	s.readCursors[readCursorKey(cursor.WorkspaceID, cursor.UserID, cursor.Conversation)] = cursor
 	// Activity follows the cursor in BOTH directions: marking unread moves the
 	// cursor backwards, and items after it must reopen, or the sidebar and
@@ -5126,7 +5155,37 @@ func (s *Store) SetReadCursor(_ context.Context, cursor domain.ReadCursor, event
 		}
 	}
 	s.outbox = append(s.outbox, event)
-	return nil
+}
+
+// LatestMessageTimestamps reports the newest undeleted message in each named
+// conversation, omitting those that have none.
+func (s *Store) LatestMessageTimestamps(_ context.Context, workspace domain.WorkspaceID, conversations []domain.ConversationID) (map[domain.ConversationID]domain.MessageTimestamp, error) {
+	wanted := make(map[domain.ConversationID]bool, len(conversations))
+	for _, conversation := range conversations {
+		wanted[conversation] = true
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	newest := make(map[domain.ConversationID]time.Time, len(conversations))
+	for conversation, stored := range s.messages {
+		if !wanted[conversation] {
+			continue
+		}
+		for _, message := range stored {
+			if message.WorkspaceID != workspace || message.Deleted {
+				continue
+			}
+			at := message.CreatedAt
+			if current, ok := newest[conversation]; !ok || at.After(current) {
+				newest[conversation] = at
+			}
+		}
+	}
+	latest := make(map[domain.ConversationID]domain.MessageTimestamp, len(newest))
+	for conversation, at := range newest {
+		latest[conversation] = domain.NewMessageTimestamp(at)
+	}
+	return latest, nil
 }
 
 func activityPreferencesKey(workspace domain.WorkspaceID, user domain.UserID) string {

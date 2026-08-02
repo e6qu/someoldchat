@@ -30,6 +30,22 @@ documented platform and surface mapping:
 | Activity | `Command+Shift+M` | `Control+Shift+M` | the dedicated shortcut is desktop-only; web uses the assigned navigation-tab shortcut, currently `Control+3` on Mac and `Control+Shift+3` on Windows/Linux for the default Activity tab |
 | Conversation details | `Command+Shift+I` | `Control+Shift+I` | none |
 | Move among major sections | `F6` / `Shift+F6` | `F6` / `Shift+F6` | web uses `Command+F6` / `Command+Shift+F6` on Mac and `Control+F6` / `Control+Shift+F6` on Windows/Linux |
+| Previous/next unread conversation | `Option+Shift+Up/Down` | `Alt+Shift+Up/Down` | none |
+| Direct messages | `Command+Shift+K` | `Control+Shift+K` | none |
+| Later | `Command+Shift+S` | `Control+Shift+S` | Slack's saved-items surface is named Later here |
+| Mark this conversation read | `Escape` | `Escape` | applies outside a text field, so `Escape` still dismisses the composer's suggestions, a dialog, or the navigation drawer |
+| Mark every conversation read | `Shift+Escape` | `Shift+Escape` | applies anywhere, including the composer: `Shift+Escape` means nothing else in a text field |
+| Attach a file | `Command+U` | `Control+U` | none |
+| Keyboard shortcuts | `Command+/` | `Control+/` | none |
+
+The client MUST also publish the layer it implements. Slack opens a shortcut
+reference on `Command/Control+/`; a member who does not know that chord MUST be
+able to reach the same reference from a visible control, or the reference is
+only discoverable by already having the knowledge it exists to supply. The
+reference MUST show the chords for the platform the member is on, and it MUST
+NOT list a binding the client does not implement — an announced binding that
+does nothing is worse than an absent one, because assistive technology reads it
+out as available.
 
 The shortcut target MUST receive visible focus and an announced name. Browser
 or operating-system reserved behavior MUST be preserved where Slack preserves
