@@ -4415,3 +4415,45 @@ func TestOnlyTheStarterIsOfferedTheEndControl(t *testing.T) {
 		t.Fatalf("a refused end still ended the huddle: %v", err)
 	}
 }
+
+// NOTIFY-04: a desktop notification needs three separate permissions and this
+// product owns only two of them. The page carries its two so the client can
+// decide, and says which is missing rather than reporting one silent "off".
+func TestBrowserNotificationsCarryBothHalvesTheServerOwns(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+
+	off := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "notifications off", off, `data-browser-notifications="false"`, `data-notifications-paused="false"`)
+
+	if _, err := messages.SetWorkspaceNotificationPreferences(ctx, "T1", "U1", domain.NotificationMentions, nil, true, true, true); err != nil {
+		t.Fatal(err)
+	}
+	on := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "notifications on", on, `data-browser-notifications="true"`)
+
+	// Do Not Disturb was fetched for the preferences page and consulted
+	// nowhere, so a paused workspace still raised every banner it could.
+	if _, err := messages.SetSnooze(ctx, "T1", "U1", 60); err != nil {
+		t.Fatal(err)
+	}
+	paused := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "notifications paused", paused, `data-notifications-paused="true"`)
+}
+
+// The preferences page names what this deployment does not deliver, rather
+// than leaving a person to wonder why a phone never buzzes.
+func TestTheNotificationsPageNamesWhatItCannotDeliver(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	if _, err := (service.Messages{Store: store}).SetWorkspaceNotificationPreferences(ctx, "T1", "U1", domain.NotificationMentions, nil, true, true, true); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app/notifications?channel=Cdev").Body.String()
+	requireContains(t, "notification preferences", body,
+		"Show desktop notifications", `name="browser_notifications"`, "checked",
+		"Not delivered here", "There is no mobile application", "sends no mail at all",
+		"Your browser also has to allow notifications",
+	)
+}

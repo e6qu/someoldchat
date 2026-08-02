@@ -622,15 +622,16 @@ func (x *NotificationPreferencesRequest) GetUserId() string {
 }
 
 type WorkspaceNotificationPreferences struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Level             string                 `protobuf:"bytes,3,opt,name=level,proto3" json:"level,omitempty"`
-	Keywords          []string               `protobuf:"bytes,4,rep,name=keywords,proto3" json:"keywords,omitempty"`
-	ActivityChannels  bool                   `protobuf:"varint,5,opt,name=activity_channels,json=activityChannels,proto3" json:"activity_channels,omitempty"`
-	ActivityReminders bool                   `protobuf:"varint,6,opt,name=activity_reminders,json=activityReminders,proto3" json:"activity_reminders,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId          string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId               string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Level                string                 `protobuf:"bytes,3,opt,name=level,proto3" json:"level,omitempty"`
+	Keywords             []string               `protobuf:"bytes,4,rep,name=keywords,proto3" json:"keywords,omitempty"`
+	ActivityChannels     bool                   `protobuf:"varint,5,opt,name=activity_channels,json=activityChannels,proto3" json:"activity_channels,omitempty"`
+	ActivityReminders    bool                   `protobuf:"varint,6,opt,name=activity_reminders,json=activityReminders,proto3" json:"activity_reminders,omitempty"`
+	BrowserNotifications bool                   `protobuf:"varint,7,opt,name=browser_notifications,json=browserNotifications,proto3" json:"browser_notifications,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *WorkspaceNotificationPreferences) Reset() {
@@ -705,16 +706,24 @@ func (x *WorkspaceNotificationPreferences) GetActivityReminders() bool {
 	return false
 }
 
+func (x *WorkspaceNotificationPreferences) GetBrowserNotifications() bool {
+	if x != nil {
+		return x.BrowserNotifications
+	}
+	return false
+}
+
 type SetWorkspaceNotificationPreferencesRequest struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Level             string                 `protobuf:"bytes,3,opt,name=level,proto3" json:"level,omitempty"`
-	Keywords          []string               `protobuf:"bytes,4,rep,name=keywords,proto3" json:"keywords,omitempty"`
-	ActivityChannels  bool                   `protobuf:"varint,5,opt,name=activity_channels,json=activityChannels,proto3" json:"activity_channels,omitempty"`
-	ActivityReminders bool                   `protobuf:"varint,6,opt,name=activity_reminders,json=activityReminders,proto3" json:"activity_reminders,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId          string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId               string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Level                string                 `protobuf:"bytes,3,opt,name=level,proto3" json:"level,omitempty"`
+	Keywords             []string               `protobuf:"bytes,4,rep,name=keywords,proto3" json:"keywords,omitempty"`
+	ActivityChannels     bool                   `protobuf:"varint,5,opt,name=activity_channels,json=activityChannels,proto3" json:"activity_channels,omitempty"`
+	ActivityReminders    bool                   `protobuf:"varint,6,opt,name=activity_reminders,json=activityReminders,proto3" json:"activity_reminders,omitempty"`
+	BrowserNotifications bool                   `protobuf:"varint,7,opt,name=browser_notifications,json=browserNotifications,proto3" json:"browser_notifications,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *SetWorkspaceNotificationPreferencesRequest) Reset() {
@@ -785,6 +794,13 @@ func (x *SetWorkspaceNotificationPreferencesRequest) GetActivityChannels() bool 
 func (x *SetWorkspaceNotificationPreferencesRequest) GetActivityReminders() bool {
 	if x != nil {
 		return x.ActivityReminders
+	}
+	return false
+}
+
+func (x *SetWorkspaceNotificationPreferencesRequest) GetBrowserNotifications() bool {
+	if x != nil {
+		return x.BrowserNotifications
 	}
 	return false
 }
@@ -1247,21 +1263,23 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\x06layout\x18\x03 \x01(\tR\x06layout\"\\\n" +
 	"\x1eNotificationPreferencesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xec\x01\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xa1\x02\n" +
 	" WorkspaceNotificationPreferences\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05level\x18\x03 \x01(\tR\x05level\x12\x1a\n" +
 	"\bkeywords\x18\x04 \x03(\tR\bkeywords\x12+\n" +
 	"\x11activity_channels\x18\x05 \x01(\bR\x10activityChannels\x12-\n" +
-	"\x12activity_reminders\x18\x06 \x01(\bR\x11activityReminders\"\xf6\x01\n" +
+	"\x12activity_reminders\x18\x06 \x01(\bR\x11activityReminders\x123\n" +
+	"\x15browser_notifications\x18\a \x01(\bR\x14browserNotifications\"\xab\x02\n" +
 	"*SetWorkspaceNotificationPreferencesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05level\x18\x03 \x01(\tR\x05level\x12\x1a\n" +
 	"\bkeywords\x18\x04 \x03(\tR\bkeywords\x12+\n" +
 	"\x11activity_channels\x18\x05 \x01(\bR\x10activityChannels\x12-\n" +
-	"\x12activity_reminders\x18\x06 \x01(\bR\x11activityReminders\"\x91\x01\n" +
+	"\x12activity_reminders\x18\x06 \x01(\bR\x11activityReminders\x123\n" +
+	"\x15browser_notifications\x18\a \x01(\bR\x14browserNotifications\"\x91\x01\n" +
 	"*ConversationNotificationPreferencesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +

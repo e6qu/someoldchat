@@ -276,7 +276,7 @@ type Service interface {
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	ThreadSummaries(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
 	WorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
-	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationLevel, []string, bool, bool) (domain.WorkspaceNotificationPreferences, error)
+	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationLevel, []string, bool, bool, bool) (domain.WorkspaceNotificationPreferences, error)
 	ConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.NotificationLevel, bool) (domain.ConversationNotificationPreferences, error)
 	ThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (bool, error)

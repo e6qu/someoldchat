@@ -78,6 +78,7 @@ message WorkspaceNotificationPreferences {
   repeated string keywords = 4;
   bool activity_channels = 5;
   bool activity_reminders = 6;
+  bool browser_notifications = 7;
 }
 
 message SetWorkspaceNotificationPreferencesRequest {
@@ -87,6 +88,7 @@ message SetWorkspaceNotificationPreferencesRequest {
   repeated string keywords = 4;
   bool activity_channels = 5;
   bool activity_reminders = 6;
+  bool browser_notifications = 7;
 }
 
 message ConversationNotificationPreferencesRequest {

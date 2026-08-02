@@ -343,34 +343,39 @@ type connectInviteView struct {
 }
 
 type pageData struct {
-	Workspaces      []workspaceChoice
-	Huddle          huddleView
-	HuddleURL       string
-	Timeline        messageList
-	Thread          messageList
-	ThreadTimestamp string
-	Channels        []conversationView
-	Directs         []conversationView
-	MoreChannelsURL string
-	Channel         string
-	ChannelName     string
-	ChannelPrefix   string
-	ChannelMeta     string
-	WorkspaceName   string
-	CSRFToken       string
-	ShowProfile     bool
-	ShowAdmin       bool
-	ReminderUnread  bool
-	IsMember        bool
-	CanPost         bool
-	CanSchedule     bool
-	CanUpload       bool
-	CanJoin         bool
-	CanCreate       bool
-	JoinURL         string
-	Username        string
-	UserInitial     string
-	OlderURL        string
+	// BrowserNotifications and NotificationsPaused are this product's two
+	// halves of whether a desktop notification may be raised. The third — the
+	// browser's permission — only the client can see.
+	BrowserNotifications bool
+	NotificationsPaused  bool
+	Workspaces           []workspaceChoice
+	Huddle               huddleView
+	HuddleURL            string
+	Timeline             messageList
+	Thread               messageList
+	ThreadTimestamp      string
+	Channels             []conversationView
+	Directs              []conversationView
+	MoreChannelsURL      string
+	Channel              string
+	ChannelName          string
+	ChannelPrefix        string
+	ChannelMeta          string
+	WorkspaceName        string
+	CSRFToken            string
+	ShowProfile          bool
+	ShowAdmin            bool
+	ReminderUnread       bool
+	IsMember             bool
+	CanPost              bool
+	CanSchedule          bool
+	CanUpload            bool
+	CanJoin              bool
+	CanCreate            bool
+	JoinURL              string
+	Username             string
+	UserInitial          string
+	OlderURL             string
 	// LatestURL is set when the rendered window is not the newest one. It is
 	// both the "jump to the latest messages" pager and the composer's
 	// data-newest, so a post made while reading older history takes the
@@ -633,10 +638,15 @@ type notificationsData struct {
 	Keywords          string
 	ActivityChannels  bool
 	ActivityReminders bool
-	Snoozed           bool
-	SnoozeUntil       string
-	Exceptions        []notificationExceptionView
-	Notice            string
+	// BrowserNotifications is this product's half of the decision. The other
+	// half belongs to the browser, and the page says which of the two is
+	// missing rather than reporting one silent "off" for both.
+	BrowserNotifications     bool
+	BrowserNotificationState string
+	Snoozed                  bool
+	SnoozeUntil              string
+	Exceptions               []notificationExceptionView
+	Notice                   string
 }
 
 type scheduledMessageView struct {
@@ -1380,7 +1390,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 {{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
-<div class="shell">
+<div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}">
   <header class="topbar">
     <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="false" aria-label="Open navigation"><span aria-hidden="true">☰</span></button>
     <span class="brand">{{.WorkspaceName}}</span>
@@ -2137,13 +2147,38 @@ if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldc
 
 var activityTemplate = mustPage(activityMarkup)
 
+// browserNotificationSettingScript reports what the browser says, because the
+// server cannot know it: a stored preference and a granted permission are two
+// different things, and one silent "off" for both leaves a person unable to
+// tell whether to change a setting here or in their browser.
+//
+// Turning the preference on asks for the permission then and there, which is
+// the only moment a browser will honour the request — it must follow a click.
+const browserNotificationSettingScript = `<script>(function(){
+var toggle=document.getElementById('browser-notifications');
+var state=document.getElementById('browser-notification-state');
+if(!toggle||!state)return;
+function describe(){
+if(!('Notification' in window)){state.textContent='This browser cannot show desktop notifications at all.';toggle.disabled=true;return}
+var permission=Notification.permission;
+if(permission==='denied'){state.textContent='Your browser is blocking notifications for this site. Turning this on here will not be enough until you allow them in the browser.';return}
+if(permission==='granted'){state.textContent=toggle.checked?'Your browser allows notifications, and this workspace will send them while a tab is open.':'Your browser allows notifications. Turn this on to receive them.';return}
+state.textContent=toggle.checked?'Your browser has not been asked yet. Save, and it will ask.':'Your browser has not been asked to allow notifications yet.';
+}
+describe();
+toggle.addEventListener('change',function(){
+if(toggle.checked&&'Notification' in window&&Notification.permission==='default'){Notification.requestPermission().then(describe).catch(describe);return}
+describe();
+});
+})();</script>`
+
 const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(760px,calc(100% - 28px));margin:24px auto 48px}.heading h2{margin:0 0 5px}.heading p{margin:0;color:var(--muted)}.settings{display:grid;gap:18px;margin-top:20px}.card{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.card h3{margin:0 0 6px}.card>p{margin:0 0 14px;color:var(--muted)}.fields{display:grid;gap:12px}.fields label{display:grid;gap:6px;font-weight:700}.fields input[type=text],.fields input[type=number],.fields select{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:start;gap:8px!important;font-weight:600!important}.actions{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.actions label{flex:1 1 180px}.actions button,.fields button{border:0;border-radius:6px;background:var(--action);color:var(--on-strong);padding:9px 12px;font-weight:800}.resume{background:var(--danger)!important}.exceptions{margin:0;padding:0;list-style:none;display:grid;gap:8px}.exceptions a{display:flex;justify-content:space-between;gap:10px;padding:11px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.exceptions span:last-child{color:var(--muted)}
 @media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 18px,760px);margin-top:16px}.card{padding:14px}.actions{display:grid}.actions label{width:100%}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "scripts"}}` + localTimeScript + browserNotificationSettingScript + `{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Notifications</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
 <main class="layout"><div class="heading"><h2>Notification preferences</h2><p>Choose what needs your attention without changing what you can read.</p></div>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 <div class="settings">
@@ -2153,7 +2188,10 @@ const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end
 <label for="notification-keywords">Channel keywords<input id="notification-keywords" type="text" name="keywords" maxlength="5049" value="{{.Keywords}}" placeholder="release, customer escalation"><span class="muted">Comma-separated; exact matches are case-insensitive and do not trigger in threads.</span></label>
 <label class="check"><input type="checkbox" name="activity_channels" value="true"{{if .ActivityChannels}} checked{{end}}> Show channels set to All new posts in Activity</label>
 <label class="check"><input type="checkbox" name="activity_reminders" value="true"{{if .ActivityReminders}} checked{{end}}> Show due personal reminders in Activity</label>
+<label class="check"><input type="checkbox" id="browser-notifications" name="browser_notifications" value="true"{{if .BrowserNotifications}} checked{{end}}> Show desktop notifications while SameOldChat is open in a tab</label>
+<p class="muted" id="browser-notification-state" role="status">{{.BrowserNotificationState}}</p>
 <button type="submit">Save workspace defaults</button></form></section>
+<section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds and notification schedules.</strong> Pausing above is the only schedule.</li></ul></section>
 <section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time>. Messages and Activity remain available.</p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="resume" type="submit">Resume notifications</button></form>{{else}}<p>Pause banners and sounds for a preset or custom duration.</p><form class="actions" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><label for="dnd-minutes">Preset<select id="dnd-minutes" name="minutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="480">8 hours</option><option value="1440">24 hours</option></select></label><label for="dnd-custom-minutes">Custom minutes (optional)<input id="dnd-custom-minutes" type="number" name="custom_minutes" min="1" max="1440"></label><button type="submit">Pause notifications</button></form>{{end}}</section>
 <section class="card" aria-labelledby="notification-exceptions-heading"><h3 id="notification-exceptions-heading">Exceptions to defaults</h3>{{if .Exceptions}}<ul class="exceptions">{{range .Exceptions}}<li><a href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span>{{.Level}}{{if .FollowEveryThread}} · following every thread{{end}}</span></a></li>{{end}}</ul>{{else}}<p>No conversation-specific exceptions.</p>{{end}}</section>
 </div></main>{{end}}`
@@ -2485,6 +2523,23 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // intercepts it where the clipboard API exists. A browser without clipboard
 // access, or one that refuses the write, follows the link instead of doing
 // nothing.
+// The script's notify() raises a desktop notification for messages that
+// arrived while the tab was not being looked at.
+//
+// Its text comes from the timeline this client just fetched under its own
+// session, never from the event frame: the durable payloads carry identifiers
+// and no content by design, and a notification is not a reason to start
+// shipping message text to every consumer of the stream.
+//
+// Three things must all be true, and each is somebody else's decision: the
+// person turned the preference on, the browser granted permission, and
+// notifications are not paused. Do Not Disturb was fetched for the preferences
+// page and consulted nowhere else, so a paused workspace still raised every
+// banner it could.
+//
+// The comments live here rather than in the script because html/template
+// elides JavaScript comments in a script context, which changes the bytes the
+// browser receives and so breaks the hash the policy pins.
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
@@ -2914,6 +2969,15 @@ var target=details.querySelector(control);
 if(target)target.focus();
 return true;
 }
+function notify(arrived){
+var shell=document.querySelector('[data-browser-notifications]');
+if(!shell||shell.getAttribute('data-browser-notifications')!=='true')return;
+if(shell.getAttribute('data-notifications-paused')==='true')return;
+if(!('Notification' in window)||Notification.permission!=='granted')return;
+if(!document.hidden)return;
+var channel=shell.getAttribute('data-channel-name')||'this workspace';
+try{new Notification(arrived===1?'1 new message in '+channel:arrived+' new messages in '+channel,{tag:'sameoldchat-'+channel})}catch(error){}
+}
 function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
 function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}
 function refresh(force){
@@ -2963,7 +3027,7 @@ var behind=document.querySelectorAll('[data-fragment]:not([data-live="true"])').
 var before=messageCount();
 refresh(false).then(function(){
 var arrived=messageCount()-before;
-if(arrived>0){announce(arrived===1?'1 new message.':arrived+' new messages.');return}
+if(arrived>0){announce(arrived===1?'1 new message.':arrived+' new messages.');notify(arrived);return}
 if(behind)announce('New activity is available in this conversation.');
 }).catch(function(error){if(error&&error.name==='AbortError')return;announce('New activity could not be loaded. Reload the page.')});
 },250);
@@ -4360,6 +4424,14 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	// the refresh fetches: a first paint that disagreed with the first refresh
 	// would flicker the control set for anyone reading it.
 	data.Workspaces = h.workspaceChoices(r, principal)
+	// A failure to read either leaves notifications off: the safe default for
+	// something that interrupts a person is not to.
+	if preferences, prefErr := h.Messages.WorkspaceNotificationPreferences(r.Context(), principal.WorkspaceID, principal.UserID); prefErr == nil {
+		data.BrowserNotifications = preferences.BrowserNotifications
+	}
+	if dnd, dndErr := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); dndErr == nil {
+		data.NotificationsPaused = dnd.SnoozeUntil.After(time.Now())
+	}
 	data.HuddleURL = "/app/huddle?channel=" + url.QueryEscape(string(channel))
 	data.Huddle = h.huddleFor(r.Context(), principal, conversation, data.CSRFToken, "", names)
 	if isMember && threadTimestamp != "" {
@@ -5973,7 +6045,13 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 		Channel: channel, CSRFToken: auth.CSRFToken(sessionCookie.Value),
 		Level: string(preferences.Level), Keywords: strings.Join(preferences.Keywords, ", "),
 		ActivityChannels: preferences.ActivityChannels, ActivityReminders: preferences.ActivityReminders,
-		Snoozed: dnd.SnoozeUntil.After(time.Now()), SnoozeUntil: dnd.SnoozeUntil.UTC().Format(time.RFC3339),
+		BrowserNotifications: preferences.BrowserNotifications,
+		// The server knows only its own half. The script replaces this line
+		// with what the browser actually reports, which is the only way to
+		// tell "you have not turned it on" from "your browser refused".
+		BrowserNotificationState: "Your browser also has to allow notifications. This page will say which of the two is missing.",
+		Snoozed:                  dnd.SnoozeUntil.After(time.Now()),
+		SnoozeUntil:              dnd.SnoozeUntil.UTC().Format(time.RFC3339),
 	}
 	switch r.URL.Query().Get("status") {
 	case "saved":
@@ -6056,6 +6134,7 @@ func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Reques
 		domain.NotificationLevel(strings.TrimSpace(fields["level"])),
 		splitNotificationKeywords(fields["keywords"]),
 		fields["activity_channels"] == "true", fields["activity_reminders"] == "true",
+		fields["browser_notifications"] == "true",
 	); err != nil {
 		if errors.Is(err, store.ErrInvalidArgument) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "Those notification preferences are not valid", "Choose a trigger and use no more than 50 keywords of 100 characters each.")

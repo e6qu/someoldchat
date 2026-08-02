@@ -832,6 +832,11 @@ type WorkspaceNotificationPreferences struct {
 	Keywords          []string
 	ActivityChannels  bool
 	ActivityReminders bool
+	// BrowserNotifications is off unless the person turns it on. It is only
+	// half of what a notification needs — the browser must also grant
+	// permission — and the two are deliberately separate: a preference this
+	// product stores cannot grant a permission only the browser can.
+	BrowserNotifications bool
 }
 
 func DefaultWorkspaceNotificationPreferences(workspace WorkspaceID, user UserID) WorkspaceNotificationPreferences {

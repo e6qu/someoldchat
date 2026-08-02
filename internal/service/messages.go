@@ -4715,7 +4715,7 @@ func (m Messages) WorkspaceNotificationPreferences(ctx context.Context, workspac
 	return m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
 }
 
-func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders bool) (domain.WorkspaceNotificationPreferences, error) {
+func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err
 	}
@@ -4723,6 +4723,7 @@ func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, works
 		WorkspaceID: workspaceID, UserID: userID, Level: level,
 		Keywords:         domain.NormalizeNotificationKeywords(keywords),
 		ActivityChannels: activityChannels, ActivityReminders: activityReminders,
+		BrowserNotifications: browserNotifications,
 	}
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, store.InvalidArgument("workspace notification preferences are invalid")

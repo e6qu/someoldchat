@@ -3887,10 +3887,11 @@ func (r Remote) WorkspaceNotificationPreferences(ctx context.Context, workspaceI
 	return decodeProtoWorkspaceNotificationPreferences(out)
 }
 
-func (r Remote) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders bool) (domain.WorkspaceNotificationPreferences, error) {
+func (r Remote) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
 	out, err := r.activity.SetWorkspaceNotificationPreferences(ctx, &chatv1.SetWorkspaceNotificationPreferencesRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Level: string(level),
 		Keywords: keywords, ActivityChannels: activityChannels, ActivityReminders: activityReminders,
+		BrowserNotifications: browserNotifications,
 	})
 	if err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err
@@ -6934,7 +6935,7 @@ func (s *Server) GetWorkspaceNotificationPreferences(ctx context.Context, input 
 func (s *Server) SetWorkspaceNotificationPreferences(ctx context.Context, input *chatv1.SetWorkspaceNotificationPreferencesRequest) (*chatv1.WorkspaceNotificationPreferences, error) {
 	preferences, err := s.implementation.SetWorkspaceNotificationPreferences(
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		domain.NotificationLevel(input.GetLevel()), input.GetKeywords(), input.GetActivityChannels(), input.GetActivityReminders(),
+		domain.NotificationLevel(input.GetLevel()), input.GetKeywords(), input.GetActivityChannels(), input.GetActivityReminders(), input.GetBrowserNotifications(),
 	)
 	if err != nil {
 		return nil, mapError(err)
@@ -9342,6 +9343,7 @@ func encodeProtoWorkspaceNotificationPreferences(value domain.WorkspaceNotificat
 	return &chatv1.WorkspaceNotificationPreferences{
 		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Level: string(value.Level),
 		Keywords: append([]string(nil), value.Keywords...), ActivityChannels: value.ActivityChannels, ActivityReminders: value.ActivityReminders,
+		BrowserNotifications: value.BrowserNotifications,
 	}
 }
 
@@ -9353,6 +9355,7 @@ func decodeProtoWorkspaceNotificationPreferences(value *chatv1.WorkspaceNotifica
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
 		Level: domain.NotificationLevel(value.GetLevel()), Keywords: domain.NormalizeNotificationKeywords(value.GetKeywords()),
 		ActivityChannels: value.GetActivityChannels(), ActivityReminders: value.GetActivityReminders(),
+		BrowserNotifications: value.GetBrowserNotifications(),
 	}
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, errors.New("typed workspace notification preferences are invalid")

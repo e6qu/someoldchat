@@ -330,6 +330,7 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  level TEXT NOT NULL, keywords TEXT NOT NULL DEFAULT '[]',
  activity_channels INTEGER NOT NULL DEFAULT 1, activity_reminders INTEGER NOT NULL DEFAULT 1,
+ browser_notifications INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY (workspace_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS conversation_notification_preferences (
@@ -494,7 +495,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 131
+const schemaVersion = 132
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2963,6 +2964,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate shared invites: %w", err)
 		}
 	}
+	if version < 132 {
+		columns, err := s.tableColumns(ctx, db, "notification_preferences")
+		if err != nil {
+			return err
+		}
+		if !columns["browser_notifications"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE notification_preferences ADD COLUMN browser_notifications INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate browser notification preference: %w", err)
+			}
+		}
+	}
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -3383,6 +3395,7 @@ var migratableTables = []string{
 	"list_items",
 	"lists",
 	"messages",
+	"notification_preferences",
 	"oauth_codes",
 	"outbox",
 	"recent_searches",
@@ -9260,9 +9273,9 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, user)
 	var keywords string
-	var activityChannels, activityReminders int
-	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
-		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders)
+	var activityChannels, activityReminders, browserNotifications int
+	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders, browser_notifications FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
+		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders, &browserNotifications)
 	if errors.Is(err, sql.ErrNoRows) {
 		return preferences, nil
 	}
@@ -9275,6 +9288,7 @@ func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspa
 	preferences.Keywords = domain.NormalizeNotificationKeywords(preferences.Keywords)
 	preferences.ActivityChannels = activityChannels != 0
 	preferences.ActivityReminders = activityReminders != 0
+	preferences.BrowserNotifications = browserNotifications != 0
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, errors.New("stored workspace notification preferences are invalid")
 	}
@@ -9295,9 +9309,9 @@ func (s *Store) SetWorkspaceNotificationPreferences(ctx context.Context, prefere
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders`,
-		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders, browser_notifications)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders, browser_notifications = excluded.browser_notifications`,
+		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders), boolInt(preferences.BrowserNotifications)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
