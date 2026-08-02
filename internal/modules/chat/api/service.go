@@ -86,6 +86,19 @@ type Service interface {
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
+	WorkspaceAnalytics(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (domain.WorkspaceAnalytics, error)
+	UserWorkspaces(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.WorkspaceMembershipSummary, error)
+	// The Slack Connect invitation lifecycle. Approval and acceptance are
+	// separate methods because CONNECT-02 makes them separate decisions, taken
+	// by different organizations.
+	InviteShared(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, string) (domain.SharedInvite, error)
+	ApproveSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	DenySharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	RevokeSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	DeclineSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	AcceptSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.Conversation, error)
+	ListSharedInvites(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteStatus, domain.PageRequest) (domain.SharedInvitePage, error)
+	SetExternalInvitePermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, bool) (domain.Conversation, error)
 	IntegrationLogs(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int, int) (domain.IntegrationLogPage, error)
 	Permalink(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (string, error)
 	Update(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) (domain.Message, error)
@@ -122,6 +135,11 @@ type Service interface {
 	AdminApproveInviteRequest(context.Context, domain.WorkspaceID, domain.UserID, domain.InviteRequestID) error
 	AdminDenyInviteRequest(context.Context, domain.WorkspaceID, domain.UserID, domain.InviteRequestID) error
 	AdminListInviteRequests(context.Context, domain.WorkspaceID, domain.UserID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
+	// InvitationPreview and AcceptInvitationForEmail carry no actor: the person
+	// they serve has no account and no session yet. See the contracts on
+	// service.Messages, which explain why each is safe without one.
+	InvitationPreview(context.Context, domain.WorkspaceID, domain.InviteRequestID) (domain.InviteRequest, error)
+	AcceptInvitationForEmail(context.Context, domain.WorkspaceID, string, string) (domain.User, error)
 	AdminInviteUser(context.Context, domain.WorkspaceID, domain.UserID, string, []domain.ConversationID, string, string, bool, bool, bool, time.Time) error
 	AdminCreateUser(context.Context, domain.WorkspaceID, domain.UserID, string, string, domain.WorkspaceRole) (domain.User, error)
 	AdminListUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.AdminUserPage, error)
@@ -254,8 +272,11 @@ type Service interface {
 	LeaveConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
 	KickConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID) error
 	MarkRead(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.ReadCursor, error)
+	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
+	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
+	ThreadSummaries(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
 	WorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
-	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationLevel, []string, bool, bool) (domain.WorkspaceNotificationPreferences, error)
+	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationLevel, []string, bool, bool, bool) (domain.WorkspaceNotificationPreferences, error)
 	ConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.NotificationLevel, bool) (domain.ConversationNotificationPreferences, error)
 	ThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (bool, error)
@@ -321,6 +342,14 @@ type Service interface {
 	UserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.UserID, error)
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroup, error)
 	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.UserID) (domain.Call, error)
+	// The huddle family takes a conversation rather than a call identifier: a
+	// conversation has at most one running huddle, and naming the conversation
+	// is what lets two concurrent starts converge on one.
+	StartHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Call, error)
+	JoinHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
+	LeaveHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
+	EndHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
+	ActiveHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Call, error)
 	GetCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, string, string, string) (domain.Call, error)
 	EndCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, int64) error

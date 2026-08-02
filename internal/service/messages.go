@@ -27,36 +27,42 @@ import (
 )
 
 var (
-	ErrInvalidMessage              = errors.New("message text and conversation are required")
-	ErrInvalidTimestamp            = errors.New("message timestamp is invalid")
-	ErrMessageNotOwned             = errors.New("message is not owned by user")
-	ErrMessageAlreadyDeleted       = errors.New("message is already deleted")
-	ErrInvalidConversation         = errors.New("conversation name is invalid")
-	ErrInvalidWorkspace            = errors.New("workspace settings are invalid")
-	ErrInvalidConversationPrefs    = errors.New("conversation preferences are invalid")
-	ErrInvalidReaction             = errors.New("reaction name is invalid")
-	ErrBlobUnavailable             = errors.New("blob storage is unavailable")
-	ErrInvalidFile                 = errors.New("file metadata is invalid")
-	ErrInvalidSearch               = errors.New("search query is invalid")
-	ErrInvalidProfile              = errors.New("user profile is invalid")
-	ErrInvalidScheduledStatus      = errors.New("scheduled status is invalid")
-	ErrScheduledStatusLimit        = errors.New("five statuses are already scheduled")
-	ErrInvalidPresence             = errors.New("user presence is invalid")
-	ErrInvalidSnooze               = errors.New("snooze duration must be between 1 and 1440 minutes")
-	ErrInvalidReminder             = errors.New("reminder text, user, and time are required")
-	ErrInvalidLaterReminder        = errors.New("Later reminder arguments are invalid")
-	ErrReminderTimeInPast          = errors.New("reminder time is in the past")
-	ErrScheduledTimeInPast         = errors.New("scheduled message time is in the past")
-	ErrScheduledTimeTooFar         = errors.New("scheduled message time is more than 120 days away")
-	ErrScheduledTooMany            = errors.New("too many messages are scheduled in the channel window")
-	ErrInvalidUserGroup            = errors.New("user group name, handle, and members are invalid")
-	ErrInvalidCall                 = errors.New("call external id and join URL are required")
-	ErrInvalidEphemeral            = errors.New("ephemeral message recipient, conversation, and text are required")
-	ErrInvalidAccessLog            = errors.New("access log fields are invalid")
-	ErrInvalidEmoji                = errors.New("custom emoji name or URL is invalid")
-	ErrEmojiAlreadyExists          = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile           = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest        = errors.New("invite request is invalid")
+	ErrInvalidMessage           = errors.New("message text and conversation are required")
+	ErrInvalidTimestamp         = errors.New("message timestamp is invalid")
+	ErrMessageNotOwned          = errors.New("message is not owned by user")
+	ErrMessageAlreadyDeleted    = errors.New("message is already deleted")
+	ErrInvalidConversation      = errors.New("conversation name is invalid")
+	ErrInvalidWorkspace         = errors.New("workspace settings are invalid")
+	ErrInvalidConversationPrefs = errors.New("conversation preferences are invalid")
+	ErrInvalidReaction          = errors.New("reaction name is invalid")
+	ErrBlobUnavailable          = errors.New("blob storage is unavailable")
+	ErrInvalidFile              = errors.New("file metadata is invalid")
+	ErrInvalidSearch            = errors.New("search query is invalid")
+	ErrInvalidProfile           = errors.New("user profile is invalid")
+	ErrInvalidScheduledStatus   = errors.New("scheduled status is invalid")
+	ErrScheduledStatusLimit     = errors.New("five statuses are already scheduled")
+	ErrInvalidPresence          = errors.New("user presence is invalid")
+	ErrInvalidSnooze            = errors.New("snooze duration must be between 1 and 1440 minutes")
+	ErrInvalidReminder          = errors.New("reminder text, user, and time are required")
+	ErrInvalidLaterReminder     = errors.New("Later reminder arguments are invalid")
+	ErrReminderTimeInPast       = errors.New("reminder time is in the past")
+	ErrScheduledTimeInPast      = errors.New("scheduled message time is in the past")
+	ErrScheduledTimeTooFar      = errors.New("scheduled message time is more than 120 days away")
+	ErrScheduledTooMany         = errors.New("too many messages are scheduled in the channel window")
+	ErrInvalidUserGroup         = errors.New("user group name, handle, and members are invalid")
+	ErrInvalidCall              = errors.New("call external id and join URL are required")
+	ErrInvalidEphemeral         = errors.New("ephemeral message recipient, conversation, and text are required")
+	ErrInvalidAccessLog         = errors.New("access log fields are invalid")
+	ErrInvalidEmoji             = errors.New("custom emoji name or URL is invalid")
+	ErrEmojiAlreadyExists       = errors.New("custom emoji already exists")
+	ErrInvalidRemoteFile        = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest     = errors.New("invite request is invalid")
+	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
+	// person reading it needs to know whether to ask for a new invitation or
+	// to check which address they signed in with.
+	ErrInvitationExpired = errors.New("invitation has expired")
+	// ErrHuddleNotOwned refuses to end a huddle on everyone else's behalf.
+	ErrHuddleNotOwned              = errors.New("huddle is not owned by this actor")
 	ErrInvalidAppApproval          = errors.New("app approval is invalid")
 	ErrInvalidView                 = errors.New("view payload is invalid")
 	ErrAppHomeNotEnabled           = errors.New("app home tab is not enabled")
@@ -1329,7 +1335,46 @@ func (m Messages) ConversationInfo(ctx context.Context, workspaceID domain.Works
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.GetConversation(ctx, conversationID)
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.withSharedIdentity(ctx, conversation), nil
+}
+
+// withSharedIdentity fills the Slack Connect fields conversations.info emits.
+// They are derived from the teams already attached and the invitations still
+// outstanding, rather than stored as flags someone has to remember to clear: a
+// decided invitation that left a pending flag set would show a pending badge
+// forever, and the derived answer cannot drift from the rows it is read from.
+//
+// A failure to read either leaves the fields false rather than failing the
+// conversation: a channel that will not render because its sharing state could
+// not be read is a worse outcome than one whose Connect badge is missing.
+func (m Messages) withSharedIdentity(ctx context.Context, conversation domain.Conversation) domain.Conversation {
+	if conversation.ID == "" || conversation.IsDirect || conversation.IsGroupDirect {
+		return conversation
+	}
+	if teams, _, err := m.Store.ListConversationTeams(ctx, conversation.WorkspaceID, conversation.ID); err == nil {
+		for _, team := range teams {
+			if team != conversation.WorkspaceID {
+				conversation.IsExtShared = true
+				break
+			}
+		}
+	}
+	for _, status := range []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved} {
+		page, err := m.Store.ListSharedInvites(ctx, conversation.WorkspaceID, status, domain.PageRequest{Limit: 50})
+		if err != nil {
+			continue
+		}
+		for _, invite := range page.Invites {
+			if invite.ConversationID == conversation.ID {
+				conversation.IsPendingExtShared = true
+			}
+		}
+	}
+	return conversation
 }
 
 func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, requestedID domain.UserID) (domain.User, error) {
@@ -1641,7 +1686,24 @@ func (m Messages) AdminApproveInviteRequest(ctx context.Context, workspaceID dom
 	return m.changeInviteRequestStatus(ctx, workspaceID, actorID, id, domain.InviteRequestApproved)
 }
 
+// AdminDenyInviteRequest answers a pending request, and withdraws an approved
+// invitation nobody has accepted yet. The two are different facts and are
+// recorded as different statuses: denied is the answer to a request, revoked is
+// the withdrawal of an answer already given.
 func (m Messages) AdminDenyInviteRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.InviteRequestID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if id == "" {
+		return ErrInvalidInviteRequest
+	}
+	request, err := m.Store.GetInviteRequest(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	if request.Status == domain.InviteRequestApproved {
+		return m.reviewInviteRequest(ctx, workspaceID, actorID, id, domain.InviteRequestApproved, domain.InviteRequestRevoked)
+	}
 	return m.changeInviteRequestStatus(ctx, workspaceID, actorID, id, domain.InviteRequestDenied)
 }
 
@@ -1659,15 +1721,99 @@ func (m Messages) changeInviteRequestStatus(ctx context.Context, workspaceID dom
 	if request.Status != domain.InviteRequestPending {
 		return ErrInvalidInviteRequest
 	}
+	return m.reviewInviteRequest(ctx, workspaceID, actorID, id, domain.InviteRequestPending, status)
+}
+
+func (m Messages) reviewInviteRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.InviteRequestID, from, status domain.InviteRequestStatus) error {
 	topic := "invite_request.approved"
-	if status == domain.InviteRequestDenied {
+	switch status {
+	case domain.InviteRequestDenied:
 		topic = "invite_request.denied"
+	case domain.InviteRequestRevoked:
+		topic = "invite_request.revoked"
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload(topic, events.String("invite_request_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetInviteRequestStatus(ctx, workspaceID, id, status, time.Now().UTC(), event)
+	return m.Store.SetInviteRequestStatus(ctx, workspaceID, id, from, status, time.Now().UTC(), event)
+}
+
+// InvitationLifetime bounds how long an invitation may be accepted for. It runs
+// from when the invitation is recorded: an invitation that sat in the queue for
+// a month is not made fresh by someone finally approving it.
+const InvitationLifetime = 14 * 24 * time.Hour
+
+// InvitationPreview reads one invitation with no authority check, because the
+// person it is for has no account and no session yet — that is the whole point
+// of the page it feeds. It is safe to read without authority because it grants
+// nothing: acceptance is decided against an address the identity provider has
+// verified, so knowing an invitation exists does not let anyone redeem it.
+func (m Messages) InvitationPreview(ctx context.Context, workspaceID domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
+	if strings.TrimSpace(string(id)) == "" {
+		return domain.InviteRequest{}, ErrInvalidInviteRequest
+	}
+	return m.Store.GetInviteRequest(ctx, workspaceID, id)
+}
+
+// AcceptInvitationForEmail redeems the approved invitation for a
+// provider-verified address, creating the member it promised at the recorded
+// guest tier and joining every channel it recorded.
+//
+// The caller MUST have verified the address with the identity provider first.
+// The address is the whole authorization: this method has no session and no
+// actor behind it, exactly like ProvisionExternalUser, and the invitation is
+// the standing decision an administrator already made about that address.
+func (m Messages) AcceptInvitationForEmail(ctx context.Context, workspaceID domain.WorkspaceID, email, displayName string) (domain.User, error) {
+	email = domain.NormalizeEmail(email)
+	if workspaceID == "" || email == "" {
+		return domain.User{}, ErrInvalidInviteRequest
+	}
+	request, err := m.Store.FindInviteRequestByEmail(ctx, workspaceID, email, domain.InviteRequestApproved)
+	if err != nil {
+		return domain.User{}, err
+	}
+	now := time.Now().UTC()
+	if !request.Acceptable(now) {
+		return domain.User{}, ErrInvitationExpired
+	}
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		name = strings.TrimSpace(request.RealName)
+	}
+	if name == "" {
+		name = email
+	}
+	id, err := domain.NewUserID()
+	if err != nil {
+		return domain.User{}, err
+	}
+	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: name, RealName: name, Presence: domain.PresenceAuto}
+	membership := domain.WorkspaceMembership{
+		WorkspaceID: workspaceID, UserID: id, Role: domain.WorkspaceRoleMember, Active: true,
+		Restricted: request.Restricted, UltraRestricted: request.UltraRestricted,
+	}
+	createdPayload, err := events.UserChangePayload("user.created", user, false, false, now)
+	if err != nil {
+		return domain.User{}, err
+	}
+	created, err := newEvent(workspaceID, "", createdPayload, now)
+	if err != nil {
+		return domain.User{}, err
+	}
+	accepted, err := newEvent(workspaceID, id, events.NewPayload("invite_request.accepted",
+		events.String("invite_request_id", string(request.ID)), events.String("user_id", string(id))), now)
+	if err != nil {
+		return domain.User{}, err
+	}
+	acceptance := domain.InviteRequestAcceptance{
+		WorkspaceID: workspaceID, RequestID: request.ID, User: user, Membership: membership,
+		Channels: append([]domain.ConversationID(nil), request.ChannelIDs...), AcceptedAt: now,
+	}
+	if err := m.Store.AcceptInviteRequest(ctx, acceptance, []events.Event{created, accepted}); err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
 }
 
 func (m Messages) AdminListInviteRequests(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, status domain.InviteRequestStatus, request domain.PageRequest) (domain.InviteRequestPage, error) {
@@ -1719,7 +1865,7 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 		return err
 	}
 	now := time.Now().UTC()
-	value := domain.InviteRequest{ID: domain.InviteRequestID(id), WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: normalizedChannels, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(), Status: domain.InviteRequestPending, CreatedAt: now}
+	value := domain.InviteRequest{ID: domain.InviteRequestID(id), WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: normalizedChannels, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(), Status: domain.InviteRequestPending, CreatedAt: now, ExpiresAt: now.Add(InvitationLifetime)}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("invite_request.created", events.String("invite_request_id", string(value.ID))), now)
 	if err != nil {
 		return err
@@ -3551,7 +3697,11 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.RenameConversation(ctx, conversationID, name, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelName, name)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.RenameConversation(ctx, conversationID, name, event, notice)
 }
 
 func (m Messages) SetConversationTopic(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, topic string) (domain.Conversation, error) {
@@ -3566,7 +3716,11 @@ func (m Messages) SetConversationTopic(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.SetConversationTopic(ctx, conversationID, topic, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelTopic, topic)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.SetConversationTopic(ctx, conversationID, topic, event, notice)
 }
 
 func (m Messages) SetConversationPurpose(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, purpose string) (domain.Conversation, error) {
@@ -3581,7 +3735,11 @@ func (m Messages) SetConversationPurpose(ctx context.Context, workspaceID domain
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.SetConversationPurpose(ctx, conversationID, purpose, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelPurpose, purpose)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.SetConversationPurpose(ctx, conversationID, purpose, event, notice)
 }
 
 func (m Messages) SetConversationArchived(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, archived bool) (domain.Conversation, error) {
@@ -3649,7 +3807,11 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	if err := m.Store.AddConversationMember(ctx, conversationID, userID, event); err != nil {
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelJoin, "")
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := m.Store.AddConversationMember(ctx, conversationID, userID, event, notice); err != nil {
 		return domain.Conversation{}, err
 	}
 	return conversation, nil
@@ -4441,7 +4603,11 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveConversationMember(ctx, conversationID, userID, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelLeave, "")
+	if err != nil {
+		return err
+	}
+	return m.Store.RemoveConversationMember(ctx, conversationID, userID, event, notice)
 }
 
 func (m Messages) isDefaultConversation(ctx context.Context, workspaceID domain.WorkspaceID, conversationID domain.ConversationID) (bool, error) {
@@ -4472,6 +4638,57 @@ func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain
 	return m.Store.RemoveConversationMember(ctx, conversationID, targetID, event)
 }
 
+// MessageAt resolves a message by its public timestamp, which is the
+// identifier every Slack permalink, action and API argument names it by. The
+// caller must be able to read the conversation; a message that does not exist
+// and one in a conversation the caller may not read are the same answer, so
+// the lookup cannot be used to probe for either.
+func (m Messages) MessageAt(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Message, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversation); err != nil {
+		return domain.Message{}, err
+	}
+	createdAt, err := domain.ParseMessageTimestamp(timestamp)
+	if err != nil {
+		return domain.Message{}, ErrInvalidTimestamp
+	}
+	message, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+	if err != nil || message.WorkspaceID != workspaceID || message.Deleted {
+		return domain.Message{}, store.ErrNotFound
+	}
+	return message, nil
+}
+
+// ReadCursor reports where a member has read to in a conversation. MarkRead
+// has always been on this seam; the reader was not, so nothing above the
+// store could render an unread divider or answer "which message is the first
+// unread one" without writing a cursor to find out.
+func (m Messages) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ReadCursor, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.ReadCursor{}, err
+	}
+	cursor, err := m.Store.GetReadCursor(ctx, workspaceID, userID, conversationID)
+	if errors.Is(err, store.ErrNotFound) {
+		// A member who has never marked anything read has read nothing, which
+		// is a cursor at the zero instant rather than a missing record: every
+		// caller would otherwise have to translate the same absence.
+		return domain.ReadCursor{WorkspaceID: workspaceID, UserID: userID, Conversation: conversationID}, nil
+	}
+	if err != nil {
+		return domain.ReadCursor{}, err
+	}
+	return cursor, nil
+}
+
+// ThreadSummaries reports what each named thread root has accumulated. The
+// caller must be able to read the conversation; the summary discloses reply
+// counts and participants, which are conversation content.
+func (m Messages) ThreadSummaries(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return nil, err
+	}
+	return m.Store.ThreadSummaries(ctx, conversationID, roots)
+}
+
 func (m Messages) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.ReadCursor, error) {
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.ReadCursor{}, err
@@ -4498,7 +4715,7 @@ func (m Messages) WorkspaceNotificationPreferences(ctx context.Context, workspac
 	return m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
 }
 
-func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders bool) (domain.WorkspaceNotificationPreferences, error) {
+func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err
 	}
@@ -4506,6 +4723,7 @@ func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, works
 		WorkspaceID: workspaceID, UserID: userID, Level: level,
 		Keywords:         domain.NormalizeNotificationKeywords(keywords),
 		ActivityChannels: activityChannels, ActivityReminders: activityReminders,
+		BrowserNotifications: browserNotifications,
 	}
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, store.InvalidArgument("workspace notification preferences are invalid")
@@ -5737,6 +5955,122 @@ func (m Messages) validateCallUsers(ctx context.Context, workspaceID domain.Work
 	return nil
 }
 
+// StartHuddle starts, or joins, the conversation's huddle.
+//
+// Membership of the conversation is the authority: a huddle happens inside a
+// conversation and is visible to the people in it, so being able to read the
+// conversation is exactly the right to be in its huddle. AddCall checks neither
+// membership nor posting rights because an app-registered call has no
+// conversation to check against — the two operations are deliberately not the
+// same check.
+func (m Messages) StartHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, title string) (domain.Call, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, actor, conversationID); err != nil {
+		return domain.Call{}, err
+	}
+	id, err := domain.NewCallID()
+	if err != nil {
+		return domain.Call{}, err
+	}
+	now := time.Now().UTC()
+	value := domain.Call{
+		ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindHuddle, ConversationID: conversationID,
+		Title: strings.TrimSpace(title), CreatedBy: actor, StartedAt: now,
+	}
+	started, err := huddleEvent(workspaceID, actor, "huddle.started", id, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", id, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	call, _, err := m.Store.StartHuddle(ctx, value, started, joined)
+	return call, err
+}
+
+// JoinHuddle adds the actor to the conversation's running huddle. It is
+// separate from StartHuddle so a client can express "join what is there"
+// without the risk of starting a second one if it has just ended.
+func (m Messages) JoinHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	call, err := m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", call.ID, conversationID, time.Now().UTC())
+	if err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.JoinCall(ctx, workspaceID, call.ID, actor, joined)
+}
+
+// LeaveHuddle removes the actor. The store ends the huddle when the last person
+// leaves, in the same transaction, so a conversation never shows a huddle
+// nobody is in.
+func (m Messages) LeaveHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	call, err := m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	now := time.Now().UTC()
+	left, err := huddleEvent(workspaceID, actor, "huddle.left", call.ID, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.LeaveCall(ctx, workspaceID, call.ID, actor, left, ended)
+}
+
+// EndHuddle ends it for everyone. Only the person who started it or a workspace
+// administrator may: ending a huddle removes everyone else from it, which is
+// not a thing any participant should be able to do to the others.
+func (m Messages) EndHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	call, err := m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if call.CreatedBy != actor {
+		if adminErr := m.requireWorkspaceAdmin(ctx, workspaceID, actor); adminErr != nil {
+			return domain.Call{}, ErrHuddleNotOwned
+		}
+	}
+	now := time.Now().UTC()
+	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	duration := int64(now.Sub(call.StartedAt).Seconds())
+	if duration < 0 {
+		duration = 0
+	}
+	if err := m.Store.EndCall(ctx, workspaceID, call.ID, duration, ended); err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.GetCall(ctx, workspaceID, call.ID)
+}
+
+// ActiveHuddle reports the conversation's running huddle, or ErrNotFound.
+func (m Messages) ActiveHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	return m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+}
+
+func (m Messages) activeHuddleFor(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID) (domain.Call, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, actor, conversationID); err != nil {
+		return domain.Call{}, err
+	}
+	return m.Store.ActiveHuddle(ctx, workspaceID, conversationID)
+}
+
+func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic string, id domain.CallID, conversationID domain.ConversationID, at time.Time) (events.Event, error) {
+	return newEvent(workspaceID, actor, events.NewPayload(topic,
+		events.String("call_id", string(id)),
+		events.String("channel_id", string(conversationID)),
+		events.String("user_id", string(actor)),
+	), at)
+}
+
 func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, users []domain.UserID) (domain.Call, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
@@ -5761,7 +6095,7 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if err != nil {
 		return domain.Call{}, err
 	}
-	value := domain.Call{ID: id, WorkspaceID: workspaceID, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, StartedAt: startedAt}
+	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, StartedAt: startedAt}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("call.created", events.String("call_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err
@@ -5899,7 +6233,17 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 		return "", store.ErrNotFound
 	}
 	canonical := domain.NewMessageTimestamp(message.CreatedAt)
-	return "https://sameoldchat.local/archives/" + url.PathEscape(string(conversation)) + "/p" + strings.ReplaceAll(string(canonical), ".", ""), nil
+	// Slack's shape is <origin>/archives/<channel>/p<ts without the dot>, and
+	// internal/web serves exactly that path, redirecting into the window that
+	// contains the message.
+	//
+	// The origin is deliberately omitted rather than guessed. This used to
+	// return https://sameoldchat.local/..., a host that exists nowhere, so
+	// every permalink the product handed out was unfollowable. The service
+	// does not know what origin served the request — the web and API handlers
+	// do — and a relative permalink resolves correctly against whichever one
+	// did, which is the honest answer available here.
+	return "/archives/" + url.PathEscape(string(conversation)) + "/p" + strings.ReplaceAll(string(canonical), ".", ""), nil
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
@@ -5919,6 +6263,39 @@ func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.Workspace
 		return ErrInvalidAccessLog
 	}
 	return m.Store.RecordAccess(ctx, domain.AccessLog{WorkspaceID: workspaceID, UserID: userID, Username: user.Name, CreatedAt: time.Now().UTC(), IP: ip, UserAgent: userAgent})
+}
+
+// AnalyticsBusiestChannels bounds the busiest-channel list the dashboard asks
+// for. It is a product decision, not a store one, so it lives here.
+const AnalyticsBusiestChannels = 10
+
+// WorkspaceAnalytics reports what the workspace holds and what has happened in
+// it since an instant the caller chooses. It is administrative: the counts span
+// private conversations the actor is not in, which is why it requires the
+// workspace administrator role rather than mere membership.
+// UserWorkspaces lists the workspaces the actor may switch into. It resolves by
+// the actor's own verified address, and it is deliberately readable only about
+// oneself: which workspaces a given address belongs to is exactly the fact a
+// directory of one deployment must not hand out about other people.
+func (m Messages) UserWorkspaces(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) ([]domain.WorkspaceMembershipSummary, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	user, err := m.Store.GetUser(ctx, actorID)
+	if err != nil {
+		return nil, err
+	}
+	if user.WorkspaceID != workspaceID {
+		return nil, store.ErrNotFound
+	}
+	return m.Store.ListWorkspacesForEmail(ctx, user.Email)
+}
+
+func (m Messages) WorkspaceAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, since time.Time) (domain.WorkspaceAnalytics, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	return m.Store.WorkspaceAnalytics(ctx, workspaceID, since.UTC(), AnalyticsBusiestChannels)
 }
 
 func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
@@ -6116,7 +6493,21 @@ func (m Messages) Delete(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if err != nil {
 		return domain.Message{}, err
 	}
-	if err := m.Store.UpdateMessage(ctx, message, event); err != nil {
+	// Deleting the message retracts the shares it carried, so every file on it
+	// is a candidate for file.unshared. The store journals only the candidates
+	// whose share actually ended; see store.Store.DeleteMessage.
+	unshares := make([]store.FileUnshare, 0, len(message.Files))
+	for _, file := range message.Files {
+		unshared := file
+		unshared.SharedChannels = slices.DeleteFunc(append([]domain.ConversationID(nil), file.SharedChannels...),
+			func(channel domain.ConversationID) bool { return channel == conversation })
+		unshareEvent, eventErr := fileEventAt(workspaceID, userID, "file.unshared", unshared, conversation, time.Now().UTC())
+		if eventErr != nil {
+			return domain.Message{}, eventErr
+		}
+		unshares = append(unshares, store.FileUnshare{FileID: file.ID, Event: unshareEvent})
+	}
+	if err := m.Store.DeleteMessage(ctx, message, event, unshares); err != nil {
 		return domain.Message{}, err
 	}
 	return message, nil
@@ -6247,6 +6638,49 @@ func conversationPayload(topic string, conversationID domain.ConversationID) eve
 // the channel_* and group_* vocabularies, and the acting user. `created` is
 // recorded only where the event IS the creation, because the domain
 // conversation carries no creation instant of its own.
+// conversationNotice builds the message a conversation change posts into the
+// conversation — Slack's channel_join, channel_leave, channel_topic,
+// channel_purpose and channel_name messages. It is written by the same store
+// call as the change it describes, so the two commit together.
+//
+// The text is the Slack phrasing, with the actor as a mention the client
+// resolves like any other: the notice is an ordinary durable message that
+// happens to carry a subtype, not a second rendering path.
+func conversationNotice(workspaceID domain.WorkspaceID, conversationID domain.ConversationID, actorID domain.UserID, subtype domain.MessageSubtype, detail string) (domain.Message, error) {
+	id, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	text := ""
+	switch subtype {
+	case domain.MessageSubtypeChannelJoin:
+		text = "<@" + string(actorID) + "> has joined the channel"
+	case domain.MessageSubtypeChannelLeave:
+		text = "<@" + string(actorID) + "> has left the channel"
+	case domain.MessageSubtypeChannelTopic:
+		text = "<@" + string(actorID) + "> set the channel topic: " + detail
+		if strings.TrimSpace(detail) == "" {
+			text = "<@" + string(actorID) + "> cleared the channel topic"
+		}
+	case domain.MessageSubtypeChannelPurpose:
+		text = "<@" + string(actorID) + "> set the channel purpose: " + detail
+		if strings.TrimSpace(detail) == "" {
+			text = "<@" + string(actorID) + "> cleared the channel purpose"
+		}
+	case domain.MessageSubtypeChannelName:
+		text = "<@" + string(actorID) + "> renamed the channel to " + detail
+	default:
+		return domain.Message{}, ErrInvalidMessage
+	}
+	return domain.Message{
+		ID: id, WorkspaceID: workspaceID, Conversation: conversationID, AuthorID: actorID,
+		Text: text, Subtype: subtype, CreatedAt: domain.MessageInstant(time.Now()),
+		// Normalized exactly as a composed message is, so the two storage
+		// profiles cannot disagree about what an empty attachment list is.
+		Attachments: "[]",
+	}, nil
+}
+
 func conversationLifecycleEvent(workspaceID domain.WorkspaceID, topic string, conversation domain.Conversation, actorID domain.UserID) (events.Event, error) {
 	now := time.Now().UTC()
 	fields := []events.Field{
@@ -6880,7 +7314,8 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		(strings.TrimSpace(request.Text) == "" && normalizedBlocks == "" && normalizedAttachments == "") ||
 		messageTextTooLong(request.Text) || (request.MarkdownText && utf8.RuneCountInString(request.Text) > 12000) ||
 		(request.Parse != "" && request.Parse != "none" && request.Parse != "full") ||
-		(request.ReplyBroadcast && request.ThreadTimestamp == "") {
+		(request.ReplyBroadcast && request.ThreadTimestamp == "") ||
+		!request.Subtype.Valid() {
 		return domain.Message{}, ErrInvalidMessage
 	}
 	metadata := ""
@@ -6943,7 +7378,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		ID: id, WorkspaceID: workspaceID, Conversation: request.Conversation, AuthorID: authorID,
 		AppID: request.AppID, Text: request.Text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
 		Metadata: metadata, StreamState: streamState, ThreadTimestamp: threadTimestampValue,
-		CreatedAt: domain.MessageInstant(time.Now()),
+		CreatedAt: domain.MessageInstant(time.Now()), Subtype: request.Subtype,
 	}
 	// A message's ts is its public identifier and it carries microseconds, so two
 	// messages in one conversation may not be created on the same microsecond.
@@ -7030,6 +7465,13 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 		(strings.TrimSpace(message.Text) == "" && message.Blocks == "" && message.Attachments == "") {
 		return domain.Message{}, ErrInvalidMessage
 	}
+	// The edit is recorded on the message itself, not only on the event it
+	// emits. Slack's message object carries an `edited` sub-object, and every
+	// reader — history, replies, the first-party timeline — needs it; deriving
+	// it from an outbox event meant a replayed event and the message could
+	// disagree about when the edit happened.
+	message.EditedAt = time.Now().UTC()
+	message.EditedBy = userID
 	event, err := messageMutationEvent(workspaceID, "message.changed", message, previous)
 	if err != nil {
 		return domain.Message{}, err

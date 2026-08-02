@@ -4,6 +4,9 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+// MessageAt returns a Message, which this package defines.
+import "sameoldchat/chat/v1/messages.proto";
+
 message ReadCursor {
   string workspace_id = 1;
   string user_id = 2;
@@ -17,6 +20,37 @@ message MarkReadRequest {
   string user_id = 2;
   string conversation_id = 3;
   string timestamp = 4;
+}
+
+message ReadCursorRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message MessageAtRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+}
+
+message ThreadSummariesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  repeated string thread_timestamps = 4;
+}
+
+// ThreadSummary reports what one thread root has accumulated.
+message ThreadSummary {
+  int32 reply_count = 1;
+  repeated string participants = 2;
+  string last_reply_at = 3;
+}
+
+message ThreadSummariesResponse {
+  map<string, ThreadSummary> summaries = 1;
 }
 
 message SlashCommandRequest {
@@ -173,6 +207,11 @@ message SocketModeInteractionResponseRequest {
 
 service InteractionsService {
   rpc MarkRead(MarkReadRequest) returns (ReadCursor);
+  // Named GetReadCursor because an rpc named ReadCursor would shadow the
+  // ReadCursor message type for every later return in this service.
+  rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);
+  rpc ThreadSummaries(ThreadSummariesRequest) returns (ThreadSummariesResponse);
+  rpc MessageAt(MessageAtRequest) returns (Message);
   rpc DispatchSlashCommand(SlashCommandRequest) returns (InteractionMutationResponse);
   rpc DispatchBlockAction(BlockActionRequest) returns (InteractionMutationResponse);
   rpc DispatchViewBlockAction(ViewBlockActionRequest) returns (InteractionMutationResponse);

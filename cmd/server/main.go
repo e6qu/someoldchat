@@ -392,7 +392,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// so live delivery answered 403 for every deployment whose workspace is its
 	// own. -auth-workspace already names that workspace; it is the same value
 	// external authorization provisions users into.
-	sseHandler, err := realtime.NewHandler(chatService, domain.WorkspaceID(resolved.workspace), webAuthenticator)
+	sseHandler, err := realtime.NewHandler(chatService, webAuthenticator)
 	if err != nil {
 		logger.Error("configure realtime", "error", err)
 		return exitConfiguration
@@ -403,7 +403,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// to slog.Default() instead of this process's configured handler.
 	sseHandler.Logger = logger
 	sseHandler.Register(mux)
-	rtmHandler, err := realtime.NewRTMHandler(chatService, domain.WorkspaceID(resolved.workspace), chatService, chatService)
+	rtmHandler, err := realtime.NewRTMHandler(chatService, chatService, chatService)
 	if err != nil {
 		logger.Error("configure RTM", "error", err)
 		return exitConfiguration

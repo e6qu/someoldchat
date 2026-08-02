@@ -30,6 +30,7 @@ service.conversation_not_archived
 service.emoji_already_exists
 service.function_access_denied
 service.function_not_running
+service.huddle_not_owned
 service.invalid_access_log
 service.invalid_app_approval
 service.invalid_app_manifest
@@ -64,6 +65,7 @@ service.invalid_reminder
 service.invalid_remote_file
 service.invalid_scheduled_status
 service.invalid_search
+service.invalid_shared_invite
 service.invalid_snooze
 service.invalid_stream_chunks
 service.invalid_timestamp
@@ -73,6 +75,7 @@ service.invalid_user_group
 service.invalid_view
 service.invalid_workflow_step
 service.invalid_workspace
+service.invitation_expired
 service.last_workspace_owner
 service.message_already_deleted
 service.message_not_owned
@@ -88,6 +91,8 @@ service.scheduled_status_limit
 service.scheduled_time_in_past
 service.scheduled_time_too_far
 service.scheduled_too_many
+service.shared_invite_settled
+service.slack_connect_full
 service.slash_command_in_thread
 service.slash_command_not_found
 service.webhook_trigger_secret

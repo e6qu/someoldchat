@@ -80,6 +80,16 @@ CREATE TABLE IF NOT EXISTS conversations (
 );
 CREATE TABLE IF NOT EXISTS workspace_default_channels (workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (workspace_id, conversation_id));
 CREATE TABLE IF NOT EXISTS conversation_teams (conversation_id TEXT NOT NULL REFERENCES conversations(id), team_id TEXT NOT NULL REFERENCES workspaces(id), org_channel INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (conversation_id, team_id));
+CREATE TABLE IF NOT EXISTS shared_invites (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ conversation_id TEXT NOT NULL REFERENCES conversations(id), target_workspace_id TEXT NOT NULL DEFAULT '',
+ target_email TEXT NOT NULL DEFAULT '', invited_by TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL,
+ created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, settled_at INTEGER NOT NULL DEFAULT 0,
+ expires_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS shared_invites_workspace ON shared_invites(workspace_id, status, id);
+CREATE INDEX IF NOT EXISTS shared_invites_target ON shared_invites(target_workspace_id, status, id);
+CREATE INDEX IF NOT EXISTS shared_invites_conversation ON shared_invites(conversation_id, status);
 CREATE TABLE IF NOT EXISTS slack_apps (
  id TEXT PRIMARY KEY, development_workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
  name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL UNIQUE, signing_secret_hash TEXT NOT NULL,
@@ -155,7 +165,7 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
  can_thread_types TEXT NOT NULL DEFAULT '[]', can_thread_users TEXT NOT NULL DEFAULT '[]',
  who_can_post_types TEXT NOT NULL DEFAULT '[]', who_can_post_users TEXT NOT NULL DEFAULT '[]'
 );
-CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0, accepted_by TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS app_bot_tokens (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), token_ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
@@ -238,9 +248,10 @@ CREATE TABLE IF NOT EXISTS messages (
 	conversation TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
 	app_id TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', attachments TEXT NOT NULL DEFAULT '[]',
 	metadata TEXT NOT NULL DEFAULT '', stream_state TEXT NOT NULL DEFAULT '', thread_timestamp TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, unfurls TEXT NOT NULL DEFAULT '{}',
-	text_folded TEXT NOT NULL DEFAULT ''
+	text_folded TEXT NOT NULL DEFAULT '', edited_at TEXT NOT NULL DEFAULT '', edited_by TEXT NOT NULL DEFAULT '', subtype TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS messages_conversation_created ON messages(conversation, created_at, id);
+CREATE INDEX IF NOT EXISTS messages_thread ON messages(conversation, thread_timestamp, created_at, id);
 CREATE TABLE IF NOT EXISTS ephemeral_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  conversation_id TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
@@ -319,6 +330,7 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  level TEXT NOT NULL, keywords TEXT NOT NULL DEFAULT '[]',
  activity_channels INTEGER NOT NULL DEFAULT 1, activity_reminders INTEGER NOT NULL DEFAULT 1,
+ browser_notifications INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY (workspace_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS conversation_notification_preferences (
@@ -448,9 +460,13 @@ CREATE TABLE IF NOT EXISTS calls (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), external_unique_id TEXT NOT NULL,
  external_display_id TEXT NOT NULL DEFAULT '', join_url TEXT NOT NULL, desktop_app_join_url TEXT NOT NULL DEFAULT '',
  title TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL REFERENCES users(id), started_at INTEGER NOT NULL,
- ended_at INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER NOT NULL DEFAULT 0
+ ended_at INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER NOT NULL DEFAULT 0,
+ kind TEXT NOT NULL DEFAULT 'external', conversation_id TEXT NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id, external_unique_id);
+-- The external identity is unique among external calls and absent from every
+-- huddle, so the uniqueness must not span the empty string: without the
+-- predicate the second huddle in a workspace collided with the first.
+CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id, external_unique_id) WHERE external_unique_id <> '';
 CREATE TABLE IF NOT EXISTS call_participants (
  call_id TEXT NOT NULL REFERENCES calls(id), user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY (call_id, user_id)
 );
@@ -479,7 +495,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 127
+const schemaVersion = 132
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2842,6 +2858,123 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 128 {
+		// Slack's message object carries an `edited` sub-object and a
+		// `subtype`. Both were derivable only from an outbox event or from
+		// other columns, so a reader of the message itself could not tell an
+		// edited message from an untouched one, and a workspace-generated
+		// notice was indistinguishable from something a person typed.
+		columns, err := s.tableColumns(ctx, db, "messages")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"edited_at TEXT NOT NULL DEFAULT ''",
+			"edited_by TEXT NOT NULL DEFAULT ''",
+			"subtype TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate message %s: %w", name, err)
+			}
+		}
+		// Thread summaries group by (conversation, thread_timestamp); without
+		// this index every parent message in a rendered page is a table scan.
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS messages_thread ON messages(conversation, thread_timestamp, created_at, id)`); err != nil {
+			return fmt.Errorf("index message threads: %w", err)
+		}
+	}
+	if version < 129 {
+		// An invitation now has a lifetime and a terminal accepted state.
+		// Before this, approving one flipped a status and produced nothing:
+		// no user, no membership and none of the channels it recorded.
+		columns, err := s.tableColumns(ctx, db, "invite_requests")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"expires_at INTEGER NOT NULL DEFAULT 0",
+			"accepted_at INTEGER NOT NULL DEFAULT 0",
+			"accepted_by TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE invite_requests ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate invite request %s: %w", name, err)
+			}
+		}
+		// Acceptance matches an invitation to a provider-verified address.
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS invite_requests_email ON invite_requests(workspace_id, status, email)`); err != nil {
+			return fmt.Errorf("index invite request addresses: %w", err)
+		}
+	}
+	if version < 130 {
+		// A call record could not express a huddle: it had no conversation and
+		// no way to say which of the two kinds it was, so the two would have
+		// shared a shape in which each carried fields the other has no value
+		// for.
+		columns, err := s.tableColumns(ctx, db, "calls")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"kind TEXT NOT NULL DEFAULT 'external'",
+			"conversation_id TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate call %s: %w", name, err)
+			}
+		}
+		// A huddle has no external identity, so every huddle carries the empty
+		// string and the old unqualified uniqueness made the second huddle in
+		// a workspace collide with the first. The index is replaced rather
+		// than dropped: it is still the rule for external calls.
+		if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS calls_workspace_external`); err != nil {
+			return fmt.Errorf("replace the external call index: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id, external_unique_id) WHERE external_unique_id <> ''`); err != nil {
+			return fmt.Errorf("index external calls: %w", err)
+		}
+		// At most one huddle per conversation may be running. The partial
+		// unique index is what makes two concurrent starts converge rather
+		// than producing one huddle each — a read-then-create cannot.
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS calls_active_huddle ON calls(workspace_id, conversation_id) WHERE kind = 'huddle' AND ended_at = 0`); err != nil {
+			return fmt.Errorf("index active huddles: %w", err)
+		}
+	}
+	if version < 131 {
+		// Slack Connect had the post-connection half — conversation_teams and
+		// admin.conversations.disconnectShared — and no way to get there: the
+		// invitation itself had nowhere to live.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS shared_invites (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			conversation_id TEXT NOT NULL REFERENCES conversations(id), target_workspace_id TEXT NOT NULL DEFAULT '',
+			target_email TEXT NOT NULL DEFAULT '', invited_by TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL,
+			created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, settled_at INTEGER NOT NULL DEFAULT 0,
+			expires_at INTEGER NOT NULL DEFAULT 0)`); err != nil {
+			return fmt.Errorf("migrate shared invites: %w", err)
+		}
+	}
+	if version < 132 {
+		columns, err := s.tableColumns(ctx, db, "notification_preferences")
+		if err != nil {
+			return err
+		}
+		if !columns["browser_notifications"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE notification_preferences ADD COLUMN browser_notifications INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate browser notification preference: %w", err)
+			}
+		}
+	}
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -3147,6 +3280,93 @@ func (s *Store) outboxColumns(ctx context.Context, db queryExecutor) (map[string
 	return s.tableColumns(ctx, db, "outbox")
 }
 
+// insertConversationNotice writes the message a conversation change posts
+// into the conversation, inside that change's own transaction. A notice that
+// commits separately can be lost by a crash, leaving a membership or a
+// renamed channel with no visible record of how it got that way.
+//
+// It is deliberately narrower than CreateMessage: a notice carries no
+// idempotency key, no scheduled-message claim and no blocks, so none of that
+// machinery has to be reasoned about here. The timestamp collision that
+// CreateMessage resolves by retrying is resolved here the same way, by
+// stepping to the next free microsecond, because a notice must never fail a
+// membership change.
+func insertConversationNotice(ctx context.Context, tx *sql.Tx, notice domain.Message) error {
+	for attempt := 0; attempt < 1000; attempt++ {
+		stored := domain.NewStoredTime(notice.CreatedAt)
+		var owner domain.MessageID
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation = ? AND created_at = ?`, notice.Conversation, stored).Scan(&owner); {
+		case err == nil:
+			notice.CreatedAt = notice.CreatedAt.Add(time.Microsecond)
+			continue
+		case errors.Is(err, sql.ErrNoRows):
+		default:
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded, edited_at, edited_by, subtype)
+			VALUES (?, ?, ?, ?, '', ?, '', '[]', '', '', '', ?, 0, '{}', ?, '', '', ?)`,
+			notice.ID, notice.WorkspaceID, notice.Conversation, notice.AuthorID, notice.Text, stored,
+			domain.FoldSearchText(notice.Text), notice.Subtype); err != nil {
+			return classify(err)
+		}
+		return nil
+	}
+	return store.ErrMessageTimestampTaken
+}
+
+// messageSelectColumns is the one message projection every read shares. The
+// list used to be written out at each of ten call sites, so a column added to
+// the table reached some readers and not others — exactly the drift that made
+// edited_at invisible to everything but the outbox event.
+const messageSelectColumns = `id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, edited_at, edited_by, subtype`
+
+// qualifiedMessageSelectColumns is the same projection for the reads that
+// join, where every column must name its table.
+const qualifiedMessageSelectColumns = `m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls, m.edited_at, m.edited_by, m.subtype`
+
+// scanMessage reads one row of messageSelectColumns, decoding the stored
+// encodings (times, the deleted flag, the unfurl object) so no caller repeats
+// them.
+func scanMessage(row rowScanner) (domain.Message, error) {
+	var message domain.Message
+	var created, attachments, unfurls, editedAt string
+	var deleted int
+	if err := row.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID,
+		&message.AppID, &message.Text, &message.Blocks, &attachments, &message.Metadata,
+		&message.StreamState, &message.ThreadTimestamp, &created, &deleted, &unfurls,
+		&editedAt, &message.EditedBy, &message.Subtype); err != nil {
+		return domain.Message{}, err
+	}
+	parsed, err := domain.ParseStoredTime(created)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message.CreatedAt = parsed
+	if editedAt != "" {
+		edited, err := domain.ParseStoredTime(editedAt)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		message.EditedAt = edited
+	}
+	message.Deleted = deleted != 0
+	message.Attachments = attachments
+	message.Unfurls, err = decodeUnfurls(unfurls)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return message, nil
+}
+
+// storedEditedAt encodes an edit instant, or the empty string for a message
+// that has never been edited — a zero time must not become a real timestamp.
+func storedEditedAt(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return string(domain.NewStoredTime(value.UTC()))
+}
+
 func (s *Store) messageColumns(ctx context.Context, db queryExecutor) (map[string]bool, error) {
 	return s.tableColumns(ctx, db, "messages")
 }
@@ -3155,9 +3375,50 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 	return s.tableColumns(ctx, db, "sessions")
 }
 
+// migratableTables is every table a migration may inspect the columns of. It
+// is a closed list because tableColumns interpolates the name into a PRAGMA and
+// an information_schema query; an unlisted name is a programming error, not a
+// caller's input.
+var migratableTables = []string{
+	"calls",
+	"canvases",
+	"conversations",
+	"draft_attachments",
+	"drafts",
+	"ephemeral_messages",
+	"external_uploads",
+	"files",
+	"invite_requests",
+	"later_reminders",
+	"lifecycle_state",
+	"list_downloads",
+	"list_items",
+	"lists",
+	"messages",
+	"notification_preferences",
+	"oauth_codes",
+	"outbox",
+	"recent_searches",
+	"scheduled_message_files",
+	"scheduled_messages",
+	"schema_backfills",
+	"sessions",
+	"slack_apps",
+	"socket_mode_connections",
+	"tokens",
+	"users",
+	"views",
+	"workflow_revisions",
+	"workflow_steps",
+	"workflow_triggers",
+	"workflows",
+	"workspace_members",
+	"workspaces",
+}
+
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflows" && table != "workflow_steps" && table != "workflow_triggers" && table != "workflow_revisions" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
-		return nil, errors.New("unsupported schema table")
+	if !slices.Contains(migratableTables, table) {
+		return nil, fmt.Errorf("unsupported schema table %q", table)
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
@@ -3185,6 +3446,42 @@ func (s *Store) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (domain
 		return domain.Workspace{}, err
 	}
 	return s.withDefaultChannels(ctx, s.db, value)
+}
+
+func (s *Store) ListWorkspacesForEmail(ctx context.Context, email string) ([]domain.WorkspaceMembershipSummary, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT w.id, w.domain, w.name, w.description, w.discoverability, w.icon_url, u.id, m.role
+		FROM users u
+		JOIN workspace_members m ON m.workspace_id = u.workspace_id AND m.user_id = u.id
+		JOIN workspaces w ON w.id = u.workspace_id
+		WHERE u.email = ? AND u.deleted = 0 AND m.active = 1
+		ORDER BY w.id`, normalized)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.WorkspaceMembershipSummary, 0, 2)
+	for rows.Next() {
+		var summary domain.WorkspaceMembershipSummary
+		if err := rows.Scan(&summary.Workspace.ID, &summary.Workspace.Domain, &summary.Workspace.Name, &summary.Workspace.Description, &summary.Workspace.Discoverability, &summary.Workspace.IconURL, &summary.UserID, &summary.Role); err != nil {
+			return nil, err
+		}
+		result = append(result, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for index := range result {
+		workspace, err := s.withDefaultChannels(ctx, s.db, result[index].Workspace)
+		if err != nil {
+			return nil, err
+		}
+		result[index].Workspace = workspace
+	}
+	return result, nil
 }
 
 func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, event events.Event) error {
@@ -3358,6 +3655,24 @@ func (s *Store) GetUser(ctx context.Context, id domain.UserID) (domain.User, err
 }
 
 func (s *Store) CreateUser(ctx context.Context, user domain.User, membership domain.WorkspaceMembership, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := createUserTx(ctx, tx, user, membership); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// createUserTx is CreateUser without its transaction, so a larger one —
+// accepting an invitation — creates the member it promised, joins the channels
+// it recorded and consumes the invitation together or not at all.
+func createUserTx(ctx context.Context, tx *sql.Tx, user domain.User, membership domain.WorkspaceMembership) error {
 	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
 		return store.InvalidArgument("user and active workspace membership are required")
 	}
@@ -3367,11 +3682,6 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 	if (membership.Restricted && membership.UltraRestricted) || (membership.Guest() && membership.Role != domain.WorkspaceRoleMember) {
 		return store.InvalidArgument("guest membership must have exactly one guest tier and the member role")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	var workspaceExists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, user.WorkspaceID).Scan(&workspaceExists); err != nil {
 		return translateNotFound(err)
@@ -3392,8 +3702,56 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, active, restricted, ultra_restricted) VALUES (?, ?, ?, 1, ?, ?)`, membership.WorkspaceID, membership.UserID, membership.Role, boolInt(membership.Restricted), boolInt(membership.UltraRestricted)); err != nil {
 		return classify(err)
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
+	return nil
+}
+
+func (s *Store) AcceptInviteRequest(ctx context.Context, acceptance domain.InviteRequestAcceptance, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return store.InvalidArgument("accepting an invitation requires at least one event")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
+	}
+	defer tx.Rollback()
+	request, err := scanInviteRequest(tx.QueryRowContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE id = ? AND workspace_id = ?`, acceptance.RequestID, acceptance.WorkspaceID))
+	if err != nil {
+		return translateNotFound(err)
+	}
+	if !request.Acceptable(acceptance.AcceptedAt) {
+		return store.ErrInvalidInviteRequest
+	}
+	if err := createUserTx(ctx, tx, acceptance.User, acceptance.Membership); err != nil {
+		return err
+	}
+	for _, channelID := range acceptance.Channels {
+		var conversationWorkspace string
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, channelID).Scan(&conversationWorkspace); err != nil {
+			return translateNotFound(err)
+		}
+		if domain.WorkspaceID(conversationWorkspace) != acceptance.WorkspaceID {
+			return store.ErrNotFound
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members (conversation_id, user_id) VALUES (?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`, channelID, acceptance.User.ID); err != nil {
+			return classify(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE invite_requests SET status = ?, accepted_at = ?, accepted_by = ? WHERE id = ? AND workspace_id = ? AND status = ?`,
+		domain.InviteRequestAccepted, acceptance.AcceptedAt.UTC().Unix(), acceptance.User.ID, acceptance.RequestID, acceptance.WorkspaceID, domain.InviteRequestApproved)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrInvalidInviteRequest
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -4710,9 +5068,9 @@ func (s *Store) ExpandDirectConversation(ctx context.Context, expansion domain.D
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-				copyID, original.workspaceID, expansion.Target.ID, original.authorID, original.appID, original.text, original.blocks, original.attachments, original.metadata, original.streamState, original.threadTimestamp, original.createdAt, original.unfurls, original.textFolded); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded, edited_at, edited_by, subtype)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+				copyID, original.workspaceID, expansion.Target.ID, original.authorID, original.appID, original.text, original.blocks, original.attachments, original.metadata, original.streamState, original.threadTimestamp, original.createdAt, original.unfurls, original.textFolded, original.editedAt, original.editedBy, original.subtype); err != nil {
 				return classify(err)
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO message_files(message_id, file_id, position)
@@ -4751,10 +5109,13 @@ type directHistoryRow struct {
 	createdAt       string
 	unfurls         string
 	textFolded      string
+	editedAt        string
+	editedBy        domain.UserID
+	subtype         domain.MessageSubtype
 }
 
 func directHistoryRows(ctx context.Context, tx *sql.Tx, conversation domain.ConversationID) ([]directHistoryRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, unfurls, text_folded
+	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, unfurls, text_folded, edited_at, edited_by, subtype
 		FROM messages WHERE conversation = ? AND deleted = 0 ORDER BY created_at, id`, conversation)
 	if err != nil {
 		return nil, err
@@ -4763,7 +5124,7 @@ func directHistoryRows(ctx context.Context, tx *sql.Tx, conversation domain.Conv
 	values := make([]directHistoryRow, 0)
 	for rows.Next() {
 		var value directHistoryRow
-		if err := rows.Scan(&value.id, &value.workspaceID, &value.authorID, &value.appID, &value.text, &value.blocks, &value.attachments, &value.metadata, &value.streamState, &value.threadTimestamp, &value.createdAt, &value.unfurls, &value.textFolded); err != nil {
+		if err := rows.Scan(&value.id, &value.workspaceID, &value.authorID, &value.appID, &value.text, &value.blocks, &value.attachments, &value.metadata, &value.streamState, &value.threadTimestamp, &value.createdAt, &value.unfurls, &value.textFolded, &value.editedAt, &value.editedBy, &value.subtype); err != nil {
 			return nil, err
 		}
 		values = append(values, value)
@@ -4864,7 +5225,7 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	return tx.Commit()
 }
 
-func (s *Store) RenameConversation(ctx context.Context, conversation domain.ConversationID, name string, event events.Event) (domain.Conversation, error) {
+func (s *Store) RenameConversation(ctx context.Context, conversation domain.ConversationID, name string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -4884,6 +5245,11 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return domain.Conversation{}, err
+		}
+	}
 	var value domain.Conversation
 	var private, direct, groupDirect, archived int
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
@@ -4896,7 +5262,7 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.ConversationID, topic string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -4916,6 +5282,11 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return domain.Conversation{}, err
+		}
+	}
 	var value domain.Conversation
 	var private, direct, groupDirect, archived int
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
@@ -4928,7 +5299,7 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.ConversationID, purpose string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -4947,6 +5318,11 @@ func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.
 	}
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
+	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return domain.Conversation{}, err
+		}
 	}
 	var value domain.Conversation
 	var private, direct, groupDirect, archived int
@@ -5113,7 +5489,7 @@ func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequ
 	if value.Status != domain.InviteRequestPending {
 		return store.ErrAlreadyExists
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO invite_requests(id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, value.ID, value.WorkspaceID, value.Email, value.RequestedBy, string(channelIDs), value.CustomMessage, value.RealName, boolInt(value.Resend), boolInt(value.Restricted), boolInt(value.UltraRestricted), unixSeconds(value.GuestExpirationAt), value.Status, value.CreatedAt.UTC().Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO invite_requests(id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, value.ID, value.WorkspaceID, value.Email, value.RequestedBy, string(channelIDs), value.CustomMessage, value.RealName, boolInt(value.Resend), boolInt(value.Restricted), boolInt(value.UltraRestricted), unixSeconds(value.GuestExpirationAt), value.Status, value.CreatedAt.UTC().Unix(), unixSeconds(value.ExpiresAt)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -5122,31 +5498,128 @@ func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequ
 	return tx.Commit()
 }
 
-func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
+// inviteRequestSelectColumns is the one column list every invitation read
+// uses. Three readers each carried their own copy and their own scan, so a
+// column added to one was silently missing from the others.
+const inviteRequestSelectColumns = `id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at, expires_at, accepted_at, accepted_by`
+
+func scanInviteRequest(row rowScanner) (domain.InviteRequest, error) {
 	var value domain.InviteRequest
-	var created, reviewed, expiration int64
+	var created, reviewed, guestExpiration, expires, accepted int64
 	var channelIDs string
 	var resend, restricted, ultraRestricted int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at FROM invite_requests WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.RequestedBy, &channelIDs, &value.CustomMessage, &value.RealName, &resend, &restricted, &ultraRestricted, &expiration, &value.Status, &created, &reviewed)
-	if err != nil {
-		return domain.InviteRequest{}, translateNotFound(err)
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.RequestedBy, &channelIDs, &value.CustomMessage, &value.RealName, &resend, &restricted, &ultraRestricted, &guestExpiration, &value.Status, &created, &reviewed, &expires, &accepted, &value.AcceptedBy); err != nil {
+		return domain.InviteRequest{}, err
 	}
 	if err := json.Unmarshal([]byte(channelIDs), &value.ChannelIDs); err != nil {
 		return domain.InviteRequest{}, fmt.Errorf("decode invite request channels: %w", err)
 	}
 	value.Resend, value.Restricted, value.UltraRestricted = resend != 0, restricted != 0, ultraRestricted != 0
-	if expiration != 0 {
-		value.GuestExpirationAt = time.Unix(expiration, 0).UTC()
+	if guestExpiration != 0 {
+		value.GuestExpirationAt = time.Unix(guestExpiration, 0).UTC()
 	}
 	value.CreatedAt = time.Unix(created, 0).UTC()
 	if reviewed != 0 {
 		value.ReviewedAt = time.Unix(reviewed, 0).UTC()
 	}
+	if expires != 0 {
+		value.ExpiresAt = time.Unix(expires, 0).UTC()
+	}
+	if accepted != 0 {
+		value.AcceptedAt = time.Unix(accepted, 0).UTC()
+	}
 	return value, nil
 }
 
-func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
-	if status != domain.InviteRequestApproved && status != domain.InviteRequestDenied {
+func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID) (domain.InviteRequest, error) {
+	value, err := scanInviteRequest(s.db.QueryRowContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE id = ? AND workspace_id = ?`, id, workspace))
+	if err != nil {
+		return domain.InviteRequest{}, translateNotFound(err)
+	}
+	return value, nil
+}
+
+func (s *Store) WorkspaceAnalytics(ctx context.Context, workspace domain.WorkspaceID, since time.Time, busiest int) (domain.WorkspaceAnalytics, error) {
+	if busiest < 0 {
+		return domain.WorkspaceAnalytics{}, store.InvalidArgument("the busiest-channel bound must not be negative")
+	}
+	result := domain.WorkspaceAnalytics{Since: since.UTC()}
+	// domain.NewStoredTime, never a raw RFC3339: created_at is TEXT and is
+	// compared lexically, and only the stored form has a fixed-width fraction.
+	// A variable-width rendering makes one instant a byte prefix of another and
+	// the comparison silently wrong.
+	storedSince := domain.NewStoredTime(since)
+	if err := s.db.QueryRowContext(ctx, `SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN m.active = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN m.restricted = 1 OR m.ultra_restricted = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN m.role IN ('admin', 'owner') THEN 1 ELSE 0 END), 0)
+		FROM users u LEFT JOIN workspace_members m ON m.workspace_id = u.workspace_id AND m.user_id = u.id
+		WHERE u.workspace_id = ? AND u.deleted = 0`, workspace).
+		Scan(&result.Members, &result.ActiveMembers, &result.Guests, &result.Admins); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT
+			COALESCE(SUM(CASE WHEN archived = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN archived = 0 AND is_private = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN archived = 0 AND is_private = 0 THEN 1 ELSE 0 END), 0)
+		FROM conversations WHERE workspace_id = ? AND is_direct = 0 AND is_group_direct = 0`, workspace).
+		Scan(&result.ArchivedChannels, &result.PrivateChannels, &result.PublicChannels); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0)
+		FROM messages WHERE workspace_id = ? AND deleted = 0`, storedSince, workspace).
+		Scan(&result.Messages, &result.RecentMessages); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0)
+		FROM files WHERE workspace_id = ? AND deleted = 0`, storedSince, workspace).
+		Scan(&result.Files, &result.RecentFiles); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if busiest == 0 {
+		return result, nil
+	}
+	// Ties break on the identifier so two profiles, and two calls, order the
+	// same list the same way.
+	rows, err := s.db.QueryContext(ctx, `SELECT m.conversation, c.name, COUNT(*) AS total
+		FROM messages m JOIN conversations c ON c.id = m.conversation
+		WHERE m.workspace_id = ? AND m.deleted = 0 AND m.created_at >= ?
+		AND c.is_direct = 0 AND c.is_group_direct = 0
+		GROUP BY m.conversation, c.name ORDER BY total DESC, m.conversation LIMIT ?`, workspace, storedSince, busiest)
+	if err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entry domain.ChannelActivity
+		if err := rows.Scan(&entry.ConversationID, &entry.Name, &entry.Messages); err != nil {
+			return domain.WorkspaceAnalytics{}, err
+		}
+		result.BusiestChannels = append(result.BusiestChannels, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	return result, nil
+}
+
+func (s *Store) FindInviteRequestByEmail(ctx context.Context, workspace domain.WorkspaceID, email string, status domain.InviteRequestStatus) (domain.InviteRequest, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return domain.InviteRequest{}, store.ErrNotFound
+	}
+	// Newest first: an address invited twice is being re-invited, and the
+	// older record is the stale one.
+	value, err := scanInviteRequest(s.db.QueryRowContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE workspace_id = ? AND status = ? AND lower(email) = ? ORDER BY created_at DESC, id DESC LIMIT 1`, workspace, status, normalized))
+	if err != nil {
+		return domain.InviteRequest{}, translateNotFound(err)
+	}
+	return value, nil
+}
+
+func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, from, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
+	if !domain.InviteRequestReviewable(from, status) {
 		return store.ErrInvalidInviteRequest
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -5154,7 +5627,7 @@ func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.Wor
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE invite_requests SET status = ?, reviewed_at = ? WHERE id = ? AND workspace_id = ? AND status = ?`, status, reviewedAt.UTC().Unix(), id, workspace, domain.InviteRequestPending)
+	result, err := tx.ExecContext(ctx, `UPDATE invite_requests SET status = ?, reviewed_at = ? WHERE id = ? AND workspace_id = ? AND status = ?`, status, reviewedAt.UTC().Unix(), id, workspace, from)
 	if err != nil {
 		return err
 	}
@@ -5179,30 +5652,16 @@ func (s *Store) ListInviteRequests(ctx context.Context, workspace domain.Workspa
 	if err != nil {
 		return domain.InviteRequestPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at FROM invite_requests WHERE workspace_id = ? AND status = ? AND id > ? ORDER BY id LIMIT ?`, workspace, status, after, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+inviteRequestSelectColumns+` FROM invite_requests WHERE workspace_id = ? AND status = ? AND id > ? ORDER BY id LIMIT ?`, workspace, status, after, request.Limit+1)
 	if err != nil {
 		return domain.InviteRequestPage{}, err
 	}
 	defer rows.Close()
 	values := make([]domain.InviteRequest, 0, request.Limit+1)
 	for rows.Next() {
-		var value domain.InviteRequest
-		var created, reviewed, expiration int64
-		var channelIDs string
-		var resend, restricted, ultraRestricted int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.RequestedBy, &channelIDs, &value.CustomMessage, &value.RealName, &resend, &restricted, &ultraRestricted, &expiration, &value.Status, &created, &reviewed); err != nil {
+		value, err := scanInviteRequest(rows)
+		if err != nil {
 			return domain.InviteRequestPage{}, err
-		}
-		if err := json.Unmarshal([]byte(channelIDs), &value.ChannelIDs); err != nil {
-			return domain.InviteRequestPage{}, fmt.Errorf("decode invite request channels: %w", err)
-		}
-		value.Resend, value.Restricted, value.UltraRestricted = resend != 0, restricted != 0, ultraRestricted != 0
-		if expiration != 0 {
-			value.GuestExpirationAt = time.Unix(expiration, 0).UTC()
-		}
-		value.CreatedAt = time.Unix(created, 0).UTC()
-		if reviewed != 0 {
-			value.ReviewedAt = time.Unix(reviewed, 0).UTC()
 		}
 		values = append(values, value)
 	}
@@ -6810,6 +7269,226 @@ func (s *Store) FindUserMigration(ctx context.Context, workspace domain.Workspac
 	return value, nil
 }
 
+const sharedInviteSelectColumns = `id, workspace_id, conversation_id, target_workspace_id, target_email, invited_by, status, created_at, reviewed_at, settled_at, expires_at`
+
+func scanSharedInvite(row rowScanner) (domain.SharedInvite, error) {
+	var value domain.SharedInvite
+	var created, reviewed, settled, expires int64
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.ConversationID, &value.TargetWorkspaceID, &value.TargetEmail, &value.InvitedBy, &value.Status, &created, &reviewed, &settled, &expires); err != nil {
+		return domain.SharedInvite{}, err
+	}
+	value.CreatedAt = time.Unix(created, 0).UTC()
+	if reviewed != 0 {
+		value.ReviewedAt = time.Unix(reviewed, 0).UTC()
+	}
+	if settled != 0 {
+		value.SettledAt = time.Unix(settled, 0).UTC()
+	}
+	if expires != 0 {
+		value.ExpiresAt = time.Unix(expires, 0).UTC()
+	}
+	return value, nil
+}
+
+func (s *Store) CreateSharedInvite(ctx context.Context, value domain.SharedInvite, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.ConversationID == "" || value.Status != domain.SharedInvitePending {
+		return store.InvalidArgument("a shared invitation must be pending and name its conversation")
+	}
+	if value.TargetWorkspaceID == "" && strings.TrimSpace(value.TargetEmail) == "" {
+		return store.InvalidArgument("a shared invitation must name an organization or an address")
+	}
+	if value.TargetWorkspaceID == value.WorkspaceID {
+		return store.InvalidArgument("a conversation cannot be shared with its own workspace")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var conversationWorkspace string
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, value.ConversationID).Scan(&conversationWorkspace); err != nil {
+		return translateNotFound(err)
+	}
+	if domain.WorkspaceID(conversationWorkspace) != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if value.TargetWorkspaceID != "" {
+		// One outstanding invitation per organization per conversation: a
+		// second would let two acceptances each claim a place.
+		var outstanding int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM shared_invites WHERE conversation_id = ? AND target_workspace_id = ? AND status IN (?, ?, ?)`,
+			value.ConversationID, value.TargetWorkspaceID, domain.SharedInvitePending, domain.SharedInviteApproved, domain.SharedInviteAccepted).Scan(&outstanding); err != nil {
+			return err
+		}
+		if outstanding > 0 {
+			return store.ErrAlreadyExists
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_invites(`+sharedInviteSelectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
+		value.ID, value.WorkspaceID, value.ConversationID, value.TargetWorkspaceID, value.TargetEmail, value.InvitedBy, value.Status, value.CreatedAt.UTC().Unix(), unixSeconds(value.ExpiresAt)); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetSharedInvite(ctx context.Context, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	value, err := scanSharedInvite(s.db.QueryRowContext(ctx, `SELECT `+sharedInviteSelectColumns+` FROM shared_invites WHERE id = ?`, id))
+	if err != nil {
+		return domain.SharedInvite{}, translateNotFound(err)
+	}
+	return value, nil
+}
+
+func (s *Store) ListSharedInvites(ctx context.Context, workspace domain.WorkspaceID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.SharedInvitePage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.SharedInvitePage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+sharedInviteSelectColumns+` FROM shared_invites
+		WHERE (workspace_id = ? OR target_workspace_id = ?) AND status = ? AND id > ? ORDER BY id LIMIT ?`,
+		workspace, workspace, status, after, request.Limit+1)
+	if err != nil {
+		return domain.SharedInvitePage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.SharedInvite, 0, request.Limit+1)
+	for rows.Next() {
+		value, scanErr := scanSharedInvite(rows)
+		if scanErr != nil {
+			return domain.SharedInvitePage{}, scanErr
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.SharedInvitePage{}, err
+	}
+	page := domain.SharedInvitePage{HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		values = values[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	page.Invites = values
+	return page, err
+}
+
+func (s *Store) SetSharedInviteStatus(ctx context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, event events.Event) error {
+	if !domain.SharedInviteTransition(from, to) {
+		return store.InvalidArgument("a shared invitation cannot move between those states")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	column := "settled_at"
+	if to == domain.SharedInviteApproved {
+		column = "reviewed_at"
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status = ?, `+column+` = ? WHERE id = ? AND status = ?`, to, at.UTC().Unix(), id, from)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		// Either it is gone or somebody else decided it first; both are a
+		// conflict from the caller's point of view, and neither is an outage.
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM shared_invites WHERE id = ?`, id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return store.ErrNotFound
+		}
+		return store.ErrConflict
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) AcceptSharedInvite(ctx context.Context, id domain.SharedInviteID, at time.Time, emitted []events.Event) (domain.Conversation, error) {
+	if len(emitted) == 0 {
+		return domain.Conversation{}, store.InvalidArgument("accepting a shared invitation requires at least one event")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	defer tx.Rollback()
+	invite, err := scanSharedInvite(tx.QueryRowContext(ctx, `SELECT `+sharedInviteSelectColumns+` FROM shared_invites WHERE id = ?`, id))
+	if err != nil {
+		return domain.Conversation{}, translateNotFound(err)
+	}
+	if !invite.Acceptable(at) {
+		return domain.Conversation{}, store.ErrConflict
+	}
+	conversation, err := scanConversationRow(tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, invite.ConversationID))
+	if err != nil {
+		return domain.Conversation{}, translateNotFound(err)
+	}
+	// The capacity is counted inside this transaction, never from a count read
+	// earlier: two organizations accepting the last place concurrently would
+	// otherwise both be told yes.
+	var already int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_teams WHERE conversation_id = ? AND team_id = ?`, invite.ConversationID, invite.TargetWorkspaceID).Scan(&already); err != nil {
+		return domain.Conversation{}, err
+	}
+	if already == 0 {
+		var participating int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_teams WHERE conversation_id = ? AND team_id <> ?`, invite.ConversationID, conversation.WorkspaceID).Scan(&participating); err != nil {
+			return domain.Conversation{}, err
+		}
+		// The host counts towards the documented capacity.
+		if participating+1 >= domain.SlackConnectCapacity {
+			return domain.Conversation{}, store.ErrConflict
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id) VALUES (?, ?) ON CONFLICT(conversation_id, team_id) DO NOTHING`, invite.ConversationID, invite.TargetWorkspaceID); err != nil {
+			return domain.Conversation{}, classify(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status = ?, settled_at = ? WHERE id = ? AND status = ?`, domain.SharedInviteAccepted, at.UTC().Unix(), id, domain.SharedInviteApproved)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if changed != 1 {
+		return domain.Conversation{}, store.ErrConflict
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return domain.Conversation{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Conversation{}, err
+	}
+	return conversation, nil
+}
+
+// scanConversationRow reads the conversation columns every full read selects.
+func scanConversationRow(row rowScanner) (domain.Conversation, error) {
+	var value domain.Conversation
+	var archived, private, direct, groupDirect int
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
+		return domain.Conversation{}, err
+	}
+	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	return value, nil
+}
+
 func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -8380,7 +9059,7 @@ func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, o
 	return tx.Commit()
 }
 
-func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -8412,6 +9091,11 @@ func (s *Store) AddConversationMember(ctx context.Context, conversation domain.C
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
+	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -8477,7 +9161,7 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 	return tx.Commit()
 }
 
-func (s *Store) RemoveConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) RemoveConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -8503,7 +9187,73 @@ func (s *Store) RemoveConversationMember(ctx context.Context, conversation domai
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return err
 	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+func (s *Store) ThreadSummaries(ctx context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
+	summaries := make(map[domain.MessageTimestamp]domain.ThreadSummary, len(roots))
+	if conversation == "" || len(roots) == 0 {
+		return summaries, nil
+	}
+	placeholders := make([]string, 0, len(roots))
+	args := make([]any, 0, len(roots)+1)
+	args = append(args, conversation)
+	for _, root := range roots {
+		if strings.TrimSpace(string(root)) == "" {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, string(root))
+	}
+	if len(placeholders) == 0 {
+		return summaries, nil
+	}
+	// One row per (root, author) keeps the participant list and the counts in
+	// a single read; the (conversation, thread_timestamp, created_at, id)
+	// index added with the subtype columns serves it as a range scan.
+	rows, err := s.db.QueryContext(ctx, `SELECT thread_timestamp, author_id, COUNT(*), MAX(created_at)
+		FROM messages
+		WHERE conversation = ? AND deleted = 0 AND thread_timestamp IN (`+strings.Join(placeholders, ", ")+`)
+		GROUP BY thread_timestamp, author_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var root domain.MessageTimestamp
+		var author domain.UserID
+		var count int
+		var latest string
+		if err := rows.Scan(&root, &author, &count, &latest); err != nil {
+			return nil, err
+		}
+		parsed, err := domain.ParseStoredTime(latest)
+		if err != nil {
+			return nil, err
+		}
+		summary := summaries[root]
+		summary.ReplyCount += count
+		summary.Participants = append(summary.Participants, author)
+		if parsed.After(summary.LastReplyAt) {
+			summary.LastReplyAt = parsed
+		}
+		summaries[root] = summary
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Participants arrive grouped by author, so the order depends on the
+	// engine's grouping; sorting makes the projection identical everywhere.
+	for root, summary := range summaries {
+		slices.Sort(summary.Participants)
+		summaries[root] = summary
+	}
+	return summaries, nil
 }
 
 func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (domain.ReadCursor, error) {
@@ -8523,9 +9273,9 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, user)
 	var keywords string
-	var activityChannels, activityReminders int
-	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
-		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders)
+	var activityChannels, activityReminders, browserNotifications int
+	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders, browser_notifications FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
+		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders, &browserNotifications)
 	if errors.Is(err, sql.ErrNoRows) {
 		return preferences, nil
 	}
@@ -8538,6 +9288,7 @@ func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspa
 	preferences.Keywords = domain.NormalizeNotificationKeywords(preferences.Keywords)
 	preferences.ActivityChannels = activityChannels != 0
 	preferences.ActivityReminders = activityReminders != 0
+	preferences.BrowserNotifications = browserNotifications != 0
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, errors.New("stored workspace notification preferences are invalid")
 	}
@@ -8558,9 +9309,9 @@ func (s *Store) SetWorkspaceNotificationPreferences(ctx context.Context, prefere
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders`,
-		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders, browser_notifications)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders, browser_notifications = excluded.browser_notifications`,
+		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders), boolInt(preferences.BrowserNotifications)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -8679,6 +9430,15 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, domain.NewStoredTime(cursor.UpdatedAt)); err != nil {
+		return err
+	}
+	// Activity follows the cursor in BOTH directions. Marking read closed the
+	// items at or before the cursor, but marking unread — which moves the
+	// cursor backwards, and is how Slack's "mark unread from here" works —
+	// left them closed, so the sidebar showed unread messages while Activity
+	// insisted there was nothing to see. MSG-02 requires the two to agree.
+	if _, err := tx.ExecContext(ctx, `UPDATE activity_items SET read_at = 0 WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND occurred_at > ? AND read_at <> 0`,
+		cursor.WorkspaceID, cursor.UserID, cursor.Conversation, readAt.UTC().UnixNano()); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE activity_items SET read_at = ? WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND occurred_at <= ? AND read_at = 0`,
@@ -9199,7 +9959,7 @@ func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledM
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.AppID, message.Text, blocks, attachments, message.Metadata, message.StreamState, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text)); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded, edited_at, edited_by, subtype) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.AppID, message.Text, blocks, attachments, message.Metadata, message.StreamState, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text), storedEditedAt(message.EditedAt), message.EditedBy, message.Subtype); err != nil {
 		_ = tx.Rollback()
 		// A duplicate identifier is ErrAlreadyExists and a missing conversation,
 		// author or workspace is ErrNotFound; neither may reach the caller as a raw
@@ -9292,8 +10052,8 @@ func insertFileShareMessage(ctx context.Context, tx *sql.Tx, message domain.Mess
 	default:
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-		message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.AppID, message.Text, blocks, attachments, message.Metadata, message.StreamState, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded, edited_at, edited_by, subtype) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+		message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.AppID, message.Text, blocks, attachments, message.Metadata, message.StreamState, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text), storedEditedAt(message.EditedAt), message.EditedBy, message.Subtype); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM closed_direct_conversations WHERE conversation_id = ?`, message.Conversation); err != nil {
@@ -9741,25 +10501,10 @@ func (s *Store) messageTimestampTaken(ctx context.Context, conversation domain.C
 // on the SQL profiles and returned the message on the memory profile whenever the
 // caller's instant carried sub-microsecond precision.
 func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.ConversationID, createdAt time.Time) (domain.Message, error) {
-	var message domain.Message
-	var deleted int
-	var stored string
-	var blocks, attachments, unfurls string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, domain.NewStoredTime(domain.MessageInstant(createdAt))).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.AppID, &message.Text, &blocks, &attachments, &message.Metadata, &message.StreamState, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
+	message, err := scanMessage(s.db.QueryRowContext(ctx, `SELECT `+messageSelectColumns+` FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, domain.NewStoredTime(domain.MessageInstant(createdAt))))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
-	if err != nil {
-		return domain.Message{}, err
-	}
-	message.CreatedAt, err = domain.ParseStoredTime(stored)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	message.Deleted = deleted != 0
-	message.Blocks = blocks
-	message.Attachments = attachments
-	message.Unfurls, err = decodeUnfurls(unfurls)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -9772,6 +10517,54 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 }
 
 func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updateMessageTx(ctx, tx, message, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteMessage(ctx context.Context, message domain.Message, event events.Event, unshares []store.FileUnshare) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updateMessageTx(ctx, tx, message, event); err != nil {
+		return err
+	}
+	for _, unshare := range unshares {
+		// A share ends only with the last live message carrying the file into
+		// this conversation, so the delete is conditional on there being none.
+		result, err := tx.ExecContext(ctx, `DELETE FROM file_shares WHERE file_id = ? AND conversation_id = ?
+			AND NOT EXISTS (
+				SELECT 1 FROM message_files mf_carrier
+				JOIN messages m_carrier ON m_carrier.id = mf_carrier.message_id
+				WHERE mf_carrier.file_id = ? AND m_carrier.conversation = ?
+				AND m_carrier.deleted = 0 AND m_carrier.id <> ?
+			)`, unshare.FileID, message.Conversation, unshare.FileID, message.Conversation, message.ID)
+		if err != nil {
+			return err
+		}
+		removed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if removed == 0 {
+			continue
+		}
+		if err := insertOutbox(ctx, tx, unshare.Event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func updateMessageTx(ctx context.Context, tx *sql.Tx, message domain.Message, event events.Event) error {
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
 		return err
@@ -9787,16 +10580,11 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	deleted := 0
 	if message.Deleted {
 		deleted = 1
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, text_folded = ?, blocks = ?, attachments = ?, metadata = ?, stream_state = ?, deleted = ?, unfurls = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, domain.FoldSearchText(message.Text), blocks, attachments, message.Metadata, message.StreamState, deleted, unfurls, message.ID, message.WorkspaceID, message.Conversation)
+	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, text_folded = ?, blocks = ?, attachments = ?, metadata = ?, stream_state = ?, deleted = ?, unfurls = ?, edited_at = ?, edited_by = ?, subtype = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, domain.FoldSearchText(message.Text), blocks, attachments, message.Metadata, message.StreamState, deleted, unfurls, storedEditedAt(message.EditedAt), message.EditedBy, message.Subtype, message.ID, message.WorkspaceID, message.Conversation)
 	if err != nil {
 		return err
 	}
@@ -9807,10 +10595,7 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return insertOutbox(ctx, tx, event)
 }
 
 func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event events.Event) error {
@@ -11605,6 +12390,12 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
+// rowQuerier is *sql.DB and *sql.Tx alike, so a read that a transaction must
+// also perform is written once rather than duplicated per caller.
+type rowQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
 	var value domain.ScheduledMessage
 	var postAt, createdAt, deliveredAt, failedAt int64
@@ -12602,7 +13393,11 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.ExternalUniqueID, value.ExternalDisplayID, value.JoinURL, value.DesktopAppJoinURL, value.Title, value.CreatedBy, value.StartedAt.Unix())
+	kind := value.Kind
+	if kind == "" {
+		kind = domain.CallKindExternal
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, kind, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.ExternalUniqueID, value.ExternalDisplayID, value.JoinURL, value.DesktopAppJoinURL, value.Title, value.CreatedBy, value.StartedAt.Unix(), kind, value.ConversationID)
 	if err != nil {
 		return classify(err)
 	}
@@ -12617,33 +13412,216 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 	return tx.Commit()
 }
 
-func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
+// callSelectColumns is the one column list every call read uses.
+const callSelectColumns = `id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, ended_at, duration_seconds, kind, conversation_id`
+
+func scanCall(row rowScanner) (domain.Call, error) {
 	var value domain.Call
 	var started, ended int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, ended_at, duration_seconds FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&value.ID, &value.WorkspaceID, &value.ExternalUniqueID, &value.ExternalDisplayID, &value.JoinURL, &value.DesktopAppJoinURL, &value.Title, &value.CreatedBy, &started, &ended, &value.DurationSeconds)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Call{}, store.ErrNotFound
-	}
-	if err != nil {
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.ExternalUniqueID, &value.ExternalDisplayID, &value.JoinURL, &value.DesktopAppJoinURL, &value.Title, &value.CreatedBy, &started, &ended, &value.DurationSeconds, &value.Kind, &value.ConversationID); err != nil {
 		return domain.Call{}, err
 	}
 	value.StartedAt = time.Unix(started, 0).UTC()
 	if ended != 0 {
 		value.EndedAt = time.Unix(ended, 0).UTC()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT user_id FROM call_participants WHERE call_id = ? ORDER BY user_id`, id)
+	return value, nil
+}
+
+func callParticipants(ctx context.Context, query rowQuerier, id domain.CallID) ([]domain.UserID, error) {
+	rows, err := query.QueryContext(ctx, `SELECT user_id FROM call_participants WHERE call_id = ? ORDER BY user_id`, id)
 	if err != nil {
-		return domain.Call{}, err
+		return nil, err
 	}
 	defer rows.Close()
+	var participants []domain.UserID
 	for rows.Next() {
 		var userID domain.UserID
 		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+		participants = append(participants, userID)
+	}
+	return participants, rows.Err()
+}
+
+func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joined events.Event) (domain.Call, bool, error) {
+	if value.Kind != domain.CallKindHuddle || value.ConversationID == "" || value.CreatedBy == "" {
+		return domain.Call{}, false, store.InvalidArgument("a huddle requires a conversation and a creator")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Call{}, false, err
+	}
+	defer tx.Rollback()
+	var conversationWorkspace string
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, value.ConversationID).Scan(&conversationWorkspace); err != nil {
+		return domain.Call{}, false, translateNotFound(err)
+	}
+	if domain.WorkspaceID(conversationWorkspace) != value.WorkspaceID {
+		return domain.Call{}, false, store.ErrNotFound
+	}
+	existing, err := scanCall(tx.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND conversation_id = ? AND kind = ? AND ended_at = 0`, value.WorkspaceID, value.ConversationID, domain.CallKindHuddle))
+	switch {
+	case err == nil:
+		joinedNow, joinErr := addCallParticipantTx(ctx, tx, existing.ID, value.CreatedBy, value.WorkspaceID)
+		if joinErr != nil {
+			return domain.Call{}, false, joinErr
+		}
+		if joinedNow {
+			if err := insertOutbox(ctx, tx, joined); err != nil {
+				return domain.Call{}, false, err
+			}
+		}
+		existing.Participants, err = callParticipants(ctx, tx, existing.ID)
+		if err != nil {
+			return domain.Call{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.Call{}, false, err
+		}
+		return existing, false, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return domain.Call{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, kind, conversation_id) VALUES (?, ?, '', '', '', '', ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkspaceID, value.Title, value.CreatedBy, value.StartedAt.Unix(), domain.CallKindHuddle, value.ConversationID); err != nil {
+		return domain.Call{}, false, classify(err)
+	}
+	if _, err := addCallParticipantTx(ctx, tx, value.ID, value.CreatedBy, value.WorkspaceID); err != nil {
+		return domain.Call{}, false, err
+	}
+	if err := insertOutbox(ctx, tx, started); err != nil {
+		return domain.Call{}, false, err
+	}
+	value.Participants = []domain.UserID{value.CreatedBy}
+	if err := tx.Commit(); err != nil {
+		return domain.Call{}, false, err
+	}
+	return value, true, nil
+}
+
+func addCallParticipantTx(ctx context.Context, tx *sql.Tx, id domain.CallID, user domain.UserID, workspace domain.WorkspaceID) (bool, error) {
+	result, err := tx.ExecContext(ctx, `INSERT INTO call_participants(call_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(call_id, user_id) DO NOTHING`, id, user, workspace)
+	if err != nil {
+		return false, classify(err)
+	}
+	added, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return added == 1, nil
+}
+
+func (s *Store) ActiveHuddle(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) (domain.Call, error) {
+	value, err := scanCall(s.db.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND conversation_id = ? AND kind = ? AND ended_at = 0`, workspace, conversation, domain.CallKindHuddle))
+	if err != nil {
+		return domain.Call{}, translateNotFound(err)
+	}
+	value.Participants, err = callParticipants(ctx, s.db, value.ID)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) JoinCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, event events.Event) (domain.Call, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	defer tx.Rollback()
+	value, err := scanCall(tx.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id))
+	if err != nil {
+		return domain.Call{}, translateNotFound(err)
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	joined, err := addCallParticipantTx(ctx, tx, id, user, workspace)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if joined {
+		if err := insertOutbox(ctx, tx, event); err != nil {
 			return domain.Call{}, err
 		}
-		value.Participants = append(value.Participants, userID)
 	}
-	if err := rows.Err(); err != nil {
+	value.Participants, err = callParticipants(ctx, tx, id)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Call{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, left, ended events.Event) (domain.Call, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	defer tx.Rollback()
+	value, err := scanCall(tx.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id))
+	if err != nil {
+		return domain.Call{}, translateNotFound(err)
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM call_participants WHERE call_id = ? AND user_id = ?`, id, user)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if removed == 0 {
+		value.Participants, err = callParticipants(ctx, tx, id)
+		if err != nil {
+			return domain.Call{}, err
+		}
+		return value, tx.Commit()
+	}
+	if err := insertOutbox(ctx, tx, left); err != nil {
+		return domain.Call{}, err
+	}
+	value.Participants, err = callParticipants(ctx, tx, id)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if len(value.Participants) == 0 {
+		endedAt := ended.CreatedAt.UTC()
+		duration := int64(endedAt.Sub(value.StartedAt).Seconds())
+		if duration < 0 {
+			duration = 0
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE calls SET ended_at = ?, duration_seconds = ? WHERE workspace_id = ? AND id = ?`, endedAt.Unix(), duration, workspace, id); err != nil {
+			return domain.Call{}, err
+		}
+		if err := insertOutbox(ctx, tx, ended); err != nil {
+			return domain.Call{}, err
+		}
+		value.EndedAt, value.DurationSeconds = endedAt, duration
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Call{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
+	value, err := scanCall(s.db.QueryRowContext(ctx, `SELECT `+callSelectColumns+` FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Call{}, store.ErrNotFound
+	}
+	if err != nil {
+		return domain.Call{}, err
+	}
+	value.Participants, err = callParticipants(ctx, s.db, id)
+	if err != nil {
 		return domain.Call{}, err
 	}
 	return value, nil
@@ -13560,25 +14538,10 @@ func (s *Store) UpdateRemoteFile(ctx context.Context, workspace domain.Workspace
 }
 
 func (s *Store) GetMessage(ctx context.Context, id domain.MessageID) (domain.Message, error) {
-	var message domain.Message
-	var deleted int
-	var created string
-	var unfurls string
-	var attachments string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE id = ?`, id).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.AppID, &message.Text, &message.Blocks, &attachments, &message.Metadata, &message.StreamState, &message.ThreadTimestamp, &created, &deleted, &unfurls)
+	message, err := scanMessage(s.db.QueryRowContext(ctx, `SELECT `+messageSelectColumns+` FROM messages WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
-	if err != nil {
-		return domain.Message{}, err
-	}
-	message.CreatedAt, err = domain.ParseStoredTime(created)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	message.Deleted = deleted != 0
-	message.Attachments = attachments
-	message.Unfurls, err = decodeUnfurls(unfurls)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -14070,7 +15033,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	if err := store.CheckPage(request); err != nil {
 		return domain.MessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND deleted = 0`
+	query := `SELECT ` + messageSelectColumns + ` FROM messages WHERE conversation = ? AND deleted = 0`
 	args := []any{conversation}
 	if request.Cursor != "" {
 		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
@@ -14098,19 +15061,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	defer rows.Close()
 	var values []domain.Message
 	for rows.Next() {
-		var value domain.Message
-		var created, attachments, unfurls string
-		var deleted int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.Text, &value.Blocks, &attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
-			return domain.MessagePage{}, err
-		}
-		value.CreatedAt, err = domain.ParseStoredTime(created)
-		if err != nil {
-			return domain.MessagePage{}, err
-		}
-		value.Deleted = deleted != 0
-		value.Attachments = attachments
-		value.Unfurls, err = decodeUnfurls(unfurls)
+		value, err := scanMessage(rows)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
@@ -14141,7 +15092,7 @@ func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.Works
 	if err := store.CheckPage(request); err != nil {
 		return domain.MessagePage{}, err
 	}
-	query := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls
+	query := `SELECT ` + qualifiedMessageSelectColumns + `
 		FROM messages m
 		JOIN conversations c ON c.id = m.conversation
 		WHERE m.workspace_id = ? AND m.author_id = ? AND m.deleted = 0
@@ -14176,19 +15127,7 @@ func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.Works
 	defer rows.Close()
 	values := make([]domain.Message, 0, request.Limit+1)
 	for rows.Next() {
-		var value domain.Message
-		var created, attachments, unfurls string
-		var deleted int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.Text, &value.Blocks, &attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
-			return domain.MessagePage{}, err
-		}
-		value.CreatedAt, err = domain.ParseStoredTime(created)
-		if err != nil {
-			return domain.MessagePage{}, err
-		}
-		value.Deleted = deleted != 0
-		value.Attachments = attachments
-		value.Unfurls, err = decodeUnfurls(unfurls)
+		value, err := scanMessage(rows)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
@@ -14218,7 +15157,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	if len(search.Terms) == 0 && search.Conversation == "" && search.Author == "" && search.WithUser == "" && search.After.IsZero() && search.Before.IsZero() && !search.ThreadOnly && !search.HasFiles && !search.HasPins && !search.HasReactions && search.SavedBy == "" {
 		return domain.MessagePage{}, store.InvalidArgument("search query must not be empty")
 	}
-	querySQL := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	querySQL := `SELECT ` + qualifiedMessageSelectColumns + ` FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user}
 	for _, term := range search.Terms {
 		querySQL += ` AND m.text_folded LIKE ? ESCAPE '\'`
@@ -14272,7 +15211,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		querySQL += ` AND EXISTS (SELECT 1 FROM saved_items si_search WHERE si_search.message_id = m.id AND si_search.user_id = ?)`
 		args = append(args, search.SavedBy)
 	}
-	countSQL := strings.Replace(querySQL, `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls`, `SELECT COUNT(*)`, 1)
+	countSQL := strings.Replace(querySQL, `SELECT `+qualifiedMessageSelectColumns+``, `SELECT COUNT(*)`, 1)
 	var total int
 	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return domain.MessagePage{}, err
@@ -14303,19 +15242,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	defer rows.Close()
 	values := make([]domain.Message, 0, search.Page.Limit+1)
 	for rows.Next() {
-		var message domain.Message
-		var created, attachments, unfurls string
-		var deleted int
-		if err := rows.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.AppID, &message.Text, &message.Blocks, &attachments, &message.Metadata, &message.StreamState, &message.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
-			return domain.MessagePage{}, err
-		}
-		message.CreatedAt, err = domain.ParseStoredTime(created)
-		if err != nil {
-			return domain.MessagePage{}, err
-		}
-		message.Deleted = deleted != 0
-		message.Attachments = attachments
-		message.Unfurls, err = decodeUnfurls(unfurls)
+		message, err := scanMessage(rows)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
@@ -14757,7 +15684,7 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND deleted = 0 AND ((created_at = ? AND thread_timestamp = '') OR thread_timestamp = ?)`
+	query := `SELECT ` + messageSelectColumns + ` FROM messages WHERE conversation = ? AND deleted = 0 AND ((created_at = ? AND thread_timestamp = '') OR thread_timestamp = ?)`
 	created := domain.NewStoredTime(createdAt)
 	args := []any{conversation, created, string(timestamp)}
 	if request.Cursor != "" {
@@ -14782,20 +15709,7 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 	defer rows.Close()
 	values := make([]domain.Message, 0, request.Limit+1)
 	for rows.Next() {
-		var value domain.Message
-		var stored string
-		var deleted int
-		var attachments, unfurls string
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.Text, &value.Blocks, &attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp, &stored, &deleted, &unfurls); err != nil {
-			return domain.MessagePage{}, err
-		}
-		value.CreatedAt, err = domain.ParseStoredTime(stored)
-		if err != nil {
-			return domain.MessagePage{}, err
-		}
-		value.Deleted = deleted != 0
-		value.Attachments = attachments
-		value.Unfurls, err = decodeUnfurls(unfurls)
+		value, err := scanMessage(rows)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}

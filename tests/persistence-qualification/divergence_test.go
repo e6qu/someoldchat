@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1381,5 +1382,693 @@ func uninstallAnnouncementOutlivesTheInstallation(t *testing.T, open opener) {
 			t.Fatal("the open connection never received the uninstall announcement")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Slack's channel_join, channel_topic and channel_name messages are the
+// visible record of how a channel came to be the way it is. They are written
+// by the same store call as the change they describe, so a crash cannot leave
+// a renamed channel with no notice — and every profile must agree, including
+// on the normalized empty attachment list, or the same notice reads
+// differently depending on where it was stored.
+func conversationNoticesCommitWithTheirChange(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	joiner := domain.UserID("U-joiner-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: joiner, WorkspaceID: f.workspaceID, Name: "joiner"}); err != nil {
+		t.Fatal(err)
+	}
+	joinNotice := domain.Message{
+		ID: domain.MessageID("M-join-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: joiner, Text: "<@" + string(joiner) + "> has joined the channel",
+		Subtype: domain.MessageSubtypeChannelJoin, Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Now()),
+	}
+	if err := f.repository.AddConversationMember(ctx, f.channelID, joiner, f.event("notice-join", "conversation.member_added", string(f.channelID)), joinNotice); err != nil {
+		t.Fatal(err)
+	}
+	renameNotice := domain.Message{
+		ID: domain.MessageID("M-rename-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "<@" + string(f.userID) + "> renamed the channel to renamed-" + f.suffix,
+		Subtype: domain.MessageSubtypeChannelName, Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Now().Add(time.Millisecond)),
+	}
+	if _, err := f.repository.RenameConversation(ctx, f.channelID, "renamed-"+f.suffix, f.event("notice-rename", "conversation.renamed", string(f.channelID)), renameNotice); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[domain.MessageSubtype]domain.Message{}
+	for _, message := range page.Messages {
+		if message.Subtype != "" {
+			found[message.Subtype] = message
+		}
+	}
+	for _, want := range []domain.MessageSubtype{domain.MessageSubtypeChannelJoin, domain.MessageSubtypeChannelName} {
+		message, ok := found[want]
+		if !ok {
+			t.Fatalf("the %s notice did not commit with its change: %+v", want, page.Messages)
+		}
+		if message.Attachments != "[]" {
+			t.Fatalf("%s notice attachments=%q, want the normalized empty list every profile writes", want, message.Attachments)
+		}
+		if message.Text == "" {
+			t.Fatalf("%s notice carries no text", want)
+		}
+	}
+}
+
+// Deleting a file must delete it everywhere it was shared. The message that
+// shared it survives — Slack keeps the post and marks the attachment gone —
+// so every profile has to report the attachment's current state when it hands
+// out the message, not the state it had when it was posted. A profile that
+// snapshots the file onto the message keeps offering a download link and the
+// original title for bytes that are no longer there, and keeps offering the
+// uploader a delete control for a file already deleted.
+func aDeletedFileIsDeletedOnEveryMessageThatCarriesIt(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	file := domain.File{
+		ID: domain.FileID("F-shared-" + f.suffix), WorkspaceID: f.workspaceID, Uploader: f.userID,
+		Name: "budget.txt", Title: "Budget", MIMEType: "text/plain",
+		BlobKey: string(f.workspaceID) + "/budget", Size: 9, CreatedAt: time.Unix(1_700_000_500, 0).UTC(),
+	}
+	if err := f.repository.CreateFile(ctx, file, f.event("shared-file", "file.created", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	share := domain.Message{
+		ID: domain.MessageID("M-file-share-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "here is the budget", Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Unix(1_700_000_501, 0).UTC()),
+	}
+	if err := f.repository.CreateFileShareMessage(ctx, []domain.FileID{file.ID}, share,
+		[]events.Event{f.event("shared-file-message", "message.created", string(share.ID))}); err != nil {
+		t.Fatal(err)
+	}
+	attached := func(stage string) domain.File {
+		t.Helper()
+		page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		for _, message := range page.Messages {
+			if message.ID != share.ID {
+				continue
+			}
+			if len(message.Files) != 1 {
+				t.Fatalf("%s: the share message carries %d files, want 1", stage, len(message.Files))
+			}
+			return message.Files[0]
+		}
+		t.Fatalf("%s: the share message is gone from the channel", stage)
+		return domain.File{}
+	}
+	before := attached("before deletion")
+	if before.Deleted || before.Title != file.Title || !slices.Contains(before.SharedChannels, f.channelID) {
+		t.Fatalf("before deletion the attachment reads %+v, want the live file shared into the channel", before)
+	}
+
+	if err := f.repository.DeleteFile(ctx, file.ID, f.event("shared-file-delete", "file.deleted", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	after := attached("after deletion")
+	if !after.Deleted {
+		t.Fatalf("after deletion the attachment still reads as live: %+v", after)
+	}
+	if _, err := f.repository.GetFile(ctx, file.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the deleted file is still readable: %v", err)
+	}
+}
+
+// A file is visible to whoever can read a conversation it is shared into, and
+// the share is a row of its own. Deleting the message that shared it therefore
+// has to retract the share, or the file stays readable in that channel — and
+// keeps appearing in files.list — with nothing left on screen that put it
+// there. The share survives while another live message still carries the file,
+// and the retraction is journalled as file.unshared exactly when it happens.
+func deletingTheLastCarrierRetractsTheFileShare(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	file := domain.File{
+		ID: domain.FileID("F-carried-" + f.suffix), WorkspaceID: f.workspaceID, Uploader: f.userID,
+		Name: "plan.txt", Title: "Plan", MIMEType: "text/plain",
+		BlobKey: string(f.workspaceID) + "/plan", Size: 4, CreatedAt: time.Unix(1_700_000_600, 0).UTC(),
+	}
+	if err := f.repository.CreateFile(ctx, file, f.event("carried-file", "file.created", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	carrier := func(name string, at time.Time) domain.Message {
+		t.Helper()
+		message := domain.Message{
+			ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+			AuthorID: f.userID, Text: name, Attachments: "[]", CreatedAt: domain.MessageInstant(at),
+		}
+		if err := f.repository.CreateFileShareMessage(ctx, []domain.FileID{file.ID}, message,
+			[]events.Event{f.event(name, "message.created", string(message.ID))}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return message
+	}
+	first := carrier("carrier-one", time.Unix(1_700_000_601, 0).UTC())
+	second := carrier("carrier-two", time.Unix(1_700_000_602, 0).UTC())
+
+	sharedChannels := func(stage string) []domain.ConversationID {
+		t.Helper()
+		stored, err := f.repository.GetFile(ctx, file.ID)
+		if err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		return stored.SharedChannels
+	}
+	unsharedEvents := func(stage string) int {
+		t.Helper()
+		records, err := f.repository.ListEventsAfter(ctx, f.workspaceID, 0, 200)
+		if err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		count := 0
+		for _, record := range records {
+			if record.Event.Topic == "file.unshared" {
+				count++
+			}
+		}
+		return count
+	}
+
+	deleteCarrier := func(message domain.Message, name string) {
+		t.Helper()
+		message.Deleted = true
+		unshareEvent := f.event(name+"-unshare", "file.unshared", string(file.ID))
+		if err := f.repository.DeleteMessage(ctx, message, f.event(name+"-delete", "message.deleted", string(message.ID)),
+			[]store.FileUnshare{{FileID: file.ID, Event: unshareEvent}}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+
+	deleteCarrier(first, "first")
+	if channels := sharedChannels("after the first delete"); !slices.Contains(channels, f.channelID) {
+		t.Fatalf("the share ended while another message still carried the file: %v", channels)
+	}
+	if count := unsharedEvents("after the first delete"); count != 0 {
+		t.Fatalf("file.unshared was journalled %d times while the share was still open", count)
+	}
+
+	deleteCarrier(second, "second")
+	if channels := sharedChannels("after the last delete"); slices.Contains(channels, f.channelID) {
+		t.Fatalf("the file is still shared into the channel with no message carrying it: %v", channels)
+	}
+	if count := unsharedEvents("after the last delete"); count != 1 {
+		t.Fatalf("file.unshared was journalled %d times for one retracted share", count)
+	}
+}
+
+// Accepting an invitation creates a member, a membership at the recorded guest
+// tier and every channel join the invitation named. All of it commits together
+// or none of it does: a partial acceptance would leave a member who cannot see
+// the channels they were invited to, or consume an invitation with no member
+// behind it, and either state is unrecoverable without an administrator.
+func acceptingAnInvitationCommitsTheWholeMembership(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	second := domain.ConversationID("C-invited-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: second, WorkspaceID: f.workspaceID, Name: "invited"}); err != nil {
+		t.Fatal(err)
+	}
+	invitation := domain.InviteRequest{
+		ID: domain.InviteRequestID("IR-" + f.suffix), WorkspaceID: f.workspaceID,
+		Email: "invited-" + f.suffix + "@example.com", RequestedBy: f.userID,
+		ChannelIDs: []domain.ConversationID{f.channelID, second}, RealName: "Invited",
+		Restricted: true, Status: domain.InviteRequestPending,
+		CreatedAt: time.Unix(1_700_000_700, 0).UTC(), ExpiresAt: time.Unix(1_800_000_000, 0).UTC(),
+	}
+	if err := f.repository.CreateInviteRequest(ctx, invitation, f.event("invite-create", "invite_request.created", string(invitation.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	newcomer := domain.UserID("U-invited-" + f.suffix)
+	acceptance := domain.InviteRequestAcceptance{
+		WorkspaceID: f.workspaceID, RequestID: invitation.ID,
+		User:       domain.User{ID: newcomer, WorkspaceID: f.workspaceID, Email: invitation.Email, Name: "Invited", RealName: "Invited"},
+		Membership: domain.WorkspaceMembership{WorkspaceID: f.workspaceID, UserID: newcomer, Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
+		Channels:   invitation.ChannelIDs,
+		AcceptedAt: time.Unix(1_700_000_800, 0).UTC(),
+	}
+	accept := func() error {
+		return f.repository.AcceptInviteRequest(ctx, acceptance, []events.Event{f.event("invite-accept", "invite_request.accepted", string(invitation.ID))})
+	}
+
+	// Nothing is acceptable until it is approved, and nothing may be written
+	// on the way to finding that out.
+	if err := accept(); err == nil {
+		t.Fatal("an unapproved invitation was accepted")
+	}
+	if _, err := f.repository.FindUserByEmail(ctx, f.workspaceID, invitation.Email); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a refused acceptance created a user anyway: %v", err)
+	}
+
+	if err := f.repository.SetInviteRequestStatus(ctx, f.workspaceID, invitation.ID, domain.InviteRequestPending, domain.InviteRequestApproved, time.Unix(1_700_000_750, 0).UTC(), f.event("invite-approve", "invite_request.approved", string(invitation.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := accept(); err != nil {
+		t.Fatal(err)
+	}
+
+	membership, err := f.repository.GetWorkspaceMembership(ctx, f.workspaceID, newcomer)
+	if err != nil || !membership.Active || !membership.Restricted || membership.UltraRestricted {
+		t.Fatalf("membership=%+v err=%v, want an active multi-channel guest", membership, err)
+	}
+	for _, channelID := range invitation.ChannelIDs {
+		members, listErr := f.repository.ListConversationMembers(ctx, channelID, domain.PageRequest{Limit: 50})
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		joined := false
+		for _, member := range members.Users {
+			if member.ID == newcomer {
+				joined = true
+			}
+		}
+		if !joined {
+			t.Fatalf("the accepted member did not join %s", channelID)
+		}
+	}
+	stored, err := f.repository.GetInviteRequest(ctx, f.workspaceID, invitation.ID)
+	if err != nil || stored.Status != domain.InviteRequestAccepted || stored.AcceptedBy != newcomer || stored.AcceptedAt.IsZero() {
+		t.Fatalf("invitation=%+v err=%v", stored, err)
+	}
+	// Single use.
+	if err := accept(); err == nil {
+		t.Fatal("an invitation was accepted twice")
+	}
+}
+
+// The analytics dashboard is counted from the durable rows on every load, so
+// two storage profiles that count differently show an administrator two
+// different workspaces. The window is a parameter for the same reason: a store
+// that chose its own would make the page and any export from the same call
+// describe different spans.
+func workspaceAnalyticsCountTheSameOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	private := domain.ConversationID("C-private-" + f.suffix)
+	archived := domain.ConversationID("C-archived-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: f.workspaceID, Name: "private", IsPrivate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: archived, WorkspaceID: f.workspaceID, Name: "archived", Archived: true}); err != nil {
+		t.Fatal(err)
+	}
+	guest := domain.UserID("U-guest-" + f.suffix)
+	if err := f.repository.CreateUser(ctx, domain.User{ID: guest, WorkspaceID: f.workspaceID, Email: "guest-" + f.suffix + "@example.com", Name: "guest", RealName: "guest"},
+		domain.WorkspaceMembership{WorkspaceID: f.workspaceID, UserID: guest, Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
+		f.event("guest-created", "user.created", string(guest))); err != nil {
+		t.Fatal(err)
+	}
+
+	window := time.Unix(1_700_000_000, 0).UTC()
+	// Two inside the window and one before it, so a store that ignores the
+	// window and one that applies it cannot both pass.
+	f.message(t, ctx, "analytics-old", window.Add(-48*time.Hour))
+	f.message(t, ctx, "analytics-one", window.Add(time.Hour))
+	f.message(t, ctx, "analytics-two", window.Add(2*time.Hour))
+
+	analytics, err := f.repository.WorkspaceAnalytics(ctx, f.workspaceID, window, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Members != 2 || analytics.ActiveMembers != 2 || analytics.Guests != 1 {
+		t.Fatalf("people=%+v, want two members of whom one is a guest", analytics)
+	}
+	if analytics.PublicChannels != 1 || analytics.PrivateChannels != 1 || analytics.ArchivedChannels != 1 {
+		t.Fatalf("channels=%+v", analytics)
+	}
+	if analytics.Messages != 3 || analytics.RecentMessages != 2 {
+		t.Fatalf("messages=%d recent=%d, want three of which two are in the window", analytics.Messages, analytics.RecentMessages)
+	}
+	if len(analytics.BusiestChannels) != 1 || analytics.BusiestChannels[0].ConversationID != f.channelID || analytics.BusiestChannels[0].Messages != 2 {
+		t.Fatalf("busiest=%+v", analytics.BusiestChannels)
+	}
+	// The bound is honoured, and a zero bound asks for no list rather than an
+	// unbounded one.
+	none, err := f.repository.WorkspaceAnalytics(ctx, f.workspaceID, window, 0)
+	if err != nil || len(none.BusiestChannels) != 0 {
+		t.Fatalf("bounded=%+v err=%v", none.BusiestChannels, err)
+	}
+}
+
+// A conversation has at most one running huddle, and everyone who presses
+// start joins that one. The convergence is the store's job: a read-then-create
+// gives two concurrent starters one huddle each, and the second is the one
+// nobody else is in. Every profile must converge the same way, and must end the
+// huddle when the last person leaves.
+func huddlesConvergeAndEndWithTheirLastParticipant(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	second := domain.UserID("U-huddler-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: second, WorkspaceID: f.workspaceID, Name: "huddler"}); err != nil {
+		t.Fatal(err)
+	}
+	start := func(name string, actor domain.UserID) (domain.Call, bool) {
+		t.Helper()
+		call := domain.Call{
+			ID: domain.CallID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Kind: domain.CallKindHuddle,
+			ConversationID: f.channelID, CreatedBy: actor, StartedAt: time.Unix(1_700_000_900, 0).UTC(),
+		}
+		value, created, err := f.repository.StartHuddle(ctx, call,
+			f.event(name+"-started", "huddle.started", string(call.ID)),
+			f.event(name+"-joined", "huddle.joined", string(call.ID)))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return value, created
+	}
+
+	first, created := start("huddle-a", f.userID)
+	if !created {
+		t.Fatal("the first start did not create the huddle")
+	}
+	joinedExisting, createdAgain := start("huddle-b", second)
+	if createdAgain {
+		t.Fatal("a second huddle was started in a conversation that already had one")
+	}
+	if joinedExisting.ID != first.ID {
+		t.Fatalf("the second starter joined %s, want the running huddle %s", joinedExisting.ID, first.ID)
+	}
+	if len(joinedExisting.Participants) != 2 {
+		t.Fatalf("participants=%v, want both starters", joinedExisting.Participants)
+	}
+
+	active, err := f.repository.ActiveHuddle(ctx, f.workspaceID, f.channelID)
+	if err != nil || active.ID != first.ID {
+		t.Fatalf("active=%+v err=%v", active, err)
+	}
+
+	after, err := f.repository.LeaveCall(ctx, f.workspaceID, first.ID, second,
+		f.event("huddle-left-one", "huddle.left", string(first.ID)),
+		f.event("huddle-ended-one", "huddle.ended", string(first.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Active() || len(after.Participants) != 1 {
+		t.Fatalf("after one left the huddle reads %+v, want it still running with one person", after)
+	}
+
+	ended, err := f.repository.LeaveCall(ctx, f.workspaceID, first.ID, f.userID,
+		f.event("huddle-left-two", "huddle.left", string(first.ID)),
+		f.event("huddle-ended-two", "huddle.ended", string(first.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ended.Active() || len(ended.Participants) != 0 {
+		t.Fatalf("the huddle outlived its last participant: %+v", ended)
+	}
+	if _, err := f.repository.ActiveHuddle(ctx, f.workspaceID, f.channelID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an ended huddle is still the conversation's active one: %v", err)
+	}
+	// The conversation is free for a new huddle, which is the point of ending
+	// it rather than leaving it running and empty.
+	if _, createdAfter := start("huddle-c", f.userID); !createdAfter {
+		t.Fatal("a new huddle could not be started after the previous one ended")
+	}
+}
+
+// A user row belongs to one workspace, so the same person in two workspaces is
+// two rows sharing an address. The switcher resolves by that address, and both
+// profiles must agree on which workspaces it names, in what order, and with
+// which local identity — a switcher that listed a workspace on one profile and
+// not the other would offer a destination the switch then refuses.
+func workspacesForAnAddressAgreeOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	address := "shared-" + f.suffix + "@example.com"
+	local := domain.UserID("U-local-" + f.suffix)
+	if err := f.repository.CreateUser(ctx,
+		domain.User{ID: local, WorkspaceID: f.workspaceID, Email: address, Name: "shared", RealName: "Shared"},
+		domain.WorkspaceMembership{WorkspaceID: f.workspaceID, UserID: local, Role: domain.WorkspaceRoleAdmin, Active: true},
+		f.event("shared-local", "user.created", string(local))); err != nil {
+		t.Fatal(err)
+	}
+	second := domain.WorkspaceID("T-second-" + f.suffix)
+	if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: second, Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := domain.UserID("U-elsewhere-" + f.suffix)
+	if err := f.repository.CreateUser(ctx,
+		domain.User{ID: elsewhere, WorkspaceID: second, Email: address, Name: "shared", RealName: "Shared"},
+		domain.WorkspaceMembership{WorkspaceID: second, UserID: elsewhere, Role: domain.WorkspaceRoleMember, Active: true},
+		f.event("shared-elsewhere", "user.created", string(elsewhere))); err != nil {
+		t.Fatal(err)
+	}
+	// A third workspace the address was removed from must not be offered.
+	third := domain.WorkspaceID("T-third-" + f.suffix)
+	if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: third, Name: "Third"}); err != nil {
+		t.Fatal(err)
+	}
+	inactive := domain.UserID("U-inactive-" + f.suffix)
+	if err := f.repository.CreateUser(ctx,
+		domain.User{ID: inactive, WorkspaceID: third, Email: address, Name: "shared", RealName: "Shared"},
+		domain.WorkspaceMembership{WorkspaceID: third, UserID: inactive, Role: domain.WorkspaceRoleMember, Active: true},
+		f.event("shared-inactive", "user.created", string(inactive))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SetUserDeleted(ctx, third, inactive, true, f.event("shared-removed", "user.removed", string(inactive))); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries, err := f.repository.ListWorkspacesForEmail(ctx, strings.ToUpper(address))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("workspaces=%+v, want the two the address is an active member of", summaries)
+	}
+	// Ordered by workspace identifier, so two calls and two profiles agree.
+	if summaries[0].Workspace.ID >= summaries[1].Workspace.ID {
+		t.Fatalf("workspaces are not ordered: %+v", summaries)
+	}
+	byWorkspace := map[domain.WorkspaceID]domain.WorkspaceMembershipSummary{}
+	for _, summary := range summaries {
+		byWorkspace[summary.Workspace.ID] = summary
+	}
+	if got := byWorkspace[f.workspaceID]; got.UserID != local || got.Role != domain.WorkspaceRoleAdmin {
+		t.Fatalf("local membership=%+v", got)
+	}
+	if got := byWorkspace[second]; got.UserID != elsewhere || got.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("second membership=%+v, want the identity and role held there", got)
+	}
+	if _, offered := byWorkspace[third]; offered {
+		t.Fatal("a workspace the address was removed from was offered as a destination")
+	}
+}
+
+// CONNECT-01 forbids promising a place in a Slack Connect channel from a stale
+// count, so the capacity is claimed inside the transaction that appends the
+// organization. Both profiles must refuse the same acceptance, and must leave
+// the refused invitation acceptable: being told there is no room must not
+// consume the invitation.
+func slackConnectCapacityIsClaimedTransactionally(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	// The host counts towards the capacity, so filling it takes one fewer.
+	teams := make([]domain.WorkspaceID, 0, domain.SlackConnectCapacity)
+	for index := 0; index < domain.SlackConnectCapacity-1; index++ {
+		id := domain.WorkspaceID(fmt.Sprintf("T-seat-%d-%s", index, f.suffix))
+		if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: id, Name: "seat"}); err != nil {
+			t.Fatal(err)
+		}
+		teams = append(teams, id)
+	}
+	if err := f.repository.SetConversationTeams(ctx, f.workspaceID, f.channelID, teams, false, f.event("seats", "conversation.connected", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+
+	late := domain.WorkspaceID("T-late-" + f.suffix)
+	if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: late, Name: "late"}); err != nil {
+		t.Fatal(err)
+	}
+	invite := domain.SharedInvite{
+		ID: domain.SharedInviteID("SI-" + f.suffix), WorkspaceID: f.workspaceID, ConversationID: f.channelID,
+		TargetWorkspaceID: late, InvitedBy: f.userID, Status: domain.SharedInvitePending,
+		CreatedAt: time.Unix(1_700_001_000, 0).UTC(), ExpiresAt: time.Unix(1_800_000_000, 0).UTC(),
+	}
+	if err := f.repository.CreateSharedInvite(ctx, invite, f.event("connect-created", "shared_invite.created", string(invite.ID))); err != nil {
+		t.Fatal(err)
+	}
+	// A second outstanding invitation for the same organization is refused:
+	// two would let two acceptances each claim the last place.
+	duplicate := invite
+	duplicate.ID = domain.SharedInviteID("SI-dup-" + f.suffix)
+	if err := f.repository.CreateSharedInvite(ctx, duplicate, f.event("connect-duplicate", "shared_invite.created", string(duplicate.ID))); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("a second outstanding invitation err=%v, want it refused", err)
+	}
+	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInvitePending, domain.SharedInviteApproved, time.Unix(1_700_001_100, 0).UTC(), f.event("connect-approved", "shared_invite.approved", string(invite.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.repository.AcceptSharedInvite(ctx, invite.ID, time.Unix(1_700_001_200, 0).UTC(),
+		[]events.Event{f.event("connect-accepted", "shared_invite.accepted", string(invite.ID))}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("acceptance into a full channel err=%v, want a conflict", err)
+	}
+	// Nothing was consumed by the refusal.
+	stored, err := f.repository.GetSharedInvite(ctx, invite.ID)
+	if err != nil || stored.Status != domain.SharedInviteApproved {
+		t.Fatalf("invitation=%+v err=%v, want it still approved", stored, err)
+	}
+
+	// A transition the state machine forbids is refused on both profiles, so
+	// no caller can move an invitation somewhere it may not go.
+	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInviteApproved, domain.SharedInvitePending, time.Unix(1_700_001_300, 0).UTC(), f.event("connect-back", "shared_invite.created", string(invite.ID))); err == nil {
+		t.Fatal("an approved invitation was moved back to pending")
+	}
+}
+
+// A timeline renders many parents at once, so thread summaries are read in
+// one batched call rather than one read per parent. Every profile must return
+// the same counts, the same participant list in the same order, and the same
+// last-reply instant — a summary that differs by storage engine would render
+// a different "N replies" line to the same person on two deployments.
+func threadSummariesAreBatchedAndIdentical(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	second := domain.UserID("U-replier-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: second, WorkspaceID: f.workspaceID, Name: "replier"}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Unix(1_700_000_400, 0).UTC()
+	rootA := f.message(t, ctx, "thread-root-a", base)
+	rootB := f.message(t, ctx, "thread-root-b", base.Add(time.Second))
+	rootATS := domain.NewMessageTimestamp(rootA.CreatedAt)
+	rootBTS := domain.NewMessageTimestamp(rootB.CreatedAt)
+
+	reply := func(name string, root domain.MessageTimestamp, author domain.UserID, at time.Time) {
+		t.Helper()
+		message := domain.Message{
+			ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+			AuthorID: author, Text: "reply " + name, ThreadTimestamp: root, Attachments: "[]",
+			CreatedAt: domain.MessageInstant(at),
+		}
+		if err := f.repository.CreateMessage(ctx, message, f.event("evt-"+name, "message.created", string(message.ID)), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply("reply-a1", rootATS, f.userID, base.Add(10*time.Second))
+	reply("reply-a2", rootATS, second, base.Add(20*time.Second))
+	reply("reply-a3", rootATS, second, base.Add(30*time.Second))
+	reply("reply-b1", rootBTS, second, base.Add(40*time.Second))
+
+	summaries, err := f.repository.ThreadSummaries(ctx, f.channelID, []domain.MessageTimestamp{rootATS, rootBTS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := summaries[rootATS]
+	if a.ReplyCount != 3 {
+		t.Fatalf("root A replies=%d, want 3", a.ReplyCount)
+	}
+	if len(a.Participants) != 2 || a.Participants[0] > a.Participants[1] {
+		t.Fatalf("root A participants=%v, want two distinct authors in sorted order", a.Participants)
+	}
+	if !a.LastReplyAt.Equal(domain.MessageInstant(base.Add(30 * time.Second))) {
+		t.Fatalf("root A last reply=%s, want the newest reply's instant", a.LastReplyAt)
+	}
+	b := summaries[rootBTS]
+	if b.ReplyCount != 1 || len(b.Participants) != 1 || b.Participants[0] != second {
+		t.Fatalf("root B summary=%+v", b)
+	}
+	// A root with no replies is absent rather than zero-valued, and an empty
+	// request reads nothing at all.
+	unknown := domain.NewMessageTimestamp(base.Add(9 * time.Hour))
+	more, err := f.repository.ThreadSummaries(ctx, f.channelID, []domain.MessageTimestamp{unknown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := more[unknown]; present {
+		t.Fatalf("a root with no replies reported a summary: %+v", more)
+	}
+	empty, err := f.repository.ThreadSummaries(ctx, f.channelID, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty request summaries=%+v err=%v", empty, err)
+	}
+}
+
+// Moving the read cursor forward closes the Activity items it covers, and
+// moving it BACKWARDS — which is how Slack's "mark unread from here" works —
+// must reopen them. Only the forward half existed, so marking a conversation
+// unread left the sidebar showing unread messages while Activity insisted
+// there was nothing to see. MSG-02 requires the two to agree.
+func activityFollowsTheReadCursorBothWays(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	// The Activity item is produced by the mention itself, which is how every
+	// item in this system comes to exist. Both identifiers are Slack-shaped:
+	// the mention parser only recognizes <@Uxxxx> forms, so the fixture's own
+	// hyphenated identifiers cannot be mentioned.
+	recipient := domain.UserID("U" + f.suffix)
+	author := domain.UserID("UA" + f.suffix)
+	for _, user := range []domain.UserID{recipient, author} {
+		if err := f.repository.SeedUser(ctx, domain.User{ID: user, WorkspaceID: f.workspaceID, Name: string(user)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repository.SeedConversationMember(ctx, f.channelID, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := domain.MessageInstant(time.Unix(1_700_000_800, 0).UTC())
+	mention := domain.Message{
+		ID: domain.MessageID("M-activity-cursor-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: author, Text: "hello <@" + string(recipient) + ">", Attachments: "[]", CreatedAt: at,
+	}
+	if err := f.repository.CreateMessage(ctx, mention, f.event("activity-cursor", "message.created", string(mention.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
+	unread := func() int {
+		t.Helper()
+		page, err := f.repository.ListActivity(ctx, f.workspaceID, recipient, domain.ActivityQuery{UnreadOnly: true, Page: domain.PageRequest{Limit: 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Items)
+	}
+	if unread() != 1 {
+		t.Fatalf("a fresh mention is not unread")
+	}
+	read := domain.ReadCursor{WorkspaceID: f.workspaceID, UserID: recipient, Conversation: f.channelID,
+		LastRead: domain.NewMessageTimestamp(mention.CreatedAt), UpdatedAt: time.Now().UTC()}
+	if err := f.repository.SetReadCursor(ctx, read, f.event("cursor-read", "conversation.read", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	if unread() != 0 {
+		t.Fatalf("marking read left the mention unread")
+	}
+	// Mark unread from the message itself: the cursor moves to just before it.
+	back := read
+	back.LastRead = domain.NewMessageTimestamp(mention.CreatedAt.Add(-time.Microsecond))
+	back.UpdatedAt = time.Now().UTC()
+	if err := f.repository.SetReadCursor(ctx, back, f.event("cursor-unread", "conversation.read", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	if unread() != 1 {
+		t.Fatalf("marking unread did not reopen the Activity item: the sidebar and Activity now disagree")
 	}
 }

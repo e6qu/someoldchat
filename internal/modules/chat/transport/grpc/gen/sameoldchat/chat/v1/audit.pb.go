@@ -345,6 +345,266 @@ func (x *AccessMutationResponse) GetOk() bool {
 	return false
 }
 
+type WorkspaceAnalyticsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Since         int64                  `protobuf:"varint,3,opt,name=since,proto3" json:"since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceAnalyticsRequest) Reset() {
+	*x = WorkspaceAnalyticsRequest{}
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceAnalyticsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceAnalyticsRequest) ProtoMessage() {}
+
+func (x *WorkspaceAnalyticsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceAnalyticsRequest.ProtoReflect.Descriptor instead.
+func (*WorkspaceAnalyticsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *WorkspaceAnalyticsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkspaceAnalyticsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkspaceAnalyticsRequest) GetSince() int64 {
+	if x != nil {
+		return x.Since
+	}
+	return 0
+}
+
+type ChannelActivity struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ConversationId string                 `protobuf:"bytes,1,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Messages       int32                  `protobuf:"varint,3,opt,name=messages,proto3" json:"messages,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ChannelActivity) Reset() {
+	*x = ChannelActivity{}
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChannelActivity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChannelActivity) ProtoMessage() {}
+
+func (x *ChannelActivity) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChannelActivity.ProtoReflect.Descriptor instead.
+func (*ChannelActivity) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ChannelActivity) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *ChannelActivity) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ChannelActivity) GetMessages() int32 {
+	if x != nil {
+		return x.Messages
+	}
+	return 0
+}
+
+type WorkspaceAnalytics struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Members          int32                  `protobuf:"varint,1,opt,name=members,proto3" json:"members,omitempty"`
+	ActiveMembers    int32                  `protobuf:"varint,2,opt,name=active_members,json=activeMembers,proto3" json:"active_members,omitempty"`
+	Guests           int32                  `protobuf:"varint,3,opt,name=guests,proto3" json:"guests,omitempty"`
+	Admins           int32                  `protobuf:"varint,4,opt,name=admins,proto3" json:"admins,omitempty"`
+	PublicChannels   int32                  `protobuf:"varint,5,opt,name=public_channels,json=publicChannels,proto3" json:"public_channels,omitempty"`
+	PrivateChannels  int32                  `protobuf:"varint,6,opt,name=private_channels,json=privateChannels,proto3" json:"private_channels,omitempty"`
+	ArchivedChannels int32                  `protobuf:"varint,7,opt,name=archived_channels,json=archivedChannels,proto3" json:"archived_channels,omitempty"`
+	Messages         int32                  `protobuf:"varint,8,opt,name=messages,proto3" json:"messages,omitempty"`
+	RecentMessages   int32                  `protobuf:"varint,9,opt,name=recent_messages,json=recentMessages,proto3" json:"recent_messages,omitempty"`
+	Files            int32                  `protobuf:"varint,10,opt,name=files,proto3" json:"files,omitempty"`
+	RecentFiles      int32                  `protobuf:"varint,11,opt,name=recent_files,json=recentFiles,proto3" json:"recent_files,omitempty"`
+	BusiestChannels  []*ChannelActivity     `protobuf:"bytes,12,rep,name=busiest_channels,json=busiestChannels,proto3" json:"busiest_channels,omitempty"`
+	Since            int64                  `protobuf:"varint,13,opt,name=since,proto3" json:"since,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *WorkspaceAnalytics) Reset() {
+	*x = WorkspaceAnalytics{}
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceAnalytics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceAnalytics) ProtoMessage() {}
+
+func (x *WorkspaceAnalytics) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceAnalytics.ProtoReflect.Descriptor instead.
+func (*WorkspaceAnalytics) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *WorkspaceAnalytics) GetMembers() int32 {
+	if x != nil {
+		return x.Members
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetActiveMembers() int32 {
+	if x != nil {
+		return x.ActiveMembers
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetGuests() int32 {
+	if x != nil {
+		return x.Guests
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetAdmins() int32 {
+	if x != nil {
+		return x.Admins
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetPublicChannels() int32 {
+	if x != nil {
+		return x.PublicChannels
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetPrivateChannels() int32 {
+	if x != nil {
+		return x.PrivateChannels
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetArchivedChannels() int32 {
+	if x != nil {
+		return x.ArchivedChannels
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetMessages() int32 {
+	if x != nil {
+		return x.Messages
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetRecentMessages() int32 {
+	if x != nil {
+		return x.RecentMessages
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetFiles() int32 {
+	if x != nil {
+		return x.Files
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetRecentFiles() int32 {
+	if x != nil {
+		return x.RecentFiles
+	}
+	return 0
+}
+
+func (x *WorkspaceAnalytics) GetBusiestChannels() []*ChannelActivity {
+	if x != nil {
+		return x.BusiestChannels
+	}
+	return nil
+}
+
+func (x *WorkspaceAnalytics) GetSince() int64 {
+	if x != nil {
+		return x.Since
+	}
+	return 0
+}
+
 type IntegrationLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
@@ -363,7 +623,7 @@ type IntegrationLog struct {
 
 func (x *IntegrationLog) Reset() {
 	*x = IntegrationLog{}
-	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -375,7 +635,7 @@ func (x *IntegrationLog) String() string {
 func (*IntegrationLog) ProtoMessage() {}
 
 func (x *IntegrationLog) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -388,7 +648,7 @@ func (x *IntegrationLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntegrationLog.ProtoReflect.Descriptor instead.
 func (*IntegrationLog) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *IntegrationLog) GetAppId() string {
@@ -477,7 +737,7 @@ type IntegrationLogsRequest struct {
 
 func (x *IntegrationLogsRequest) Reset() {
 	*x = IntegrationLogsRequest{}
-	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -489,7 +749,7 @@ func (x *IntegrationLogsRequest) String() string {
 func (*IntegrationLogsRequest) ProtoMessage() {}
 
 func (x *IntegrationLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -502,7 +762,7 @@ func (x *IntegrationLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntegrationLogsRequest.ProtoReflect.Descriptor instead.
 func (*IntegrationLogsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *IntegrationLogsRequest) GetWorkspaceId() string {
@@ -573,7 +833,7 @@ type IntegrationLogsResponse struct {
 
 func (x *IntegrationLogsResponse) Reset() {
 	*x = IntegrationLogsResponse{}
-	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -585,7 +845,7 @@ func (x *IntegrationLogsResponse) String() string {
 func (*IntegrationLogsResponse) ProtoMessage() {}
 
 func (x *IntegrationLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_audit_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -598,7 +858,7 @@ func (x *IntegrationLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntegrationLogsResponse.ProtoReflect.Descriptor instead.
 func (*IntegrationLogsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_audit_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *IntegrationLogsResponse) GetLogs() []*IntegrationLog {
@@ -659,7 +919,30 @@ const file_sameoldchat_chat_v1_audit_proto_rawDesc = "" +
 	"\x04logs\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.AccessLogR\x04logs\x12\x19\n" +
 	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"(\n" +
 	"\x16AccessMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xad\x02\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"m\n" +
+	"\x19WorkspaceAnalyticsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05since\x18\x03 \x01(\x03R\x05since\"j\n" +
+	"\x0fChannelActivity\x12'\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\bmessages\x18\x03 \x01(\x05R\bmessages\"\xeb\x03\n" +
+	"\x12WorkspaceAnalytics\x12\x18\n" +
+	"\amembers\x18\x01 \x01(\x05R\amembers\x12%\n" +
+	"\x0eactive_members\x18\x02 \x01(\x05R\ractiveMembers\x12\x16\n" +
+	"\x06guests\x18\x03 \x01(\x05R\x06guests\x12\x16\n" +
+	"\x06admins\x18\x04 \x01(\x05R\x06admins\x12'\n" +
+	"\x0fpublic_channels\x18\x05 \x01(\x05R\x0epublicChannels\x12)\n" +
+	"\x10private_channels\x18\x06 \x01(\x05R\x0fprivateChannels\x12+\n" +
+	"\x11archived_channels\x18\a \x01(\x05R\x10archivedChannels\x12\x1a\n" +
+	"\bmessages\x18\b \x01(\x05R\bmessages\x12'\n" +
+	"\x0frecent_messages\x18\t \x01(\x05R\x0erecentMessages\x12\x14\n" +
+	"\x05files\x18\n" +
+	" \x01(\x05R\x05files\x12!\n" +
+	"\frecent_files\x18\v \x01(\x05R\vrecentFiles\x12O\n" +
+	"\x10busiest_channels\x18\f \x03(\v2$.sameoldchat.chat.v1.ChannelActivityR\x0fbusiestChannels\x12\x14\n" +
+	"\x05since\x18\r \x01(\x03R\x05since\"\xad\x02\n" +
 	"\x0eIntegrationLog\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x19\n" +
 	"\bapp_type\x18\x02 \x01(\tR\aappType\x12\x1f\n" +
@@ -691,11 +974,12 @@ const file_sameoldchat_chat_v1_audit_proto_rawDesc = "" +
 	"\x04logs\x18\x01 \x03(\v2#.sameoldchat.chat.v1.IntegrationLogR\x04logs\x12\x12\n" +
 	"\x04page\x18\x02 \x01(\x05R\x04page\x12\x14\n" +
 	"\x05pages\x18\x03 \x01(\x05R\x05pages\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x05R\x05total2\xc7\x02\n" +
+	"\x05total\x18\x04 \x01(\x05R\x05total2\xb9\x03\n" +
 	"\x11AccessLogsService\x12e\n" +
 	"\fRecordAccess\x12(.sameoldchat.chat.v1.RecordAccessRequest\x1a+.sameoldchat.chat.v1.AccessMutationResponse\x12]\n" +
 	"\n" +
-	"AccessLogs\x12&.sameoldchat.chat.v1.AccessLogsRequest\x1a'.sameoldchat.chat.v1.AccessLogsResponse\x12l\n" +
+	"AccessLogs\x12&.sameoldchat.chat.v1.AccessLogsRequest\x1a'.sameoldchat.chat.v1.AccessLogsResponse\x12p\n" +
+	"\x15GetWorkspaceAnalytics\x12..sameoldchat.chat.v1.WorkspaceAnalyticsRequest\x1a'.sameoldchat.chat.v1.WorkspaceAnalytics\x12l\n" +
 	"\x0fIntegrationLogs\x12+.sameoldchat.chat.v1.IntegrationLogsRequest\x1a,.sameoldchat.chat.v1.IntegrationLogsResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
@@ -710,31 +994,37 @@ func file_sameoldchat_chat_v1_audit_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_audit_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_audit_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_sameoldchat_chat_v1_audit_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_sameoldchat_chat_v1_audit_proto_goTypes = []any{
-	(*AccessLog)(nil),               // 0: sameoldchat.chat.v1.AccessLog
-	(*RecordAccessRequest)(nil),     // 1: sameoldchat.chat.v1.RecordAccessRequest
-	(*AccessLogsRequest)(nil),       // 2: sameoldchat.chat.v1.AccessLogsRequest
-	(*AccessLogsResponse)(nil),      // 3: sameoldchat.chat.v1.AccessLogsResponse
-	(*AccessMutationResponse)(nil),  // 4: sameoldchat.chat.v1.AccessMutationResponse
-	(*IntegrationLog)(nil),          // 5: sameoldchat.chat.v1.IntegrationLog
-	(*IntegrationLogsRequest)(nil),  // 6: sameoldchat.chat.v1.IntegrationLogsRequest
-	(*IntegrationLogsResponse)(nil), // 7: sameoldchat.chat.v1.IntegrationLogsResponse
+	(*AccessLog)(nil),                 // 0: sameoldchat.chat.v1.AccessLog
+	(*RecordAccessRequest)(nil),       // 1: sameoldchat.chat.v1.RecordAccessRequest
+	(*AccessLogsRequest)(nil),         // 2: sameoldchat.chat.v1.AccessLogsRequest
+	(*AccessLogsResponse)(nil),        // 3: sameoldchat.chat.v1.AccessLogsResponse
+	(*AccessMutationResponse)(nil),    // 4: sameoldchat.chat.v1.AccessMutationResponse
+	(*WorkspaceAnalyticsRequest)(nil), // 5: sameoldchat.chat.v1.WorkspaceAnalyticsRequest
+	(*ChannelActivity)(nil),           // 6: sameoldchat.chat.v1.ChannelActivity
+	(*WorkspaceAnalytics)(nil),        // 7: sameoldchat.chat.v1.WorkspaceAnalytics
+	(*IntegrationLog)(nil),            // 8: sameoldchat.chat.v1.IntegrationLog
+	(*IntegrationLogsRequest)(nil),    // 9: sameoldchat.chat.v1.IntegrationLogsRequest
+	(*IntegrationLogsResponse)(nil),   // 10: sameoldchat.chat.v1.IntegrationLogsResponse
 }
 var file_sameoldchat_chat_v1_audit_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.AccessLogsResponse.logs:type_name -> sameoldchat.chat.v1.AccessLog
-	5, // 1: sameoldchat.chat.v1.IntegrationLogsResponse.logs:type_name -> sameoldchat.chat.v1.IntegrationLog
-	1, // 2: sameoldchat.chat.v1.AccessLogsService.RecordAccess:input_type -> sameoldchat.chat.v1.RecordAccessRequest
-	2, // 3: sameoldchat.chat.v1.AccessLogsService.AccessLogs:input_type -> sameoldchat.chat.v1.AccessLogsRequest
-	6, // 4: sameoldchat.chat.v1.AccessLogsService.IntegrationLogs:input_type -> sameoldchat.chat.v1.IntegrationLogsRequest
-	4, // 5: sameoldchat.chat.v1.AccessLogsService.RecordAccess:output_type -> sameoldchat.chat.v1.AccessMutationResponse
-	3, // 6: sameoldchat.chat.v1.AccessLogsService.AccessLogs:output_type -> sameoldchat.chat.v1.AccessLogsResponse
-	7, // 7: sameoldchat.chat.v1.AccessLogsService.IntegrationLogs:output_type -> sameoldchat.chat.v1.IntegrationLogsResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0,  // 0: sameoldchat.chat.v1.AccessLogsResponse.logs:type_name -> sameoldchat.chat.v1.AccessLog
+	6,  // 1: sameoldchat.chat.v1.WorkspaceAnalytics.busiest_channels:type_name -> sameoldchat.chat.v1.ChannelActivity
+	8,  // 2: sameoldchat.chat.v1.IntegrationLogsResponse.logs:type_name -> sameoldchat.chat.v1.IntegrationLog
+	1,  // 3: sameoldchat.chat.v1.AccessLogsService.RecordAccess:input_type -> sameoldchat.chat.v1.RecordAccessRequest
+	2,  // 4: sameoldchat.chat.v1.AccessLogsService.AccessLogs:input_type -> sameoldchat.chat.v1.AccessLogsRequest
+	5,  // 5: sameoldchat.chat.v1.AccessLogsService.GetWorkspaceAnalytics:input_type -> sameoldchat.chat.v1.WorkspaceAnalyticsRequest
+	9,  // 6: sameoldchat.chat.v1.AccessLogsService.IntegrationLogs:input_type -> sameoldchat.chat.v1.IntegrationLogsRequest
+	4,  // 7: sameoldchat.chat.v1.AccessLogsService.RecordAccess:output_type -> sameoldchat.chat.v1.AccessMutationResponse
+	3,  // 8: sameoldchat.chat.v1.AccessLogsService.AccessLogs:output_type -> sameoldchat.chat.v1.AccessLogsResponse
+	7,  // 9: sameoldchat.chat.v1.AccessLogsService.GetWorkspaceAnalytics:output_type -> sameoldchat.chat.v1.WorkspaceAnalytics
+	10, // 10: sameoldchat.chat.v1.AccessLogsService.IntegrationLogs:output_type -> sameoldchat.chat.v1.IntegrationLogsResponse
+	7,  // [7:11] is the sub-list for method output_type
+	3,  // [3:7] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_audit_proto_init() }
@@ -748,7 +1038,7 @@ func file_sameoldchat_chat_v1_audit_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_audit_proto_rawDesc), len(file_sameoldchat_chat_v1_audit_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

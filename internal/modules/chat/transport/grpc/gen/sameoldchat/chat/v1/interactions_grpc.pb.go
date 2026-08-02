@@ -20,6 +20,9 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	InteractionsService_MarkRead_FullMethodName                     = "/sameoldchat.chat.v1.InteractionsService/MarkRead"
+	InteractionsService_GetReadCursor_FullMethodName                = "/sameoldchat.chat.v1.InteractionsService/GetReadCursor"
+	InteractionsService_ThreadSummaries_FullMethodName              = "/sameoldchat.chat.v1.InteractionsService/ThreadSummaries"
+	InteractionsService_MessageAt_FullMethodName                    = "/sameoldchat.chat.v1.InteractionsService/MessageAt"
 	InteractionsService_DispatchSlashCommand_FullMethodName         = "/sameoldchat.chat.v1.InteractionsService/DispatchSlashCommand"
 	InteractionsService_DispatchBlockAction_FullMethodName          = "/sameoldchat.chat.v1.InteractionsService/DispatchBlockAction"
 	InteractionsService_DispatchViewBlockAction_FullMethodName      = "/sameoldchat.chat.v1.InteractionsService/DispatchViewBlockAction"
@@ -38,6 +41,11 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type InteractionsServiceClient interface {
 	MarkRead(ctx context.Context, in *MarkReadRequest, opts ...grpc.CallOption) (*ReadCursor, error)
+	// Named GetReadCursor because an rpc named ReadCursor would shadow the
+	// ReadCursor message type for every later return in this service.
+	GetReadCursor(ctx context.Context, in *ReadCursorRequest, opts ...grpc.CallOption) (*ReadCursor, error)
+	ThreadSummaries(ctx context.Context, in *ThreadSummariesRequest, opts ...grpc.CallOption) (*ThreadSummariesResponse, error)
+	MessageAt(ctx context.Context, in *MessageAtRequest, opts ...grpc.CallOption) (*Message, error)
 	DispatchSlashCommand(ctx context.Context, in *SlashCommandRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
 	DispatchBlockAction(ctx context.Context, in *BlockActionRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
 	DispatchViewBlockAction(ctx context.Context, in *ViewBlockActionRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
@@ -63,6 +71,36 @@ func (c *interactionsServiceClient) MarkRead(ctx context.Context, in *MarkReadRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReadCursor)
 	err := c.cc.Invoke(ctx, InteractionsService_MarkRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) GetReadCursor(ctx context.Context, in *ReadCursorRequest, opts ...grpc.CallOption) (*ReadCursor, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReadCursor)
+	err := c.cc.Invoke(ctx, InteractionsService_GetReadCursor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) ThreadSummaries(ctx context.Context, in *ThreadSummariesRequest, opts ...grpc.CallOption) (*ThreadSummariesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ThreadSummariesResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_ThreadSummaries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) MessageAt(ctx context.Context, in *MessageAtRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, InteractionsService_MessageAt_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +222,11 @@ func (c *interactionsServiceClient) HandleSocketModeResponse(ctx context.Context
 // for forward compatibility.
 type InteractionsServiceServer interface {
 	MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error)
+	// Named GetReadCursor because an rpc named ReadCursor would shadow the
+	// ReadCursor message type for every later return in this service.
+	GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error)
+	ThreadSummaries(context.Context, *ThreadSummariesRequest) (*ThreadSummariesResponse, error)
+	MessageAt(context.Context, *MessageAtRequest) (*Message, error)
 	DispatchSlashCommand(context.Context, *SlashCommandRequest) (*InteractionMutationResponse, error)
 	DispatchBlockAction(context.Context, *BlockActionRequest) (*InteractionMutationResponse, error)
 	DispatchViewBlockAction(context.Context, *ViewBlockActionRequest) (*InteractionMutationResponse, error)
@@ -206,6 +249,15 @@ type UnimplementedInteractionsServiceServer struct{}
 
 func (UnimplementedInteractionsServiceServer) MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error) {
 	return nil, status.Error(codes.Unimplemented, "method MarkRead not implemented")
+}
+func (UnimplementedInteractionsServiceServer) GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetReadCursor not implemented")
+}
+func (UnimplementedInteractionsServiceServer) ThreadSummaries(context.Context, *ThreadSummariesRequest) (*ThreadSummariesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ThreadSummaries not implemented")
+}
+func (UnimplementedInteractionsServiceServer) MessageAt(context.Context, *MessageAtRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method MessageAt not implemented")
 }
 func (UnimplementedInteractionsServiceServer) DispatchSlashCommand(context.Context, *SlashCommandRequest) (*InteractionMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DispatchSlashCommand not implemented")
@@ -274,6 +326,60 @@ func _InteractionsService_MarkRead_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(InteractionsServiceServer).MarkRead(ctx, req.(*MarkReadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_GetReadCursor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadCursorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).GetReadCursor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_GetReadCursor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).GetReadCursor(ctx, req.(*ReadCursorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_ThreadSummaries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ThreadSummariesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).ThreadSummaries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_ThreadSummaries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).ThreadSummaries(ctx, req.(*ThreadSummariesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_MessageAt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MessageAtRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).MessageAt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_MessageAt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).MessageAt(ctx, req.(*MessageAtRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -486,6 +592,18 @@ var InteractionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MarkRead",
 			Handler:    _InteractionsService_MarkRead_Handler,
+		},
+		{
+			MethodName: "GetReadCursor",
+			Handler:    _InteractionsService_GetReadCursor_Handler,
+		},
+		{
+			MethodName: "ThreadSummaries",
+			Handler:    _InteractionsService_ThreadSummaries_Handler,
+		},
+		{
+			MethodName: "MessageAt",
+			Handler:    _InteractionsService_MessageAt_Handler,
 		},
 		{
 			MethodName: "DispatchSlashCommand",

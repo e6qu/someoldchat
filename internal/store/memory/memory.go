@@ -19,16 +19,18 @@ import (
 )
 
 type Store struct {
-	mu                            sync.RWMutex
-	workspaces                    map[domain.WorkspaceID]domain.Workspace
-	members                       map[string]domain.WorkspaceMembership
-	users                         map[domain.UserID]domain.User
-	scheduledStatuses             map[domain.ScheduledStatusID]domain.ScheduledStatus
-	userExpirations               map[domain.UserID]time.Time
-	conversations                 map[domain.ConversationID]domain.Conversation
-	conversationPrefs             map[domain.ConversationID]domain.ConversationPrefs
-	conversationAccess            map[domain.ConversationID][]domain.UserGroupID
-	conversationTeams             map[domain.ConversationID]map[domain.WorkspaceID]struct{}
+	mu                 sync.RWMutex
+	workspaces         map[domain.WorkspaceID]domain.Workspace
+	members            map[string]domain.WorkspaceMembership
+	users              map[domain.UserID]domain.User
+	scheduledStatuses  map[domain.ScheduledStatusID]domain.ScheduledStatus
+	userExpirations    map[domain.UserID]time.Time
+	conversations      map[domain.ConversationID]domain.Conversation
+	conversationPrefs  map[domain.ConversationID]domain.ConversationPrefs
+	conversationAccess map[domain.ConversationID][]domain.UserGroupID
+	conversationTeams  map[domain.ConversationID]map[domain.WorkspaceID]struct{}
+	sharedInvites      map[domain.SharedInviteID]domain.SharedInvite
+
 	conversationOrg               map[domain.ConversationID]bool
 	closedDirects                 map[string]struct{}
 	inviteRequests                map[domain.InviteRequestID]domain.InviteRequest
@@ -186,7 +188,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), sharedInvites: make(map[domain.SharedInviteID]domain.SharedInvite), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -1016,6 +1018,13 @@ func (s *Store) GetUser(_ context.Context, id domain.UserID) (domain.User, error
 func (s *Store) CreateUser(_ context.Context, user domain.User, membership domain.WorkspaceMembership, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createUserLocked(user, membership, &event)
+}
+
+// createUserLocked is CreateUser without the lock or the event, so a larger
+// transaction — accepting an invitation — can create the member it promised
+// under the same lock as the rest of its writes.
+func (s *Store) createUserLocked(user domain.User, membership domain.WorkspaceMembership, event *events.Event) error {
 	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
 		return store.InvalidArgument("user and active workspace membership are required")
 	}
@@ -1048,7 +1057,9 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 	}
 	s.users[user.ID] = user
 	s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)] = membership
-	s.outbox = append(s.outbox, event)
+	if event != nil {
+		s.outbox = append(s.outbox, *event)
+	}
 	return nil
 }
 
@@ -1770,7 +1781,7 @@ func (s *Store) ExpandDirectConversation(_ context.Context, expansion domain.Dir
 			if original.Deleted {
 				continue
 			}
-			copy := cloneMessage(original)
+			copy := s.cloneMessage(original)
 			copy.ID, err = domain.NewMessageID()
 			if err != nil {
 				return err
@@ -1945,7 +1956,7 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 	return nil
 }
 
-func (s *Store) RenameConversation(_ context.Context, conversation domain.ConversationID, name string, event events.Event) (domain.Conversation, error) {
+func (s *Store) RenameConversation(_ context.Context, conversation domain.ConversationID, name string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -1962,10 +1973,11 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	value.Name = name
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -1975,10 +1987,11 @@ func (s *Store) SetConversationTopic(_ context.Context, conversation domain.Conv
 	value.Topic = topic
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -1988,6 +2001,7 @@ func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.Co
 	value.Purpose = purpose
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return value, nil
 }
 
@@ -2147,15 +2161,18 @@ func (s *Store) GetInviteRequest(_ context.Context, workspace domain.WorkspaceID
 	return cloneInviteRequest(value), nil
 }
 
-func (s *Store) SetInviteRequestStatus(_ context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
+func (s *Store) SetInviteRequestStatus(_ context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, from, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.inviteRequests[id]
 	if !ok || value.WorkspaceID != workspace {
 		return store.ErrNotFound
 	}
-	if value.Status != domain.InviteRequestPending || (status != domain.InviteRequestApproved && status != domain.InviteRequestDenied) {
+	if !domain.InviteRequestReviewable(from, status) {
 		return store.ErrInvalidInviteRequest
+	}
+	if value.Status != from {
+		return store.ErrNotFound
 	}
 	value.Status = status
 	value.ReviewedAt = reviewedAt.UTC()
@@ -2187,6 +2204,172 @@ func (s *Store) ListInviteRequests(_ context.Context, workspace domain.Workspace
 	}
 	page.Requests = values
 	return page, err
+}
+
+func (s *Store) ListWorkspacesForEmail(_ context.Context, email string) ([]domain.WorkspaceMembershipSummary, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]domain.WorkspaceMembershipSummary, 0, 2)
+	for _, user := range s.users {
+		if user.Deleted || domain.NormalizeEmail(user.Email) != normalized {
+			continue
+		}
+		membership, exists := s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)]
+		if !exists || !membership.Active {
+			continue
+		}
+		workspace, exists := s.workspaces[user.WorkspaceID]
+		if !exists {
+			continue
+		}
+		result = append(result, domain.WorkspaceMembershipSummary{Workspace: cloneWorkspace(workspace), UserID: user.ID, Role: membership.Role})
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].Workspace.ID < result[right].Workspace.ID })
+	return result, nil
+}
+
+func (s *Store) WorkspaceAnalytics(_ context.Context, workspace domain.WorkspaceID, since time.Time, busiest int) (domain.WorkspaceAnalytics, error) {
+	if busiest < 0 {
+		return domain.WorkspaceAnalytics{}, store.InvalidArgument("the busiest-channel bound must not be negative")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := domain.WorkspaceAnalytics{Since: since.UTC()}
+	for _, user := range s.users {
+		if user.WorkspaceID != workspace || user.Deleted {
+			continue
+		}
+		result.Members++
+		membership, exists := s.members[string(workspace)+"\x00"+string(user.ID)]
+		if !exists {
+			continue
+		}
+		if membership.Active {
+			result.ActiveMembers++
+		}
+		if membership.Guest() {
+			result.Guests++
+		}
+		if membership.Role == domain.WorkspaceRoleAdmin || membership.Role == domain.WorkspaceRoleOwner {
+			result.Admins++
+		}
+	}
+	activity := make([]domain.ChannelActivity, 0, len(s.conversations))
+	for id, conversation := range s.conversations {
+		if conversation.WorkspaceID != workspace {
+			continue
+		}
+		if !conversation.IsDirect && !conversation.IsGroupDirect {
+			switch {
+			case conversation.Archived:
+				result.ArchivedChannels++
+			case conversation.IsPrivate:
+				result.PrivateChannels++
+			default:
+				result.PublicChannels++
+			}
+		}
+		recent := 0
+		for _, message := range s.messages[id] {
+			if message.Deleted {
+				continue
+			}
+			result.Messages++
+			if !since.IsZero() && message.CreatedAt.Before(since) {
+				continue
+			}
+			result.RecentMessages++
+			recent++
+		}
+		if recent > 0 && !conversation.IsDirect && !conversation.IsGroupDirect {
+			activity = append(activity, domain.ChannelActivity{ConversationID: id, Name: conversation.Name, Messages: recent})
+		}
+	}
+	for _, file := range s.files {
+		if file.WorkspaceID != workspace || file.Deleted {
+			continue
+		}
+		result.Files++
+		if since.IsZero() || !file.CreatedAt.Before(since) {
+			result.RecentFiles++
+		}
+	}
+	// Ties break on the identifier so two profiles, and two calls, order the
+	// same list the same way.
+	sort.Slice(activity, func(left, right int) bool {
+		if activity[left].Messages != activity[right].Messages {
+			return activity[left].Messages > activity[right].Messages
+		}
+		return activity[left].ConversationID < activity[right].ConversationID
+	})
+	if busiest < len(activity) {
+		activity = activity[:busiest]
+	}
+	result.BusiestChannels = activity
+	return result, nil
+}
+
+func (s *Store) FindInviteRequestByEmail(_ context.Context, workspace domain.WorkspaceID, email string, status domain.InviteRequestStatus) (domain.InviteRequest, error) {
+	normalized := domain.NormalizeEmail(email)
+	if normalized == "" {
+		return domain.InviteRequest{}, store.ErrNotFound
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	found := domain.InviteRequest{}
+	exists := false
+	for _, value := range s.inviteRequests {
+		if value.WorkspaceID != workspace || value.Status != status || domain.NormalizeEmail(value.Email) != normalized {
+			continue
+		}
+		// The newest invitation wins: an address invited twice is being
+		// re-invited, and the older record is the stale one.
+		if !exists || value.CreatedAt.After(found.CreatedAt) || (value.CreatedAt.Equal(found.CreatedAt) && value.ID > found.ID) {
+			found, exists = value, true
+		}
+	}
+	if !exists {
+		return domain.InviteRequest{}, store.ErrNotFound
+	}
+	return cloneInviteRequest(found), nil
+}
+
+func (s *Store) AcceptInviteRequest(_ context.Context, acceptance domain.InviteRequestAcceptance, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return store.InvalidArgument("accepting an invitation requires at least one event")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	request, exists := s.inviteRequests[acceptance.RequestID]
+	if !exists || request.WorkspaceID != acceptance.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if !request.Acceptable(acceptance.AcceptedAt) {
+		return store.ErrInvalidInviteRequest
+	}
+	if err := s.createUserLocked(acceptance.User, acceptance.Membership, nil); err != nil {
+		return err
+	}
+	for _, channelID := range acceptance.Channels {
+		conversation, ok := s.conversations[channelID]
+		if !ok || conversation.WorkspaceID != acceptance.WorkspaceID {
+			return store.ErrNotFound
+		}
+		if s.memberships[channelID] == nil {
+			s.memberships[channelID] = make(map[domain.UserID]struct{})
+		}
+		s.memberships[channelID][acceptance.User.ID] = struct{}{}
+	}
+	request.Status = domain.InviteRequestAccepted
+	request.AcceptedAt = acceptance.AcceptedAt.UTC()
+	request.AcceptedBy = acceptance.User.ID
+	s.inviteRequests[acceptance.RequestID] = request
+	s.outbox = append(s.outbox, emitted...)
+	return nil
 }
 
 func validAppApprovalStatus(status domain.AppApprovalStatus) bool {
@@ -3319,6 +3502,149 @@ func (s *Store) FindUserMigration(_ context.Context, workspace domain.WorkspaceI
 	return value, nil
 }
 
+func (s *Store) CreateSharedInvite(_ context.Context, value domain.SharedInvite, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.ConversationID == "" || value.Status != domain.SharedInvitePending {
+		return store.InvalidArgument("a shared invitation must be pending and name its conversation")
+	}
+	if value.TargetWorkspaceID == "" && strings.TrimSpace(value.TargetEmail) == "" {
+		return store.InvalidArgument("a shared invitation must name an organization or an address")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conversation, exists := s.conversations[value.ConversationID]
+	if !exists || conversation.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if value.TargetWorkspaceID != "" {
+		if _, exists := s.workspaces[value.TargetWorkspaceID]; !exists {
+			return store.ErrNotFound
+		}
+		if value.TargetWorkspaceID == value.WorkspaceID {
+			return store.InvalidArgument("a conversation cannot be shared with its own workspace")
+		}
+	}
+	if _, exists := s.sharedInvites[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	// One outstanding invitation per organization per conversation: a second
+	// would let two acceptances each claim a place.
+	for _, existing := range s.sharedInvites {
+		if existing.ConversationID != value.ConversationID || existing.TargetWorkspaceID == "" || existing.TargetWorkspaceID != value.TargetWorkspaceID {
+			continue
+		}
+		if existing.Status == domain.SharedInvitePending || existing.Status == domain.SharedInviteApproved || existing.Status == domain.SharedInviteAccepted {
+			return store.ErrAlreadyExists
+		}
+	}
+	s.sharedInvites[value.ID] = value
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetSharedInvite(_ context.Context, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.sharedInvites[id]
+	if !exists {
+		return domain.SharedInvite{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.SharedInvitePage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.SharedInvitePage{}, err
+	}
+	s.mu.RLock()
+	values := make([]domain.SharedInvite, 0, request.Limit+1)
+	for _, value := range s.sharedInvites {
+		if value.Status != status || string(value.ID) <= after {
+			continue
+		}
+		if value.WorkspaceID != workspace && value.TargetWorkspaceID != workspace {
+			continue
+		}
+		values = appendSorted(values, value, request.Limit+1, func(left, right domain.SharedInvite) bool { return left.ID < right.ID })
+	}
+	s.mu.RUnlock()
+	page := domain.SharedInvitePage{HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		values = values[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	page.Invites = values
+	return page, err
+}
+
+func (s *Store) SetSharedInviteStatus(_ context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, event events.Event) error {
+	if !domain.SharedInviteTransition(from, to) {
+		return store.InvalidArgument("a shared invitation cannot move between those states")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.sharedInvites[id]
+	if !exists {
+		return store.ErrNotFound
+	}
+	if value.Status != from {
+		return store.ErrConflict
+	}
+	value.Status = to
+	if to == domain.SharedInviteApproved {
+		value.ReviewedAt = at.UTC()
+	} else {
+		value.SettledAt = at.UTC()
+	}
+	s.sharedInvites[id] = value
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) AcceptSharedInvite(_ context.Context, id domain.SharedInviteID, at time.Time, emitted []events.Event) (domain.Conversation, error) {
+	if len(emitted) == 0 {
+		return domain.Conversation{}, store.InvalidArgument("accepting a shared invitation requires at least one event")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	invite, exists := s.sharedInvites[id]
+	if !exists {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	if !invite.Acceptable(at) {
+		return domain.Conversation{}, store.ErrConflict
+	}
+	conversation, exists := s.conversations[invite.ConversationID]
+	if !exists {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	teams := s.conversationTeams[invite.ConversationID]
+	if teams == nil {
+		teams = map[domain.WorkspaceID]struct{}{}
+	}
+	// The host organization counts towards the capacity, so it is part of the
+	// set before the place is claimed.
+	participating := map[domain.WorkspaceID]struct{}{conversation.WorkspaceID: {}}
+	for team := range teams {
+		participating[team] = struct{}{}
+	}
+	if _, already := participating[invite.TargetWorkspaceID]; !already {
+		if len(participating) >= domain.SlackConnectCapacity {
+			return domain.Conversation{}, store.ErrConflict
+		}
+		teams[invite.TargetWorkspaceID] = struct{}{}
+		s.conversationTeams[invite.ConversationID] = teams
+	}
+	invite.Status = domain.SharedInviteAccepted
+	invite.SettledAt = at.UTC()
+	s.sharedInvites[id] = invite
+	s.outbox = append(s.outbox, emitted...)
+	return conversation, nil
+}
+
 func (s *Store) SetConversationTeams(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -4211,7 +4537,31 @@ func (s *Store) SetConversationPrefs(_ context.Context, conversation domain.Conv
 	return value, nil
 }
 
-func (s *Store) AddConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+// appendConversationNotices records the messages a conversation change posts
+// into the conversation. The caller holds the lock, so the notice and the
+// change it describes become visible together — the in-memory equivalent of
+// the SQL transaction.
+func (s *Store) appendConversationNotices(notices []domain.Message) {
+	for _, notice := range notices {
+		for {
+			taken := false
+			for _, existing := range s.messages[notice.Conversation] {
+				if existing.CreatedAt.Equal(notice.CreatedAt) {
+					taken = true
+					break
+				}
+			}
+			if !taken {
+				break
+			}
+			notice.CreatedAt = notice.CreatedAt.Add(time.Microsecond)
+		}
+		notice.Unfurls = copyUnfurls(notice.Unfurls)
+		s.messages[notice.Conversation] = append(s.messages[notice.Conversation], notice)
+	}
+}
+
+func (s *Store) AddConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -4229,6 +4579,7 @@ func (s *Store) AddConversationMember(_ context.Context, conversation domain.Con
 	}
 	s.memberships[conversation][user] = struct{}{}
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return nil
 }
 
@@ -4277,7 +4628,7 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 	return nil
 }
 
-func (s *Store) RemoveConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) RemoveConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, exists := s.conversations[conversation]
@@ -4298,6 +4649,7 @@ func (s *Store) RemoveConversationMember(_ context.Context, conversation domain.
 		}
 	}
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return nil
 }
 
@@ -4419,6 +4771,51 @@ func (s *Store) SetThreadFollowed(_ context.Context, workspace domain.WorkspaceI
 	return nil
 }
 
+func (s *Store) ThreadSummaries(_ context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
+	summaries := make(map[domain.MessageTimestamp]domain.ThreadSummary, len(roots))
+	if conversation == "" || len(roots) == 0 {
+		return summaries, nil
+	}
+	wanted := make(map[domain.MessageTimestamp]struct{}, len(roots))
+	for _, root := range roots {
+		if strings.TrimSpace(string(root)) != "" {
+			wanted[root] = struct{}{}
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	participants := make(map[domain.MessageTimestamp]map[domain.UserID]struct{}, len(wanted))
+	for _, message := range s.messages[conversation] {
+		if message.Deleted || message.ThreadTimestamp == "" {
+			continue
+		}
+		if _, ok := wanted[message.ThreadTimestamp]; !ok {
+			continue
+		}
+		summary := summaries[message.ThreadTimestamp]
+		summary.ReplyCount++
+		if message.CreatedAt.After(summary.LastReplyAt) {
+			summary.LastReplyAt = message.CreatedAt
+		}
+		summaries[message.ThreadTimestamp] = summary
+		if participants[message.ThreadTimestamp] == nil {
+			participants[message.ThreadTimestamp] = make(map[domain.UserID]struct{})
+		}
+		participants[message.ThreadTimestamp][message.AuthorID] = struct{}{}
+	}
+	for root, authors := range participants {
+		summary := summaries[root]
+		for author := range authors {
+			summary.Participants = append(summary.Participants, author)
+		}
+		// Map iteration is unordered; the SQL profile returns a sorted list,
+		// so sorting here is what makes the two projections identical.
+		slices.Sort(summary.Participants)
+		summaries[root] = summary
+	}
+	return summaries, nil
+}
+
 func (s *Store) GetReadCursor(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (domain.ReadCursor, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -4437,10 +4834,19 @@ func (s *Store) SetReadCursor(_ context.Context, cursor domain.ReadCursor, event
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.readCursors[readCursorKey(cursor.WorkspaceID, cursor.UserID, cursor.Conversation)] = cursor
+	// Activity follows the cursor in BOTH directions: marking unread moves the
+	// cursor backwards, and items after it must reopen, or the sidebar and
+	// Activity disagree about the same conversation.
 	for id, item := range s.activityItems {
-		if item.WorkspaceID == cursor.WorkspaceID && item.UserID == cursor.UserID && item.Conversation == cursor.Conversation &&
-			!item.OccurredAt.After(readAt) && item.ReadAt.IsZero() {
+		if item.WorkspaceID != cursor.WorkspaceID || item.UserID != cursor.UserID || item.Conversation != cursor.Conversation {
+			continue
+		}
+		switch {
+		case !item.OccurredAt.After(readAt) && item.ReadAt.IsZero():
 			item.ReadAt = cursor.UpdatedAt.UTC()
+			s.activityItems[id] = item
+		case item.OccurredAt.After(readAt) && !item.ReadAt.IsZero():
+			item.ReadAt = time.Time{}
 			s.activityItems[id] = item
 		}
 	}
@@ -4509,7 +4915,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 			message, messageErr := s.messageLocked(item.MessageID)
 			conversation, conversationExists := s.conversations[item.Conversation]
 			if messageErr == nil && !message.Deleted && conversationExists && s.canViewActivitySourceLocked(workspace, user, conversation) {
-				item.Message = cloneMessage(message)
+				item.Message = s.cloneMessage(message)
 				item.SourceAvailable = true
 			}
 		}
@@ -5121,7 +5527,7 @@ func (s *Store) GetMessage(_ context.Context, id domain.MessageID) (domain.Messa
 	for _, values := range s.messages {
 		for _, message := range values {
 			if message.ID == id {
-				return cloneMessage(message), nil
+				return s.cloneMessage(message), nil
 			}
 		}
 	}
@@ -5149,7 +5555,7 @@ func (s *Store) GetMessageByCreatedAt(_ context.Context, conversation domain.Con
 	wanted := domain.MessageInstant(createdAt)
 	for _, message := range s.messages[conversation] {
 		if domain.MessageInstant(message.CreatedAt).Equal(wanted) {
-			return cloneMessage(message), nil
+			return s.cloneMessage(message), nil
 		}
 	}
 	return domain.Message{}, store.ErrNotFound
@@ -5257,7 +5663,7 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 				if reaction.UserID != user {
 					continue
 				}
-				item := domain.UserReaction{Conversation: conversationID, Message: cloneMessage(message), Reaction: reaction}
+				item := domain.UserReaction{Conversation: conversationID, Message: s.cloneMessage(message), Reaction: reaction}
 				if after == "" || userReactionKey(item) > after {
 					values = appendSorted(values, item, request.Limit+1, func(left, right domain.UserReaction) bool { return userReactionKey(left) < userReactionKey(right) })
 				}
@@ -5408,7 +5814,7 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 		if star.Message.WorkspaceID != workspace || star.Message.Deleted || (after != "" && starKey(star) <= after) {
 			continue
 		}
-		star.Message = cloneMessage(star.Message)
+		star.Message = s.cloneMessage(star.Message)
 		values = appendSorted(values, star, request.Limit+1, func(left, right domain.Star) bool { return starKey(left) < starKey(right) })
 	}
 	hasMore := len(values) > request.Limit
@@ -6714,6 +7120,92 @@ func (s *Store) CreateCall(_ context.Context, value domain.Call, event events.Ev
 	return nil
 }
 
+func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joined events.Event) (domain.Call, bool, error) {
+	if value.Kind != domain.CallKindHuddle || value.ConversationID == "" || value.CreatedBy == "" {
+		return domain.Call{}, false, store.InvalidArgument("a huddle requires a conversation and a creator")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if conversation, ok := s.conversations[value.ConversationID]; !ok || conversation.WorkspaceID != value.WorkspaceID {
+		return domain.Call{}, false, store.ErrNotFound
+	}
+	for id, existing := range s.calls {
+		if existing.WorkspaceID != value.WorkspaceID || existing.Kind != domain.CallKindHuddle || existing.ConversationID != value.ConversationID || !existing.Active() {
+			continue
+		}
+		if !slices.Contains(existing.Participants, value.CreatedBy) {
+			existing.Participants = append(existing.Participants, value.CreatedBy)
+			s.calls[id] = existing
+			s.outbox = append(s.outbox, joined)
+		}
+		return cloneCall(existing), false, nil
+	}
+	if _, exists := s.calls[value.ID]; exists {
+		return domain.Call{}, false, store.ErrAlreadyExists
+	}
+	value.Participants = []domain.UserID{value.CreatedBy}
+	s.calls[value.ID] = cloneCall(value)
+	s.outbox = append(s.outbox, started)
+	return cloneCall(value), true, nil
+}
+
+func (s *Store) ActiveHuddle(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) (domain.Call, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, existing := range s.calls {
+		if existing.WorkspaceID == workspace && existing.Kind == domain.CallKindHuddle && existing.ConversationID == conversation && existing.Active() {
+			return cloneCall(existing), nil
+		}
+	}
+	return domain.Call{}, store.ErrNotFound
+}
+
+func (s *Store) JoinCall(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, event events.Event) (domain.Call, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.calls[id]
+	if !ok || value.WorkspaceID != workspace {
+		return domain.Call{}, store.ErrNotFound
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	if slices.Contains(value.Participants, user) {
+		return cloneCall(value), nil
+	}
+	value.Participants = append(value.Participants, user)
+	s.calls[id] = value
+	s.outbox = append(s.outbox, event)
+	return cloneCall(value), nil
+}
+
+func (s *Store) LeaveCall(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, left, ended events.Event) (domain.Call, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.calls[id]
+	if !ok || value.WorkspaceID != workspace {
+		return domain.Call{}, store.ErrNotFound
+	}
+	if !value.Active() {
+		return domain.Call{}, store.ErrConflict
+	}
+	if !slices.Contains(value.Participants, user) {
+		return cloneCall(value), nil
+	}
+	value.Participants = slices.DeleteFunc(append([]domain.UserID(nil), value.Participants...), func(candidate domain.UserID) bool { return candidate == user })
+	s.outbox = append(s.outbox, left)
+	if len(value.Participants) == 0 {
+		value.EndedAt = ended.CreatedAt.UTC()
+		value.DurationSeconds = int64(value.EndedAt.Sub(value.StartedAt).Seconds())
+		if value.DurationSeconds < 0 {
+			value.DurationSeconds = 0
+		}
+		s.outbox = append(s.outbox, ended)
+	}
+	s.calls[id] = value
+	return cloneCall(value), nil
+}
+
 func (s *Store) GetCall(_ context.Context, workspace domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -7289,6 +7781,54 @@ func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event e
 	return store.ErrNotFound
 }
 
+func (s *Store) DeleteMessage(_ context.Context, message domain.Message, event events.Event, unshares []store.FileUnshare) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := s.messages[message.Conversation]
+	for index := range values {
+		if values[index].ID != message.ID {
+			continue
+		}
+		message.Unfurls = copyUnfurls(message.Unfurls)
+		values[index] = message
+		s.messages[message.Conversation] = values
+		s.outbox = append(s.outbox, event)
+		for _, unshare := range unshares {
+			if s.fileIsCarriedElsewhereLocked(unshare.FileID, message.Conversation, message.ID) {
+				continue
+			}
+			channels := s.fileShares[unshare.FileID]
+			retained := slices.DeleteFunc(append([]domain.ConversationID(nil), channels...), func(channel domain.ConversationID) bool {
+				return channel == message.Conversation
+			})
+			if len(retained) == len(channels) {
+				continue
+			}
+			s.fileShares[unshare.FileID] = retained
+			s.outbox = append(s.outbox, unshare.Event)
+		}
+		return nil
+	}
+	return store.ErrNotFound
+}
+
+// fileIsCarriedElsewhereLocked reports whether any live message other than the
+// one being deleted still shares the file into the conversation. Sharing the
+// same file twice is ordinary, so the share only ends with the last carrier.
+func (s *Store) fileIsCarriedElsewhereLocked(fileID domain.FileID, conversation domain.ConversationID, excluding domain.MessageID) bool {
+	for _, message := range s.messages[conversation] {
+		if message.ID == excluding || message.Deleted {
+			continue
+		}
+		for _, file := range message.Files {
+			if file.ID == fileID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // cloneInviteRequest, cloneWorkspace and cloneMessage exist for the same reason
 // cloneUserGroup and cloneCall do: a value returned from this repository must not
 // alias the slice or map that still lives inside it, or a caller can mutate store
@@ -7304,14 +7844,25 @@ func cloneWorkspace(value domain.Workspace) domain.Workspace {
 	return value
 }
 
-func cloneMessage(value domain.Message) domain.Message {
+// cloneMessage re-reads every attached file from the file table rather than
+// returning the copy that was current when the message was posted. The SQL
+// profiles join message_files to files on every read, so a snapshot here
+// diverges the moment a file is deleted, renamed or shared: a deleted file
+// kept rendering as a live download with its original title.
+func (s *Store) cloneMessage(value domain.Message) domain.Message {
 	if value.Unfurls != nil {
 		value.Unfurls = copyUnfurls(value.Unfurls)
 	}
-	value.Files = append([]domain.File(nil), value.Files...)
-	for index := range value.Files {
-		value.Files[index].SharedChannels = append([]domain.ConversationID(nil), value.Files[index].SharedChannels...)
+	files := make([]domain.File, 0, len(value.Files))
+	for _, attached := range value.Files {
+		current, exists := s.files[attached.ID]
+		if !exists {
+			current = attached
+		}
+		current.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[attached.ID]...)
+		files = append(files, current)
 	}
+	value.Files = files
 	return value
 }
 
@@ -7638,7 +8189,7 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
 				continue
 			}
-			window = append(window, cloneMessage(values[index]))
+			window = append(window, s.cloneMessage(values[index]))
 		}
 	} else {
 		for index := 0; index < len(values) && len(window) <= request.Limit; index++ {
@@ -7648,7 +8199,7 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
 				continue
 			}
-			window = append(window, cloneMessage(values[index]))
+			window = append(window, s.cloneMessage(values[index]))
 		}
 	}
 	hasMore := len(window) > request.Limit
@@ -7703,7 +8254,7 @@ func (s *Store) ListAuthoredMessages(_ context.Context, workspace domain.Workspa
 			if request.Descending {
 				less = func(left, right domain.Message) bool { return messageBefore(right, left) }
 			}
-			values = appendSorted(values, cloneMessage(message), request.Limit+1, less)
+			values = appendSorted(values, s.cloneMessage(message), request.Limit+1, less)
 		}
 	}
 	hasMore := len(values) > request.Limit
@@ -7781,7 +8332,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 					return messageBefore(right, left)
 				}
 			}
-			values = appendSorted(values, cloneMessage(message), search.Page.Limit+1, less)
+			values = appendSorted(values, s.cloneMessage(message), search.Page.Limit+1, less)
 		}
 	}
 	s.mu.RUnlock()
@@ -7839,7 +8390,7 @@ func (s *Store) ListThreadMessages(_ context.Context, conversation domain.Conver
 		}
 		if (message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp) || message.ThreadTimestamp == timestamp {
 			if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
-				values = appendSorted(values, cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
+				values = appendSorted(values, s.cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
 			}
 		}
 	}

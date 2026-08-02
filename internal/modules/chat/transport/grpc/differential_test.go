@@ -1744,7 +1744,37 @@ func parityCases() []parityCase {
 				for _, member := range members.Users {
 					identifiers = append(identifiers, member.ID)
 				}
-				return []any{cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore, isMember}, nil
+				// The cursor a member has is read back through the seam, and a
+				// thread's accumulated replies are summarized in one batched
+				// call: both are what the unread divider and the parent
+				// message's "N replies" line are built from.
+				readBack, err := chat.ReadCursor(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				reply, err := chat.Post(ctx, "T1", "U2", "C1", "in thread", timestampOf(message), "")
+				if err != nil {
+					return nil, err
+				}
+				_ = reply
+				summaries, err := chat.ThreadSummaries(ctx, "T1", "U1", "C1", []domain.MessageTimestamp{timestampOf(message)})
+				if err != nil {
+					return nil, err
+				}
+				summary := summaries[timestampOf(message)]
+				// The permalink route resolves a message by its public
+				// timestamp, which is the identifier every Slack link and
+				// action names it by.
+				resolved, err := chat.MessageAt(ctx, "T1", "U1", "C1", timestampOf(message))
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore, isMember,
+					readBack.Conversation, readBack.LastRead == cursor.LastRead,
+					summary.ReplyCount, summary.Participants, !summary.LastReplyAt.IsZero(),
+					resolved.ID == message.ID, resolved.Text,
+				}, nil
 			},
 		},
 		{
@@ -2099,7 +2129,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				workspace, err := chat.SetWorkspaceNotificationPreferences(
-					ctx, "T1", "U1", domain.NotificationAll, []string{"release", "customer escalation"}, false, true,
+					ctx, "T1", "U1", domain.NotificationAll, []string{"release", "customer escalation"}, false, true, true,
 				)
 				if err != nil {
 					return nil, err
@@ -2544,8 +2574,10 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // methods that take a page bound, a timestamp in nanoseconds, or an identifier
 // the store treats as optional.
 var parityGaps = map[string]struct{}{
+	"AcceptSharedInvite":                 {},
 	"AckSocketModeResponses":             {},
 	"AcknowledgeEntityCommentAction":     {},
+	"ActiveHuddle":                       {},
 	"AddCall":                            {},
 	"AddCallParticipants":                {},
 	"AddRemoteFile":                      {},
@@ -2569,7 +2601,13 @@ var parityGaps = map[string]struct{}{
 	"AdminInviteUser":                    {},
 	"AdminListApps":                      {},
 	"AdminListConversationAccessGroups":  {},
+	"AcceptInvitationForEmail":           {},
 	"AdminListInviteRequests":            {},
+	"ApproveSharedInvite":                {},
+	"DeclineSharedInvite":                {},
+	"DenySharedInvite":                   {},
+	"EndHuddle":                          {},
+	"InvitationPreview":                  {},
 	"AdminRemoveConversationAccessGroup": {},
 	"AdminRemoveEmoji":                   {},
 	"AdminRenameConversation":            {},
@@ -2626,9 +2664,13 @@ var parityGaps = map[string]struct{}{
 	"HandleAppResponse":                       {},
 	"IntegrationLogs":                         {},
 	"InviteConversationMembers":               {},
+	"InviteShared":                            {},
 	"JoinConversation":                        {},
+	"JoinHuddle":                              {},
 	"KickConversationMember":                  {},
 	"LeaveConversation":                       {},
+	"LeaveHuddle":                             {},
+	"ListSharedInvites":                       {},
 	"ListWorkspaceApps":                       {},
 	"ListAccessLogs":                          {},
 	"ListAppEventsAfter":                      {},
@@ -2679,6 +2721,7 @@ var parityGaps = map[string]struct{}{
 	"ResetUserSessions":                       {},
 	"RevokeFilePublic":                        {},
 	"RevokeSession":                           {},
+	"RevokeSharedInvite":                      {},
 	"RevokeToken":                             {},
 	"ScheduleMessageWithBlocks":               {},
 	"ScheduleMessageWithBlocksAndAttachments": {},
@@ -2688,12 +2731,14 @@ var parityGaps = map[string]struct{}{
 	"SetConversationArchived":                 {},
 	"SetConversationPurpose":                  {},
 	"SetConversationTopic":                    {},
+	"SetExternalInvitePermissions":            {},
 	"SetListAccess":                           {},
 	"SetSocketModeCursor":                     {},
 	"SetUserExpiration":                       {},
 	"SetUserGroupEnabled":                     {},
 	"ShareFilePublic":                         {},
 	"ShareRemoteFile":                         {},
+	"StartHuddle":                             {},
 	"StartListDownload":                       {},
 	"TeamBillableInfo":                        {},
 	"Unfurl":                                  {},
@@ -2711,7 +2756,9 @@ var parityGaps = map[string]struct{}{
 	"UserGroupChannels":                       {},
 	"UserGroupUsers":                          {},
 	"UserReactions":                           {},
+	"UserWorkspaces":                          {},
 	"WorkflowStepCompleted":                   {},
 	"WorkflowStepFailed":                      {},
 	"WorkflowUpdateStep":                      {},
+	"WorkspaceAnalytics":                      {},
 }

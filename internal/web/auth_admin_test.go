@@ -2,7 +2,10 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -14,6 +17,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	store2 "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -69,6 +73,17 @@ func newAuthAdminTestHandlerWithRole(t *testing.T, scopes []auth.Scope, role dom
 	return mux, store
 }
 
+// allAdminScopes is every scope this package knows, as the typed values the
+// fixture takes. auth.AllScopes reports strings.
+func allAdminScopes() []auth.Scope {
+	names := auth.AllScopes()
+	scopes := make([]auth.Scope, 0, len(names))
+	for _, name := range names {
+		scopes = append(scopes, auth.Scope(name))
+	}
+	return scopes
+}
+
 func authScopeStrings(scopes []auth.Scope) []string {
 	values := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -111,7 +126,11 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 		`href="/app">Back to chat</a>`,
 		`aria-label="Disable Workspace Admin"`,
 		`aria-label="Save role for Workspace Admin"`,
-		`<meta name="color-scheme" content="light dark">`,
+		// The page renders through the shared layout, so it honours the theme
+		// the administrator chose in the workspace instead of only the one the
+		// operating system reports.
+		`<html lang="en" data-theme="light">`,
+		`id="theme-toggle"`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("administration page is missing %q: %s", expected, body)
@@ -488,5 +507,821 @@ func TestAuthAdminPageEscapesUserControlledValuesInEveryContext(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;script&gt;") && !strings.Contains(body, "&#43;") && !strings.Contains(body, "&#34;") {
 		t.Fatalf("page did not escape the hostile values at all: %s", body)
+	}
+}
+
+// The invitation form is the only way a person reaches admin.auth.users.invite,
+// and the guest tiers are the point of it: the handler used to hardcode
+// resend, restricted, ultra_restricted and the expiry to their zero values, so
+// every invitation it could produce was a full permanent member no matter what
+// the service was willing to record.
+func TestAdminInvitationCarriesTheGuestTierAndExpiry(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, []auth.Scope{auth.ScopeAdminUsersWrite, auth.ScopeAdminUsersRead}, domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.invite",
+		"email=guest%40example.test&real_name=Guest&tier=multi_channel_guest&guest_expires_on=2026-09-01&resend=true&channel_ids=C1&channel_ids=C2"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("invite status=%d body=%s", response.Code, response.Body.String())
+	}
+	page, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Requests) != 1 {
+		t.Fatalf("requests=%+v err=%v", page.Requests, err)
+	}
+	recorded := page.Requests[0]
+	if !recorded.Restricted || recorded.UltraRestricted {
+		t.Fatalf("tier recorded as restricted=%v ultra=%v, want a multi-channel guest", recorded.Restricted, recorded.UltraRestricted)
+	}
+	if !recorded.Resend {
+		t.Fatal("resend was not recorded")
+	}
+	if len(recorded.ChannelIDs) != 2 {
+		t.Fatalf("channels=%v, want both checked channels", recorded.ChannelIDs)
+	}
+	// The expiry is a date, and the guest keeps the whole of the day chosen.
+	if recorded.GuestExpirationAt.UTC().Format("2006-01-02 15:04") != "2026-09-01 23:59" {
+		t.Fatalf("expiry=%s, want the end of the chosen day", recorded.GuestExpirationAt.UTC())
+	}
+}
+
+// A full member cannot expire, and the tier field cannot express the state the
+// service always refuses, so both wrong shapes are rejected as caller mistakes
+// rather than reported as an outage.
+func TestAdminInvitationRefusesAnExpiryOnAFullMember(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, []auth.Scope{auth.ScopeAdminUsersWrite}, domain.WorkspaceRoleAdmin)
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.invite",
+		"email=member%40example.test&real_name=Member&tier=member&guest_expires_on=2026-09-01&channel_ids=C1"))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil || decoded["error"] != "invalid_expiration" {
+		t.Fatalf("body=%s err=%v", response.Body.String(), err)
+	}
+}
+
+// ADMIN-02: the pending queues are the surface an administrator acts on. Both
+// were unreachable from any page, so an invitation or an app request could be
+// recorded and never decided.
+func TestAdminPageDecidesPendingInvitationsAndAppRequests(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "guest@example.test", []domain.ConversationID{"C1"}, "", "Guest", false, true, false, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetAppApproval(ctx, "T1", "A1", "AR1", domain.AppApprovalRequested, time.Now().UTC(), events.Event{ID: "Eapp", WorkspaceID: "T1", Topic: "app.requested", Payload: `{"type":"app.requested","app_id":"A1"}`, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	body := func() string {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, adminPageRequest())
+		if response.Code != http.StatusOK {
+			t.Fatalf("page status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	listed := body()
+	for _, expected := range []string{"guest@example.test", "Guest, several channels", "#general", "AR1", "/app/admin/invites/approve", "/app/admin/apps/restrict"} {
+		if !strings.Contains(listed, expected) {
+			t.Fatalf("the pending queues are missing %q: %s", expected, listed)
+		}
+	}
+
+	invites, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(invites.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", invites.Requests, err)
+	}
+	approve := httptest.NewRecorder()
+	handler.ServeHTTP(approve, adminMutationRequest(http.MethodPost, "/app/admin/invites/approve", "invite_request_id="+string(invites.Requests[0].ID)))
+	if approve.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", approve.Code, approve.Body.String())
+	}
+	restrict := httptest.NewRecorder()
+	handler.ServeHTTP(restrict, adminMutationRequest(http.MethodPost, "/app/admin/apps/restrict", "app_id=A1&request_id=AR1"))
+	if restrict.Code != http.StatusOK {
+		t.Fatalf("restrict status=%d body=%s", restrict.Code, restrict.Body.String())
+	}
+	remaining, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(remaining.Requests) != 0 {
+		t.Fatalf("pending invitations after approval=%+v err=%v", remaining.Requests, err)
+	}
+	restricted, err := store.ListAppApprovals(ctx, "T1", domain.AppApprovalRestricted, domain.PageRequest{Limit: 10})
+	if err != nil || len(restricted.Apps) != 1 {
+		t.Fatalf("restricted apps=%+v err=%v", restricted.Apps, err)
+	}
+	after := body()
+	if strings.Contains(after, "AR1") {
+		t.Fatalf("a decided app request is still queued: %s", after)
+	}
+	// The approved invitation leaves the pending queue and appears in the one
+	// waiting to be accepted, with the link to send.
+	if !strings.Contains(after, "Approved, waiting to be accepted") || !strings.Contains(after, "/app/invite/"+string(invites.Requests[0].ID)) {
+		t.Fatalf("the approved invitation carries no link to send: %s", after)
+	}
+	if strings.Contains(after, `aria-label="Approve the invitation for guest@example.test"`) {
+		t.Fatalf("an approved invitation is still offered for approval: %s", after)
+	}
+	if !strings.Contains(after, `aria-label="Withdraw the invitation for guest@example.test"`) {
+		t.Fatalf("an approved invitation cannot be withdrawn: %s", after)
+	}
+}
+
+// A decision that empties a row with nothing else on screen leaves the
+// administrator unsure which button landed.
+func TestAdminDecisionRedirectsWithANotice(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	if err := (service.Messages{Store: store}).AdminInviteUser(ctx, "T1", "U1", "denied@example.test", []domain.ConversationID{"C1"}, "", "Denied", false, false, false, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	invites, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(invites.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", invites.Requests, err)
+	}
+	request := adminMutationRequest(http.MethodPost, "/app/admin/invites/deny", "invite_request_id="+string(invites.Requests[0].ID))
+	request.Header.Del("Accept")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); !strings.Contains(location, "notice=Invitation+denied") {
+		t.Fatalf("location=%q, want the decision reported back", location)
+	}
+}
+
+// The administration page carries inline script through the shared layout, so
+// it needs the same document/policy agreement the workspace pages have: a hash
+// the policy omits disables the script in a browser and in nothing else.
+func TestAuthAdminDocumentAndItsPolicyAgree(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminPageRequest())
+	policy := response.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "form-action 'self'") || !strings.Contains(policy, "frame-ancestors 'none'") {
+		t.Fatalf("policy=%q, want the administration page to keep its framing and form restrictions", policy)
+	}
+	bodies := inlineScriptBodies(response.Body.String())
+	if len(bodies) == 0 {
+		t.Fatal("the administration page renders no inline script")
+	}
+	for _, body := range bodies {
+		digest := sha256.Sum256([]byte(body))
+		hash := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
+		if !strings.Contains(policy, hash) {
+			t.Fatalf("the administration page serves an inline script its policy blocks: %s\npolicy=%s", hash, policy)
+		}
+	}
+	if strings.Contains(policy, "script-src 'unsafe-inline'") {
+		t.Fatalf("the administration page allows any inline script: %s", policy)
+	}
+}
+
+// AUTH-05: approving an invitation used to flip a status and do nothing else.
+// The invited person still had no account, no membership and none of the
+// channels the invitation recorded, so the whole promise was inert.
+func TestAcceptingAnInvitationCreatesTheMemberItPromised(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	_ = handler
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "guest@example.test", []domain.ConversationID{"C1", "C2"}, "", "Guest", false, true, false, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", page.Requests, err)
+	}
+	invitation := page.Requests[0]
+
+	// Nothing can be accepted before it is approved: recording an invitation
+	// and issuing it are deliberately distinct transitions.
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "guest@example.test", "Guest Person"); !errors.Is(err, store2.ErrNotFound) {
+		t.Fatalf("an unapproved invitation was accepted: %v", err)
+	}
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	user, err := messages.AcceptInvitationForEmail(ctx, "T1", "GUEST@example.test", "Guest Person")
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if user.Email != "guest@example.test" || user.RealName != "Guest Person" {
+		t.Fatalf("user=%+v", user)
+	}
+	membership, err := store.GetWorkspaceMembership(ctx, "T1", user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !membership.Active || !membership.Restricted || membership.UltraRestricted || membership.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("membership=%+v, want an active multi-channel guest", membership)
+	}
+	for _, channelID := range []domain.ConversationID{"C1", "C2"} {
+		members, err := store.ListConversationMembers(ctx, channelID, domain.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := false
+		for _, member := range members.Users {
+			if member.ID == user.ID {
+				joined = true
+			}
+		}
+		if !joined {
+			t.Fatalf("the accepted member did not join %s, which the invitation recorded", channelID)
+		}
+	}
+	// Single use: the transition to accepted is the same transaction that
+	// created the member, so a second acceptance finds nothing approved.
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "guest@example.test", "Guest Person"); !errors.Is(err, store2.ErrNotFound) {
+		t.Fatalf("an invitation was accepted twice: %v", err)
+	}
+	stored, err := store.GetInviteRequest(ctx, "T1", invitation.ID)
+	if err != nil || stored.Status != domain.InviteRequestAccepted || stored.AcceptedBy != user.ID || stored.AcceptedAt.IsZero() {
+		t.Fatalf("invitation=%+v err=%v", stored, err)
+	}
+}
+
+// An invitation is valid for a bounded time from when it was recorded, and an
+// expired one has to say so: the remedy is a new invitation, not a retry.
+func TestAnExpiredInvitationIsRefusedDistinctly(t *testing.T) {
+	_, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	stale := domain.InviteRequest{
+		ID: "IR_stale", WorkspaceID: "T1", Email: "late@example.test", RequestedBy: "U1",
+		ChannelIDs: []domain.ConversationID{"C1"}, RealName: "Late", Status: domain.InviteRequestPending,
+		CreatedAt: time.Now().UTC().Add(-30 * 24 * time.Hour), ExpiresAt: time.Now().UTC().Add(-16 * 24 * time.Hour),
+	}
+	if err := store.CreateInviteRequest(ctx, stale, events.Event{ID: "Estale", WorkspaceID: "T1", Topic: "invite_request.created", Payload: `{"type":"invite_request.created"}`, CreatedAt: stale.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	messages := service.Messages{Store: store}
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "late@example.test", "Late"); !errors.Is(err, service.ErrInvitationExpired) {
+		t.Fatalf("an expired invitation was not refused as expired: %v", err)
+	}
+}
+
+// The invitation page is reached signed-out, on purpose, and every terminal
+// state says something different: the reader has to be able to tell whether to
+// wait, to sign in, or to ask for a new invitation.
+func TestTheInvitationPageAnswersEveryOutcomeSignedOut(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "guest@example.test", []domain.ConversationID{"C1"}, "", "Guest", false, false, true, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Requests) != 1 {
+		t.Fatalf("invites=%+v err=%v", page.Requests, err)
+	}
+	invitation := page.Requests[0]
+	visit := func(id domain.InviteRequestID) (int, string) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		// No session cookie: this is what an invited person actually has.
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app/invite/"+string(id), nil))
+		return response.Code, response.Body.String()
+	}
+
+	status, body := visit(invitation.ID)
+	if status != http.StatusOK || !strings.Contains(body, "waiting for approval") {
+		t.Fatalf("pending invitation status=%d body=%s", status, body)
+	}
+	// The address is masked: an invitation identifier is workspace-visible.
+	if strings.Contains(body, "guest@example.test") {
+		t.Fatalf("the invited address was handed to whoever holds the link: %s", body)
+	}
+	if !strings.Contains(body, "g•••@example.test") {
+		t.Fatalf("the invited person cannot recognise their own address: %s", body)
+	}
+
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, body = visit(invitation.ID)
+	if status != http.StatusOK || !strings.Contains(body, "Sign in to accept") || !strings.Contains(body, "Guest in one channel") || !strings.Contains(body, "#general") {
+		t.Fatalf("approved invitation status=%d body=%s", status, body)
+	}
+	if !strings.Contains(body, "/login?return_to=") {
+		t.Fatalf("the invitation page does not lead anywhere: %s", body)
+	}
+
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "guest@example.test", "Guest"); err != nil {
+		t.Fatal(err)
+	}
+	status, body = visit(invitation.ID)
+	if status != http.StatusGone || !strings.Contains(body, "already been accepted") {
+		t.Fatalf("accepted invitation status=%d body=%s", status, body)
+	}
+
+	status, body = visit("IR_missing")
+	if status != http.StatusNotFound || !strings.Contains(body, "does not exist") {
+		t.Fatalf("unknown invitation status=%d body=%s", status, body)
+	}
+}
+
+// An approved invitation nobody accepted can be withdrawn, and withdrawing is
+// recorded as its own status: denied answers a request, revoked withdraws an
+// answer already given, and an administrator reading the record needs both.
+func TestWithdrawingAnApprovedInvitationIsItsOwnOutcome(t *testing.T) {
+	_, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if err := messages.AdminInviteUser(ctx, "T1", "U1", "gone@example.test", []domain.ConversationID{"C1"}, "", "Gone", false, false, false, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	page, _ := store.ListInviteRequests(ctx, "T1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+	invitation := page.Requests[0]
+	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.AdminDenyInviteRequest(ctx, "T1", "U1", invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetInviteRequest(ctx, "T1", invitation.ID)
+	if err != nil || stored.Status != domain.InviteRequestRevoked {
+		t.Fatalf("invitation=%+v err=%v, want it revoked rather than denied", stored, err)
+	}
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "gone@example.test", "Gone"); !errors.Is(err, store2.ErrNotFound) {
+		t.Fatalf("a withdrawn invitation was accepted: %v", err)
+	}
+}
+
+// ADMIN-03: the durable record and the access log both existed with no way to
+// look at either, and RecordAccess was wired only into the Slack API
+// authenticator — so an audit of a workspace whose people use the browser was
+// empty. The page and its JSON export come from one query, because two code
+// paths are how an export stops agreeing with the page it exports.
+func TestTheAuditPageShowsWhatWasDoneAndWhoSignedIn(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	messages := service.Messages{Store: store}
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", "audited", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.RecordAccess(ctx, "T1", "U1", "203.0.113.7", "Mozilla/5.0 (test)"); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/app/admin/audit", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{"message.created", "Workspace Admin", "203.0.113.7", "Mozilla/5.0 (test)", "channel C1"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("the audit page is missing %q: %s", expected, body)
+		}
+	}
+	// The message text is not in the record and must not appear on the page:
+	// payloads carry identifiers, and the delivery snapshot is never rendered.
+	if strings.Contains(body, "audited") {
+		t.Fatalf("message content reached the audit page: %s", body)
+	}
+
+	exportRequest := httptest.NewRequest(http.MethodGet, "/app/admin/audit", nil)
+	exportRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	exportRequest.Header.Set("Accept", "application/json")
+	export := httptest.NewRecorder()
+	handler.ServeHTTP(export, exportRequest)
+	if export.Code != http.StatusOK {
+		t.Fatalf("export status=%d body=%s", export.Code, export.Body.String())
+	}
+	var decoded struct {
+		OK    bool `json:"ok"`
+		Audit struct {
+			Entries []struct {
+				Action string `json:"action"`
+				Actor  string `json:"actor"`
+				Target string `json:"target"`
+			} `json:"entries"`
+			Access []struct {
+				IP string `json:"ip"`
+			} `json:"access"`
+		} `json:"audit"`
+	}
+	if err := json.Unmarshal(export.Body.Bytes(), &decoded); err != nil || !decoded.OK {
+		t.Fatalf("export body=%s err=%v", export.Body.String(), err)
+	}
+	// Export and page agree: every entry the page rendered is in the export.
+	if len(decoded.Audit.Entries) == 0 || len(decoded.Audit.Access) != 1 {
+		t.Fatalf("export=%+v", decoded.Audit)
+	}
+	found := false
+	for _, entry := range decoded.Audit.Entries {
+		if entry.Action == "message.created" && entry.Target == "channel C1" && entry.Actor == "Workspace Admin" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the export does not carry what the page showed: %+v", decoded.Audit.Entries)
+	}
+	if decoded.Audit.Access[0].IP != "203.0.113.7" {
+		t.Fatalf("access export=%+v", decoded.Audit.Access)
+	}
+}
+
+// A member without an administrative scope must not read the audit record.
+func TestTheAuditPageRefusesAnUnprivilegedReader(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeChannelsHistory})
+	request := httptest.NewRequest(http.MethodGet, "/app/admin/audit", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+// ADMIN-02: the settings page carries exactly what has a durable backend, and
+// each control writes through to workspace state. A page that drew a control
+// for a policy nothing enforces would be worse than no page.
+func TestWorkspaceSettingsWriteThroughAndNameWhatIsAbsent(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+
+	page := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app/admin/settings", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	// Retention has no implementation anywhere, so the page must say it is
+	// absent rather than draw a switch for it.
+	before := page()
+	if !strings.Contains(before, "Message and file retention") || !strings.Contains(before, "no retention policy") {
+		t.Fatalf("the settings page does not say retention is absent: %s", before)
+	}
+	if strings.Contains(before, `name="retention`) {
+		t.Fatalf("the settings page draws a retention control nothing enforces: %s", before)
+	}
+
+	identity := adminMutationRequest(http.MethodPost, "/app/admin/settings/identity", "name=Renamed&description=A+described+workspace&icon_url=https%3A%2F%2Ficons.example.test%2Ft1.png")
+	identityResponse := httptest.NewRecorder()
+	handler.ServeHTTP(identityResponse, identity)
+	if identityResponse.Code != http.StatusOK {
+		t.Fatalf("identity status=%d body=%s", identityResponse.Code, identityResponse.Body.String())
+	}
+	discoverability := adminMutationRequest(http.MethodPost, "/app/admin/settings/discoverability", "discoverability=unlisted")
+	discoverabilityResponse := httptest.NewRecorder()
+	handler.ServeHTTP(discoverabilityResponse, discoverability)
+	if discoverabilityResponse.Code != http.StatusOK {
+		t.Fatalf("discoverability status=%d body=%s", discoverabilityResponse.Code, discoverabilityResponse.Body.String())
+	}
+	defaults := adminMutationRequest(http.MethodPost, "/app/admin/settings/default-channels", "channel_ids=C1&channel_ids=C2")
+	defaultsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(defaultsResponse, defaults)
+	if defaultsResponse.Code != http.StatusOK {
+		t.Fatalf("default channels status=%d body=%s", defaultsResponse.Code, defaultsResponse.Body.String())
+	}
+
+	workspace, err := store.GetWorkspace(ctx, "T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.Name != "Renamed" || workspace.Description != "A described workspace" || workspace.IconURL != "https://icons.example.test/t1.png" {
+		t.Fatalf("workspace=%+v", workspace)
+	}
+	if workspace.Discoverability != domain.WorkspaceDiscoverabilityUnlisted {
+		t.Fatalf("discoverability=%q", workspace.Discoverability)
+	}
+	if len(workspace.DefaultChannelIDs) != 2 {
+		t.Fatalf("default channels=%v", workspace.DefaultChannelIDs)
+	}
+	after := page()
+	if !strings.Contains(after, `value="Renamed"`) || !strings.Contains(after, `value="unlisted" checked`) {
+		t.Fatalf("the settings page does not show what was saved: %s", after)
+	}
+}
+
+// A value the workspace does not accept is a caller mistake, not an outage:
+// reporting it as "temporarily unavailable" tells an administrator to retry
+// something that can never succeed.
+func TestWorkspaceSettingsRefuseAnUnknownDiscoverability(t *testing.T) {
+	handler, _ := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/settings/discoverability", "discoverability=whenever"))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+// ADMIN-02: the analytics dashboard counts the durable rows. Nothing here is
+// sampled or delayed, so the page and the store must agree exactly.
+func TestAnalyticsCountsWhatTheWorkspaceHolds(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design", IsPrivate: true})
+	store.SeedConversation(domain.Conversation{ID: "C3", WorkspaceID: "T1", Name: "old", Archived: true})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+	messages := service.Messages{Store: store}
+	for index := 0; index < 3; index++ {
+		if _, err := messages.Post(ctx, "T1", "U1", "C1", "counted "+strconv.Itoa(index), "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", "C2", "private", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/app/admin/analytics?days=30", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{"Workspace analytics", "Busiest channels", "#general", "last 30 days"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("the analytics page is missing %q: %s", expected, body)
+		}
+	}
+	analytics, err := messages.WorkspaceAnalytics(ctx, "T1", "U1", time.Now().UTC().Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.PublicChannels != 1 || analytics.PrivateChannels != 1 || analytics.ArchivedChannels != 1 {
+		t.Fatalf("channel counts=%+v", analytics)
+	}
+	if analytics.Messages != 4 || analytics.RecentMessages != 4 {
+		t.Fatalf("message counts=%+v", analytics)
+	}
+	if len(analytics.BusiestChannels) == 0 || analytics.BusiestChannels[0].ConversationID != "C1" || analytics.BusiestChannels[0].Messages != 3 {
+		t.Fatalf("busiest=%+v", analytics.BusiestChannels)
+	}
+	// The window is a closed set: an arbitrary one is a caller mistake.
+	bad := httptest.NewRequest(http.MethodGet, "/app/admin/analytics?days=4000", nil)
+	bad.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	badResponse := httptest.NewRecorder()
+	handler.ServeHTTP(badResponse, bad)
+	if badResponse.Code != http.StatusBadRequest {
+		t.Fatalf("window status=%d", badResponse.Code)
+	}
+}
+
+// AUTH-02: switching workspaces must land the reader in an isolated session
+// context, with nothing about the target in browser history. The switch mints
+// a new session for the target workspace rather than rewriting the current
+// one — the same person is a different user row in each workspace, so a
+// rewritten session would name a user that does not belong to it.
+func TestSwitchingWorkspacesMintsAnIsolatedSession(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	// The same person in a second workspace: a different user row, the same
+	// address, and a plain member rather than an administrator.
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+	store.SeedUser(domain.User{ID: "U1-second", WorkspaceID: "T2", Email: "admin@example.test", Name: "Admin", RealName: "Workspace Admin"})
+	if err := store.SetWorkspaceRole(ctx, "T2", "U1-second", domain.WorkspaceRoleMember, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptest.NewRequest(http.MethodGet, "/app?channel=C1", nil)
+	page.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	rendered := httptest.NewRecorder()
+	handler.ServeHTTP(rendered, page)
+	body := rendered.Body.String()
+	if !strings.Contains(body, `value="T2"`) || !strings.Contains(body, "you are here") {
+		t.Fatalf("the switcher does not offer the second workspace: %s", body)
+	}
+
+	switched := adminMutationRequest(http.MethodPost, "/app/workspace/switch", "workspace_id=T2")
+	switched.Header.Del("Accept")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, switched)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("switch=%d body=%s", response.Code, response.Body.String())
+	}
+	// Nothing about the target may reach history: the redirect goes to the
+	// workspace page, not to a URL naming the workspace.
+	if location := response.Header().Get("Location"); strings.Contains(location, "T2") {
+		t.Fatalf("the switch leaked the target workspace into history: %q", location)
+	}
+	var issued *http.Cookie
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == auth.SessionCookieName {
+			issued = cookie
+		}
+	}
+	if issued == nil || issued.Value == "" || issued.Value == "session" {
+		t.Fatalf("the switch did not mint a new session: %+v", issued)
+	}
+	record, err := store.LookupSession(ctx, issued.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.WorkspaceID != "T2" || record.UserID != "U1-second" {
+		t.Fatalf("session=%+v, want the identity held in the target workspace", record)
+	}
+	// The scopes follow the role held there, not the one left behind.
+	for _, scope := range record.Scopes {
+		if scope == string(auth.ScopeAdminUsersWrite) {
+			t.Fatalf("the switched session carries administrative scope the target role does not justify: %v", record.Scopes)
+		}
+	}
+	// The session left behind is revoked rather than left as a live credential
+	// nothing references.
+	previous, err := store.LookupSession(ctx, "session")
+	if err == nil && !previous.Revoked {
+		t.Fatal("the previous session is still usable after switching away from it")
+	}
+}
+
+// A workspace the reader is not a member of is not switchable into, and the
+// refusal declines to confirm it exists.
+func TestSwitchingRefusesAWorkspaceYouAreNotIn(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedWorkspace(domain.Workspace{ID: "T3", Name: "Somebody else's"})
+	store.SeedUser(domain.User{ID: "U9", WorkspaceID: "T3", Email: "stranger@example.test", Name: "stranger"})
+	if err := store.SetWorkspaceRole(ctx, "T3", "U9", domain.WorkspaceRoleMember, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/workspace/switch", "workspace_id=T3"))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	kept, err := store.LookupSession(ctx, "session")
+	if err != nil || kept.Revoked {
+		t.Fatalf("a refused switch revoked the session it refused to leave: %+v err=%v", kept, err)
+	}
+}
+
+// One workspace is not a choice: a menu with a single entry implies there is
+// somewhere else to go.
+func TestASingleWorkspaceDrawsNoSwitcher(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	request := httptest.NewRequest(http.MethodGet, "/app?channel=C1", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if strings.Contains(response.Body.String(), "/app/workspace/switch") {
+		t.Fatalf("a lone workspace drew a switcher: %s", response.Body.String())
+	}
+}
+
+// CONNECT-01..03 in the browser: the details panel is where "who else is in
+// this channel" is already asked, so an external organization belongs beside a
+// person. It must distinguish an outstanding invitation from a connection —
+// an invitation is not a place in the channel — and say what accepting it
+// means before it is sent.
+func TestTheConnectPanelSeparatesInvitationsFromConnections(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+	store.SeedUser(domain.User{ID: "U1-second", WorkspaceID: "T2", Email: "admin@example.test", Name: "Admin"})
+	if err := store.SetWorkspaceRole(ctx, "T2", "U1-second", domain.WorkspaceRoleAdmin, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+
+	details := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app?channel=C1&details=1", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	before := details()
+	for _, expected := range []string{"Shared with other organizations", "Only this workspace is in this channel", "read this channel"} {
+		if !strings.Contains(before, expected) {
+			t.Fatalf("the Connect panel is missing %q: %s", expected, before)
+		}
+	}
+
+	sent := adminMutationRequest(http.MethodPost, "/app/connect/invite?channel=C1", "target=T2")
+	sentResponse := httptest.NewRecorder()
+	handler.ServeHTTP(sentResponse, sent)
+	if sentResponse.Code != http.StatusSeeOther {
+		t.Fatalf("invite=%d body=%s", sentResponse.Code, sentResponse.Body.String())
+	}
+	pending := details()
+	// An outstanding invitation is not a connection: the panel must still say
+	// only this workspace is in the channel.
+	if !strings.Contains(pending, "Only this workspace is in this channel") || !strings.Contains(pending, "Second") {
+		t.Fatalf("an invitation was rendered as a connection: %s", pending)
+	}
+
+	page, err := store.ListSharedInvites(ctx, "T1", domain.SharedInvitePending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Invites) != 1 {
+		t.Fatalf("invites=%+v err=%v", page.Invites, err)
+	}
+	invite := page.Invites[0]
+	approve := adminMutationRequest(http.MethodPost, "/app/connect/approve?channel=C1", "invite_id="+string(invite.ID))
+	approveResponse := httptest.NewRecorder()
+	handler.ServeHTTP(approveResponse, approve)
+	if approveResponse.Code != http.StatusSeeOther {
+		t.Fatalf("approve=%d body=%s", approveResponse.Code, approveResponse.Body.String())
+	}
+	// Still not a connection until the other organization accepts.
+	if !strings.Contains(details(), "Only this workspace is in this channel") {
+		t.Fatalf("an approved invitation was rendered as a connection: %s", details())
+	}
+
+	if _, err := (service.Messages{Store: store}).AcceptSharedInvite(ctx, "T2", "U1-second", invite.ID); err != nil {
+		t.Fatal(err)
+	}
+	connected := details()
+	// The organization renders as its identifier: a host administrator is not a
+	// member of the workspace it invited, so its name is not readable from
+	// here. See Handler.workspaceName.
+	if strings.Contains(connected, "Only this workspace is in this channel") || !strings.Contains(connected, "In this channel: T2") {
+		t.Fatalf("an accepted invitation is not rendered as a connection: %s", connected)
+	}
+}
+
+// One control withdraws an invitation whichever side of the state machine it
+// is on: two buttons that mean the same thing would make an administrator
+// guess which applies.
+func TestWithdrawingWorksOnPendingAndApprovedInvitations(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+	messages := service.Messages{Store: store}
+
+	pending, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/connect/deny?channel=C1", "invite_id="+string(pending.ID)))
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("deny pending=%d body=%s", response.Code, response.Body.String())
+	}
+	stored, err := store.GetSharedInvite(ctx, pending.ID)
+	if err != nil || stored.Status != domain.SharedInviteRevoked {
+		t.Fatalf("pending invitation=%+v err=%v", stored, err)
+	}
+
+	approved, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", approved.ID); err != nil {
+		t.Fatal(err)
+	}
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, adminMutationRequest(http.MethodPost, "/app/connect/deny?channel=C1", "invite_id="+string(approved.ID)))
+	if second.Code != http.StatusSeeOther {
+		t.Fatalf("deny approved=%d body=%s", second.Code, second.Body.String())
+	}
+	settled, err := store.GetSharedInvite(ctx, approved.ID)
+	if err != nil || settled.Status != domain.SharedInviteRevoked {
+		t.Fatalf("approved invitation=%+v err=%v", settled, err)
 	}
 }

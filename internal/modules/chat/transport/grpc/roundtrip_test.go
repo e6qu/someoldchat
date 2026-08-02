@@ -221,6 +221,7 @@ func conversionCases() map[string]conversionCase {
 		"RemoteFile":     {sample: &domain.RemoteFile{}, through: through(encodeProtoRemoteFile, decodeProtoRemoteFile)},
 		"RemoteFilePage": {sample: &domain.RemoteFilePage{}, through: through(encodeProtoRemoteFilePage, decodeProtoRemoteFilePage)},
 		"ReadCursor":     {sample: &domain.ReadCursor{}, through: through(encodeProtoReadCursor, decodeProtoReadCursor)},
+		"ThreadSummary":  {sample: &domain.ThreadSummary{}, through: through(encodeProtoThreadSummary, decodeProtoThreadSummary)},
 		"WorkspaceNotificationPreferences": {
 			sample: &domain.WorkspaceNotificationPreferences{},
 			prepare: func(filled any) {
@@ -332,18 +333,23 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoAppDeliveryHealth, decodeProtoAppDeliveryHealth),
 		},
-		"DoNotDisturb": {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
-		"UserGroup":    {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
-		"Call":         {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
-		"Canvas":       {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
-		"CanvasPage":   {sample: &domain.CanvasPage{}, through: through(encodeProtoCanvasPage, decodeProtoCanvasPage)},
-		"List":         {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
-		"ListPage":     {sample: &domain.ListPage{}, through: through(encodeProtoListPage, decodeProtoListPage)},
-		"ListItem":     {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
-		"ListItemPage": {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
-		"ListDownload": {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
-		"AccessLog":    {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
-		"View":         {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
+		"DoNotDisturb":               {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
+		"UserGroup":                  {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
+		"Call":                       {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
+		"Canvas":                     {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
+		"CanvasPage":                 {sample: &domain.CanvasPage{}, through: through(encodeProtoCanvasPage, decodeProtoCanvasPage)},
+		"List":                       {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
+		"ListPage":                   {sample: &domain.ListPage{}, through: through(encodeProtoListPage, decodeProtoListPage)},
+		"ListItem":                   {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
+		"ListItemPage":               {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
+		"ListDownload":               {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
+		"AccessLog":                  {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
+		"SharedInvite":               {sample: &domain.SharedInvite{}, through: through(encodeProtoSharedInvite, decodeProtoSharedInvite)},
+		"WorkspaceMembershipSummary": {sample: &domain.WorkspaceMembershipSummary{}, through: through(encodeProtoWorkspaceMembershipSummary, decodeProtoWorkspaceMembershipSummary)},
+		"WorkspaceAnalytics": {sample: &domain.WorkspaceAnalytics{}, through: through(encodeProtoWorkspaceAnalytics, func(value *chatv1.WorkspaceAnalytics) (domain.WorkspaceAnalytics, error) {
+			return decodeProtoWorkspaceAnalytics(value), nil
+		})},
+		"View": {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
 		"AppHome": {
 			sample: &appHomeRoundTrip{},
 			through: through(
@@ -687,6 +693,10 @@ func fillString(path string) string {
 		return string(domain.PresenceAway)
 	case "Type", "BookmarkType":
 		return "link"
+	case "Kind":
+		// A call's kind is a closed set the decoder validates, and the external
+		// kind is the one whose other required fields this generator also fills.
+		return string(domain.CallKindExternal)
 	}
 	return "value-" + strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(path, "."), ".", "-"))
 }

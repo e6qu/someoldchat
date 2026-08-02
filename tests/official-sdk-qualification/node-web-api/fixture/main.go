@@ -44,6 +44,16 @@ func main() {
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice"}})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", Email: "bob@example.com"})
 	store.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", Email: "carol@example.com"})
+	// A second organization, so the Slack Connect methods can be exercised
+	// across the boundary they exist for: the host approves and the invited
+	// organization accepts, and one workspace cannot tell those apart.
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "second"})
+	// A third, so the deny and decline outcomes can each be exercised without
+	// colliding with the accepted invitation T2 already holds: one outstanding
+	// invitation per organization per conversation is deliberate.
+	store.SeedWorkspace(domain.Workspace{ID: "T3", Name: "third"})
+	store.SeedUser(domain.User{ID: "U-third", WorkspaceID: "T3", Name: "erin", Email: "erin@example.com"})
+	store.SeedUser(domain.User{ID: "U-external", WorkspaceID: "T2", Name: "dana", Email: "dana@example.com"})
 	now := time.Now().UTC()
 	newQualificationEvent := func(id domain.EventID, actorID domain.UserID, payload events.Payload) events.Event {
 		event, eventErr := events.New(id, "T1", actorID, payload, now)
@@ -60,6 +70,18 @@ func main() {
 	if err := store.SetWorkspaceRole(context.Background(), "T1", "U2", domain.WorkspaceRoleAdmin,
 		newQualificationEvent("qualification-admin", "U1", events.NewPayload("workspace.role_changed",
 			events.String("user_id", "U2"), events.String("role", string(domain.WorkspaceRoleAdmin))))); err != nil {
+		panic(err)
+	}
+	// The invited organization needs its own administrator: accepting is its
+	// decision, not the host's.
+	if err := store.SetWorkspaceRole(context.Background(), "T2", "U-external", domain.WorkspaceRoleAdmin,
+		newQualificationEvent("qualification-external-admin", "U-external", events.NewPayload("workspace.role_changed",
+			events.String("user_id", "U-external"), events.String("role", string(domain.WorkspaceRoleAdmin))))); err != nil {
+		panic(err)
+	}
+	if err := store.SetWorkspaceRole(context.Background(), "T3", "U-third", domain.WorkspaceRoleAdmin,
+		newQualificationEvent("qualification-third-admin", "U-third", events.NewPayload("workspace.role_changed",
+			events.String("user_id", "U-third"), events.String("role", string(domain.WorkspaceRoleAdmin))))); err != nil {
 		panic(err)
 	}
 	if err := store.CreateBot(context.Background(), domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "U1", Name: "qualification-bot", UpdatedAt: time.Now().UTC()}); err != nil {
@@ -151,6 +173,11 @@ func main() {
 	// method.
 	store.SeedToken(context.Background(), "xoxp-reminder-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()})
 	store.SeedToken(context.Background(), "xoxb-qualification-legacy", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: []string{"chat:write"}})
+	// The invited organization's own credential. Slack Connect acceptance is
+	// its decision, so exercising it through the host's token would prove the
+	// opposite of what CONNECT-02 asks for.
+	store.SeedToken(context.Background(), "xoxb-external-org", domain.TokenRecord{WorkspaceID: "T2", UserID: "U-external", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()})
+	store.SeedToken(context.Background(), "xoxb-third-org", domain.TokenRecord{WorkspaceID: "T3", UserID: "U-third", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()})
 	if err := store.CreateAppConfigurationToken(context.Background(), "xoxe.xoxp-qualification", "xoxe-qualification", domain.AppConfigurationToken{WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().UTC().Add(12 * time.Hour)}); err != nil {
 		panic(err)
 	}
@@ -317,7 +344,7 @@ func main() {
 		_, _ = io.WriteString(w, value)
 	})
 	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
-	rtmHandler, err := realtime.NewRTMHandler(messages, "T1", messages, messages)
+	rtmHandler, err := realtime.NewRTMHandler(messages, messages, messages)
 	if err != nil {
 		panic(err)
 	}

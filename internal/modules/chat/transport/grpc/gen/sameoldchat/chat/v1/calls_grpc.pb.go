@@ -20,6 +20,11 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	CallsService_AddCall_FullMethodName                = "/sameoldchat.chat.v1.CallsService/AddCall"
+	CallsService_StartHuddle_FullMethodName            = "/sameoldchat.chat.v1.CallsService/StartHuddle"
+	CallsService_JoinHuddle_FullMethodName             = "/sameoldchat.chat.v1.CallsService/JoinHuddle"
+	CallsService_LeaveHuddle_FullMethodName            = "/sameoldchat.chat.v1.CallsService/LeaveHuddle"
+	CallsService_EndHuddle_FullMethodName              = "/sameoldchat.chat.v1.CallsService/EndHuddle"
+	CallsService_GetActiveHuddle_FullMethodName        = "/sameoldchat.chat.v1.CallsService/GetActiveHuddle"
 	CallsService_EndCall_FullMethodName                = "/sameoldchat.chat.v1.CallsService/EndCall"
 	CallsService_CallInfo_FullMethodName               = "/sameoldchat.chat.v1.CallsService/CallInfo"
 	CallsService_UpdateCall_FullMethodName             = "/sameoldchat.chat.v1.CallsService/UpdateCall"
@@ -32,6 +37,11 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CallsServiceClient interface {
 	AddCall(ctx context.Context, in *AddCallRequest, opts ...grpc.CallOption) (*Call, error)
+	StartHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error)
+	JoinHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error)
+	LeaveHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error)
+	EndHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error)
+	GetActiveHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error)
 	EndCall(ctx context.Context, in *EndCallRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	CallInfo(ctx context.Context, in *CallRequest, opts ...grpc.CallOption) (*Call, error)
 	UpdateCall(ctx context.Context, in *UpdateCallRequest, opts ...grpc.CallOption) (*Call, error)
@@ -51,6 +61,56 @@ func (c *callsServiceClient) AddCall(ctx context.Context, in *AddCallRequest, op
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Call)
 	err := c.cc.Invoke(ctx, CallsService_AddCall_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *callsServiceClient) StartHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Call)
+	err := c.cc.Invoke(ctx, CallsService_StartHuddle_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *callsServiceClient) JoinHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Call)
+	err := c.cc.Invoke(ctx, CallsService_JoinHuddle_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *callsServiceClient) LeaveHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Call)
+	err := c.cc.Invoke(ctx, CallsService_LeaveHuddle_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *callsServiceClient) EndHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Call)
+	err := c.cc.Invoke(ctx, CallsService_EndHuddle_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *callsServiceClient) GetActiveHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Call)
+	err := c.cc.Invoke(ctx, CallsService_GetActiveHuddle_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +172,11 @@ func (c *callsServiceClient) RemoveCallParticipants(ctx context.Context, in *Cal
 // for forward compatibility.
 type CallsServiceServer interface {
 	AddCall(context.Context, *AddCallRequest) (*Call, error)
+	StartHuddle(context.Context, *HuddleRequest) (*Call, error)
+	JoinHuddle(context.Context, *HuddleRequest) (*Call, error)
+	LeaveHuddle(context.Context, *HuddleRequest) (*Call, error)
+	EndHuddle(context.Context, *HuddleRequest) (*Call, error)
+	GetActiveHuddle(context.Context, *HuddleRequest) (*Call, error)
 	EndCall(context.Context, *EndCallRequest) (*MutationResponse, error)
 	CallInfo(context.Context, *CallRequest) (*Call, error)
 	UpdateCall(context.Context, *UpdateCallRequest) (*Call, error)
@@ -128,6 +193,21 @@ type UnimplementedCallsServiceServer struct{}
 
 func (UnimplementedCallsServiceServer) AddCall(context.Context, *AddCallRequest) (*Call, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddCall not implemented")
+}
+func (UnimplementedCallsServiceServer) StartHuddle(context.Context, *HuddleRequest) (*Call, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartHuddle not implemented")
+}
+func (UnimplementedCallsServiceServer) JoinHuddle(context.Context, *HuddleRequest) (*Call, error) {
+	return nil, status.Error(codes.Unimplemented, "method JoinHuddle not implemented")
+}
+func (UnimplementedCallsServiceServer) LeaveHuddle(context.Context, *HuddleRequest) (*Call, error) {
+	return nil, status.Error(codes.Unimplemented, "method LeaveHuddle not implemented")
+}
+func (UnimplementedCallsServiceServer) EndHuddle(context.Context, *HuddleRequest) (*Call, error) {
+	return nil, status.Error(codes.Unimplemented, "method EndHuddle not implemented")
+}
+func (UnimplementedCallsServiceServer) GetActiveHuddle(context.Context, *HuddleRequest) (*Call, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetActiveHuddle not implemented")
 }
 func (UnimplementedCallsServiceServer) EndCall(context.Context, *EndCallRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EndCall not implemented")
@@ -178,6 +258,96 @@ func _CallsService_AddCall_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CallsServiceServer).AddCall(ctx, req.(*AddCallRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CallsService_StartHuddle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HuddleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CallsServiceServer).StartHuddle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CallsService_StartHuddle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CallsServiceServer).StartHuddle(ctx, req.(*HuddleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CallsService_JoinHuddle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HuddleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CallsServiceServer).JoinHuddle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CallsService_JoinHuddle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CallsServiceServer).JoinHuddle(ctx, req.(*HuddleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CallsService_LeaveHuddle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HuddleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CallsServiceServer).LeaveHuddle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CallsService_LeaveHuddle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CallsServiceServer).LeaveHuddle(ctx, req.(*HuddleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CallsService_EndHuddle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HuddleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CallsServiceServer).EndHuddle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CallsService_EndHuddle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CallsServiceServer).EndHuddle(ctx, req.(*HuddleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CallsService_GetActiveHuddle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HuddleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CallsServiceServer).GetActiveHuddle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CallsService_GetActiveHuddle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CallsServiceServer).GetActiveHuddle(ctx, req.(*HuddleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -282,6 +452,26 @@ var CallsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddCall",
 			Handler:    _CallsService_AddCall_Handler,
+		},
+		{
+			MethodName: "StartHuddle",
+			Handler:    _CallsService_StartHuddle_Handler,
+		},
+		{
+			MethodName: "JoinHuddle",
+			Handler:    _CallsService_JoinHuddle_Handler,
+		},
+		{
+			MethodName: "LeaveHuddle",
+			Handler:    _CallsService_LeaveHuddle_Handler,
+		},
+		{
+			MethodName: "EndHuddle",
+			Handler:    _CallsService_EndHuddle_Handler,
+		},
+		{
+			MethodName: "GetActiveHuddle",
+			Handler:    _CallsService_GetActiveHuddle_Handler,
 		},
 		{
 			MethodName: "EndCall",

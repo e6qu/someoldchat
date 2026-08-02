@@ -511,8 +511,15 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 		}
 		delete(current, "event_ts")
 		delete(previous, "event_ts")
+		// event_ts is when the change was journalled; the `edited` sub-object
+		// is what the message itself records. They used to be the same
+		// derived value, so a replayed event reported its replay instant as
+		// the edit time. appEventMessage now carries `edited` from the
+		// message; this only supplies the envelope's own timestamp.
 		editedAt := string(domain.NewMessageTimestamp(record.Event.CreatedAt))
-		current["edited"] = map[string]any{"user": record.Event.ActorID, "ts": editedAt}
+		if _, recorded := current["edited"]; !recorded {
+			current["edited"] = map[string]any{"user": record.Event.ActorID, "ts": editedAt}
+		}
 		body := map[string]any{
 			"type": "message", "subtype": "message_changed", "hidden": true,
 			"channel": snapshot.Current.Conversation, "ts": string(domain.NewMessageTimestamp(snapshot.Current.CreatedAt)),
@@ -555,6 +562,12 @@ func appEventMessage(ctx context.Context, state any, message domain.Message) (ma
 	body := map[string]any{
 		"type": "message", "channel": message.Conversation, "user": message.AuthorID,
 		"text": message.Text, "ts": timestamp, "event_ts": timestamp,
+	}
+	if !message.EditedAt.IsZero() {
+		body["edited"] = map[string]any{"user": message.EditedBy, "ts": string(domain.NewMessageTimestamp(message.EditedAt))}
+	}
+	if message.Subtype != "" {
+		body["subtype"] = string(message.Subtype)
 	}
 	if message.ThreadTimestamp != "" {
 		body["thread_ts"] = message.ThreadTimestamp

@@ -51,6 +51,9 @@ const (
 	DirectoryService_AdminApproveInviteRequest_FullMethodName   = "/sameoldchat.chat.v1.DirectoryService/AdminApproveInviteRequest"
 	DirectoryService_AdminDenyInviteRequest_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminDenyInviteRequest"
 	DirectoryService_AdminListInviteRequests_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AdminListInviteRequests"
+	DirectoryService_UserWorkspaces_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/UserWorkspaces"
+	DirectoryService_InvitationPreview_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/InvitationPreview"
+	DirectoryService_AcceptInvitationForEmail_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AcceptInvitationForEmail"
 	DirectoryService_AdminApproveApp_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminApproveApp"
 	DirectoryService_AdminRestrictApp_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminRestrictApp"
 	DirectoryService_AdminListApps_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminListApps"
@@ -95,6 +98,9 @@ type DirectoryServiceClient interface {
 	AdminApproveInviteRequest(ctx context.Context, in *InviteRequestMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminDenyInviteRequest(ctx context.Context, in *InviteRequestMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListInviteRequests(ctx context.Context, in *InviteRequestsRequest, opts ...grpc.CallOption) (*InviteRequestPage, error)
+	UserWorkspaces(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*UserWorkspacesResponse, error)
+	InvitationPreview(ctx context.Context, in *InvitationPreviewRequest, opts ...grpc.CallOption) (*InviteRequest, error)
+	AcceptInvitationForEmail(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*User, error)
 	AdminApproveApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRestrictApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListApps(ctx context.Context, in *AppApprovalsRequest, opts ...grpc.CallOption) (*AppApprovalPage, error)
@@ -431,6 +437,36 @@ func (c *directoryServiceClient) AdminListInviteRequests(ctx context.Context, in
 	return out, nil
 }
 
+func (c *directoryServiceClient) UserWorkspaces(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*UserWorkspacesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserWorkspacesResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_UserWorkspaces_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) InvitationPreview(ctx context.Context, in *InvitationPreviewRequest, opts ...grpc.CallOption) (*InviteRequest, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InviteRequest)
+	err := c.cc.Invoke(ctx, DirectoryService_InvitationPreview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AcceptInvitationForEmail(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*User, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(User)
+	err := c.cc.Invoke(ctx, DirectoryService_AcceptInvitationForEmail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *directoryServiceClient) AdminApproveApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -527,6 +563,9 @@ type DirectoryServiceServer interface {
 	AdminApproveInviteRequest(context.Context, *InviteRequestMutationRequest) (*MutationResponse, error)
 	AdminDenyInviteRequest(context.Context, *InviteRequestMutationRequest) (*MutationResponse, error)
 	AdminListInviteRequests(context.Context, *InviteRequestsRequest) (*InviteRequestPage, error)
+	UserWorkspaces(context.Context, *WorkspaceRequest) (*UserWorkspacesResponse, error)
+	InvitationPreview(context.Context, *InvitationPreviewRequest) (*InviteRequest, error)
+	AcceptInvitationForEmail(context.Context, *AcceptInvitationRequest) (*User, error)
 	AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminRestrictApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminListApps(context.Context, *AppApprovalsRequest) (*AppApprovalPage, error)
@@ -637,6 +676,15 @@ func (UnimplementedDirectoryServiceServer) AdminDenyInviteRequest(context.Contex
 }
 func (UnimplementedDirectoryServiceServer) AdminListInviteRequests(context.Context, *InviteRequestsRequest) (*InviteRequestPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminListInviteRequests not implemented")
+}
+func (UnimplementedDirectoryServiceServer) UserWorkspaces(context.Context, *WorkspaceRequest) (*UserWorkspacesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UserWorkspaces not implemented")
+}
+func (UnimplementedDirectoryServiceServer) InvitationPreview(context.Context, *InvitationPreviewRequest) (*InviteRequest, error) {
+	return nil, status.Error(codes.Unimplemented, "method InvitationPreview not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AcceptInvitationForEmail(context.Context, *AcceptInvitationRequest) (*User, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcceptInvitationForEmail not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminApproveApp not implemented")
@@ -1252,6 +1300,60 @@ func _DirectoryService_AdminListInviteRequests_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DirectoryService_UserWorkspaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).UserWorkspaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_UserWorkspaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).UserWorkspaces(ctx, req.(*WorkspaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_InvitationPreview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvitationPreviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).InvitationPreview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_InvitationPreview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).InvitationPreview(ctx, req.(*InvitationPreviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AcceptInvitationForEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcceptInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AcceptInvitationForEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AcceptInvitationForEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AcceptInvitationForEmail(ctx, req.(*AcceptInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DirectoryService_AdminApproveApp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AppApprovalMutationRequest)
 	if err := dec(in); err != nil {
@@ -1494,6 +1596,18 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminListInviteRequests",
 			Handler:    _DirectoryService_AdminListInviteRequests_Handler,
+		},
+		{
+			MethodName: "UserWorkspaces",
+			Handler:    _DirectoryService_UserWorkspaces_Handler,
+		},
+		{
+			MethodName: "InvitationPreview",
+			Handler:    _DirectoryService_InvitationPreview_Handler,
+		},
+		{
+			MethodName: "AcceptInvitationForEmail",
+			Handler:    _DirectoryService_AcceptInvitationForEmail_Handler,
 		},
 		{
 			MethodName: "AdminApproveApp",

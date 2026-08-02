@@ -65,6 +65,16 @@ func runQualification(t *testing.T, open opener) {
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 		{"revoking an app token announces tokens_revoked once", revokingAnAppTokenAnnouncesTokensRevokedOnce},
 		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
+		{"a conversation change and its notice commit together", conversationNoticesCommitWithTheirChange},
+		{"thread summaries are batched and identical across profiles", threadSummariesAreBatchedAndIdentical},
+		{"activity follows the read cursor in both directions", activityFollowsTheReadCursorBothWays},
+		{"a deleted file is deleted on every message that carries it", aDeletedFileIsDeletedOnEveryMessageThatCarriesIt},
+		{"deleting the last carrier retracts the file share", deletingTheLastCarrierRetractsTheFileShare},
+		{"accepting an invitation commits the whole membership", acceptingAnInvitationCommitsTheWholeMembership},
+		{"workspace analytics count the same on every profile", workspaceAnalyticsCountTheSameOnEveryProfile},
+		{"huddles converge and end with their last participant", huddlesConvergeAndEndWithTheirLastParticipant},
+		{"workspaces for an address agree on every profile", workspacesForAnAddressAgreeOnEveryProfile},
+		{"Slack Connect capacity is claimed transactionally", slackConnectCapacityIsClaimedTransactionally},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -1442,7 +1452,7 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 		if err != nil || len(page.Requests) != 1 || page.Requests[0].Email != invite.Email || len(page.Requests[0].ChannelIDs) != 1 {
 			t.Fatalf("invites=%+v err=%v", page, err)
 		}
-		if err := repository.SetInviteRequestStatus(ctx, workspaceID, invite.ID, domain.InviteRequestApproved, now.Add(time.Minute), event("invite-approve", "invite.approved", string(invite.ID))); err != nil {
+		if err := repository.SetInviteRequestStatus(ctx, workspaceID, invite.ID, domain.InviteRequestPending, domain.InviteRequestApproved, now.Add(time.Minute), event("invite-approve", "invite.approved", string(invite.ID))); err != nil {
 			t.Fatal(err)
 		}
 		loadedInvite, err := repository.GetInviteRequest(ctx, workspaceID, invite.ID)

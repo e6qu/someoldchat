@@ -37,6 +37,34 @@ message AccessMutationResponse {
   bool ok = 1;
 }
 
+message WorkspaceAnalyticsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int64 since = 3;
+}
+
+message ChannelActivity {
+  string conversation_id = 1;
+  string name = 2;
+  int32 messages = 3;
+}
+
+message WorkspaceAnalytics {
+  int32 members = 1;
+  int32 active_members = 2;
+  int32 guests = 3;
+  int32 admins = 4;
+  int32 public_channels = 5;
+  int32 private_channels = 6;
+  int32 archived_channels = 7;
+  int32 messages = 8;
+  int32 recent_messages = 9;
+  int32 files = 10;
+  int32 recent_files = 11;
+  repeated ChannelActivity busiest_channels = 12;
+  int64 since = 13;
+}
+
 message IntegrationLog {
   string app_id = 1;
   string app_type = 2;
@@ -71,5 +99,9 @@ message IntegrationLogsResponse {
 service AccessLogsService {
   rpc RecordAccess(RecordAccessRequest) returns (AccessMutationResponse);
   rpc AccessLogs(AccessLogsRequest) returns (AccessLogsResponse);
+  // Named GetWorkspaceAnalytics because an rpc named WorkspaceAnalytics would
+  // shadow the WorkspaceAnalytics message type for every later return in this
+  // service, exactly as GetReadCursor does in InteractionsService.
+  rpc GetWorkspaceAnalytics(WorkspaceAnalyticsRequest) returns (WorkspaceAnalytics);
   rpc IntegrationLogs(IntegrationLogsRequest) returns (IntegrationLogsResponse);
 }

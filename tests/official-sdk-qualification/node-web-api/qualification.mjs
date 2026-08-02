@@ -10,6 +10,9 @@ const clientOptions = {
 const client = new WebClient(token, clientOptions);
 const reminderClient = new WebClient("xoxp-reminder-qualification", clientOptions);
 const workflowClient = new WebClient("xoxb-workflow-qualification", clientOptions);
+// The invited organization's own credential; see the Slack Connect walk below.
+const externalClient = new WebClient("xoxb-external-org", clientOptions);
+const thirdOrgClient = new WebClient("xoxb-third-org", clientOptions);
 const appClient = new WebClient(process.env.SAMEOLDCHAT_APP_TOKEN ?? "xapp-test", clientOptions);
 const configurationClient = new WebClient(process.env.SAMEOLDCHAT_CONFIGURATION_TOKEN ?? "xoxe.xoxp-qualification", clientOptions);
 
@@ -721,6 +724,51 @@ const connectedChannelInfo = await client.admin.conversations.ekm.listOriginalCo
 assert.equal(connectedChannelInfo.ok, true);
 assert.equal(Array.isArray(connectedChannelInfo.channels), true);
 assert.equal((await client.admin.conversations.disconnectShared({ channel_id: "C1", leaving_team_ids: ["T1"] })).ok, true);
+
+// Slack Connect, walked across the boundary it exists for. The host sends and
+// approves; the invited organization accepts, through its own credential —
+// doing it all with one token would prove the opposite of what CONNECT-02
+// asks for.
+const sharedInvite = await client.conversations.inviteShared({ channel: "C1", external_limited: "T2" });
+assert.equal(sharedInvite.ok, true);
+assert.equal(typeof sharedInvite.invite.id, "string");
+assert.equal(sharedInvite.invite.status, "pending");
+
+const requested = await client.conversations.requestSharedInvite.list({});
+assert.equal(requested.ok, true);
+assert.equal(requested.invites.some((invite) => invite.id === sharedInvite.invite.id), true);
+
+assert.equal((await client.conversations.approveSharedInvite({ invite_id: sharedInvite.invite.id })).ok, true);
+const issued = await client.conversations.listConnectInvites({});
+assert.equal(issued.ok, true);
+assert.equal(issued.invites.some((invite) => invite.id === sharedInvite.invite.id), true);
+
+const accepted = await externalClient.conversations.acceptSharedInvite({ invite_id: sharedInvite.invite.id });
+assert.equal(accepted.ok, true);
+assert.equal(accepted.is_ext_shared, true);
+
+// conversations.info reports the connection, and no longer reports it pending.
+const connectedInfo = await client.conversations.info({ channel: "C1" });
+assert.equal(connectedInfo.channel.is_ext_shared, true);
+assert.equal(connectedInfo.channel.is_pending_ext_shared, false);
+
+assert.equal((await client.conversations.externalInvitePermissions.set({
+	channel: "C1",
+	target_team: "T2",
+	action: "downgrade",
+})).ok, true);
+
+// Denying and declining are different outcomes, so both are exercised.
+const denied = await client.conversations.inviteShared({ channel: "C1", external_limited: "T3" });
+assert.equal((await client.conversations.requestSharedInvite.deny({ invite_id: denied.invite.id })).ok, true);
+
+const toDecline = await client.conversations.inviteShared({ channel: "C1", external_limited: "T3" });
+// Slack publishes the same host approval under a request-oriented name too, so
+// both reach the same decision here.
+assert.equal((await client.conversations.requestSharedInvite.approve({ invite_id: toDecline.invite.id })).ok, true);
+// Declined by the organization it was actually sent to: an invitation names
+// one organization, and only that one may answer it.
+assert.equal((await thirdOrgClient.conversations.declineSharedInvite({ invite_id: toDecline.invite.id })).ok, true);
 assert.equal((await client.admin.conversations.setTeams({
 	channel_id: "C1",
 	org_channel: false,

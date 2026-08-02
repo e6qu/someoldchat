@@ -115,6 +115,15 @@ type ListItemCreation struct {
 	Event events.Event
 }
 
+// FileUnshare pairs a file carried by a message with the event to journal if
+// deleting that message retracts the file's last share into the conversation.
+// The event is a candidate: only the store knows whether another live message
+// still holds the share open. See Store.DeleteMessage.
+type FileUnshare struct {
+	FileID domain.FileID
+	Event  events.Event
+}
+
 // BetterAccessGrant reports whether one grant should replace another as the
 // grant that decided a resolved access level.
 //
@@ -324,17 +333,48 @@ type Store interface {
 	// The bool reports whether durable state changed.
 	SetDirectConversationOpen(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool, events.Event) (bool, error)
 	CreateConversation(context.Context, domain.Conversation, domain.UserID, events.Event) error
-	RenameConversation(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)
-	SetConversationTopic(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)
-	SetConversationPurpose(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)
+	RenameConversation(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationTopic(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationPurpose(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
 	SetConversationArchived(context.Context, domain.ConversationID, bool, events.Event) (domain.Conversation, error)
 	DeleteConversation(context.Context, domain.WorkspaceID, domain.ConversationID, events.Event) error
 	SetConversationAccessGroups(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.UserGroupID, events.Event) error
 	ListConversationAccessGroups(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.UserGroupID, error)
 	CreateInviteRequest(context.Context, domain.InviteRequest, events.Event) error
 	GetInviteRequest(context.Context, domain.WorkspaceID, domain.InviteRequestID) (domain.InviteRequest, error)
-	SetInviteRequestStatus(context.Context, domain.WorkspaceID, domain.InviteRequestID, domain.InviteRequestStatus, time.Time, events.Event) error
+	// SetInviteRequestStatus is a compare-and-set: the caller names the status
+	// it read and the status it wants. The previous status used to be an
+	// implicit "pending", which is why an approved invitation could not be
+	// withdrawn — the update matched no row and reported not found.
+	SetInviteRequestStatus(context.Context, domain.WorkspaceID, domain.InviteRequestID, domain.InviteRequestStatus, domain.InviteRequestStatus, time.Time, events.Event) error
 	ListInviteRequests(context.Context, domain.WorkspaceID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
+	// ListWorkspacesForEmail returns every workspace in which this address is
+	// an active, undeleted member, ordered by workspace identifier so two
+	// calls and two profiles list them alike. The address is the join: a user
+	// row belongs to one workspace, so the same person elsewhere is a
+	// different row with the same address.
+	ListWorkspacesForEmail(context.Context, string) ([]domain.WorkspaceMembershipSummary, error)
+	// WorkspaceAnalytics counts what one workspace holds, and what has
+	// happened in it since a caller-supplied instant. The instant is a
+	// parameter so the page and any export built from the same call describe
+	// the same window.
+	WorkspaceAnalytics(context.Context, domain.WorkspaceID, time.Time, int) (domain.WorkspaceAnalytics, error)
+	// FindInviteRequestByEmail returns the one invitation for an address in a
+	// given state, or ErrNotFound. The address is the whole match: acceptance
+	// is decided against an email a provider has verified, so an invitation
+	// nobody has that address cannot be redeemed.
+	FindInviteRequestByEmail(context.Context, domain.WorkspaceID, string, domain.InviteRequestStatus) (domain.InviteRequest, error)
+	// AcceptInviteRequest turns an approved invitation into the member it
+	// promised, in one transaction: the invitation becomes accepted, the user
+	// and the workspace membership are created at the recorded guest tier, and
+	// every channel the invitation named is joined.
+	//
+	// Approval used to flip a status and do nothing else, so an accepted
+	// invitation produced no user, no membership and no channel: the whole
+	// promise was inert. Splitting the work across calls would let a crash
+	// leave a member with none of the channels they were invited to, or an
+	// invitation consumed with no member behind it.
+	AcceptInviteRequest(context.Context, domain.InviteRequestAcceptance, []events.Event) error
 	SetAppApproval(context.Context, domain.WorkspaceID, domain.AppID, domain.AppRequestID, domain.AppApprovalStatus, time.Time, events.Event) error
 	ListAppApprovals(context.Context, domain.WorkspaceID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	CreateAppConfigurationToken(context.Context, string, string, domain.AppConfigurationToken) error
@@ -430,6 +470,25 @@ type Store interface {
 	SetConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, bool, events.Event) error
 	ListConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.WorkspaceID, bool, error)
 	DisconnectConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, events.Event) error
+	CreateSharedInvite(context.Context, domain.SharedInvite, events.Event) error
+	GetSharedInvite(context.Context, domain.SharedInviteID) (domain.SharedInvite, error)
+	// ListSharedInvites pages one workspace's invitations in a given status.
+	// The workspace matches either side: the host sees what it sent, and the
+	// invited organization sees what it was sent.
+	ListSharedInvites(context.Context, domain.WorkspaceID, domain.SharedInviteStatus, domain.PageRequest) (domain.SharedInvitePage, error)
+	// SetSharedInviteStatus is a compare-and-set over domain's transition
+	// table, so no caller can move an invitation somewhere the state machine
+	// does not allow, and two concurrent decisions cannot both win.
+	SetSharedInviteStatus(context.Context, domain.SharedInviteID, domain.SharedInviteStatus, domain.SharedInviteStatus, time.Time, events.Event) error
+	// AcceptSharedInvite appends the invited organization to the conversation
+	// and settles the invitation in one transaction, refusing when the channel
+	// is already at domain.SlackConnectCapacity.
+	//
+	// The capacity is checked here and nowhere else. CONNECT-01 forbids
+	// promising a place from a stale count, and a count read before the
+	// transaction is stale by definition: two organizations accepting the
+	// 250th place concurrently would both be told yes.
+	AcceptSharedInvite(context.Context, domain.SharedInviteID, time.Time, []events.Event) (domain.Conversation, error)
 	ListConnectedChannelInfo(context.Context, domain.WorkspaceID, []domain.ConversationID, []domain.WorkspaceID, domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error)
 	CreateOAuthClient(context.Context, domain.OAuthClient) error
 	GetOAuthClient(context.Context, string) (domain.OAuthClient, error)
@@ -468,9 +527,20 @@ type Store interface {
 	ListEmojis(context.Context, domain.WorkspaceID) ([]domain.CustomEmoji, error)
 	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error
 	RenameEmoji(context.Context, domain.WorkspaceID, string, string, events.Event) error
-	AddConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event) error
+	// AddConversationMember and its siblings accept the notice message the
+	// change posts into the conversation — Slack's channel_join,
+	// channel_leave, channel_topic, channel_purpose and channel_name
+	// messages. The notice commits inside the same transaction as the change
+	// it describes, so a crash cannot leave a renamed channel or a new member
+	// with no visible record of how that happened.
+	AddConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event, ...domain.Message) error
 	InviteConversationMembers(context.Context, domain.ConversationID, []domain.UserID, events.Event) error
-	RemoveConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event) error
+	RemoveConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event, ...domain.Message) error
+	// ThreadSummaries reports reply counts, participants and last-reply
+	// instants for the named thread roots in one read. A timeline renders
+	// fifty parents at a time, so this is deliberately batched: the
+	// per-parent alternative is fifty queries per page.
+	ThreadSummaries(context.Context, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
 	GetReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
 	GetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
@@ -510,6 +580,18 @@ type Store interface {
 	GetMessageByCreatedAt(context.Context, domain.ConversationID, time.Time) (domain.Message, error)
 	GetIdempotentMessage(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Message, error)
 	UpdateMessage(context.Context, domain.Message, events.Event) error
+	// DeleteMessage marks one message deleted and retracts the file shares that
+	// message was carrying. A file is visible to whoever can see a conversation
+	// it is shared into, and the share is a row of its own: without this, the
+	// only message that ever shared a file into a channel could be deleted and
+	// the file stayed readable there, and files.list kept listing it, forever.
+	//
+	// A share survives while any other live message in the same conversation
+	// still carries the file, so the store — not the caller — decides which
+	// shares end. The caller supplies one candidate event per file the message
+	// carries; the store journals exactly those whose share it removed, in the
+	// order given, inside the same transaction as the deletion.
+	DeleteMessage(context.Context, domain.Message, events.Event, []FileUnshare) error
 	// CreateMessage stores a message and the event announcing it in one
 	// transaction, at an instant no other message in the same conversation owns.
 	//
@@ -637,6 +719,26 @@ type Store interface {
 	UpdateCall(context.Context, domain.Call, events.Event) error
 	EndCall(context.Context, domain.WorkspaceID, domain.CallID, int64, events.Event) error
 	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, events.Event) error
+	// StartHuddle returns the conversation's active huddle, creating it only if
+	// there is none, and adds the caller to it either way. It is one atomic
+	// upsert because two people pressing start at the same moment must end up
+	// in the same huddle: a read-then-create would give them one each, and the
+	// second would silently be the one nobody else joined.
+	//
+	// The returned bool reports whether this call created the huddle, so the
+	// caller knows whether to announce a start or a join.
+	StartHuddle(context.Context, domain.Call, events.Event, events.Event) (domain.Call, bool, error)
+	// ActiveHuddle returns the conversation's running huddle, or ErrNotFound.
+	ActiveHuddle(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.Call, error)
+	// JoinCall and LeaveCall move one participant, rather than replacing the
+	// whole set as SetCallParticipants does. Two people joining concurrently
+	// through a whole-set write lose one of the two additions.
+	//
+	// LeaveCall ends the call when the last participant leaves: a huddle with
+	// nobody in it is over, and leaving it running would let the conversation
+	// show a huddle nobody can be in.
+	JoinCall(context.Context, domain.WorkspaceID, domain.CallID, domain.UserID, events.Event) (domain.Call, error)
+	LeaveCall(context.Context, domain.WorkspaceID, domain.CallID, domain.UserID, events.Event, events.Event) (domain.Call, error)
 	CreateFile(context.Context, domain.File, events.Event) error
 	CreateExternalUpload(context.Context, domain.ExternalUpload) error
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)

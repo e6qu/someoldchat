@@ -154,6 +154,10 @@ var liveEventTopics = []string{
 	"view.updated",
 	"view.submitted",
 	"view.closed",
+	"huddle.started",
+	"huddle.joined",
+	"huddle.left",
+	"huddle.ended",
 }
 
 // ---------------------------------------------------------------------------
@@ -165,13 +169,17 @@ var liveEventTopics = []string{
 // so the partial cannot be reached with a value that is missing a field it
 // needs: that mismatch is what made every thread view fail to render.
 type messageList struct {
-	Messages    []messageView
-	ChannelName string
-	CSRFToken   string
-	IsMember    bool
-	CanReact    bool
-	CanPin      bool
-	CanReply    bool
+	// ForwardDestinations are the conversations this reader may forward into.
+	// They are the reader's own visible channels: ACT-03 requires a forward
+	// not to disclose a destination the actor cannot post to.
+	ForwardDestinations []conversationView
+	Messages            []messageView
+	ChannelName         string
+	CSRFToken           string
+	IsMember            bool
+	CanReact            bool
+	CanPin              bool
+	CanReply            bool
 }
 
 type messageView struct {
@@ -207,24 +215,54 @@ type messageView struct {
 	CanEdit       bool
 	CanDelete     bool
 	Permalink     string
-	Channel       string
-	ChannelName   string
-	ChannelPrefix string
-	AppID         string
-	CanInteract   bool
-	Streaming     bool
-	Ephemeral     bool
-	Shortcuts     []domain.AppShortcut
-	Files         []fileView
+	// Edited, ReplyCount and their neighbours are the fittings Slack shows
+	// around a message: whether it was edited, what its thread has
+	// accumulated, whether it was also sent to the channel, and whether it is
+	// a message the workspace generated rather than a person composing one.
+	Edited            bool
+	EditedTime        string
+	EditedMachineTime string
+	ReplyCount        int
+	ReplySummary      string
+	LastReplyTime     string
+	Broadcast         bool
+	System            bool
+	Subtype           string
+	// DaySeparator is set on the first message of each day in the rendered
+	// window, and FirstUnread on the first message the reader has not read.
+	// Both are computed server-side: the fragment refresh re-renders this
+	// same partial, so anything computed in the browser is lost on every
+	// live update.
+	DaySeparator        string
+	DaySeparatorMachine string
+	FirstUnread         bool
+	CopyLinkURL         string
+	ForwardURL          string
+	MarkUnreadURL       string
+	Channel             string
+	ChannelName         string
+	ChannelPrefix       string
+	AppID               string
+	CanInteract         bool
+	Streaming           bool
+	Ephemeral           bool
+	Shortcuts           []domain.AppShortcut
+	Files               []fileView
 }
 
 type fileView struct {
+	ID          string
 	Name        string
 	Title       string
 	MIMEType    string
 	Size        string
 	DownloadURL string
 	Deleted     bool
+	// DeleteURL is set only for a file this reader may actually delete. The
+	// service is uploader-only, so rendering the control for anyone else
+	// would be a button that always fails — the universal contract forbids a
+	// control that does not do what its name promises.
+	DeleteURL string
 }
 
 type reactionView struct {
@@ -277,65 +315,101 @@ type conversationDetailsView struct {
 	NotificationLevel string
 	FollowEveryThread bool
 	ArchiveVerb       string
+	// Slack Connect. Connected names the organizations already in the channel;
+	// Outstanding names the invitations still waiting on someone, so the panel
+	// distinguishes "shared with" from "asked to share with" rather than
+	// implying an invitation is a connection.
+	Connected    []connectOrganizationView
+	Outstanding  []connectInviteView
+	CanConnect   bool
+	ConnectURL   string
+	ConnectHosts []conversationView
+}
+
+type connectOrganizationView struct {
+	ID   string
+	Name string
+}
+
+type connectInviteView struct {
+	ID         string
+	Target     string
+	Status     string
+	Expires    string
+	CanApprove bool
+	CanRevoke  bool
+	ApproveURL string
+	DenyURL    string
 }
 
 type pageData struct {
-	Timeline          messageList
-	Thread            messageList
-	ThreadTimestamp   string
-	Channels          []conversationView
-	Directs           []conversationView
-	MoreChannelsURL   string
-	Channel           string
-	ChannelName       string
-	ChannelPrefix     string
-	ChannelMeta       string
-	WorkspaceName     string
-	CSRFToken         string
-	ShowProfile       bool
-	ShowAdmin         bool
-	ReminderUnread    bool
-	IsMember          bool
-	CanPost           bool
-	CanSchedule       bool
-	CanUpload         bool
-	CanJoin           bool
-	CanCreate         bool
-	JoinURL           string
-	Username          string
-	UserInitial       string
-	OlderURL          string
+	// BrowserNotifications and NotificationsPaused are this product's two
+	// halves of whether a desktop notification may be raised. The third — the
+	// browser's permission — only the client can see.
+	BrowserNotifications bool
+	NotificationsPaused  bool
+	Workspaces           []workspaceChoice
+	Huddle               huddleView
+	HuddleURL            string
+	Timeline             messageList
+	Thread               messageList
+	ThreadTimestamp      string
+	Channels             []conversationView
+	Directs              []conversationView
+	MoreChannelsURL      string
+	Channel              string
+	ChannelName          string
+	ChannelPrefix        string
+	ChannelMeta          string
+	WorkspaceName        string
+	CSRFToken            string
+	ShowProfile          bool
+	ShowAdmin            bool
+	ReminderUnread       bool
+	IsMember             bool
+	CanPost              bool
+	CanSchedule          bool
+	CanUpload            bool
+	CanJoin              bool
+	CanCreate            bool
+	JoinURL              string
+	Username             string
+	UserInitial          string
+	OlderURL             string
+	// LatestURL is set when the rendered window is not the newest one. It is
+	// both the "jump to the latest messages" pager and the composer's
+	// data-newest, so a post made while reading older history takes the
+	// reader to where the message actually landed instead of refreshing a
+	// window that cannot hold it. These were two fields assigned the same
+	// value, which is one drift away from the pager and the composer
+	// disagreeing about where "latest" is.
 	LatestURL         string
 	MarkReadURL       string
 	MarkReadTimestamp string
-	// NewestURL is set when the rendered window is not the newest one, so a
-	// post made while reading older history can take the reader to where the
-	// message actually landed instead of refreshing a window that cannot hold it.
-	NewestURL        string
-	AtLatest         bool
-	Notice           string
-	Error            string
-	Draft            string
-	DraftAttachments []draftAttachmentView
-	DraftJSON        string
-	ScheduleAt       string
-	ComposeURL       string
-	DraftURL         string
-	ScheduleURL      string
-	UploadURL        string
-	StageUploadURL   string
-	TimelineURL      string
-	ThreadURL        string
-	ThreadFollowURL  string
-	FollowingThread  bool
-	GlobalShortcuts  []domain.AppShortcut
-	SlashCommands    []domain.AppShortcut
-	ComposerMembers  []memberView
-	ComposerGroups   []userGroupView
-	ComposerChannels []conversationView
-	Apps             []domain.InstalledApp
-	Modal            *modalView
-	Details          *conversationDetailsView
+	AtLatest          bool
+	Notice            string
+	Error             string
+	Draft             string
+	DraftAttachments  []draftAttachmentView
+	DraftJSON         string
+	ScheduleAt        string
+	ComposeURL        string
+	DraftURL          string
+	ScheduleURL       string
+	UploadURL         string
+	StageUploadURL    string
+	TimelineURL       string
+	ThreadURL         string
+	ThreadFollowURL   string
+	FollowingThread   bool
+	GlobalShortcuts   []domain.AppShortcut
+	SlashCommands     []domain.AppShortcut
+	ComposerMembers   []memberView
+	ComposerGroups    []userGroupView
+	ComposerChannels  []conversationView
+	Apps              []domain.InstalledApp
+	Modal             *modalView
+	Details           *conversationDetailsView
 }
 
 type memberView struct {
@@ -564,10 +638,15 @@ type notificationsData struct {
 	Keywords          string
 	ActivityChannels  bool
 	ActivityReminders bool
-	Snoozed           bool
-	SnoozeUntil       string
-	Exceptions        []notificationExceptionView
-	Notice            string
+	// BrowserNotifications is this product's half of the decision. The other
+	// half belongs to the browser, and the page says which of the two is
+	// missing rather than reporting one silent "off" for both.
+	BrowserNotifications     bool
+	BrowserNotificationState string
+	Snoozed                  bool
+	SnoozeUntil              string
+	Exceptions               []notificationExceptionView
+	Notice                   string
 }
 
 type scheduledMessageView struct {
@@ -818,6 +897,20 @@ const pageStyle = `<style>
 .workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}
 .sidebar{background:var(--accent);color:var(--on-accent);padding:16px 10px;display:flex;flex-direction:column;gap:14px;overflow:auto}
 .workspace-name{font-weight:800;padding:0 10px}
+.connect-invites{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
+.connect-invites li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--line);border-radius:8px}
+.connect-actions{display:flex;gap:8px}
+.connect-invite{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:8px}
+.connect-invite label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.workspace-switch summary{cursor:pointer;list-style:none}
+.workspace-switch summary::-webkit-details-marker{display:none}
+.workspace-switch summary::after{content:" ▾"}
+.workspace-list{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:2px}
+.workspace-list button{width:100%;text-align:left;border:0;border-radius:5px;background:transparent;color:var(--on-accent);padding:7px 10px;font:inherit}
+.workspace-list button:hover{background:#ffffff2b}
+.workspace-list small{display:block;color:#e8cbe9;font-weight:400}
+.workspace-current{display:block;padding:7px 10px;border-radius:5px;background:#ffffff2b;font-weight:700}
+.workspace-current small{display:block;color:#e8cbe9;font-weight:400}
 .workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}
 .side-section{display:grid;gap:2px}
 .side-label{color:#e8cbe9;font-size:12px;font-weight:700;padding:6px 10px;text-transform:uppercase;letter-spacing:.06em}
@@ -829,7 +922,7 @@ const pageStyle = `<style>
 .side-empty{margin:0;padding:6px 10px;color:#e8cbe9;font-size:13px}
 .side-more{padding:6px 10px;color:var(--on-accent);font-size:13px}
 .badge{margin-left:auto;background:var(--on-accent);color:var(--accent);border-radius:12px;min-width:20px;text-align:center;padding:1px 6px;font-size:12px;font-weight:800}
-.draft-badge{margin-left:auto;color:#e8cbe9;font-size:11px;font-style:italic}
+.draft-badge{margin-left:auto;color:#f3e3f4;font-size:11px;font-style:italic}
 .sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff5c;padding-top:12px}
 .signed-in{display:flex;align-items:center;gap:9px;padding:4px 10px 10px;min-width:0}
 .signed-in-avatar{flex:0 0 auto;width:24px;height:24px;border-radius:5px;display:grid;place-items:center;background:#ffffff42;font-size:11px;font-weight:800;text-transform:uppercase;overflow:hidden}
@@ -970,6 +1063,15 @@ const workspaceRefinements = `<style>
 .membership-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
+.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.huddle-bar.active{background:var(--hover)}
+.huddle-state{display:grid;gap:2px;min-width:0}
+.huddle-people{color:var(--text)}
+.huddle-media{color:var(--muted)}
+.huddle-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto}
+.huddle-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
+.huddle-actions button:hover{background:var(--hover)}
+.huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
 .channel-actions button:hover{background:var(--hover)}
 .timeline{padding-top:12px}
 .message{position:relative;border-radius:6px;padding-top:8px;padding-bottom:8px}
@@ -1061,6 +1163,18 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .membership-pill{display:none}
 .message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1;visibility:visible}
 .message-actions details[open]>form{left:0;right:auto}
+.day-separator{display:flex;align-items:center;gap:8px;margin:14px 0 6px;color:var(--muted);font-size:12px}
+.day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
+.unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
+.unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
+.system-message{opacity:.85}
+.system-text{margin:0;color:var(--muted);font-size:13px}
+.edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
+.thread-summary{margin:2px 0 0;font-size:12px}
+.thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
+.thread-last-reply{color:var(--muted);margin-left:6px}
+.file-delete summary{cursor:pointer;color:var(--muted);font-size:12px}
+.file-delete p{margin:6px 0;font-size:12px;color:var(--muted)}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
@@ -1088,12 +1202,18 @@ const attachmentPartial = `{{define "attachment"}}
 
 const messagesPartial = `{{define "messages"}}
 {{range $message := .Messages}}
-<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if not $message.Ephemeral}} A M{{end}}{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
+{{if $message.DaySeparator}}<div class="day-separator" role="separator"><time datetime="{{$message.DaySeparatorMachine}}">{{$message.DaySeparator}}</time></div>{{end}}
+{{if $message.FirstUnread}}<div class="unread-divider" role="separator" aria-label="New messages"><span>New</span></div>{{end}}
+{{if $message.System}}<article class="message system-message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" data-subtype="{{$message.Subtype}}" tabindex="-1" aria-label="{{$message.DisplayText}}">
+  <div class="message-body"><p class="system-text">{{$message.DisplayText}}</p><time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></div>
+</article>
+{{else}}
+<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if not $message.Ephemeral}} A M F{{end}}{{if $message.MarkUnreadURL}} U{{end}}{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
   <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
   <div class="message-body">
     <div class="message-head">
       <span class="author">{{$message.AuthorName}}</span>{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
-      <time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
+      {{if $message.Permalink}}<a class="time" href="{{$message.Permalink}}"><time datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></a>{{else}}<time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{end}}{{if $message.Edited}}<span class="edited-label" title="Edited {{$message.EditedTime}}">(edited)</span>{{end}}{{if $message.Broadcast}}<span class="broadcast-label">Also sent to the channel</span>{{end}}{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
       {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
       {{if $message.Ephemeral}}<span class="ephemeral-label">Only visible to you</span>{{end}}
     </div>
@@ -1102,7 +1222,13 @@ const messagesPartial = `{{define "messages"}}
       <div class="message-file">
         <span class="message-file-icon" aria-hidden="true">FILE</span>
         <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span></span>
-        {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{end}}
+        {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{if $file.DeleteURL}}<details class="file-delete"><summary>Delete file</summary>
+          <form method="post" action="{{$file.DeleteURL}}" hx-post="{{$file.DeleteURL}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <p>Deleting {{$file.Title}} removes it from every message and search result in this workspace. This cannot be undone.</p>
+            <button type="submit">Delete this file</button>
+          </form>
+        </details>{{end}}{{end}}
       </div>{{end}}</div>{{end}}
     {{if $message.Blocks}}
     <div class="message-blocks" aria-label="Structured message">
@@ -1166,8 +1292,22 @@ const messagesPartial = `{{define "messages"}}
       {{end}}
     </ul>
     {{end}}
+    {{if $message.ReplyCount}}<p class="thread-summary"><a href="{{$message.ReplyURL}}">{{$message.ReplySummary}}</a>{{if $message.LastReplyTime}} <span class="thread-last-reply">Last reply {{$message.LastReplyTime}}</span>{{end}}</p>{{end}}
     {{if not $message.Ephemeral}}<div class="message-actions">
       <a href="{{$message.ReplyURL}}">{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}</a>
+      {{if $message.CopyLinkURL}}<a class="copy-link" href="{{$message.CopyLinkURL}}" data-copy-link="{{$message.CopyLinkURL}}">Copy link</a>{{end}}
+      {{if and $message.ForwardURL $.CanReply}}<details class="forward-menu"><summary>Forward</summary>
+        <form method="post" action="{{$message.ForwardURL}}" hx-post="{{$message.ForwardURL}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label>Forward to<select name="destination">{{range $.ForwardDestinations}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label>
+          <label>Add a message<input name="comment" maxlength="2000"></label>
+          <button type="submit">Forward</button>
+        </form>
+      </details>{{end}}
+      {{if $message.MarkUnreadURL}}<form method="post" action="{{$message.MarkUnreadURL}}" hx-post="{{$message.MarkUnreadURL}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <button type="submit">Mark unread from here</button>
+      </form>{{end}}
       {{if $.CanReact}}
       <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
@@ -1231,6 +1371,7 @@ const messagesPartial = `{{define "messages"}}
         <summary>Delete</summary>
         <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          {{if $message.Files}}<p>This message shares a file. Deleting it also removes the file from this conversation, unless another message here shares it too. The file itself is kept.</p>{{end}}
           <button type="submit">Delete this message</button>
         </form>
       </details>
@@ -1238,6 +1379,7 @@ const messagesPartial = `{{define "messages"}}
     </div>{{end}}
   </div>
 </article>
+{{end}}
 {{else}}
 <p class="empty">{{if .IsMember}}No messages yet. Start the conversation.{{else}}No messages have been posted in this channel yet.{{end}}</p>
 {{end}}
@@ -1248,7 +1390,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 {{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
-<div class="shell">
+<div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}">
   <header class="topbar">
     <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="false" aria-label="Open navigation"><span aria-hidden="true">☰</span></button>
     <span class="brand">{{.WorkspaceName}}</span>
@@ -1293,7 +1435,13 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
   <div class="workspace">
     <aside class="sidebar" id="workspace-sidebar">
       <div>
-        <div class="workspace-name">{{.WorkspaceName}}</div>
+        {{if .Workspaces}}<details class="workspace-switch">
+          <summary class="workspace-name">{{.WorkspaceName}}</summary>
+          <form method="post" action="/app/workspace/switch">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+            <ul class="workspace-list" aria-label="Your workspaces">{{range .Workspaces}}<li>{{if .Current}}<span class="workspace-current">{{.Name}} <small>{{.Role}} · you are here</small></span>{{else}}<button type="submit" name="workspace_id" value="{{.ID}}">{{.Name}} <small>{{.Role}}</small></button>{{end}}</li>{{end}}</ul>
+          </form>
+        </details>{{else}}<div class="workspace-name">{{.WorkspaceName}}</div>{{end}}
         <div class="workspace-sub"><span class="presence-dot" aria-hidden="true"></span>{{.Username}}</div>
       </div>
       <nav class="side-section" aria-label="Workspace navigation">
@@ -1304,6 +1452,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         {{if .CanSchedule}}<a class="side-link" href="/app/drafts?channel={{.Channel}}" aria-label="Drafts and sent"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Drafts &amp; sent</span></a>{{end}}
         <a class="side-link" href="/app/dms" aria-label="Direct messages"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">DMs</span></a>
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
+        <a class="side-link" href="/app/remote-files?channel={{.Channel}}" aria-label="Remote files"><span class="side-icon" aria-hidden="true">⇗</span><span class="side-text">Remote files</span></a>
         <a class="side-link" href="/app/canvases" aria-label="Canvases"><span class="side-icon" aria-hidden="true">▤</span><span class="side-text">Canvases</span></a>
         <a class="side-link" href="/app/lists" aria-label="Lists"><span class="side-icon" aria-hidden="true">☷</span><span class="side-text">Lists</span></a>
         <a class="side-link" href="/app/workflows" aria-label="Workflows"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">Workflows</span></a>
@@ -1377,6 +1526,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </header>
       <div class="timeline-wrap">
         {{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}
+        <div id="huddle" data-fragment="{{.HuddleURL}}" data-live="true">{{template "huddle" .Huddle}}</div>
         <section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>
         {{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
       </div>
@@ -1402,7 +1552,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button type="submit">Add to draft</button>
           </form>
         </details>{{end}}
-        <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}" data-draft-url="{{.DraftURL}}">
+        <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.LatestURL}}" data-draft-url="{{.DraftURL}}">
           <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
           <input type="hidden" name="timezone" data-browser-timezone value="UTC">
@@ -1566,6 +1716,27 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         {{end}}
       </section>
       {{end}}
+      {{if .Details.IsChannel}}
+      <section class="conversation-details-section" id="conversation-connect" aria-labelledby="conversation-connect-heading">
+        <h3 id="conversation-connect-heading">Shared with other organizations</h3>
+        {{if .Details.Connected}}<p>In this channel: {{range $index, $org := .Details.Connected}}{{if $index}}, {{end}}{{$org.Name}}{{end}}</p>{{else}}<p class="read-only">Only this workspace is in this channel.</p>{{end}}
+        {{if .Details.Outstanding}}<ul class="connect-invites" aria-label="Outstanding invitations">{{range .Details.Outstanding}}<li>
+          <span><strong>{{.Target}}</strong> <span class="status">{{.Status}}</span>{{if .Expires}}<br><span class="status">valid until {{.Expires}}</span>{{end}}</span>
+          <span class="connect-actions">
+          {{if .CanApprove}}<form method="post" action="{{.ApproveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_id" value="{{.ID}}"><button type="submit">Approve</button></form>{{end}}
+          {{if .CanRevoke}}<form method="post" action="{{.DenyURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_id" value="{{.ID}}"><button type="submit">Withdraw</button></form>{{end}}
+          </span>
+        </li>{{end}}</ul>{{end}}
+        {{if .Details.CanConnect}}
+        <form class="connect-invite" method="post" action="{{.Details.ConnectURL}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label>Invite an organization<select name="target">{{range .Details.ConnectHosts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+          <button type="submit">Send invitation</button>
+        </form>
+        <p class="read-only">An invitation is recorded here and takes effect only when the other organization accepts it. Everyone there will be able to read this channel's history from the moment they join.</p>
+        {{end}}
+      </section>
+      {{end}}
       {{if or .Details.CanArchive .Details.CanLeave .Details.CanClose}}
       <section class="conversation-danger" aria-label="Conversation actions">
         {{if .Details.CanArchive}}<form method="post" action="/app/conversation/archive?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Details.Archived}}false{{else}}true{{end}}"><button type="submit">{{.Details.ArchiveVerb}} channel</button></form>{{end}}
@@ -1624,9 +1795,39 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 </div>
 {{end}}
 {{end}}
-` + messagesPartial
+` + messagesPartial + huddlePartial
 
 var pageTemplate = mustPage(pageMarkup)
+
+// huddlePartial renders the conversation's huddle bar. HUDDLE-01 forbids
+// fabricating a connected state, and this deployment carries no audio
+// transport at all, so the bar says so in the same breath as it says who is
+// in the huddle: the lifecycle is real and durable, the media is not here.
+//
+// It is a fragment for the same reason the timeline is: presence changes when
+// other people join and leave, and the existing data-fragment/data-live
+// refresh already reacts to the durable event stream, so this needs no new
+// transport.
+const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{{if .Active}} active{{end}}">
+{{if .Active}}
+<div class="huddle-state" role="status">
+  <strong>Huddle in {{.ChannelName}}</strong>
+  <span class="huddle-people">{{if .Participants}}{{range $index, $name := .Participants}}{{if $index}}, {{end}}{{$name}}{{end}}{{else}}nobody yet{{end}}</span>
+  <span class="huddle-media">No audio here — this deployment carries no voice or video. Joining puts your name in the huddle and nothing else.</span>
+</div>
+<div class="huddle-actions">
+  {{if .Joined}}<form method="post" action="{{.LeaveURL}}" hx-post="{{.LeaveURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Leave huddle</button></form>
+  {{else}}<form method="post" action="{{.JoinURL}}" hx-post="{{.JoinURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Join huddle</button></form>{{end}}
+  {{if .CanEnd}}<form method="post" action="{{.EndURL}}" hx-post="{{.EndURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-end" type="submit">End for everyone</button></form>{{end}}
+</div>
+{{else}}
+<div class="huddle-actions">
+  <form method="post" action="{{.StartURL}}" hx-post="{{.StartURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Start a huddle</button></form>
+  <span class="huddle-media">A huddle here is a shared presence, not a call: this deployment carries no voice or video.</span>
+</div>
+{{end}}
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+</div>{{end}}{{end}}`
 
 const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -1946,13 +2147,38 @@ if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldc
 
 var activityTemplate = mustPage(activityMarkup)
 
+// browserNotificationSettingScript reports what the browser says, because the
+// server cannot know it: a stored preference and a granted permission are two
+// different things, and one silent "off" for both leaves a person unable to
+// tell whether to change a setting here or in their browser.
+//
+// Turning the preference on asks for the permission then and there, which is
+// the only moment a browser will honour the request — it must follow a click.
+const browserNotificationSettingScript = `<script>(function(){
+var toggle=document.getElementById('browser-notifications');
+var state=document.getElementById('browser-notification-state');
+if(!toggle||!state)return;
+function describe(){
+if(!('Notification' in window)){state.textContent='This browser cannot show desktop notifications at all.';toggle.disabled=true;return}
+var permission=Notification.permission;
+if(permission==='denied'){state.textContent='Your browser is blocking notifications for this site. Turning this on here will not be enough until you allow them in the browser.';return}
+if(permission==='granted'){state.textContent=toggle.checked?'Your browser allows notifications, and this workspace will send them while a tab is open.':'Your browser allows notifications. Turn this on to receive them.';return}
+state.textContent=toggle.checked?'Your browser has not been asked yet. Save, and it will ask.':'Your browser has not been asked to allow notifications yet.';
+}
+describe();
+toggle.addEventListener('change',function(){
+if(toggle.checked&&'Notification' in window&&Notification.permission==='default'){Notification.requestPermission().then(describe).catch(describe);return}
+describe();
+});
+})();</script>`
+
 const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(760px,calc(100% - 28px));margin:24px auto 48px}.heading h2{margin:0 0 5px}.heading p{margin:0;color:var(--muted)}.settings{display:grid;gap:18px;margin-top:20px}.card{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.card h3{margin:0 0 6px}.card>p{margin:0 0 14px;color:var(--muted)}.fields{display:grid;gap:12px}.fields label{display:grid;gap:6px;font-weight:700}.fields input[type=text],.fields input[type=number],.fields select{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:start;gap:8px!important;font-weight:600!important}.actions{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.actions label{flex:1 1 180px}.actions button,.fields button{border:0;border-radius:6px;background:var(--action);color:var(--on-strong);padding:9px 12px;font-weight:800}.resume{background:var(--danger)!important}.exceptions{margin:0;padding:0;list-style:none;display:grid;gap:8px}.exceptions a{display:flex;justify-content:space-between;gap:10px;padding:11px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.exceptions span:last-child{color:var(--muted)}
 @media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 18px,760px);margin-top:16px}.card{padding:14px}.actions{display:grid}.actions label{width:100%}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "scripts"}}` + localTimeScript + browserNotificationSettingScript + `{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Notifications</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
 <main class="layout"><div class="heading"><h2>Notification preferences</h2><p>Choose what needs your attention without changing what you can read.</p></div>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 <div class="settings">
@@ -1962,7 +2188,10 @@ const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end
 <label for="notification-keywords">Channel keywords<input id="notification-keywords" type="text" name="keywords" maxlength="5049" value="{{.Keywords}}" placeholder="release, customer escalation"><span class="muted">Comma-separated; exact matches are case-insensitive and do not trigger in threads.</span></label>
 <label class="check"><input type="checkbox" name="activity_channels" value="true"{{if .ActivityChannels}} checked{{end}}> Show channels set to All new posts in Activity</label>
 <label class="check"><input type="checkbox" name="activity_reminders" value="true"{{if .ActivityReminders}} checked{{end}}> Show due personal reminders in Activity</label>
+<label class="check"><input type="checkbox" id="browser-notifications" name="browser_notifications" value="true"{{if .BrowserNotifications}} checked{{end}}> Show desktop notifications while SameOldChat is open in a tab</label>
+<p class="muted" id="browser-notification-state" aria-live="polite">{{.BrowserNotificationState}}</p>
 <button type="submit">Save workspace defaults</button></form></section>
+<section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds and notification schedules.</strong> Pausing above is the only schedule.</li></ul></section>
 <section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time>. Messages and Activity remain available.</p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="resume" type="submit">Resume notifications</button></form>{{else}}<p>Pause banners and sounds for a preset or custom duration.</p><form class="actions" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><label for="dnd-minutes">Preset<select id="dnd-minutes" name="minutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="480">8 hours</option><option value="1440">24 hours</option></select></label><label for="dnd-custom-minutes">Custom minutes (optional)<input id="dnd-custom-minutes" type="number" name="custom_minutes" min="1" max="1440"></label><button type="submit">Pause notifications</button></form>{{end}}</section>
 <section class="card" aria-labelledby="notification-exceptions-heading"><h3 id="notification-exceptions-heading">Exceptions to defaults</h3>{{if .Exceptions}}<ul class="exceptions">{{range .Exceptions}}<li><a href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span>{{.Level}}{{if .FollowEveryThread}} · following every thread{{end}}</span></a></li>{{end}}</ul>{{else}}<p>No conversation-specific exceptions.</p>{{end}}</section>
 </div></main>{{end}}`
@@ -2288,6 +2517,29 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // them when it renders a script context, so the bytes the browser receives
 // would no longer match the Content-Security-Policy hash computed from this
 // constant, and the whole client would be silently blocked.
+//
+// Copying a message link is an enhancement layered on a real anchor: the
+// control is an <a> pointing at the permalink, and the handler below only
+// intercepts it where the clipboard API exists. A browser without clipboard
+// access, or one that refuses the write, follows the link instead of doing
+// nothing.
+// The script's notify() raises a desktop notification for messages that
+// arrived while the tab was not being looked at.
+//
+// Its text comes from the timeline this client just fetched under its own
+// session, never from the event frame: the durable payloads carry identifiers
+// and no content by design, and a notification is not a reason to start
+// shipping message text to every consumer of the stream.
+//
+// Three things must all be true, and each is somebody else's decision: the
+// person turned the preference on, the browser granted permission, and
+// notifications are not paused. Do Not Disturb was fetched for the preferences
+// page and consulted nowhere else, so a paused workspace still raised every
+// banner it could.
+//
+// The comments live here rather than in the script because html/template
+// elides JavaScript comments in a script context, which changes the bytes the
+// browser receives and so breaks the hash the policy pins.
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
@@ -2717,6 +2969,15 @@ var target=details.querySelector(control);
 if(target)target.focus();
 return true;
 }
+function notify(arrived){
+var shell=document.querySelector('[data-browser-notifications]');
+if(!shell||shell.getAttribute('data-browser-notifications')!=='true')return;
+if(shell.getAttribute('data-notifications-paused')==='true')return;
+if(!('Notification' in window)||Notification.permission!=='granted')return;
+if(!document.hidden)return;
+var channel=shell.getAttribute('data-channel-name')||'this workspace';
+try{new Notification(arrived===1?'1 new message in '+channel:arrived+' new messages in '+channel,{tag:'sameoldchat-'+channel})}catch(error){}
+}
 function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
 function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}
 function refresh(force){
@@ -2766,7 +3027,7 @@ var behind=document.querySelectorAll('[data-fragment]:not([data-live="true"])').
 var before=messageCount();
 refresh(false).then(function(){
 var arrived=messageCount()-before;
-if(arrived>0){announce(arrived===1?'1 new message.':arrived+' new messages.');return}
+if(arrived>0){announce(arrived===1?'1 new message.':arrived+' new messages.');notify(arrived);return}
 if(behind)announce('New activity is available in this conversation.');
 }).catch(function(error){if(error&&error.name==='AbortError')return;announce('New activity could not be loaded. Reload the page.')});
 },250);
@@ -2777,6 +3038,15 @@ if(!ownPath(action))return;
 fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
 document.addEventListener('click',function(event){
+var copyLink=event.target.closest?event.target.closest('[data-copy-link]'):null;
+if(copyLink){
+if(navigator.clipboard&&navigator.clipboard.writeText){
+event.preventDefault();
+var absolute=new URL(copyLink.getAttribute('data-copy-link'),window.location.origin).toString();
+navigator.clipboard.writeText(absolute).then(function(){announce('Link copied.')}).catch(function(){window.location.assign(copyLink.getAttribute('href'))});
+}
+return;
+}
 var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-mention-group],[data-channel-id],[data-slash-command],[data-emoji-name],[data-open-emoji-picker]'):null;
 if(control&&control.hasAttribute('data-open-emoji-picker')){if(openEmojiPicker(control))event.preventDefault();return}
 if(control&&control.hasAttribute('data-emoji-name')){chooseEmoji(control,!!(emojiSuggestions&&emojiSuggestions.contains(control)));return}
@@ -3152,6 +3422,11 @@ if(event.key==='ArrowLeft'){
 var back=Array.prototype.slice.call(document.querySelectorAll('.channel-actions a')).find(function(link){return link.textContent.trim()==='Back to channel'});
 if(back&&ownPath(back.getAttribute('href'))){event.preventDefault();window.location.assign(back.getAttribute('href'));return}
 }
+if(key==='f'&&openMessageDetails(focusedMessage,'Forward','select,input,button')){event.preventDefault();return}
+if(key==='u'){
+var unread=Array.prototype.slice.call(focusedMessage.querySelectorAll('.message-actions button')).find(function(button){return button.textContent.trim()==='Mark unread from here'});
+if(unread){event.preventDefault();unread.click();return}
+}
 if(key==='e'&&openMessageDetails(focusedMessage,'Edit','textarea')){event.preventDefault();return}
 if(event.key==='Delete'&&openMessageDetails(focusedMessage,'Delete','button[type=submit]')){event.preventDefault();return}
 if(key==='r'){
@@ -3239,14 +3514,43 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /auth/validation", h.validation)
 		mux.HandleFunc("GET /me", h.me)
 		mux.HandleFunc("GET /app/admin/auth", h.authAdminPage)
+		mux.HandleFunc("GET /app/admin/audit", h.auditPage)
+		mux.HandleFunc("GET /app/admin/settings", h.workspaceSettingsPage)
+		mux.HandleFunc("GET /app/admin/analytics", h.analyticsPage)
+		mux.HandleFunc("POST /app/admin/settings/identity", h.workspaceIdentitySet)
+		mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
+		mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
+		// Deliberately reachable signed-out: the person it is for has no
+		// account yet. See internal/web/invite.go for why it carries no secret.
+		mux.HandleFunc("GET /app/invite/{inviteRequestID}", h.invitationPage)
 		mux.HandleFunc("GET /api/admin.auth.methods.list", h.authMethodsList)
 		mux.HandleFunc("POST /api/admin.auth.methods.set", h.authMethodSet)
 		mux.HandleFunc("POST /api/admin.auth.users.invite", h.authUserInvite)
 		mux.HandleFunc("POST /api/admin.auth.users.create", h.authUserCreate)
 		mux.HandleFunc("GET /api/admin.auth.users.list", h.authUsersList)
 		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
+		mux.HandleFunc("POST /app/admin/invites/approve", h.authInviteRequestDecision(true))
+		mux.HandleFunc("POST /app/admin/invites/deny", h.authInviteRequestDecision(false))
+		mux.HandleFunc("POST /app/admin/apps/approve", h.authAppDecision(true))
+		mux.HandleFunc("POST /app/admin/apps/restrict", h.authAppDecision(false))
 	}
 	mux.HandleFunc("GET /app", h.index)
+	mux.HandleFunc("GET /archives/{channelID}/{timestamp}", h.archivePermalink)
+	mux.HandleFunc("POST /app/message/forward", h.forwardMessage)
+	mux.HandleFunc("POST /app/files/delete", h.deleteFile)
+	mux.HandleFunc("GET /app/remote-files", h.remoteFiles)
+	mux.HandleFunc("POST /app/workspace/switch", h.switchWorkspace)
+	mux.HandleFunc("POST /app/connect/invite", h.connectInvite)
+	mux.HandleFunc("POST /app/connect/approve", h.connectApprove)
+	mux.HandleFunc("POST /app/connect/deny", h.connectDeny)
+	mux.HandleFunc("GET /app/huddle", h.huddleFragment)
+	mux.HandleFunc("POST /app/huddle/start", h.huddleMutation("started", h.startHuddle, "Huddle started"))
+	mux.HandleFunc("POST /app/huddle/join", h.huddleMutation("joined", h.joinHuddle, "You joined the huddle"))
+	mux.HandleFunc("POST /app/huddle/leave", h.huddleMutation("left", h.leaveHuddle, "You left the huddle"))
+	mux.HandleFunc("POST /app/huddle/end", h.huddleMutation("ended", h.endHuddle, "Huddle ended"))
+	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
+	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)
+	mux.HandleFunc("POST /app/read/unread", h.markUnreadFromHere)
 	mux.HandleFunc("GET /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("POST /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("GET /oauth/v2/authorize", h.oauthAuthorize)
@@ -3430,6 +3734,179 @@ func requireHistoryReader(principal auth.Principal) (historyReader, error) {
 		return historyReader{}, auth.ErrMissingScope
 	}
 	return historyReader{principal: principal}, nil
+}
+
+// archivePermalink resolves Slack's permalink shape,
+// /archives/{channel}/p{ts-without-the-dot}, into the conversation window
+// that contains the message and anchors the message itself.
+//
+// Every permalink this deployment hands out — chat.getPermalink, the copy
+// link control, a link a member pastes to a colleague — used to point at a
+// path no route served, on a host that exists nowhere. NAV-05 requires a
+// permalink to open the containing conversation, load a window containing the
+// target, and mark it; a removed or malformed target must be a distinct, safe
+// outcome rather than a broken page.
+// forwardMessage shares a message into another conversation, the way Slack's
+// forward does: the destination receives the original's attribution and a
+// link back to it, plus the forwarder's optional note.
+//
+// The original is quoted as an attachment rather than copied as text, so the
+// forwarded message never pretends the forwarder wrote it, and the
+// destination is validated as one this actor may post to — ACT-03 requires a
+// forward not to disclose a destination the actor cannot reach.
+// deleteFile removes a hosted file. Slack's delete is workspace-wide — the
+// file leaves every message, search result and preview that referenced it —
+// so the confirmation names that consequence rather than asking a bare
+// "are you sure", which FILE-06 requires and the universal contract's
+// destructive-action rule insists on.
+func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the conversation and try again."); !ok {
+		return
+	}
+	fileID := domain.FileID(strings.TrimSpace(r.URL.Query().Get("file")))
+	if fileID == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The file was not deleted", "Reload the conversation and try again.")
+		return
+	}
+	if err := h.Messages.DeleteFile(r.Context(), principal.WorkspaceID, principal.UserID, fileID); err != nil {
+		// The service is uploader-only and answers a missing file and someone
+		// else's file identically, so this cannot be used to probe for files.
+		h.writeMessageMutationError(w, r, err, "deleted")
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	h.redirectMutation(w, r, appURL(channel, "", "", "", "")+"&notice="+url.QueryEscape("File deleted"))
+}
+
+func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the conversation and try again.")
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.URL.Query().Get("channel")))
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
+	destination := domain.ConversationID(strings.TrimSpace(fields["destination"]))
+	if channel == "" || timestamp == "" || destination == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The message was not forwarded", "Choose a destination and try again.")
+		return
+	}
+	original, lookupErr := h.Messages.MessageAt(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp)
+	if lookupErr != nil {
+		h.writeMessageMutationError(w, r, lookupErr, "forwarded")
+		return
+	}
+	names := h.newUserNames(r.Context(), principal)
+	permalink := "/archives/" + url.PathEscape(string(channel)) + "/p" + strings.ReplaceAll(string(timestamp), ".", "")
+	quoted := map[string]any{
+		"author_name": names.name(original.AuthorID),
+		"text":        original.Text,
+		"footer":      "Forwarded from " + conversationDisplayName(r.Context(), h, principal, channel),
+		"title":       "View the original message",
+		"title_link":  permalink,
+	}
+	encoded, encodeErr := json.Marshal([]any{quoted})
+	if encodeErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The message was not forwarded", "The original message could not be quoted.")
+		return
+	}
+	if _, err := h.Messages.PostMessageAs(r.Context(), principal.WorkspaceID, principal.UserID, domain.MessagePostRequest{
+		Conversation: destination,
+		Text:         strings.TrimSpace(fields["comment"]),
+		Attachments:  string(encoded),
+	}); err != nil {
+		h.writeMessageMutationError(w, r, err, "forwarded")
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(destination), "", "", "", "")+"&notice="+url.QueryEscape("Message forwarded"))
+}
+
+// conversationDisplayName names a conversation for a person, falling back to
+// its identifier when the reader cannot read its metadata.
+func conversationDisplayName(ctx context.Context, h Handler, principal auth.Principal, channel domain.ConversationID) string {
+	conversation, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		return string(channel)
+	}
+	return conversationName(conversation)
+}
+
+// markUnreadFromHere moves the reader's cursor to just before the named
+// message, which is how Slack's "mark unread from here" works: everything
+// from that message onward becomes unread again, for this member only.
+func (h Handler) markUnreadFromHere(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the conversation and try again."); !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.URL.Query().Get("channel")))
+	timestamp := strings.TrimSpace(r.URL.Query().Get("ts"))
+	instant, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(timestamp))
+	if channel == "" || parseErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The conversation was not marked unread", "Reload the conversation and try again.")
+		return
+	}
+	// One microsecond before the message: the cursor names the last message
+	// the reader HAS read, so the target itself must fall after it.
+	before := domain.NewMessageTimestamp(instant.Add(-time.Microsecond))
+	if _, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, channel, before); err != nil {
+		h.writeMessageMutationError(w, r, err, "marked unread")
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(channel), "", "", "", "")+"&notice="+url.QueryEscape("Marked unread"))
+}
+
+func (h Handler) archivePermalink(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.PathValue("channelID")))
+	raw := strings.TrimSpace(r.PathValue("timestamp"))
+	digits, ok := strings.CutPrefix(raw, "p")
+	if channel == "" || !ok || len(digits) < 7 {
+		http.NotFound(w, r)
+		return
+	}
+	// The permalink packs the timestamp without its dot; Slack's format is
+	// six fractional digits, so the split is from the right.
+	timestamp := domain.MessageTimestamp(digits[:len(digits)-6] + "." + digits[len(digits)-6:])
+	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	message, err := h.Messages.MessageAt(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp)
+	if err != nil {
+		// A message that no longer exists, or one in a conversation this
+		// member may not read, are the same answer: the link resolves to
+		// nothing they can see, and it must not disclose which.
+		h.writeStoreError(w, err, "That message is no longer available.")
+		return
+	}
+	// The window is built to CONTAIN the target: the cursor is one nanosecond
+	// after the message, which is the same trick search results use to land
+	// on a hit rather than just above it.
+	before := ""
+	boundary := message
+	boundary.CreatedAt = boundary.CreatedAt.Add(time.Nanosecond)
+	if cursor, cursorErr := domain.NewMessageCursor(boundary); cursorErr == nil {
+		before = string(cursor)
+	}
+	http.Redirect(w, r, appURL(string(channel), string(message.ThreadTimestamp), before, messageAnchor(message.ID), ""), http.StatusSeeOther)
 }
 
 func (h Handler) index(w http.ResponseWriter, r *http.Request) {
@@ -3686,7 +4163,14 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	names := h.newUserNames(r.Context(), principal)
 	notices := make([]string, 0, 3)
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "" && threadTimestamp == ""})
+	timelineSummaries, timelineLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, history.Messages, isMember)
+	forwardDestinations := []conversationView(nil)
+	if isMember && principal.HasScope(auth.ScopeChatWrite) {
+		if options, optionsErr := h.visibleChannelOptions(r.Context(), principal); optionsErr == nil {
+			forwardDestinations = options
+		}
+	}
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, ForwardDestinations: forwardDestinations})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -3936,6 +4420,20 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if canJoin {
 		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
 	}
+	// The huddle bar is a live fragment, so the page renders the same partial
+	// the refresh fetches: a first paint that disagreed with the first refresh
+	// would flicker the control set for anyone reading it.
+	data.Workspaces = h.workspaceChoices(r, principal)
+	// A failure to read either leaves notifications off: the safe default for
+	// something that interrupts a person is not to.
+	if preferences, prefErr := h.Messages.WorkspaceNotificationPreferences(r.Context(), principal.WorkspaceID, principal.UserID); prefErr == nil {
+		data.BrowserNotifications = preferences.BrowserNotifications
+	}
+	if dnd, dndErr := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); dndErr == nil {
+		data.NotificationsPaused = dnd.SnoozeUntil.After(time.Now())
+	}
+	data.HuddleURL = "/app/huddle?channel=" + url.QueryEscape(string(channel))
+	data.Huddle = h.huddleFor(r.Context(), principal, conversation, data.CSRFToken, "", names)
 	if isMember && threadTimestamp != "" {
 		following, followErr := h.Messages.ThreadFollowed(
 			r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp),
@@ -3963,7 +4461,6 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		data.OlderURL = appURL(string(channel), threadTimestamp, string(history.OlderCursor), "", "")
 	}
 	if !history.AtLatest {
-		data.NewestURL = appURL(string(channel), threadTimestamp, "", "", "")
 		data.LatestURL = appURL(string(channel), threadTimestamp, "", "", "")
 	}
 	status := state.Status
@@ -4026,7 +4523,8 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		}
 		messages = history.Messages
 	}
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "" && threadTimestamp == ""})
+	fragmentSummaries, fragmentLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, messages, isMember)
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead})
 	h.writeFragment(w, list)
 }
 
@@ -4076,15 +4574,114 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 // conversation it belongs to, the messages in it, and the view state that its
 // controls have to return to.
 type messageListRequest struct {
-	Conversation     domain.Conversation
-	CSRFToken        string
-	Messages         []domain.Message
-	Thread           string
-	Before           string
-	ThreadPane       bool
-	Member           bool
-	Names            *userNames
-	IncludeEphemeral bool
+	Conversation        domain.Conversation
+	CSRFToken           string
+	Messages            []domain.Message
+	Thread              string
+	Before              string
+	ThreadPane          bool
+	Member              bool
+	Names               *userNames
+	IncludeEphemeral    bool
+	ForwardDestinations []conversationView
+	// ThreadSummaries carries what each rendered parent's thread has
+	// accumulated, read once for the whole window rather than per message.
+	ThreadSummaries map[domain.MessageTimestamp]domain.ThreadSummary
+	// LastRead is the reader's cursor, used to place the unread divider. The
+	// zero value means the reader has read nothing in this conversation.
+	LastRead domain.MessageTimestamp
+}
+
+// timelineChrome reads the two per-window facts the chrome needs: what each
+// rendered parent's thread has accumulated, and where this reader has read
+// to. Both are one call for the whole window — the per-message alternative is
+// one read per rendered row — and both degrade to nothing rather than failing
+// the conversation: a missing summary hides a reply count, a missing cursor
+// hides the unread divider, and neither is worth a blank page.
+func (h Handler) timelineChrome(ctx context.Context, principal auth.Principal, conversation domain.ConversationID, messages []domain.Message, member bool) (map[domain.MessageTimestamp]domain.ThreadSummary, domain.MessageTimestamp) {
+	roots := make([]domain.MessageTimestamp, 0, len(messages))
+	for _, message := range messages {
+		if message.Deleted || message.ThreadTimestamp != "" {
+			continue
+		}
+		roots = append(roots, domain.NewMessageTimestamp(message.CreatedAt))
+	}
+	summaries, err := h.Messages.ThreadSummaries(ctx, principal.WorkspaceID, principal.UserID, conversation, roots)
+	if err != nil {
+		summaries = nil
+	}
+	if !member {
+		return summaries, ""
+	}
+	cursor, err := h.Messages.ReadCursor(ctx, principal.WorkspaceID, principal.UserID, conversation)
+	if err != nil {
+		return summaries, ""
+	}
+	return summaries, cursor.LastRead
+}
+
+// decodeMessageBroadcast reports whether a threaded reply was also sent to
+// the channel. The flag lives in the durable stream state, which the API
+// projects as subtype thread_broadcast; MSG-01 requires the two to be
+// distinguishable in the client too.
+func decodeMessageBroadcast(streamState string) bool {
+	if strings.TrimSpace(streamState) == "" {
+		return false
+	}
+	var state domain.MessageStreamState
+	if json.Unmarshal([]byte(streamState), &state) != nil {
+		return false
+	}
+	return state.ReplyBroadcast
+}
+
+// threadReplySummary is the sentence under a parent message: how many replies
+// and who wrote them, in Slack's phrasing.
+func threadReplySummary(summary domain.ThreadSummary, names *userNames) string {
+	replies := "1 reply"
+	if summary.ReplyCount != 1 {
+		replies = strconv.Itoa(summary.ReplyCount) + " replies"
+	}
+	if len(summary.Participants) == 0 {
+		return replies
+	}
+	people := make([]string, 0, len(summary.Participants))
+	for _, participant := range summary.Participants {
+		people = append(people, names.name(participant))
+	}
+	if len(people) > 3 {
+		people = append(people[:3], "and others")
+	}
+	return replies + " from " + strings.Join(people, ", ")
+}
+
+// markDaysAndFirstUnread annotates the rendered window with the two
+// boundaries a reader navigates by: where each day starts, and where their
+// unread messages begin.
+//
+// It runs after the ephemeral merge, because that merge re-sorts and can
+// truncate the slice — a divider computed before it would sit on the wrong
+// message. It is server-side for the same reason every other flag here is:
+// the fragment refresh re-renders this partial, and a boundary computed in
+// the browser would vanish on the next live update.
+func markDaysAndFirstUnread(views []messageView, messages []domain.Message, lastRead domain.MessageTimestamp) {
+	previousDay := ""
+	unreadMarked := lastRead == ""
+	for index := range views {
+		created := messages[index].CreatedAt.UTC()
+		day := created.Format("2006-01-02")
+		if day != previousDay {
+			views[index].DaySeparator = created.Format("Monday, 2 January 2006")
+			views[index].DaySeparatorMachine = day
+			previousDay = day
+		}
+		if !unreadMarked && !views[index].Ephemeral {
+			if domain.NewMessageTimestamp(messages[index].CreatedAt) > lastRead {
+				views[index].FirstUnread = true
+				unreadMarked = true
+			}
+		}
+	}
 }
 
 // newMessageList builds the single type the message partial renders. It also
@@ -4136,13 +4733,14 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	}
 	channel := string(conversation.ID)
 	list := messageList{
-		ChannelName: conversationName(conversation),
-		CSRFToken:   csrfToken,
-		IsMember:    request.Member,
-		CanReact:    request.Member && principal.HasScope(auth.ScopeReactionsWrite),
-		CanPin:      request.Member && principal.HasScope(auth.ScopePinsWrite),
-		CanReply:    request.Member && principal.HasScope(auth.ScopeChatWrite),
-		Messages:    make([]messageView, 0, len(messages)),
+		ForwardDestinations: request.ForwardDestinations,
+		ChannelName:         conversationName(conversation),
+		CSRFToken:           csrfToken,
+		IsMember:            request.Member,
+		CanReact:            request.Member && principal.HasScope(auth.ScopeReactionsWrite),
+		CanPin:              request.Member && principal.HasScope(auth.ScopePinsWrite),
+		CanReply:            request.Member && principal.HasScope(auth.ScopeChatWrite),
+		Messages:            make([]messageView, 0, len(messages)),
 	}
 	notice := ""
 	emojiImages := map[string]string{}
@@ -4190,6 +4788,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 	}
 	actionCatalog := appActionOptionCatalog{}
+	rendered := make([]domain.Message, 0, len(messages))
 	for _, message := range messages {
 		// Deletion is soft in the store and leaves the text in place, so every
 		// region has to drop the row rather than trust the read to have done it.
@@ -4247,6 +4846,30 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			CanInteract: request.Member && message.AppID != "",
 			Streaming:   messageStreamActive(message.StreamState),
 			Ephemeral:   ephemeral,
+			Subtype:     string(message.Subtype),
+			System:      message.Subtype.System(),
+			Broadcast:   decodeMessageBroadcast(message.StreamState),
+		}
+		if !message.EditedAt.IsZero() {
+			view.Edited = true
+			view.EditedTime = formatTime(message.EditedAt)
+			view.EditedMachineTime = message.EditedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if !ephemeral {
+			// Slack's permalink, and the two actions that need one.
+			view.Permalink = "/archives/" + url.PathEscape(channel) + "/p" + strings.ReplaceAll(timestamp, ".", "")
+			view.CopyLinkURL = view.Permalink
+			view.ForwardURL = mutationURL("/app/message/forward", channel, timestamp, threadTimestamp, before)
+			if request.Member {
+				view.MarkUnreadURL = mutationURL("/app/read/unread", channel, timestamp, threadTimestamp, before)
+			}
+		}
+		if summary, ok := request.ThreadSummaries[domain.MessageTimestamp(timestamp)]; ok && summary.ReplyCount > 0 {
+			view.ReplyCount = summary.ReplyCount
+			view.ReplySummary = threadReplySummary(summary, names)
+			if !summary.LastReplyAt.IsZero() {
+				view.LastReplyTime = formatTime(summary.LastReplyAt)
+			}
 		}
 		if item, ok := saved[message.ID]; ok {
 			view.Saved = true
@@ -4258,11 +4881,15 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			if title == "" {
 				title = file.Name
 			}
-			view.Files = append(view.Files, fileView{
-				Name: file.Name, Title: title, MIMEType: file.MIMEType,
+			fileItem := fileView{
+				ID: string(file.ID), Name: file.Name, Title: title, MIMEType: file.MIMEType,
 				Size: formatFileSize(file.Size), Deleted: file.Deleted,
 				DownloadURL: "/app/files/" + url.PathEscape(string(file.ID)),
-			})
+			}
+			if !file.Deleted && file.Uploader == principal.UserID && principal.HasScope(auth.ScopeFilesWrite) {
+				fileItem.DeleteURL = mutationURL("/app/files/delete", channel, timestamp, threadTimestamp, before) + "&file=" + url.QueryEscape(string(file.ID))
+			}
+			view.Files = append(view.Files, fileItem)
 		}
 		if !ephemeral {
 			view.Shortcuts = messageShortcuts
@@ -4278,7 +4905,12 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			view.Reactions = summarizeReactions(reactions, principal.UserID, emojiImages)
 		}
 		list.Messages = append(list.Messages, view)
+		rendered = append(rendered, message)
 	}
+	// The day separators and the unread divider are placed over the messages
+	// that were actually rendered: the loop above drops soft-deleted rows, so
+	// the two slices only line up once both are built.
+	markDaysAndFirstUnread(list.Messages, rendered, request.LastRead)
 	return list, notice
 }
 
@@ -4506,6 +5138,27 @@ func (h Handler) participantNames(ctx context.Context, principal auth.Principal,
 // directory queries. Slack caps an invite at 1,000 users; the same bound keeps
 // this human-facing selector finite and makes an oversized workspace explicit
 // instead of silently pretending that the first page is the full membership.
+// workspaceName resolves an organization's name for display, falling back to
+// its identifier.
+//
+// The fallback is the ordinary case for a connected organization, not an error:
+// WorkspaceInfo requires the reader to be a member, and a host workspace's
+// administrator is by definition not a member of the organization it invited.
+// Showing the identifier is honest — it is the name this deployment can prove —
+// where a blank row would hide a real participant. Resolving the name properly
+// needs a read that says "the public identity of an organization I share a
+// channel with", which is a cross-workspace directory this product does not
+// have.
+func (h Handler) workspaceName(ctx context.Context, principal auth.Principal, id domain.WorkspaceID) string {
+	if id == "" {
+		return ""
+	}
+	if workspace, err := h.Messages.WorkspaceInfo(ctx, id, principal.UserID); err == nil && strings.TrimSpace(workspace.Name) != "" {
+		return workspace.Name
+	}
+	return string(id)
+}
+
 func (h Handler) newConversationDetails(ctx context.Context, principal auth.Principal, workspace domain.Workspace, conversation domain.Conversation, isMember bool) (*conversationDetailsView, error) {
 	const maxDirectoryPages = 10
 
@@ -4574,6 +5227,58 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 			break
 		}
 	}
+	// The Slack Connect panel. A read failure leaves it empty rather than
+	// failing the whole details view: the conversation is still readable, and
+	// a modal that will not open because a sharing list could not be read is a
+	// worse outcome than a missing section.
+	connected := make([]connectOrganizationView, 0)
+	outstanding := make([]connectInviteView, 0)
+	connectDestinations := make([]conversationView, 0)
+	if isChannel {
+		if teams, _, _, teamsErr := h.Messages.AdminConversationTeams(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 100}); teamsErr == nil {
+			for _, team := range teams {
+				if team == conversation.WorkspaceID {
+					continue
+				}
+				connected = append(connected, connectOrganizationView{ID: string(team), Name: h.workspaceName(ctx, principal, team)})
+			}
+		}
+		canApprove := principal.HasScope(auth.ScopeConversationsConnectManage)
+		for _, status := range []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved} {
+			page, listErr := h.Messages.ListSharedInvites(ctx, principal.WorkspaceID, principal.UserID, status, domain.PageRequest{Limit: 25})
+			if listErr != nil {
+				continue
+			}
+			for _, invite := range page.Invites {
+				if invite.ConversationID != conversation.ID {
+					continue
+				}
+				view := connectInviteView{
+					ID: string(invite.ID), Status: string(invite.Status),
+					Target:     h.workspaceName(ctx, principal, invite.TargetWorkspaceID),
+					CanApprove: canApprove && invite.Status == domain.SharedInvitePending,
+					CanRevoke:  canApprove,
+					ApproveURL: "/app/connect/approve?channel=" + url.QueryEscape(string(conversation.ID)),
+					DenyURL:    "/app/connect/deny?channel=" + url.QueryEscape(string(conversation.ID)),
+				}
+				if invite.TargetEmail != "" && view.Target == "" {
+					view.Target = invite.TargetEmail
+				}
+				if !invite.ExpiresAt.IsZero() {
+					view.Expires = formatTime(invite.ExpiresAt)
+				}
+				outstanding = append(outstanding, view)
+			}
+		}
+		if summaries, workspacesErr := h.Messages.UserWorkspaces(ctx, principal.WorkspaceID, principal.UserID); workspacesErr == nil {
+			for _, summary := range summaries {
+				if summary.Workspace.ID == principal.WorkspaceID {
+					continue
+				}
+				connectDestinations = append(connectDestinations, conversationView{ID: string(summary.Workspace.ID), Name: summary.Workspace.Name})
+			}
+		}
+	}
 	name := conversationName(conversation)
 	conversationType := "Channel"
 	switch {
@@ -4636,6 +5341,11 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		NotificationLevel: string(notificationPreferences.Level),
 		FollowEveryThread: notificationPreferences.FollowEveryThread,
 		ArchiveVerb:       archiveVerb,
+		Connected:         connected,
+		Outstanding:       outstanding,
+		CanConnect:        canManage && isChannel && !conversation.Archived && principal.HasScope(auth.ScopeConversationsConnectWrite),
+		ConnectURL:        "/app/connect/invite?channel=" + url.QueryEscape(string(conversation.ID)),
+		ConnectHosts:      connectDestinations,
 	}, nil
 }
 
@@ -5335,7 +6045,13 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 		Channel: channel, CSRFToken: auth.CSRFToken(sessionCookie.Value),
 		Level: string(preferences.Level), Keywords: strings.Join(preferences.Keywords, ", "),
 		ActivityChannels: preferences.ActivityChannels, ActivityReminders: preferences.ActivityReminders,
-		Snoozed: dnd.SnoozeUntil.After(time.Now()), SnoozeUntil: dnd.SnoozeUntil.UTC().Format(time.RFC3339),
+		BrowserNotifications: preferences.BrowserNotifications,
+		// The server knows only its own half. The script replaces this line
+		// with what the browser actually reports, which is the only way to
+		// tell "you have not turned it on" from "your browser refused".
+		BrowserNotificationState: "Your browser also has to allow notifications. This page will say which of the two is missing.",
+		Snoozed:                  dnd.SnoozeUntil.After(time.Now()),
+		SnoozeUntil:              dnd.SnoozeUntil.UTC().Format(time.RFC3339),
 	}
 	switch r.URL.Query().Get("status") {
 	case "saved":
@@ -5347,6 +6063,7 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cursor domain.Cursor
+	unreadableExceptions := 0
 	for pageNumber := 0; pageNumber < 10; pageNumber++ {
 		page, listErr := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
 			Limit: 100, Cursor: cursor, MemberUserID: principal.UserID,
@@ -5366,8 +6083,14 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 				r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID,
 			)
 			if preferenceErr != nil {
-				h.writeStoreError(w, preferenceErr, "Conversation notification exceptions are temporarily unavailable.")
-				return
+				// One conversation whose override cannot be read must not take
+				// down the whole page. The workspace defaults, the pause
+				// control and every other exception have nothing to do with
+				// it, and refusing all of them leaves a person unable to
+				// change the settings that do work. The page says an exception
+				// is missing rather than pretending the list is complete.
+				unreadableExceptions++
+				continue
 			}
 			if override.Level == domain.NotificationInherit && !override.FollowEveryThread {
 				continue
@@ -5385,6 +6108,9 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 		if pageNumber == 9 {
 			data.Notice = strings.TrimSpace(data.Notice + " Only the first 1,000 conversation exceptions are shown.")
 		}
+	}
+	if unreadableExceptions > 0 {
+		data.Notice = strings.TrimSpace(data.Notice + " " + strconv.Itoa(unreadableExceptions) + " conversation exception(s) could not be read and are not listed.")
 	}
 	sort.Slice(data.Exceptions, func(left, right int) bool {
 		return strings.ToLower(data.Exceptions[left].Name) < strings.ToLower(data.Exceptions[right].Name)
@@ -5418,6 +6144,7 @@ func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Reques
 		domain.NotificationLevel(strings.TrimSpace(fields["level"])),
 		splitNotificationKeywords(fields["keywords"]),
 		fields["activity_channels"] == "true", fields["activity_reminders"] == "true",
+		fields["browser_notifications"] == "true",
 	); err != nil {
 		if errors.Is(err, store.ErrInvalidArgument) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "Those notification preferences are not valid", "Choose a trigger and use no more than 50 keywords of 100 characters each.")
@@ -9009,23 +9736,38 @@ func secureHeaders(w http.ResponseWriter, policy string) {
 }
 
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
+	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy)
+}
+
+// writeHTMLWithPolicy serves a page under a policy of its own. A page outside
+// the workspace shell carries a different set of inline scripts and a different
+// set of things it is allowed to do, and serving it under the workspace policy
+// would either allow more than it needs or block the scripts it has.
+func (h Handler) writeHTMLWithPolicy(w http.ResponseWriter, page *template.Template, data any, status int, unavailable, policy string) {
 	var output bytes.Buffer
 	if err := page.Execute(&output, data); err != nil {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, policy)
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, policy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(output.Bytes())
 }
 
 func (h Handler) writeFragment(w http.ResponseWriter, list messageList) {
+	h.writePartial(w, "messages", list, "the conversation could not be rendered")
+}
+
+// writePartial renders one named partial of the workspace page as a fragment
+// response. Every live region the client refreshes goes through it, so they
+// cannot disagree about the policy or the content type.
+func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unavailable string) {
 	var output bytes.Buffer
-	if err := pageTemplate.ExecuteTemplate(&output, "messages", list); err != nil {
+	if err := pageTemplate.ExecuteTemplate(&output, name, data); err != nil {
 		secureHeaders(w, workspaceContentSecurityPolicy)
-		http.Error(w, "the conversation could not be rendered", http.StatusServiceUnavailable)
+		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
 	}
 	secureHeaders(w, workspaceContentSecurityPolicy)
@@ -9481,7 +10223,25 @@ func (h Handler) decodeMutation(w http.ResponseWriter, r *http.Request, invalid 
 	return fields, true
 }
 
+// decodeFormValues is decodeFormFields for a form with exactly one field the
+// caller expects to repeat — a set of checkboxes sharing a name. Every other
+// field must still occur once: the single-occurrence rule exists so a request
+// cannot carry two different values for one field and leave the reader to pick,
+// and naming the repeating field keeps that guarantee for all the rest.
+func decodeFormValues(w http.ResponseWriter, r *http.Request, repeated string) (map[string]string, []string, error) {
+	fields, err := decodeFormFieldsAllowing(w, r, repeated)
+	if err != nil {
+		return nil, nil, err
+	}
+	values := append([]string(nil), r.Form[repeated]...)
+	return fields, values, nil
+}
+
 func decodeFormFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
+	return decodeFormFieldsAllowing(w, r, "")
+}
+
+func decodeFormFieldsAllowing(w http.ResponseWriter, r *http.Request, repeated string) (map[string]string, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
 	var parseErr error
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
@@ -9494,6 +10254,10 @@ func decodeFormFields(w http.ResponseWriter, r *http.Request) (map[string]string
 	}
 	fields := make(map[string]string, len(r.Form))
 	for name, values := range r.Form {
+		if name == repeated && repeated != "" {
+			fields[name] = strings.Join(values, ",")
+			continue
+		}
 		if len(values) != 1 {
 			return nil, errors.New("form fields must occur once")
 		}

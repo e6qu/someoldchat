@@ -787,9 +787,14 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   const workspaceSearch = page.locator('#workspace-search');
   await workspaceSearch.focus();
   await workspaceSearch.fill(needle);
-  const recent = page.getByRole('option', { name: `${needle} Recent search` });
+  const suggestions = page.getByRole('listbox', { name: 'Search suggestions' });
+  const recent = suggestions.getByRole('option', { name: `${needle} Recent search` });
   await expect(recent).toContainText('Recent search');
-  await expect(page.getByRole('option').filter({ hasText: 'general' })).toHaveCount(0);
+  // Scoped to the search listbox: this asserts that a needle matching nothing
+  // suggests no channel, not that the whole page contains no element with the
+  // option role — the message actions carry a destination <select> whose
+  // options are legitimately role=option.
+  await expect(suggestions.getByRole('option').filter({ hasText: 'general' })).toHaveCount(0);
   await workspaceSearch.press('ArrowDown');
   await workspaceSearch.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/app/search\\?.*q=${needle}`));
@@ -2173,6 +2178,78 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
 // every session the remaining tests would use. Placing this earlier makes every
 // later test fail with 401 for a reason that has nothing to do with what it
 // asserts.
+// These journeys sit before [AUTH-03] on purpose: signing out is terminal for
+// the shared session, so anything that needs a live one has to run first.
+//
+// They are also deliberately dense: each walks one whole surface
+// rather than one control, because the job runs every test in three engines
+// with workers: 1 and a test per control would cost more wall-clock than the
+// coverage is worth.
+
+test('[HUDDLE-01][HUDDLE-03] a huddle runs its lifecycle and never promises audio', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  // The idle bar offers to start one and says what a huddle is here.
+  await expect(page.getByRole('button', { name: 'Start a huddle' })).toBeVisible();
+  await expect(page.getByText('carries no voice or video')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Start a huddle' }).click();
+  await expect(page.getByText('No audio here')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Leave huddle' })).toBeVisible();
+  // The person who started it can end it for everyone; that is the whole
+  // difference between leaving and ending.
+  await expect(page.getByRole('button', { name: 'End for everyone' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start a huddle' })).toHaveCount(0);
+
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('button', { name: 'End for everyone' }).click();
+  await expect(page.getByRole('button', { name: 'Start a huddle' })).toBeVisible();
+});
+
+test('[CONNECT-01][CONNECT-03] the details panel separates an invitation from a connection', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app?details=1');
+
+  await expect(page.getByRole('heading', { name: 'Shared with other organizations' })).toBeVisible();
+  // With nobody invited, the panel says so plainly rather than leaving the
+  // section empty and ambiguous.
+  await expect(page.getByText('Only this workspace is in this channel')).toBeVisible();
+  // The consequence is stated before an invitation is sent, not after.
+  await expect(page.getByText('read this channel')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
+test('[NOTIFY-04] the notification preferences name every permission and every gap', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/notifications');
+
+  const desktop = page.getByLabel('Show desktop notifications while SameOldChat is open in a tab');
+  await expect(desktop).toBeVisible();
+  await expect(desktop).not.toBeChecked();
+  // The browser's own answer is reported, because the server cannot know it.
+  await expect(page.getByText(/browser/i).first()).toBeVisible();
+  // And what this deployment cannot deliver is named rather than left silent.
+  await expect(page.getByRole('heading', { name: 'Not delivered here' })).toBeVisible();
+  await expect(page.getByText('There is no mobile application')).toBeVisible();
+  await expect(page.getByText('sends no mail at all')).toBeVisible();
+
+  await desktop.check();
+  await page.getByRole('button', { name: 'Save workspace defaults' }).click();
+  await expect(page.getByLabel('Show desktop notifications while SameOldChat is open in a tab')).toBeChecked();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
+test('[FILE-06][FILE-07] remote files are visible and never claim to be hosted here', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/remote-files');
+
+  await expect(page.getByRole('heading', { name: 'Remote files', level: 1 })).toBeVisible();
+  await expect(page.getByText('The contents stay with the app that hosts them')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

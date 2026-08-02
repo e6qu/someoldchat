@@ -46,6 +46,15 @@ type scopedRoute struct {
 // how conversations.info and users.info came to enforce nothing at all.
 func scopedRoutes() []scopedRoute {
 	return []scopedRoute{
+		{http.MethodPost, "/api/conversations.inviteShared", auth.ScopeConversationsConnectWrite},
+		{http.MethodPost, "/api/conversations.acceptSharedInvite", auth.ScopeConversationsConnectWrite},
+		{http.MethodPost, "/api/conversations.approveSharedInvite", auth.ScopeConversationsConnectManage},
+		{http.MethodPost, "/api/conversations.declineSharedInvite", auth.ScopeConversationsConnectWrite},
+		{http.MethodPost, "/api/conversations.requestSharedInvite.approve", auth.ScopeConversationsConnectManage},
+		{http.MethodPost, "/api/conversations.requestSharedInvite.deny", auth.ScopeConversationsConnectManage},
+		{http.MethodPost, "/api/conversations.requestSharedInvite.list", auth.ScopeConversationsConnectRead},
+		{http.MethodPost, "/api/conversations.listConnectInvites", auth.ScopeConversationsConnectRead},
+		{http.MethodPost, "/api/conversations.externalInvitePermissions.set", auth.ScopeConversationsConnectManage},
 		{http.MethodGet, "/api/workflows.stepCompleted", auth.ScopeWorkflowStepsExecute},
 		{http.MethodGet, "/api/workflows.stepFailed", auth.ScopeWorkflowStepsExecute},
 		{http.MethodGet, "/api/workflows.updateStep", auth.ScopeWorkflowStepsExecute},

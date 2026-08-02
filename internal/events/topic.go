@@ -315,6 +315,24 @@ var topicRules = []topicRule{
 	{topic: "call.updated", note: "not pinned: calls postdate the snapshot"},
 	{topic: "call.ended", note: "not pinned: calls postdate the snapshot"},
 	{topic: "call.participants_changed", note: "not pinned: calls postdate the snapshot"},
+	// Huddles are first-party. Slack has no documented event for them at all —
+	// the pinned snapshot predates huddles and the current reference documents
+	// none — so these are named as this product's own facts rather than mapped
+	// onto a Slack event they are not.
+	// Slack Connect invitations have no documented event either: the snapshot
+	// predates Slack Connect and the current reference documents no event for
+	// the invitation lifecycle, so these are this product's own facts.
+	{topic: "shared_invite.created", note: "not pinned: Slack documents no Connect invitation event"},
+	{topic: "shared_invite.approved", note: "not pinned: Slack documents no Connect invitation event"},
+	{topic: "shared_invite.accepted", note: "not pinned: Slack documents no Connect invitation event"},
+	{topic: "shared_invite.declined", note: "not pinned: Slack documents no Connect invitation event"},
+	{topic: "shared_invite.revoked", note: "not pinned: Slack documents no Connect invitation event"},
+	{topic: "conversation.connected", note: "not pinned: Slack documents no Connect invitation event"},
+	{topic: "conversation.external_invite_permissions_set", note: "not pinned: Slack documents no Connect invitation event"},
+	{topic: "huddle.started", note: "not pinned: Slack documents no huddle event"},
+	{topic: "huddle.joined", note: "not pinned: Slack documents no huddle event"},
+	{topic: "huddle.left", note: "not pinned: Slack documents no huddle event"},
+	{topic: "huddle.ended", note: "not pinned: Slack documents no huddle event"},
 	{topic: "canvas.created", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.deleted", note: "not pinned: canvases postdate the snapshot"},

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"mime"
 	"net"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -563,6 +565,20 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// The access log is the record of who signed in, from where and when, and
+	// it had no browser sign-in in it at all: RecordAccess was wired only into
+	// the Slack API authenticator, so an administration audit of a workspace
+	// whose people use the browser was empty. It is recorded here rather than
+	// on every authenticated request because a session is issued once, while
+	// the client polls fragments continuously — a row per request would bury
+	// the sign-ins it exists to show.
+	//
+	// A failure here does not fail the sign-in: the session is already durable,
+	// and refusing to complete it would sign nobody in and still leave no
+	// record.
+	if err := h.service.RecordAccess(r.Context(), user.WorkspaceID, user.ID, truncateAccessValue(r.RemoteAddr, maxAccessLogIP), truncateAccessValue(r.UserAgent(), maxAccessLogUserAgent)); err != nil {
+		log.Printf("web: sign-in for %s was not recorded in the access log: %v", user.ID, err)
+	}
 	http.SetCookie(w, auth.SessionCookie(sessionToken, cookieMaxAge, h.cookieDomain))
 	http.SetCookie(w, &http.Cookie{Name: "sameoldchat_oauth_state", Value: "", Path: "/auth/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	target := safeLocalReturn(parts[4])
@@ -570,6 +586,22 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		target = "/app"
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// accessLogLimits mirror the durable column bounds service.Messages.RecordAccess
+// enforces. A client controls both values through the request, so they are
+// truncated rather than allowed to turn a completed sign-in into a failure.
+const (
+	maxAccessLogIP        = 128
+	maxAccessLogUserAgent = 1024
+)
+
+func truncateAccessValue(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func safeLocalReturn(raw string) string {
@@ -595,6 +627,18 @@ func safeLocalReturn(raw string) string {
 // when the assertion is absent, not only when it is explicitly false.
 var ErrUnverifiedProviderEmail = errors.New("authorization provider did not assert a verified email address")
 
+// identityDisplayName is the name to show for a provider identity, preferring
+// what the provider asserts and falling back to the address it verified.
+func identityDisplayName(identity externalIdentity) string {
+	if identity.Name != "" {
+		return identity.Name
+	}
+	if identity.PreferredUsername != "" {
+		return identity.PreferredUsername
+	}
+	return identity.Email
+}
+
 func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, identity externalIdentity) (domain.User, domain.WorkspaceRole, error) {
 	link, err := h.service.GetExternalIdentity(ctx, h.workspace, provider, identity.Subject)
 	if err == nil {
@@ -617,18 +661,28 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 	}
 
 	user, err := h.service.UserByEmail(ctx, h.workspace, h.lookupUser, identity.Email)
+	if errors.Is(err, store.ErrNotFound) {
+		// An approved invitation is a standing decision an administrator made
+		// about exactly this address, so it outranks provider-driven
+		// provisioning and applies to every provider. Approving one used to
+		// change a status and nothing else: the invited person still could not
+		// sign in, and the channels the invitation recorded were never joined.
+		invited, inviteErr := h.service.AcceptInvitationForEmail(ctx, h.workspace, identity.Email, identityDisplayName(identity))
+		switch {
+		case inviteErr == nil:
+			user, err = invited, nil
+		case errors.Is(inviteErr, service.ErrInvitationExpired):
+			return domain.User{}, "", inviteErr
+		case !errors.Is(inviteErr, store.ErrNotFound):
+			return domain.User{}, "", inviteErr
+		}
+	}
 	if errors.Is(err, store.ErrNotFound) && provider == "oidc" {
 		role, roleErr := oidcWorkspaceRole(identity.Role)
 		if roleErr != nil {
 			return domain.User{}, "", roleErr
 		}
-		displayName := identity.Name
-		if displayName == "" {
-			displayName = identity.PreferredUsername
-		}
-		if displayName == "" {
-			displayName = identity.Email
-		}
+		displayName := identityDisplayName(identity)
 		// First-login provisioning has no administrator behind it and no
 		// session for the user it creates, so it runs as the system operation
 		// whose authority is the provider assertion verified above — not as the

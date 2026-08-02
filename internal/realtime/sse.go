@@ -21,7 +21,6 @@ import (
 
 type Handler struct {
 	Source         events.Source
-	Workspace      domain.WorkspaceID
 	Authenticator  auth.Authenticator
 	RTMConnections RTMConnectionSource
 	Messages       RTMMessageService
@@ -110,25 +109,25 @@ const maxRTMMessageBytes = 16 << 10
 
 var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
 
-func NewHandler(source events.Source, workspace domain.WorkspaceID, authenticator auth.Authenticator) (Handler, error) {
+// NewHandler and NewRTMHandler no longer take a workspace. Each stream reads
+// the workspace from the credential that opened it — the session principal for
+// SSE, the connection ticket for RTM — so one process serves every workspace a
+// reader may switch into. A construction-time workspace both decided nothing
+// once the streams followed their credentials and, while it did decide, made a
+// switch unserviceable from the same process.
+func NewHandler(source events.Source, authenticator auth.Authenticator) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("SSE requires an event source")
-	}
-	if workspace == "" {
-		return Handler{}, errors.New("SSE requires a workspace")
 	}
 	if authenticator == nil {
 		return Handler{}, errors.New("SSE requires an authenticator")
 	}
-	return Handler{Source: source, Workspace: workspace, Authenticator: authenticator}, nil
+	return Handler{Source: source, Authenticator: authenticator}, nil
 }
 
-func NewRTMHandler(source events.Source, workspace domain.WorkspaceID, connections RTMConnectionSource, messages RTMMessageService) (Handler, error) {
+func NewRTMHandler(source events.Source, connections RTMConnectionSource, messages RTMMessageService) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("RTM requires an event source")
-	}
-	if workspace == "" {
-		return Handler{}, errors.New("RTM requires a workspace")
 	}
 	if connections == nil {
 		return Handler{}, errors.New("RTM requires a connection store")
@@ -136,7 +135,7 @@ func NewRTMHandler(source events.Source, workspace domain.WorkspaceID, connectio
 	if messages == nil {
 		return Handler{}, errors.New("RTM requires a message service")
 	}
-	return Handler{Source: source, Workspace: workspace, RTMConnections: connections, Messages: messages}, nil
+	return Handler{Source: source, RTMConnections: connections, Messages: messages}, nil
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
@@ -165,10 +164,15 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	}
 	connectionID := strings.TrimSpace(request.URL.Query().Get("session_id"))
 	connection, err := h.RTMConnections.ConsumeRTMConnection(request.Context(), connectionID)
-	if err != nil || connection.WorkspaceID != h.Workspace {
+	if err != nil || connection.WorkspaceID == "" {
 		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
 		return
 	}
+	// The stream follows the connection's workspace, for the same reason the
+	// SSE stream follows the principal's: the ticket already names which
+	// workspace it was issued for, and a construction-time workspace bound
+	// every connection in the process to one of them.
+	workspace := connection.WorkspaceID
 	if err := websocket.Message.Send(conn, `{"type":"hello"}`); err != nil {
 		return
 	}
@@ -204,13 +208,13 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 		var records []events.Record
 		var listErr error
 		if projected, ok := h.Source.(RTMUserEventSource); ok {
-			records, listErr = projected.ListUserEventsAfter(request.Context(), h.Workspace, connection.UserID, after, 100)
+			records, listErr = projected.ListUserEventsAfter(request.Context(), workspace, connection.UserID, after, 100)
 		} else {
-			records, listErr = h.Source.ListEventsAfter(request.Context(), h.Workspace, after, 100)
+			records, listErr = h.Source.ListEventsAfter(request.Context(), workspace, after, 100)
 		}
 		if listErr != nil {
 			if request.Context().Err() == nil {
-				h.logger().Error("RTM stream ended on an event source failure", "workspace", h.Workspace, "user", connection.UserID, "error", listErr)
+				h.logger().Error("RTM stream ended on an event source failure", "workspace", workspace, "user", connection.UserID, "error", listErr)
 			}
 			sayGoodbye()
 			return
@@ -236,13 +240,13 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			// and is stepped over, because an unparseable frame is not delivery.
 			inners, translateErr := events.RTMEvents(record.Event.Topic, delivered)
 			if translateErr != nil {
-				h.logger().Warn("RTM skipped a record whose payload cannot fill its Slack event", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", translateErr)
+				h.logger().Warn("RTM skipped a record whose payload cannot fill its Slack event", "workspace", workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", translateErr)
 				continue
 			}
 			for _, inner := range inners {
 				payload, encodeErr := inner.Encode()
 				if encodeErr != nil {
-					h.logger().Warn("RTM skipped a record it could not encode", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
+					h.logger().Warn("RTM skipped a record it could not encode", "workspace", workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
 					continue
 				}
 				if websocket.Message.Send(conn, payload) != nil {
@@ -409,10 +413,16 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
-	if principal.WorkspaceID != h.Workspace || !principal.HasScope(scope) {
+	if !principal.HasScope(scope) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	// The stream follows the principal's workspace rather than the one this
+	// handler was constructed with. A session is issued for exactly one
+	// workspace, so the principal already names which events it may see; the
+	// construction-time workspace bound every reader to one, which is what
+	// made a workspace switch impossible to serve from the same process.
+	workspace := principal.WorkspaceID
 	after, err := lastEventID(r)
 	if err != nil {
 		http.Error(w, "invalid event cursor", http.StatusBadRequest)
@@ -431,7 +441,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	w.Header().Set("X-Accel-Buffering", "no")
 	control := http.NewResponseController(w)
 	if err := h.armWrite(control); err != nil {
-		h.logger().Error("event stream could not set a write deadline", "workspace", h.Workspace, "user", principal.UserID, "error", err)
+		h.logger().Error("event stream could not set a write deadline", "workspace", workspace, "user", principal.UserID, "error", err)
 		http.Error(w, "streaming is unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -445,10 +455,10 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	lastAuthorized := time.Now()
 	unresolved := 0
 	for {
-		records, err := h.Source.ListEventsAfter(r.Context(), h.Workspace, after, 100)
+		records, err := h.Source.ListEventsAfter(r.Context(), workspace, after, 100)
 		if err != nil {
 			if r.Context().Err() == nil {
-				h.logger().Error("event stream ended on an event source failure", "workspace", h.Workspace, "user", principal.UserID, "error", err)
+				h.logger().Error("event stream ended on an event source failure", "workspace", workspace, "user", principal.UserID, "error", err)
 			}
 			return
 		}
@@ -460,7 +470,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 				// One undeliverable record must not end a durable stream: the
 				// client would reconnect with the same cursor, land on the same
 				// record and break the stream for every user in the workspace.
-				h.logger().Warn("event stream skipped an undeliverable record", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", decodeErr)
+				h.logger().Warn("event stream skipped an undeliverable record", "workspace", workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", decodeErr)
 				continue
 			}
 			if !addressedTo(record.Event.Topic, delivered, principal.UserID) {
@@ -474,14 +484,14 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 			// reader.
 			encoded, encodeErr := delivered.Encode()
 			if encodeErr != nil {
-				h.logger().Warn("event stream skipped a record it could not re-encode", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
+				h.logger().Warn("event stream skipped a record it could not re-encode", "workspace", workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
 				continue
 			}
 			if err := h.armWrite(control); err != nil {
 				return
 			}
 			if err := writeEvent(w, record.Sequence, record.Event.Topic, encoded); err != nil {
-				h.reportWriteFailure(r, principal.UserID, err)
+				h.reportWriteFailure(r, workspace, principal.UserID, err)
 				return
 			}
 			wrote = true
@@ -495,7 +505,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 				return
 			}
 			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
-				h.reportWriteFailure(r, principal.UserID, err)
+				h.reportWriteFailure(r, workspace, principal.UserID, err)
 				return
 			}
 			flusher.Flush()
@@ -507,11 +517,15 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 			// leave it delivering every workspace event indefinitely.
 			current, authErr := h.Authenticator.Authenticate(r)
 			switch {
-			case authErr == nil && current.WorkspaceID == h.Workspace && current.HasScope(scope):
+			// The re-check is against the workspace this stream started in, not
+			// the handler's: a session switched to another workspace is a
+			// different session, and this one must end rather than quietly
+			// start delivering somewhere else.
+			case authErr == nil && current.WorkspaceID == workspace && current.HasScope(scope):
 				lastAuthorized = time.Now()
 				unresolved = 0
 			case authErr == nil || credentialWithdrawn(authErr):
-				h.logger().Info("event stream ended because the session is no longer authorized", "workspace", h.Workspace, "user", principal.UserID)
+				h.logger().Info("event stream ended because the session is no longer authorized", "workspace", workspace, "user", principal.UserID)
 				return
 			default:
 				// The check did not reach a verdict: the session store did not
@@ -523,10 +537,10 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 				// retry delay.
 				unresolved++
 				if unresolved >= unresolvedReauthorizations {
-					h.logger().Warn("event stream ended after repeated inconclusive re-authorization", "workspace", h.Workspace, "user", principal.UserID, "attempts", unresolved, "error", authErr)
+					h.logger().Warn("event stream ended after repeated inconclusive re-authorization", "workspace", workspace, "user", principal.UserID, "attempts", unresolved, "error", authErr)
 					return
 				}
-				h.logger().Warn("event stream could not confirm its session and kept the stream open", "workspace", h.Workspace, "user", principal.UserID, "attempts", unresolved, "error", authErr)
+				h.logger().Warn("event stream could not confirm its session and kept the stream open", "workspace", workspace, "user", principal.UserID, "attempts", unresolved, "error", authErr)
 				lastAuthorized = time.Now()
 			}
 		}
@@ -566,15 +580,15 @@ func (h Handler) armWrite(control *http.ResponseController) error {
 // went away. A stalled consumer is a capacity fact an operator has to be able to
 // see: it holds a goroutine, a connection and a poll buffer until the deadline
 // fires.
-func (h Handler) reportWriteFailure(r *http.Request, user domain.UserID, err error) {
+func (h Handler) reportWriteFailure(r *http.Request, workspace domain.WorkspaceID, user domain.UserID, err error) {
 	if r.Context().Err() != nil {
 		return
 	}
 	if errors.Is(err, os.ErrDeadlineExceeded) {
-		h.logger().Warn("event stream dropped a consumer that stopped reading", "workspace", h.Workspace, "user", user, "timeout", h.writeTimeout())
+		h.logger().Warn("event stream dropped a consumer that stopped reading", "workspace", workspace, "user", user, "timeout", h.writeTimeout())
 		return
 	}
-	h.logger().Error("event stream ended on a write failure", "workspace", h.Workspace, "user", user, "error", err)
+	h.logger().Error("event stream ended on a write failure", "workspace", workspace, "user", user, "error", err)
 }
 
 // credentialWithdrawn reports whether a re-authorization failure means the

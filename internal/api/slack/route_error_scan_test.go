@@ -541,6 +541,10 @@ func sentinelDrivenCodes() map[string]string {
 		"channel_not_found":         "postMessageError's name for store.ErrNotFound on a message write",
 		"is_archived":               "postMessageError's name for service.ErrConversationAlreadyArchived on a message write",
 		"no_text":                   "postMessageError's name for service.ErrInvalidMessage",
+		"invitation_expired":        "mutationErrorCode's name for service.ErrInvitationExpired: the invitation is real and the request well formed, so neither not_found nor an invalid-argument code describes it",
+		"already_resolved":          "mutationErrorCode's name for service.ErrSharedInviteSettled: the caller did nothing wrong, somebody else decided first, and retrying cannot help",
+		"too_many_teams":            "mutationErrorCode's name for service.ErrSlackConnectFull: the documented capacity is reached, which is a refusal rather than a temporary failure",
+		"not_allowed":               "mutationErrorCode's name for service.ErrHuddleNotOwned: ending a huddle removes everyone else from it, so it is an authorization answer rather than a malformed request",
 	}
 }
 

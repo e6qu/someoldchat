@@ -22,19 +22,21 @@ const (
 )
 
 type Conversation struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Topic         string                 `protobuf:"bytes,4,opt,name=topic,proto3" json:"topic,omitempty"`
-	Purpose       string                 `protobuf:"bytes,5,opt,name=purpose,proto3" json:"purpose,omitempty"`
-	Archived      bool                   `protobuf:"varint,6,opt,name=archived,proto3" json:"archived,omitempty"`
-	IsPrivate     bool                   `protobuf:"varint,7,opt,name=is_private,json=isPrivate,proto3" json:"is_private,omitempty"`
-	IsDirect      bool                   `protobuf:"varint,8,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
-	IsGroupDirect bool                   `protobuf:"varint,9,opt,name=is_group_direct,json=isGroupDirect,proto3" json:"is_group_direct,omitempty"`
-	UnreadCount   int64                  `protobuf:"varint,10,opt,name=unread_count,json=unreadCount,proto3" json:"unread_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Id                 string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId        string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Name               string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Topic              string                 `protobuf:"bytes,4,opt,name=topic,proto3" json:"topic,omitempty"`
+	Purpose            string                 `protobuf:"bytes,5,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	Archived           bool                   `protobuf:"varint,6,opt,name=archived,proto3" json:"archived,omitempty"`
+	IsPrivate          bool                   `protobuf:"varint,7,opt,name=is_private,json=isPrivate,proto3" json:"is_private,omitempty"`
+	IsDirect           bool                   `protobuf:"varint,8,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	IsGroupDirect      bool                   `protobuf:"varint,9,opt,name=is_group_direct,json=isGroupDirect,proto3" json:"is_group_direct,omitempty"`
+	UnreadCount        int64                  `protobuf:"varint,10,opt,name=unread_count,json=unreadCount,proto3" json:"unread_count,omitempty"`
+	IsExtShared        bool                   `protobuf:"varint,11,opt,name=is_ext_shared,json=isExtShared,proto3" json:"is_ext_shared,omitempty"`
+	IsPendingExtShared bool                   `protobuf:"varint,12,opt,name=is_pending_ext_shared,json=isPendingExtShared,proto3" json:"is_pending_ext_shared,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Conversation) Reset() {
@@ -135,6 +137,20 @@ func (x *Conversation) GetUnreadCount() int64 {
 		return x.UnreadCount
 	}
 	return 0
+}
+
+func (x *Conversation) GetIsExtShared() bool {
+	if x != nil {
+		return x.IsExtShared
+	}
+	return false
+}
+
+func (x *Conversation) GetIsPendingExtShared() bool {
+	if x != nil {
+		return x.IsPendingExtShared
+	}
+	return false
 }
 
 type ConversationPage struct {
@@ -357,11 +373,483 @@ func (x *ConversationsRequest) GetIncludeClosedDirects() bool {
 	return false
 }
 
+type SharedInvite struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ConversationId    string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	TargetWorkspaceId string                 `protobuf:"bytes,4,opt,name=target_workspace_id,json=targetWorkspaceId,proto3" json:"target_workspace_id,omitempty"`
+	TargetEmail       string                 `protobuf:"bytes,5,opt,name=target_email,json=targetEmail,proto3" json:"target_email,omitempty"`
+	InvitedBy         string                 `protobuf:"bytes,6,opt,name=invited_by,json=invitedBy,proto3" json:"invited_by,omitempty"`
+	Status            string                 `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`
+	CreatedAt         int64                  `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ReviewedAt        int64                  `protobuf:"varint,9,opt,name=reviewed_at,json=reviewedAt,proto3" json:"reviewed_at,omitempty"`
+	SettledAt         int64                  `protobuf:"varint,10,opt,name=settled_at,json=settledAt,proto3" json:"settled_at,omitempty"`
+	ExpiresAt         int64                  `protobuf:"varint,11,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *SharedInvite) Reset() {
+	*x = SharedInvite{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SharedInvite) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SharedInvite) ProtoMessage() {}
+
+func (x *SharedInvite) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SharedInvite.ProtoReflect.Descriptor instead.
+func (*SharedInvite) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SharedInvite) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SharedInvite) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SharedInvite) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *SharedInvite) GetTargetWorkspaceId() string {
+	if x != nil {
+		return x.TargetWorkspaceId
+	}
+	return ""
+}
+
+func (x *SharedInvite) GetTargetEmail() string {
+	if x != nil {
+		return x.TargetEmail
+	}
+	return ""
+}
+
+func (x *SharedInvite) GetInvitedBy() string {
+	if x != nil {
+		return x.InvitedBy
+	}
+	return ""
+}
+
+func (x *SharedInvite) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *SharedInvite) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *SharedInvite) GetReviewedAt() int64 {
+	if x != nil {
+		return x.ReviewedAt
+	}
+	return 0
+}
+
+func (x *SharedInvite) GetSettledAt() int64 {
+	if x != nil {
+		return x.SettledAt
+	}
+	return 0
+}
+
+func (x *SharedInvite) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+type SharedInvitePage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Invites       []*SharedInvite        `protobuf:"bytes,1,rep,name=invites,proto3" json:"invites,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SharedInvitePage) Reset() {
+	*x = SharedInvitePage{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SharedInvitePage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SharedInvitePage) ProtoMessage() {}
+
+func (x *SharedInvitePage) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SharedInvitePage.ProtoReflect.Descriptor instead.
+func (*SharedInvitePage) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SharedInvitePage) GetInvites() []*SharedInvite {
+	if x != nil {
+		return x.Invites
+	}
+	return nil
+}
+
+func (x *SharedInvitePage) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+func (x *SharedInvitePage) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+type InviteSharedRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId    string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	TargetWorkspaceId string                 `protobuf:"bytes,4,opt,name=target_workspace_id,json=targetWorkspaceId,proto3" json:"target_workspace_id,omitempty"`
+	TargetEmail       string                 `protobuf:"bytes,5,opt,name=target_email,json=targetEmail,proto3" json:"target_email,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *InviteSharedRequest) Reset() {
+	*x = InviteSharedRequest{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteSharedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteSharedRequest) ProtoMessage() {}
+
+func (x *InviteSharedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteSharedRequest.ProtoReflect.Descriptor instead.
+func (*InviteSharedRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *InviteSharedRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *InviteSharedRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *InviteSharedRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *InviteSharedRequest) GetTargetWorkspaceId() string {
+	if x != nil {
+		return x.TargetWorkspaceId
+	}
+	return ""
+}
+
+func (x *InviteSharedRequest) GetTargetEmail() string {
+	if x != nil {
+		return x.TargetEmail
+	}
+	return ""
+}
+
+type SharedInviteMutationRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SharedInviteId string                 `protobuf:"bytes,3,opt,name=shared_invite_id,json=sharedInviteId,proto3" json:"shared_invite_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SharedInviteMutationRequest) Reset() {
+	*x = SharedInviteMutationRequest{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SharedInviteMutationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SharedInviteMutationRequest) ProtoMessage() {}
+
+func (x *SharedInviteMutationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SharedInviteMutationRequest.ProtoReflect.Descriptor instead.
+func (*SharedInviteMutationRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SharedInviteMutationRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SharedInviteMutationRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SharedInviteMutationRequest) GetSharedInviteId() string {
+	if x != nil {
+		return x.SharedInviteId
+	}
+	return ""
+}
+
+type SharedInvitesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SharedInvitesRequest) Reset() {
+	*x = SharedInvitesRequest{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SharedInvitesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SharedInvitesRequest) ProtoMessage() {}
+
+func (x *SharedInvitesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SharedInvitesRequest.ProtoReflect.Descriptor instead.
+func (*SharedInvitesRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SharedInvitesRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SharedInvitesRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SharedInvitesRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *SharedInvitesRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *SharedInvitesRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ExternalInvitePermissionsRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId    string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	TargetWorkspaceId string                 `protobuf:"bytes,4,opt,name=target_workspace_id,json=targetWorkspaceId,proto3" json:"target_workspace_id,omitempty"`
+	CanInvite         bool                   `protobuf:"varint,5,opt,name=can_invite,json=canInvite,proto3" json:"can_invite,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ExternalInvitePermissionsRequest) Reset() {
+	*x = ExternalInvitePermissionsRequest{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalInvitePermissionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalInvitePermissionsRequest) ProtoMessage() {}
+
+func (x *ExternalInvitePermissionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalInvitePermissionsRequest.ProtoReflect.Descriptor instead.
+func (*ExternalInvitePermissionsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ExternalInvitePermissionsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ExternalInvitePermissionsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ExternalInvitePermissionsRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *ExternalInvitePermissionsRequest) GetTargetWorkspaceId() string {
+	if x != nil {
+		return x.TargetWorkspaceId
+	}
+	return ""
+}
+
+func (x *ExternalInvitePermissionsRequest) GetCanInvite() bool {
+	if x != nil {
+		return x.CanInvite
+	}
+	return false
+}
+
 var File_sameoldchat_chat_v1_conversations_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\n" +
-	"'sameoldchat/chat/v1/conversations.proto\x12\x13sameoldchat.chat.v1\"\xa8\x02\n" +
+	"'sameoldchat/chat/v1/conversations.proto\x12\x13sameoldchat.chat.v1\"\xff\x02\n" +
 	"\fConversation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x12\n" +
@@ -374,7 +862,9 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\tis_direct\x18\b \x01(\bR\bisDirect\x12&\n" +
 	"\x0fis_group_direct\x18\t \x01(\bR\risGroupDirect\x12!\n" +
 	"\funread_count\x18\n" +
-	" \x01(\x03R\vunreadCount\"\x97\x01\n" +
+	" \x01(\x03R\vunreadCount\x12\"\n" +
+	"\ris_ext_shared\x18\v \x01(\bR\visExtShared\x121\n" +
+	"\x15is_pending_ext_shared\x18\f \x01(\bR\x12isPendingExtShared\"\x97\x01\n" +
 	"\x10ConversationPage\x12G\n" +
 	"\rconversations\x18\x01 \x03(\v2!.sameoldchat.chat.v1.ConversationR\rconversations\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -392,10 +882,64 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x05types\x18\x05 \x03(\tR\x05types\x12)\n" +
 	"\x10exclude_archived\x18\x06 \x01(\bR\x0fexcludeArchived\x12$\n" +
 	"\x0emember_user_id\x18\a \x01(\tR\fmemberUserId\x124\n" +
-	"\x16include_closed_directs\x18\b \x01(\bR\x14includeClosedDirects2\xde\x01\n" +
+	"\x16include_closed_directs\x18\b \x01(\bR\x14includeClosedDirects\"\xf2\x02\n" +
+	"\fSharedInvite\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12.\n" +
+	"\x13target_workspace_id\x18\x04 \x01(\tR\x11targetWorkspaceId\x12!\n" +
+	"\ftarget_email\x18\x05 \x01(\tR\vtargetEmail\x12\x1d\n" +
+	"\n" +
+	"invited_by\x18\x06 \x01(\tR\tinvitedBy\x12\x16\n" +
+	"\x06status\x18\a \x01(\tR\x06status\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\b \x01(\x03R\tcreatedAt\x12\x1f\n" +
+	"\vreviewed_at\x18\t \x01(\x03R\n" +
+	"reviewedAt\x12\x1d\n" +
+	"\n" +
+	"settled_at\x18\n" +
+	" \x01(\x03R\tsettledAt\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\v \x01(\x03R\texpiresAt\"\x8b\x01\n" +
+	"\x10SharedInvitePage\x12;\n" +
+	"\ainvites\x18\x01 \x03(\v2!.sameoldchat.chat.v1.SharedInviteR\ainvites\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xcd\x01\n" +
+	"\x13InviteSharedRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12.\n" +
+	"\x13target_workspace_id\x18\x04 \x01(\tR\x11targetWorkspaceId\x12!\n" +
+	"\ftarget_email\x18\x05 \x01(\tR\vtargetEmail\"\x83\x01\n" +
+	"\x1bSharedInviteMutationRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12(\n" +
+	"\x10shared_invite_id\x18\x03 \x01(\tR\x0esharedInviteId\"\x98\x01\n" +
+	"\x14SharedInvitesRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\xd6\x01\n" +
+	" ExternalInvitePermissionsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12.\n" +
+	"\x13target_workspace_id\x18\x04 \x01(\tR\x11targetWorkspaceId\x12\x1d\n" +
+	"\n" +
+	"can_invite\x18\x05 \x01(\bR\tcanInvite2\xb3\b\n" +
 	"\x14ConversationsService\x12c\n" +
 	"\x10ConversationInfo\x12,.sameoldchat.chat.v1.ConversationInfoRequest\x1a!.sameoldchat.chat.v1.Conversation\x12a\n" +
-	"\rConversations\x12).sameoldchat.chat.v1.ConversationsRequest\x1a%.sameoldchat.chat.v1.ConversationPageBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\rConversations\x12).sameoldchat.chat.v1.ConversationsRequest\x1a%.sameoldchat.chat.v1.ConversationPage\x12[\n" +
+	"\fInviteShared\x12(.sameoldchat.chat.v1.InviteSharedRequest\x1a!.sameoldchat.chat.v1.SharedInvite\x12j\n" +
+	"\x13ApproveSharedInvite\x120.sameoldchat.chat.v1.SharedInviteMutationRequest\x1a!.sameoldchat.chat.v1.SharedInvite\x12g\n" +
+	"\x10DenySharedInvite\x120.sameoldchat.chat.v1.SharedInviteMutationRequest\x1a!.sameoldchat.chat.v1.SharedInvite\x12i\n" +
+	"\x12RevokeSharedInvite\x120.sameoldchat.chat.v1.SharedInviteMutationRequest\x1a!.sameoldchat.chat.v1.SharedInvite\x12j\n" +
+	"\x13DeclineSharedInvite\x120.sameoldchat.chat.v1.SharedInviteMutationRequest\x1a!.sameoldchat.chat.v1.SharedInvite\x12i\n" +
+	"\x12AcceptSharedInvite\x120.sameoldchat.chat.v1.SharedInviteMutationRequest\x1a!.sameoldchat.chat.v1.Conversation\x12e\n" +
+	"\x11ListSharedInvites\x12).sameoldchat.chat.v1.SharedInvitesRequest\x1a%.sameoldchat.chat.v1.SharedInvitePage\x12x\n" +
+	"\x1cSetExternalInvitePermissions\x125.sameoldchat.chat.v1.ExternalInvitePermissionsRequest\x1a!.sameoldchat.chat.v1.ConversationBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_conversations_proto_rawDescOnce sync.Once
@@ -409,24 +953,47 @@ func file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_conversations_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_sameoldchat_chat_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_sameoldchat_chat_v1_conversations_proto_goTypes = []any{
-	(*Conversation)(nil),            // 0: sameoldchat.chat.v1.Conversation
-	(*ConversationPage)(nil),        // 1: sameoldchat.chat.v1.ConversationPage
-	(*ConversationInfoRequest)(nil), // 2: sameoldchat.chat.v1.ConversationInfoRequest
-	(*ConversationsRequest)(nil),    // 3: sameoldchat.chat.v1.ConversationsRequest
+	(*Conversation)(nil),                     // 0: sameoldchat.chat.v1.Conversation
+	(*ConversationPage)(nil),                 // 1: sameoldchat.chat.v1.ConversationPage
+	(*ConversationInfoRequest)(nil),          // 2: sameoldchat.chat.v1.ConversationInfoRequest
+	(*ConversationsRequest)(nil),             // 3: sameoldchat.chat.v1.ConversationsRequest
+	(*SharedInvite)(nil),                     // 4: sameoldchat.chat.v1.SharedInvite
+	(*SharedInvitePage)(nil),                 // 5: sameoldchat.chat.v1.SharedInvitePage
+	(*InviteSharedRequest)(nil),              // 6: sameoldchat.chat.v1.InviteSharedRequest
+	(*SharedInviteMutationRequest)(nil),      // 7: sameoldchat.chat.v1.SharedInviteMutationRequest
+	(*SharedInvitesRequest)(nil),             // 8: sameoldchat.chat.v1.SharedInvitesRequest
+	(*ExternalInvitePermissionsRequest)(nil), // 9: sameoldchat.chat.v1.ExternalInvitePermissionsRequest
 }
 var file_sameoldchat_chat_v1_conversations_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.ConversationPage.conversations:type_name -> sameoldchat.chat.v1.Conversation
-	2, // 1: sameoldchat.chat.v1.ConversationsService.ConversationInfo:input_type -> sameoldchat.chat.v1.ConversationInfoRequest
-	3, // 2: sameoldchat.chat.v1.ConversationsService.Conversations:input_type -> sameoldchat.chat.v1.ConversationsRequest
-	0, // 3: sameoldchat.chat.v1.ConversationsService.ConversationInfo:output_type -> sameoldchat.chat.v1.Conversation
-	1, // 4: sameoldchat.chat.v1.ConversationsService.Conversations:output_type -> sameoldchat.chat.v1.ConversationPage
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0,  // 0: sameoldchat.chat.v1.ConversationPage.conversations:type_name -> sameoldchat.chat.v1.Conversation
+	4,  // 1: sameoldchat.chat.v1.SharedInvitePage.invites:type_name -> sameoldchat.chat.v1.SharedInvite
+	2,  // 2: sameoldchat.chat.v1.ConversationsService.ConversationInfo:input_type -> sameoldchat.chat.v1.ConversationInfoRequest
+	3,  // 3: sameoldchat.chat.v1.ConversationsService.Conversations:input_type -> sameoldchat.chat.v1.ConversationsRequest
+	6,  // 4: sameoldchat.chat.v1.ConversationsService.InviteShared:input_type -> sameoldchat.chat.v1.InviteSharedRequest
+	7,  // 5: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	7,  // 6: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	7,  // 7: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	7,  // 8: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	7,  // 9: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	8,  // 10: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:input_type -> sameoldchat.chat.v1.SharedInvitesRequest
+	9,  // 11: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:input_type -> sameoldchat.chat.v1.ExternalInvitePermissionsRequest
+	0,  // 12: sameoldchat.chat.v1.ConversationsService.ConversationInfo:output_type -> sameoldchat.chat.v1.Conversation
+	1,  // 13: sameoldchat.chat.v1.ConversationsService.Conversations:output_type -> sameoldchat.chat.v1.ConversationPage
+	4,  // 14: sameoldchat.chat.v1.ConversationsService.InviteShared:output_type -> sameoldchat.chat.v1.SharedInvite
+	4,  // 15: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	4,  // 16: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	4,  // 17: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	4,  // 18: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	0,  // 19: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:output_type -> sameoldchat.chat.v1.Conversation
+	5,  // 20: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:output_type -> sameoldchat.chat.v1.SharedInvitePage
+	0,  // 21: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:output_type -> sameoldchat.chat.v1.Conversation
+	12, // [12:22] is the sub-list for method output_type
+	2,  // [2:12] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_conversations_proto_init() }
@@ -440,7 +1007,7 @@ func file_sameoldchat_chat_v1_conversations_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_conversations_proto_rawDesc), len(file_sameoldchat_chat_v1_conversations_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

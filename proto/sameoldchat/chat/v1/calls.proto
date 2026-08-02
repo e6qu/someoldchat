@@ -19,6 +19,15 @@ message Call {
   int64 started_at = 10;
   int64 ended_at = 11;
   int64 duration_seconds = 12;
+  string kind = 13;
+  string conversation_id = 14;
+}
+
+message HuddleRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string title = 4;
 }
 
 message AddCallRequest {
@@ -64,6 +73,11 @@ message CallParticipantsRequest {
 
 service CallsService {
   rpc AddCall(AddCallRequest) returns (Call);
+  rpc StartHuddle(HuddleRequest) returns (Call);
+  rpc JoinHuddle(HuddleRequest) returns (Call);
+  rpc LeaveHuddle(HuddleRequest) returns (Call);
+  rpc EndHuddle(HuddleRequest) returns (Call);
+  rpc GetActiveHuddle(HuddleRequest) returns (Call);
   rpc EndCall(EndCallRequest) returns (MutationResponse);
   rpc CallInfo(CallRequest) returns (Call);
   rpc UpdateCall(UpdateCallRequest) returns (Call);

@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AccessLogsService_RecordAccess_FullMethodName    = "/sameoldchat.chat.v1.AccessLogsService/RecordAccess"
-	AccessLogsService_AccessLogs_FullMethodName      = "/sameoldchat.chat.v1.AccessLogsService/AccessLogs"
-	AccessLogsService_IntegrationLogs_FullMethodName = "/sameoldchat.chat.v1.AccessLogsService/IntegrationLogs"
+	AccessLogsService_RecordAccess_FullMethodName          = "/sameoldchat.chat.v1.AccessLogsService/RecordAccess"
+	AccessLogsService_AccessLogs_FullMethodName            = "/sameoldchat.chat.v1.AccessLogsService/AccessLogs"
+	AccessLogsService_GetWorkspaceAnalytics_FullMethodName = "/sameoldchat.chat.v1.AccessLogsService/GetWorkspaceAnalytics"
+	AccessLogsService_IntegrationLogs_FullMethodName       = "/sameoldchat.chat.v1.AccessLogsService/IntegrationLogs"
 )
 
 // AccessLogsServiceClient is the client API for AccessLogsService service.
@@ -30,6 +31,10 @@ const (
 type AccessLogsServiceClient interface {
 	RecordAccess(ctx context.Context, in *RecordAccessRequest, opts ...grpc.CallOption) (*AccessMutationResponse, error)
 	AccessLogs(ctx context.Context, in *AccessLogsRequest, opts ...grpc.CallOption) (*AccessLogsResponse, error)
+	// Named GetWorkspaceAnalytics because an rpc named WorkspaceAnalytics would
+	// shadow the WorkspaceAnalytics message type for every later return in this
+	// service, exactly as GetReadCursor does in InteractionsService.
+	GetWorkspaceAnalytics(ctx context.Context, in *WorkspaceAnalyticsRequest, opts ...grpc.CallOption) (*WorkspaceAnalytics, error)
 	IntegrationLogs(ctx context.Context, in *IntegrationLogsRequest, opts ...grpc.CallOption) (*IntegrationLogsResponse, error)
 }
 
@@ -61,6 +66,16 @@ func (c *accessLogsServiceClient) AccessLogs(ctx context.Context, in *AccessLogs
 	return out, nil
 }
 
+func (c *accessLogsServiceClient) GetWorkspaceAnalytics(ctx context.Context, in *WorkspaceAnalyticsRequest, opts ...grpc.CallOption) (*WorkspaceAnalytics, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspaceAnalytics)
+	err := c.cc.Invoke(ctx, AccessLogsService_GetWorkspaceAnalytics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *accessLogsServiceClient) IntegrationLogs(ctx context.Context, in *IntegrationLogsRequest, opts ...grpc.CallOption) (*IntegrationLogsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(IntegrationLogsResponse)
@@ -77,6 +92,10 @@ func (c *accessLogsServiceClient) IntegrationLogs(ctx context.Context, in *Integ
 type AccessLogsServiceServer interface {
 	RecordAccess(context.Context, *RecordAccessRequest) (*AccessMutationResponse, error)
 	AccessLogs(context.Context, *AccessLogsRequest) (*AccessLogsResponse, error)
+	// Named GetWorkspaceAnalytics because an rpc named WorkspaceAnalytics would
+	// shadow the WorkspaceAnalytics message type for every later return in this
+	// service, exactly as GetReadCursor does in InteractionsService.
+	GetWorkspaceAnalytics(context.Context, *WorkspaceAnalyticsRequest) (*WorkspaceAnalytics, error)
 	IntegrationLogs(context.Context, *IntegrationLogsRequest) (*IntegrationLogsResponse, error)
 }
 
@@ -92,6 +111,9 @@ func (UnimplementedAccessLogsServiceServer) RecordAccess(context.Context, *Recor
 }
 func (UnimplementedAccessLogsServiceServer) AccessLogs(context.Context, *AccessLogsRequest) (*AccessLogsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AccessLogs not implemented")
+}
+func (UnimplementedAccessLogsServiceServer) GetWorkspaceAnalytics(context.Context, *WorkspaceAnalyticsRequest) (*WorkspaceAnalytics, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetWorkspaceAnalytics not implemented")
 }
 func (UnimplementedAccessLogsServiceServer) IntegrationLogs(context.Context, *IntegrationLogsRequest) (*IntegrationLogsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method IntegrationLogs not implemented")
@@ -152,6 +174,24 @@ func _AccessLogsService_AccessLogs_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AccessLogsService_GetWorkspaceAnalytics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceAnalyticsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AccessLogsServiceServer).GetWorkspaceAnalytics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AccessLogsService_GetWorkspaceAnalytics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AccessLogsServiceServer).GetWorkspaceAnalytics(ctx, req.(*WorkspaceAnalyticsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AccessLogsService_IntegrationLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(IntegrationLogsRequest)
 	if err := dec(in); err != nil {
@@ -184,6 +224,10 @@ var AccessLogsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AccessLogs",
 			Handler:    _AccessLogsService_AccessLogs_Handler,
+		},
+		{
+			MethodName: "GetWorkspaceAnalytics",
+			Handler:    _AccessLogsService_GetWorkspaceAnalytics_Handler,
 		},
 		{
 			MethodName: "IntegrationLogs",

@@ -99,6 +99,16 @@ func (membership WorkspaceMembership) Guest() bool {
 	return membership.Restricted || membership.UltraRestricted
 }
 
+// WorkspaceMembershipSummary is one workspace a person belongs to, with the
+// identity they hold there. A user row belongs to exactly one workspace, so the
+// same person in two workspaces is two rows sharing an email address — which is
+// why a switcher resolves by address and reports the local identity for each.
+type WorkspaceMembershipSummary struct {
+	Workspace Workspace
+	UserID    UserID
+	Role      WorkspaceRole
+}
+
 type BillableUser struct {
 	UserID        UserID
 	BillingActive bool
@@ -193,20 +203,48 @@ type DoNotDisturb struct {
 	NextEndAt   time.Time
 }
 
+// CallKind separates the two things a call record can be. An external call is
+// one an app registered through calls.add: the media lives with the app, which
+// is why ExternalUniqueID and JoinURL are required for it. A huddle is started
+// inside a conversation by a person here, so it has a conversation and no
+// external identity at all — the two could not share one shape without one of
+// them carrying required fields it has no value for.
+type CallKind string
+
+const (
+	CallKindExternal CallKind = "external"
+	CallKindHuddle   CallKind = "huddle"
+)
+
+func (kind CallKind) Valid() bool {
+	return kind == CallKindExternal || kind == CallKindHuddle
+}
+
 type Call struct {
-	ID                CallID
-	WorkspaceID       WorkspaceID
+	ID          CallID
+	WorkspaceID WorkspaceID
+	Kind        CallKind
+	// ConversationID is the conversation a huddle belongs to, and empty for an
+	// external call. At most one huddle per conversation may be active at a
+	// time; see Store.StartHuddle.
+	ConversationID    ConversationID
 	ExternalUniqueID  string
 	ExternalDisplayID string
 	JoinURL           string
 	DesktopAppJoinURL string
 	Title             string
 	CreatedBy         UserID
-	Participants      []UserID
-	StartedAt         time.Time
-	EndedAt           time.Time
-	DurationSeconds   int64
+	// Participants are the people currently in the call, not everyone who ever
+	// was. Someone who leaves is removed; the record of their having been there
+	// is the huddle.joined and huddle.left pair in the durable journal.
+	Participants    []UserID
+	StartedAt       time.Time
+	EndedAt         time.Time
+	DurationSeconds int64
 }
+
+// Active reports whether the call is still running.
+func (call Call) Active() bool { return call.EndedAt.IsZero() }
 
 // View stores the validated Slack view envelope without imposing a closed
 // schema on Block Kit, whose fields are intentionally extensible.
@@ -610,7 +648,85 @@ type Conversation struct {
 	IsDirect      bool
 	IsGroupDirect bool
 	UnreadCount   int
+	// The Slack Connect identity conversations.info must emit. A channel is
+	// externally shared once another organization has accepted an invitation
+	// to it, and pending while one is outstanding: the two are different facts
+	// and a client shows different chrome for each, so neither can be derived
+	// from the other.
+	IsExtShared        bool
+	IsPendingExtShared bool
 }
+
+// SharedInviteStatus is the state machine CONNECT-02 requires. Approval and
+// acceptance are deliberately distinct transitions: the host approves who may
+// be invited, and the invited organization decides separately whether to come.
+type SharedInviteStatus string
+
+const (
+	SharedInvitePending  SharedInviteStatus = "pending"
+	SharedInviteApproved SharedInviteStatus = "approved"
+	SharedInviteAccepted SharedInviteStatus = "accepted"
+	SharedInviteDeclined SharedInviteStatus = "declined"
+	SharedInviteRevoked  SharedInviteStatus = "revoked"
+)
+
+// SharedInviteTransition reports whether one status may follow another. A
+// pending invitation is approved or revoked by the host; an approved one is
+// accepted or declined by the invited organization, or revoked by the host
+// while it is still outstanding. Accepted and declined are terminal.
+func SharedInviteTransition(from, to SharedInviteStatus) bool {
+	switch from {
+	case SharedInvitePending:
+		return to == SharedInviteApproved || to == SharedInviteRevoked
+	case SharedInviteApproved:
+		return to == SharedInviteAccepted || to == SharedInviteDeclined || to == SharedInviteRevoked
+	default:
+		return false
+	}
+}
+
+// SharedInvite is one invitation for an external organization to join one
+// conversation. It is modelled on InviteRequest — the same recorded/issued/
+// redeemed shape — because it is the same kind of fact about a different
+// subject.
+type SharedInvite struct {
+	ID             SharedInviteID
+	WorkspaceID    WorkspaceID
+	ConversationID ConversationID
+	// TargetWorkspaceID is the organization invited. Within one deployment an
+	// organization is another workspace; a cross-deployment federation would
+	// carry an external team identifier here instead, and is a recorded gap.
+	TargetWorkspaceID WorkspaceID
+	// TargetEmail is the person invited, when the invitation names one. Slack
+	// allows either, and conversations.inviteShared takes both.
+	TargetEmail string
+	InvitedBy   UserID
+	Status      SharedInviteStatus
+	CreatedAt   time.Time
+	ReviewedAt  time.Time
+	SettledAt   time.Time
+	ExpiresAt   time.Time
+}
+
+// Acceptable reports whether the invitation can still be accepted or declined.
+func (invite SharedInvite) Acceptable(at time.Time) bool {
+	if invite.Status != SharedInviteApproved {
+		return false
+	}
+	return invite.ExpiresAt.IsZero() || !at.After(invite.ExpiresAt)
+}
+
+type SharedInvitePage struct {
+	Invites    []SharedInvite
+	NextCursor Cursor
+	HasMore    bool
+}
+
+// SlackConnectCapacity is the documented maximum number of organizations in
+// one Slack Connect channel, including the host. It is checked atomically when
+// an invitation is accepted, never from a count read earlier: CONNECT-01
+// forbids promising a place from a stale count.
+const SlackConnectCapacity = 250
 
 // DirectHistorySelection is the first-party choice Slack presents when people
 // are added to a DM. Slack's public Web API does not expose this transition;
@@ -716,6 +832,11 @@ type WorkspaceNotificationPreferences struct {
 	Keywords          []string
 	ActivityChannels  bool
 	ActivityReminders bool
+	// BrowserNotifications is off unless the person turns it on. It is only
+	// half of what a notification needs — the browser must also grant
+	// permission — and the two are deliberately separate: a preference this
+	// product stores cannot grant a permission only the browser can.
+	BrowserNotifications bool
 }
 
 func DefaultWorkspaceNotificationPreferences(workspace WorkspaceID, user UserID) WorkspaceNotificationPreferences {
@@ -1277,6 +1398,15 @@ const (
 	InviteRequestPending  InviteRequestStatus = "pending"
 	InviteRequestApproved InviteRequestStatus = "approved"
 	InviteRequestDenied   InviteRequestStatus = "denied"
+	// InviteRequestAccepted is terminal and is what makes an invitation
+	// single-use: the transition to it is the same transaction that creates
+	// the member, so a second acceptance finds nothing approved.
+	InviteRequestAccepted InviteRequestStatus = "accepted"
+	// InviteRequestRevoked is an approved invitation withdrawn before anyone
+	// accepted it. Denied is the answer to a request; revoked is the
+	// withdrawal of an answer already given, and an administrator reading the
+	// record needs to tell those apart.
+	InviteRequestRevoked InviteRequestStatus = "revoked"
 )
 
 type InviteRequest struct {
@@ -1294,6 +1424,52 @@ type InviteRequest struct {
 	Status            InviteRequestStatus
 	CreatedAt         time.Time
 	ReviewedAt        time.Time
+	// ExpiresAt bounds how long the invitation may be accepted for. It is set
+	// when the invitation is recorded, not when it is approved, because it is
+	// the promise made to the invited person that ages — an invitation that
+	// sat in the queue for a month is not fresh because someone finally
+	// clicked approve.
+	ExpiresAt  time.Time
+	AcceptedAt time.Time
+	AcceptedBy UserID
+}
+
+// InviteRequestAcceptance is everything one acceptance writes. It travels as a
+// value because the store applies all of it or none of it.
+type InviteRequestAcceptance struct {
+	WorkspaceID WorkspaceID
+	RequestID   InviteRequestID
+	User        User
+	Membership  WorkspaceMembership
+	Channels    []ConversationID
+	AcceptedAt  time.Time
+}
+
+// InviteRequestReviewable reports whether an administrator may move an
+// invitation from one status to another. Approving and denying answer a
+// pending request; revoking withdraws an approval nobody has accepted yet.
+// Accepting is not a review — it is the invited person's transition, and it
+// only happens inside the transaction that creates the member.
+func InviteRequestReviewable(from, to InviteRequestStatus) bool {
+	switch {
+	case from == InviteRequestPending && (to == InviteRequestApproved || to == InviteRequestDenied):
+		return true
+	case from == InviteRequestApproved && to == InviteRequestRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Acceptable reports whether this invitation can still become a member at the
+// given instant. Only an approved invitation can be accepted: recording an
+// invitation and issuing it are deliberately distinct transitions, so an
+// invitation nobody has approved confers nothing.
+func (request InviteRequest) Acceptable(at time.Time) bool {
+	if request.Status != InviteRequestApproved {
+		return false
+	}
+	return request.ExpiresAt.IsZero() || !at.After(request.ExpiresAt)
 }
 
 type InviteRequestPage struct {
@@ -1709,13 +1885,72 @@ type Message struct {
 	StreamState     string
 	ThreadTimestamp MessageTimestamp
 	CreatedAt       time.Time
-	Deleted         bool
-	Unfurls         map[string]string
+	// EditedAt and EditedBy record the last edit. Slack's message object
+	// carries an `edited` sub-object, and clients render "(edited)" from it.
+	// The edit instant used to live only on the outbox event, so the fact was
+	// unavailable to any reader of the message itself and the two could
+	// disagree once an event was replayed.
+	EditedAt time.Time
+	EditedBy UserID
+	// Subtype is Slack's message subtype for the messages a workspace
+	// generates rather than a person composing them — joins, topic and
+	// purpose changes, renames, and /me. An empty subtype is an ordinary
+	// message. Subtypes a projection derives from other durable state
+	// (file_share, thread_broadcast, bot_message) are deliberately NOT stored
+	// here: they are computed where they are read.
+	Subtype MessageSubtype
+	Deleted bool
+	Unfurls map[string]string
 	// Files are the durable file shares carried by this message. A file that
 	// merely names a channel in its metadata is not visible conversation
 	// content; the message relationship supplies ordering, threads, events, API
 	// projection, and the first-party timeline.
 	Files []File
+}
+
+// MessageSubtype is the durable subtype vocabulary for workspace-generated
+// messages. Slack renders each of these differently from a composed message:
+// no avatar, no author column, and no message actions.
+type MessageSubtype string
+
+const (
+	MessageSubtypeChannelJoin    MessageSubtype = "channel_join"
+	MessageSubtypeChannelLeave   MessageSubtype = "channel_leave"
+	MessageSubtypeChannelTopic   MessageSubtype = "channel_topic"
+	MessageSubtypeChannelPurpose MessageSubtype = "channel_purpose"
+	MessageSubtypeChannelName    MessageSubtype = "channel_name"
+	MessageSubtypeMeMessage      MessageSubtype = "me_message"
+)
+
+// Valid reports whether a subtype is one this repository writes. An
+// unrecognized value is refused at the storage boundary rather than being
+// projected to clients as a subtype Slack does not define.
+func (s MessageSubtype) Valid() bool {
+	switch s {
+	case "", MessageSubtypeChannelJoin, MessageSubtypeChannelLeave, MessageSubtypeChannelTopic,
+		MessageSubtypeChannelPurpose, MessageSubtypeChannelName, MessageSubtypeMeMessage:
+		return true
+	}
+	return false
+}
+
+// System reports whether the subtype marks a message the workspace generated.
+// Such a message carries no author identity to render and no actions to take.
+func (s MessageSubtype) System() bool {
+	return s != "" && s != MessageSubtypeMeMessage
+}
+
+// ThreadSummary is what a parent message reports about its replies: how many
+// there are, who wrote them, and when the last one landed. Slack renders it
+// under the parent as "N replies · last reply …", and it is the reason a
+// timeline can show a thread without opening it.
+//
+// It is computed per parent by one batched query, never by counting a
+// per-parent reply page: fifty rendered parents must not become fifty reads.
+type ThreadSummary struct {
+	ReplyCount   int
+	Participants []UserID
+	LastReplyAt  time.Time
 }
 
 type MessageStreamStart struct {
@@ -1785,6 +2020,11 @@ type MessagePostRequest struct {
 	Username        string
 	IconEmoji       string
 	IconURL         string
+	// Subtype marks a message the workspace generated rather than a person
+	// composing it. chat.meMessage sets me_message; the conversation
+	// lifecycle mutations set their own. A caller cannot choose an arbitrary
+	// value — postMessageAs refuses one the vocabulary does not define.
+	Subtype MessageSubtype
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a
@@ -1863,6 +2103,40 @@ type EphemeralMessage struct {
 	Attachments  string
 	Timestamp    MessageTimestamp
 	CreatedAt    time.Time
+}
+
+// WorkspaceAnalytics is the shape of the administration dashboard: counts a
+// workspace owner needs to answer "how big is this and is it being used",
+// derived from the durable rows rather than from a metrics pipeline this
+// product does not have.
+//
+// Every "recent" figure is relative to one instant the caller passes, so the
+// dashboard and any export made from the same call describe the same window —
+// a store that chose its own window would make two readers disagree.
+type WorkspaceAnalytics struct {
+	Members          int
+	ActiveMembers    int
+	Guests           int
+	Admins           int
+	PublicChannels   int
+	PrivateChannels  int
+	ArchivedChannels int
+	Messages         int
+	RecentMessages   int
+	Files            int
+	RecentFiles      int
+	// BusiestChannels are the conversations with the most messages in the
+	// window, most first. Direct conversations are excluded: they are private
+	// between their members and are not workspace activity an administrator
+	// governs.
+	BusiestChannels []ChannelActivity
+	Since           time.Time
+}
+
+type ChannelActivity struct {
+	ConversationID ConversationID
+	Name           string
+	Messages       int
 }
 
 type AccessLog struct {

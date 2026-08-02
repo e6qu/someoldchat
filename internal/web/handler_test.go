@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1387,8 +1388,12 @@ func TestTimelineFragmentServesTheLiveRegion(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("fragment %s status=%d body=%s", target, response.Code, response.Body)
 		}
-		requireContains(t, "fragment "+target, response.Body.String(), `class="message"`, "hello")
+		// Every live region must answer a bare fragment rather than a whole
+		// document; only the message regions carry messages.
 		requireMissing(t, "fragment "+target, response.Body.String(), "<html", "<body")
+		if strings.HasPrefix(target, "/app/timeline") {
+			requireContains(t, "fragment "+target, response.Body.String(), `class="message"`, "hello")
+		}
 	}
 	if !strings.Contains(page, `data-live="true"`) {
 		t.Fatalf("the timeline is not marked live: %s", page)
@@ -1711,14 +1716,32 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if err := s.DeleteView(ctx, "T1", "U1", firstView.ID, false, viewEvent("event-view-closed", "view.closed", now.Add(4*time.Second))); err != nil {
 		t.Fatal(err)
 	}
-	records, err := s.ListEventsAfter(ctx, "T1", 0, 100)
+	// A huddle is started, joined by a second person and then left by both, so
+	// all four huddle topics are emitted by real mutations rather than asserted
+	// from a list.
+	messages := service.Messages{Store: s}
+	if _, err := messages.StartHuddle(ctx, "T1", "U1", "Cdev", ""); err != nil {
+		t.Fatal(err)
+	}
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second"})
+	s.SeedConversationMember("Cdev", "U2")
+	if _, err := messages.JoinHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.LeaveHuddle(ctx, "T1", "U1", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := s.ListEventsAfter(ctx, "T1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "huddle.") {
 			emitted[topic] = true
 		}
 	}
@@ -1876,6 +1899,7 @@ func TestWorkspacePagesCarryTheSameProtectionAsTheAdminPage(t *testing.T) {
 		"/app?channel=Cdev",
 		"/app/timeline?channel=Cdev",
 		"/app/members",
+		"/app/remote-files",
 		"/app/search?q=hello&channel=Cdev",
 		"/app?channel=Cmissing",
 		// Failures. Each of these answered with a bare line of text and no
@@ -2732,7 +2756,7 @@ func TestApplicationRedirectsUnauthenticatedBrowserToLogin(t *testing.T) {
 // never leak into the web tree.
 func TestDeepApplicationPagesRedirectAnonymousVisitorsToSignIn(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	for _, target := range []string{"/app/members", "/app/later", "/app/workflows", "/app/canvases"} {
+	for _, target := range []string{"/app/members", "/app/later", "/app/workflows", "/app/canvases", "/app/remote-files", "/archives/Cdev/p1700000000000000"} {
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
 		if response.Code != http.StatusSeeOther {
@@ -3988,4 +4012,448 @@ type readCursorOutage struct {
 
 func (readCursorOutage) SetReadCursor(context.Context, domain.ReadCursor, events.Event) error {
 	return errors.New("read cursor store is unavailable")
+}
+
+// A permalink must open the conversation window that contains its target.
+// Every permalink this product handed out used to name /archives/... on a
+// host that exists nowhere AND a path no route served, so following one was
+// impossible from inside or outside the app. NAV-05 requires the link to open
+// the containing conversation and mark the target, with distinct safe
+// outcomes for a target that is gone.
+func TestArchivePermalinkOpensTheWindowContainingItsMessage(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	message := seedMessage(t, store, "Mperma", "the message a permalink names", time.Unix(1700000000, 0).UTC())
+	permalink, err := (service.Messages{Store: store}).Permalink(context.Background(), "T1", "U1", "Cdev", domain.NewMessageTimestamp(message.CreatedAt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(permalink, "/archives/Cdev/p") {
+		t.Fatalf("permalink=%q, want Slack's /archives/<channel>/p<ts> shape", permalink)
+	}
+	response := get(t, mux, permalink)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("permalink status=%d, want %d: %s", response.Code, http.StatusSeeOther, response.Body)
+	}
+	location := response.Header().Get("Location")
+	if !strings.HasPrefix(location, "/app?") || !strings.Contains(location, "channel=Cdev") ||
+		!strings.Contains(location, "before=") || !strings.HasSuffix(location, messageAnchor(message.ID)) {
+		t.Fatalf("permalink redirected to %q, want the containing window anchored on the message", location)
+	}
+	// Following the redirect actually shows the message: a window that does
+	// not contain the target is the defect this route exists to prevent.
+	// A browser sends the path and query and keeps the fragment to itself, so
+	// the follow-up request drops it exactly as one would.
+	page := get(t, mux, strings.Split(location, "#")[0])
+	requireContains(t, "permalink window", page.Body.String(), "the message a permalink names")
+
+	// A message that does not exist is a handled answer, not a broken page.
+	missing := get(t, mux, "/archives/Cdev/p1700000000000999")
+	if missing.Code == http.StatusOK || missing.Code >= http.StatusInternalServerError {
+		t.Fatalf("missing permalink status=%d, want a handled failure", missing.Code)
+	}
+	malformed := get(t, mux, "/archives/Cdev/notatimestamp")
+	if malformed.Code != http.StatusNotFound {
+		t.Fatalf("malformed permalink status=%d, want %d", malformed.Code, http.StatusNotFound)
+	}
+}
+
+// The fittings Slack shows around a message — the edited marker, the thread
+// summary, day separators, the unread divider, the broadcast marker, and the
+// system-message rendering — are all computed server-side, because the
+// fragment refresh re-renders this same partial and anything computed in the
+// browser is lost on the next live update. MSG-01 requires every one of them.
+func TestTimelineRendersSlackMessageChrome(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: store}
+	ctx := context.Background()
+	yesterday := time.Now().UTC().Add(-26 * time.Hour)
+
+	older := seedMessage(t, store, "Mold", "posted yesterday", yesterday)
+	parent, err := messages.Post(ctx, "T1", "U1", "Cdev", "a message with replies", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentTS := domain.NewMessageTimestamp(parent.CreatedAt)
+	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{
+		Conversation: "Cdev", Text: "a threaded reply", ThreadTimestamp: parentTS,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{
+		Conversation: "Cdev", Text: "also to the channel", ThreadTimestamp: parentTS, ReplyBroadcast: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := messages.Post(ctx, "T1", "U1", "Cdev", "before the edit", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := "after the edit"
+	if _, err := messages.UpdateMessage(ctx, "T1", "U1", "Cdev", domain.NewMessageTimestamp(edited.CreatedAt), domain.MessagePatch{Text: &changed}); err != nil {
+		t.Fatal(err)
+	}
+	// A join notice gives the system rendering something to show.
+	if _, err := messages.SetConversationTopic(ctx, "T1", "U1", "Cdev", "chrome topic"); err != nil {
+		t.Fatal(err)
+	}
+	// Read up to the older message only, so everything after it is unread.
+	if _, err := messages.MarkRead(ctx, "T1", "U1", "Cdev", domain.NewMessageTimestamp(older.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "message chrome", body,
+		`class="day-separator"`,
+		`class="unread-divider"`,
+		`(edited)`,
+		`class="thread-summary"`,
+		"2 replies",
+		"Also sent to the channel",
+		`class="message system-message"`,
+		`data-subtype="channel_topic"`,
+		"Copy link",
+		"Mark unread from here",
+		"Forward",
+		`/archives/Cdev/p`,
+	)
+	// A system message carries no author chrome and no actions: it is not
+	// something a person said, so there is nothing to reply to or react to.
+	systemStart := strings.Index(body, `class="message system-message"`)
+	if systemStart < 0 {
+		t.Fatal("no system message rendered")
+	}
+	systemEnd := strings.Index(body[systemStart:], "</article>")
+	systemBlock := body[systemStart : systemStart+systemEnd]
+	requireMissing(t, "system message", systemBlock, "message-actions", "Add reaction", `class="avatar`)
+	// The keyboard contract advertises the two new one-key actions.
+	requireContains(t, "message shortcuts", body, "aria-keyshortcuts=", " F", " U")
+}
+
+// Forwarding shares a message into another conversation with its original
+// attribution and a link back, and marking unread from a message moves only
+// this member's cursor so everything from there on is unread again.
+func TestForwardAndMarkUnreadFromAMessage(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: store}
+	ctx := context.Background()
+	if _, err := messages.CreateConversation(ctx, "T1", "U1", "elsewhere", false); err != nil {
+		t.Fatal(err)
+	}
+	target, err := messages.Post(ctx, "T1", "U1", "Cdev", "worth forwarding", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp := string(domain.NewMessageTimestamp(target.CreatedAt))
+	csrf := auth.CSRFToken("session")
+
+	conversations, err := messages.Conversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var destination domain.ConversationID
+	for _, conversation := range conversations.Conversations {
+		if conversation.Name == "elsewhere" {
+			destination = conversation.ID
+		}
+	}
+	if destination == "" {
+		t.Fatal("the destination channel was not created")
+	}
+	forwarded := postForm(t, mux, "/app/message/forward?channel=Cdev&ts="+url.QueryEscape(timestamp), url.Values{
+		"_csrf": {csrf}, "destination": {string(destination)}, "comment": {"look at this"},
+	}.Encode(), false)
+	if forwarded.Code != http.StatusSeeOther {
+		t.Fatalf("forward=%d: %s", forwarded.Code, forwarded.Body)
+	}
+	page := get(t, mux, "/app?channel="+string(destination))
+	requireContains(t, "forwarded message", page.Body.String(), "look at this", "worth forwarding", "Forwarded from")
+
+	// Mark unread from the message: the cursor moves to just before it.
+	if _, err := messages.MarkRead(ctx, "T1", "U1", "Cdev", domain.NewMessageTimestamp(target.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	unread := postForm(t, mux, "/app/read/unread?channel=Cdev&ts="+url.QueryEscape(timestamp), url.Values{"_csrf": {csrf}}.Encode(), false)
+	if unread.Code != http.StatusSeeOther {
+		t.Fatalf("mark unread=%d: %s", unread.Code, unread.Body)
+	}
+	cursor, err := messages.ReadCursor(ctx, "T1", "U1", "Cdev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.LastRead >= domain.NewMessageTimestamp(target.CreatedAt) {
+		t.Fatalf("cursor=%s, want it to sit before the message that was marked unread", cursor.LastRead)
+	}
+	requireContains(t, "timeline after marking unread", get(t, mux, "/app?channel=Cdev").Body.String(), `class="unread-divider"`)
+}
+
+// FILE-06: an uploader can delete a hosted file, and the confirmation names
+// the workspace-wide consequence rather than asking a bare "are you sure".
+// The control appears only for a file this reader may actually delete — the
+// service is uploader-only, so rendering it for anyone else would be a button
+// that always fails.
+func TestFileDeleteIsOfferedOnlyToItsUploader(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+	file := domain.File{
+		ID: "Fdelete", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt", Title: "Report",
+		MIMEType: "text/plain", BlobKey: "blob/report", Size: 12, CreatedAt: time.Now().UTC(),
+	}
+	event := events.Event{ID: "Efile", WorkspaceID: "T1", Topic: "file.created", Payload: `{"type":"file.created","event_ts":"1700000000.000000","file_id":"Fdelete"}`, CreatedAt: time.Now().UTC()}
+	if err := store.CreateFile(ctx, file, event); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{ID: "Mfile", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: "sharing a file", Attachments: "[]", CreatedAt: domain.MessageInstant(time.Now().UTC())}
+	shareEvent := events.Event{ID: "Eshare", WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message.created","event_ts":"1700000000.000001","message_id":"Mfile"}`, CreatedAt: message.CreatedAt}
+	if err := store.CreateFileShareMessage(ctx, []domain.FileID{"Fdelete"}, message, []events.Event{shareEvent}); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "own file", body, "Delete file", "removes it from every message and search result")
+
+	deleted := postForm(t, mux, "/app/files/delete?channel=Cdev&file=Fdelete", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete=%d: %s", deleted.Code, deleted.Body)
+	}
+	if _, _, err := messages.OpenFile(ctx, "T1", "U1", "Fdelete"); err == nil {
+		t.Fatal("the file is still readable after deletion")
+	}
+	after := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireMissing(t, "deleted file", after, "Delete file")
+}
+
+// Deleting a message that shares a file retracts the file's share into that
+// conversation, so the control has to say so before it is used. A confirmation
+// that names only the message understates what the button does.
+func TestDeletingASharingMessageWarnsThatTheFileLeavesTheChannel(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	file := domain.File{
+		ID: "Fshared", WorkspaceID: "T1", Uploader: "U1", Name: "plan.txt", Title: "Plan",
+		MIMEType: "text/plain", BlobKey: "blob/plan", Size: 4, CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateFile(ctx, file, events.Event{ID: "Efshared", WorkspaceID: "T1", Topic: "file.created", Payload: `{"type":"file.created","event_ts":"1700000000.000000","file_id":"Fshared"}`, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{ID: "Mshared", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: "the plan", Attachments: "[]", CreatedAt: domain.MessageInstant(time.Now().UTC())}
+	if err := store.CreateFileShareMessage(ctx, []domain.FileID{"Fshared"}, message,
+		[]events.Event{{ID: "Emshared", WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message.created","event_ts":"1700000000.000001","message_id":"Mshared"}`, CreatedAt: message.CreatedAt}}); err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, "sharing message", get(t, mux, "/app?channel=Cdev").Body.String(),
+		"This message shares a file", "also removes the file from this conversation")
+
+	timestamp := string(domain.NewMessageTimestamp(message.CreatedAt))
+	deleted := postForm(t, mux, "/app/message/delete?channel=Cdev&ts="+url.QueryEscape(timestamp), url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete=%d: %s", deleted.Code, deleted.Body)
+	}
+	stored, err := store.GetFile(ctx, "Fshared")
+	if err != nil {
+		t.Fatalf("the file itself was destroyed by deleting a message that shared it: %v", err)
+	}
+	if len(stored.SharedChannels) != 0 {
+		t.Fatalf("the file is still shared into %v with no message sharing it", stored.SharedChannels)
+	}
+}
+
+// FILE-07: remote files are visible in the client, and the surface never
+// claims to host bytes it does not have — it links out and says so.
+func TestRemoteFilesAreVisibleAndNeverClaimToBeHosted(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+	if _, err := messages.AddRemoteFile(ctx, "T1", "U1", domain.RemoteFile{
+		ExternalID: "ext-1", Title: "Quarterly plan", FileType: "gdoc",
+		ExternalURL: "https://files.example.test/quarterly", IndexableContents: "revenue and headcount",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app/remote-files?channel=Cdev").Body.String()
+	requireContains(t, "remote files", body,
+		"Quarterly plan", "gdoc", "ext-1",
+		"https://files.example.test/quarterly",
+		"Open where it is hosted", "Hosted elsewhere",
+		"The contents stay with the app that hosts them",
+	)
+	// It must not offer a download: this deployment does not have the bytes.
+	requireMissing(t, "remote files", body, "/app/files/", "download")
+
+	shared := postForm(t, mux, "/app/remote-files/share?file=ext-1&channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "destination": {"Cdev"},
+	}.Encode(), false)
+	if shared.Code != http.StatusSeeOther {
+		t.Fatalf("share=%d: %s", shared.Code, shared.Body)
+	}
+	requireContains(t, "shared remote file", get(t, mux, "/app/remote-files?channel=Cdev").Body.String(), "Shared in", "#general")
+}
+
+// HUDDLE-01 and HUDDLE-03: the huddle bar offers a real lifecycle and says, in
+// the same breath, that this deployment carries no audio. A control named
+// "Join huddle" that silently connected nothing would be exactly the promise
+// the universal contract forbids.
+func TestTheHuddleBarRunsTheLifecycleAndNeverPromisesAudio(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second", RealName: "Second Person"})
+	store.SeedConversationMember("Cdev", "U2")
+
+	idle := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "idle huddle bar", idle, "Start a huddle", "carries no voice or video")
+	requireMissing(t, "idle huddle bar", idle, "Leave huddle", "End for everyone")
+
+	started := postForm(t, mux, "/app/huddle/start?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if started.Code != http.StatusSeeOther {
+		t.Fatalf("start=%d: %s", started.Code, started.Body)
+	}
+	active := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "active huddle bar", active,
+		"Huddle in", "Leave huddle", "End for everyone",
+		"No audio here", "Joining puts your name in the huddle and nothing else")
+	requireMissing(t, "active huddle bar", active, "Start a huddle")
+
+	// A second person joins through the service; the bar is a live fragment,
+	// so the participant list follows without a page load.
+	messages := service.Messages{Store: store}
+	if _, err := messages.JoinHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	fragment := get(t, mux, "/app/huddle?channel=Cdev").Body.String()
+	requireContains(t, "huddle fragment", fragment, "Second Person")
+	requireMissing(t, "huddle fragment", fragment, "<html", "<body")
+
+	left := postForm(t, mux, "/app/huddle/leave?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if left.Code != http.StatusSeeOther {
+		t.Fatalf("leave=%d: %s", left.Code, left.Body)
+	}
+	// One participant remains, so the huddle is still running and this reader
+	// is offered the way back in rather than a way to start a second one.
+	afterLeaving := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "after leaving", afterLeaving, "Join huddle")
+	requireMissing(t, "after leaving", afterLeaving, "Start a huddle")
+
+	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	// The last person left, so the huddle ended with them: a conversation must
+	// never show a huddle nobody can be in.
+	if _, err := store.ActiveHuddle(ctx, "T1", "Cdev"); err == nil {
+		t.Fatal("the huddle outlived its last participant")
+	}
+	requireContains(t, "after the last person left", get(t, mux, "/app?channel=Cdev").Body.String(), "Start a huddle")
+}
+
+// HUDDLE-01: two people pressing start at the same moment must end up in one
+// huddle. A read-then-create would give them one each, and the second would be
+// the one nobody else joined.
+func TestConcurrentHuddleStartsConvergeOnOne(t *testing.T) {
+	store, _ := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+	starters := []domain.UserID{"U1"}
+	for index := 2; index <= 6; index++ {
+		id := domain.UserID("U" + strconv.Itoa(index))
+		store.SeedUser(domain.User{ID: id, WorkspaceID: "T1", Name: "member" + strconv.Itoa(index)})
+		store.SeedConversationMember("Cdev", id)
+		starters = append(starters, id)
+	}
+	results := make(chan domain.CallID, len(starters))
+	var wait sync.WaitGroup
+	for _, starter := range starters {
+		wait.Add(1)
+		go func(actor domain.UserID) {
+			defer wait.Done()
+			call, err := messages.StartHuddle(ctx, "T1", actor, "Cdev", "")
+			if err != nil {
+				results <- ""
+				return
+			}
+			results <- call.ID
+		}(starter)
+	}
+	wait.Wait()
+	close(results)
+	seen := map[domain.CallID]struct{}{}
+	for id := range results {
+		if id == "" {
+			t.Fatal("a concurrent start failed")
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != 1 {
+		t.Fatalf("%d huddles were started concurrently in one conversation, want 1", len(seen))
+	}
+	call, err := store.ActiveHuddle(ctx, "T1", "Cdev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(call.Participants) != len(starters) {
+		t.Fatalf("participants=%v, want everyone who pressed start", call.Participants)
+	}
+}
+
+// Ending a huddle removes everyone else from it, so a participant who did not
+// start it is offered a way out rather than a way to end it for the others.
+func TestOnlyTheStarterIsOfferedTheEndControl(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second"})
+	store.SeedConversationMember("Cdev", "U2")
+	messages := service.Messages{Store: store}
+	if _, err := messages.StartHuddle(ctx, "T1", "U2", "Cdev", ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "someone else's huddle", body, "Join huddle")
+	requireMissing(t, "someone else's huddle", body, "End for everyone")
+
+	refused := postForm(t, mux, "/app/huddle/end?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if refused.Code != http.StatusForbidden {
+		t.Fatalf("end=%d: %s", refused.Code, refused.Body)
+	}
+	if _, err := store.ActiveHuddle(ctx, "T1", "Cdev"); err != nil {
+		t.Fatalf("a refused end still ended the huddle: %v", err)
+	}
+}
+
+// NOTIFY-04: a desktop notification needs three separate permissions and this
+// product owns only two of them. The page carries its two so the client can
+// decide, and says which is missing rather than reporting one silent "off".
+func TestBrowserNotificationsCarryBothHalvesTheServerOwns(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+
+	off := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "notifications off", off, `data-browser-notifications="false"`, `data-notifications-paused="false"`)
+
+	if _, err := messages.SetWorkspaceNotificationPreferences(ctx, "T1", "U1", domain.NotificationMentions, nil, true, true, true); err != nil {
+		t.Fatal(err)
+	}
+	on := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "notifications on", on, `data-browser-notifications="true"`)
+
+	// Do Not Disturb was fetched for the preferences page and consulted
+	// nowhere, so a paused workspace still raised every banner it could.
+	if _, err := messages.SetSnooze(ctx, "T1", "U1", 60); err != nil {
+		t.Fatal(err)
+	}
+	paused := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "notifications paused", paused, `data-notifications-paused="true"`)
+}
+
+// The preferences page names what this deployment does not deliver, rather
+// than leaving a person to wonder why a phone never buzzes.
+func TestTheNotificationsPageNamesWhatItCannotDeliver(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	if _, err := (service.Messages{Store: store}).SetWorkspaceNotificationPreferences(ctx, "T1", "U1", domain.NotificationMentions, nil, true, true, true); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app/notifications?channel=Cdev").Body.String()
+	requireContains(t, "notification preferences", body,
+		"Show desktop notifications", `name="browser_notifications"`, "checked",
+		"Not delivered here", "There is no mobile application", "sends no mail at all",
+		"Your browser also has to allow notifications",
+	)
 }
