@@ -2722,6 +2722,56 @@ func TestApplicationRedirectsUnauthenticatedBrowserToLogin(t *testing.T) {
 	}
 }
 
+// TestDeepApplicationPagesRedirectAnonymousVisitorsToSignIn is issue #131:
+// only GET /app used to redirect an anonymous visitor into sign-in, so every
+// deeper page — /app/members, a Later link a teammate shared — answered a
+// bare text 401 to a browser. A person navigating to a page belongs on the
+// sign-in flow with the destination preserved; the app's own fragment
+// fetches keep the 401, because a redirect would swap the sign-in page into
+// a fragment; and unknown paths stay 404 — the /api/* JSON envelope must
+// never leak into the web tree.
+func TestDeepApplicationPagesRedirectAnonymousVisitorsToSignIn(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+	for _, target := range []string{"/app/members", "/app/later", "/app/workflows", "/app/canvases"} {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
+		if response.Code != http.StatusSeeOther {
+			t.Fatalf("anonymous %s status=%d, want %d", target, response.Code, http.StatusSeeOther)
+		}
+		location := response.Header().Get("Location")
+		if !strings.HasPrefix(location, "/login?return_to=") || !strings.Contains(location, url.QueryEscape(target)) {
+			t.Fatalf("anonymous %s location=%q, want /login carrying return_to=%s", target, location, target)
+		}
+	}
+	fragment := httptest.NewRequest(http.MethodGet, "/app/members", nil)
+	fragment.Header.Set("HX-Request", "true")
+	fragmentResult := httptest.NewRecorder()
+	mux.ServeHTTP(fragmentResult, fragment)
+	if fragmentResult.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous fragment fetch status=%d, want %d", fragmentResult.Code, http.StatusUnauthorized)
+	}
+	unknown := httptest.NewRecorder()
+	mux.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, "/app/not-a-page", nil))
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("anonymous unknown page status=%d, want %d", unknown.Code, http.StatusNotFound)
+	}
+	if strings.Contains(unknown.Body.String(), "unknown_method") {
+		t.Fatalf("the /api envelope leaked into the web tree: %s", unknown.Body)
+	}
+}
+
+// A credential store that did not answer is server trouble: the browser gets
+// a retryable 503, not a 401 and not a bounce through sign-in that would
+// discard the person's place in the app for a transient backend failure.
+func TestWebAuthErrorAnswersServiceUnavailableForAStoreOutage(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/app/members", nil)
+	Handler{}.writeAuthError(recorder, request, fmt.Errorf("%w: connection refused", auth.ErrCredentialStoreUnavailable))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("store outage status=%d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+}
+
 func TestApplicationStartsShauthForUnauthenticatedDirectEntry(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1"})

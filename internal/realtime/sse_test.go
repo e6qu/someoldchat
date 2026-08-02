@@ -254,7 +254,7 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 	authenticator := &scriptedAuthenticator{
 		principal:    auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}},
 		allowed:      1,
-		err:          auth.ErrInvalidToken,
+		err:          auth.ErrCredentialStoreUnavailable,
 		failures:     2,
 		recoverAfter: true,
 	}
@@ -290,12 +290,41 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 	<-finished
 }
 
+// A session the store looked up and did not find is a verdict, not an
+// outage: the stream ends on the first re-authorization check. It used to
+// survive three grace intervals, because auth.Browser reported an unreachable
+// store and an unknown session with the same ErrInvalidToken and this stream
+// could not afford to end on an ambiguous answer.
+func TestSSEEndsPromptlyWhenTheStoreSaysTheSessionIsGone(t *testing.T) {
+	source := &countingSource{}
+	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrInvalidToken}
+	handler, err := NewHandler(source, "T1", authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Reauthorize = time.Nanosecond
+	handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	finished := make(chan struct{})
+	go func() {
+		handler.events(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events", nil))
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a stream whose session the store says is gone kept streaming")
+	}
+	if calls := authenticator.attempts(); calls != 2 {
+		t.Fatalf("authenticate calls=%d, want the connect check plus exactly one verdict", calls)
+	}
+}
+
 // A session that can never be confirmed must not stream forever either. The
 // bound is on consecutive inconclusive checks, so a store that stays down closes
 // the stream instead of leaving an unverifiable session live indefinitely.
 func TestSSEEndsAfterRepeatedInconclusiveReauthorization(t *testing.T) {
 	source := &countingSource{}
-	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrInvalidToken}
+	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrCredentialStoreUnavailable}
 	handler, err := NewHandler(source, "T1", authenticator)
 	if err != nil {
 		t.Fatal(err)
@@ -736,5 +765,49 @@ func TestRTMWebSocketCorrelatesMessageFailure(t *testing.T) {
 func TestRTMMessageLimitMatchesSlackProtocol(t *testing.T) {
 	if maxRTMMessageBytes != 16<<10 {
 		t.Fatalf("RTM message limit=%d, want %d", maxRTMMessageBytes, 16<<10)
+	}
+}
+
+// failingEventSource answers every read with an error, which is the
+// server-side condition that ends an RTM stream intentionally.
+type failingEventSource struct{}
+
+func (failingEventSource) ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error) {
+	return nil, errors.New("event source is unavailable")
+}
+
+// An intentional end of an RTM stream is announced with Slack's goodbye
+// frame, so an official client reconnects instead of treating the close as a
+// failure. Nothing said goodbye before; the socket just vanished.
+func TestRTMWebSocketSaysGoodbyeWhenTheStreamEnds(t *testing.T) {
+	handler, err := NewRTMHandler(failingEventSource{}, "T1", testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	mux := http.NewServeMux()
+	handler.RegisterRTM(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/rtm?session_id=session-1"
+	config, err := websocket.NewConfig(websocketURL, server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	var hello map[string]any
+	if err := websocket.JSON.Receive(connection, &hello); err != nil || hello["type"] != "hello" {
+		t.Fatalf("hello=%v err=%v", hello, err)
+	}
+	var farewell map[string]any
+	if err := websocket.JSON.Receive(connection, &farewell); err != nil {
+		t.Fatalf("no goodbye before the close: %v", err)
+	}
+	if farewell["type"] != "goodbye" {
+		t.Fatalf("farewell=%v, want goodbye", farewell)
 	}
 }

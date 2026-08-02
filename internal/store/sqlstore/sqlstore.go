@@ -5280,8 +5280,8 @@ func (s *Store) CreateAppInstallation(ctx context.Context, value domain.AppInsta
 	return err
 }
 
-func (s *Store) SetAppBotToken(ctx context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, event events.Event) error {
-	if appID == "" || workspace == "" || tokenCiphertext == "" {
+func (s *Store) SetAppBotToken(ctx context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, written ...events.Event) error {
+	if appID == "" || workspace == "" || tokenCiphertext == "" || len(written) == 0 {
 		return store.InvalidArgument("invalid app bot token")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -5291,11 +5291,13 @@ func (s *Store) SetAppBotToken(ctx context.Context, appID domain.AppID, workspac
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO app_bot_tokens(app_id, workspace_id, token_ciphertext, updated_at)
 		VALUES (?, ?, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET token_ciphertext = excluded.token_ciphertext, updated_at = excluded.updated_at`,
-		appID, workspace, tokenCiphertext, event.CreatedAt.UTC().UnixNano()); err != nil {
+		appID, workspace, tokenCiphertext, written[0].CreatedAt.UTC().UnixNano()); err != nil {
 		return err
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
+	for _, event := range written {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

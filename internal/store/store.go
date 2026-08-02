@@ -391,7 +391,7 @@ type Store interface {
 	// SetAppBotToken stores an app's bot access token as sealed ciphertext so a
 	// function_executed dispatch can include it, exactly as Slack sends
 	// bot_access_token to the app.
-	SetAppBotToken(context.Context, domain.AppID, domain.WorkspaceID, string, events.Event) error
+	SetAppBotToken(context.Context, domain.AppID, domain.WorkspaceID, string, ...events.Event) error
 	// GetAppBotTokenCiphertext returns the sealed bot access token for an
 	// installed app, or ErrNotFound when the app has not issued one.
 	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)

@@ -2501,6 +2501,21 @@ func TestAuthRevokeDurablyInvalidatesToken(t *testing.T) {
 	}
 }
 
+// A credential store that did not answer is server trouble, not an
+// authentication outcome. Answering `invalid_auth` made official clients
+// discard their token and re-authenticate during every store outage;
+// `fatal_error` tells them to retry with the credential they already hold.
+func TestCredentialStoreOutageAnswersFatalErrorNotInvalidAuth(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeAuthError(recorder, fmt.Errorf("%w: connection refused", auth.ErrCredentialStoreUnavailable))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"error":"fatal_error"`) {
+		t.Fatalf("outage status=%d body=%s", recorder.Code, recorder.Body)
+	}
+	if strings.Contains(recorder.Body.String(), "invalid_auth") || strings.Contains(recorder.Body.String(), "not_authed") {
+		t.Fatalf("outage answered an authentication outcome: %s", recorder.Body)
+	}
+}
+
 func TestJSONDuplicateFieldsAreRejected(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", bytes.NewBufferString(`{"channel":"C1","channel":"C2","text":"duplicate"}`))
 	req.Header.Set("Content-Type", "application/json")

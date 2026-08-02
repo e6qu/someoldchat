@@ -104,25 +104,6 @@ type parityCase struct {
 	// wantSentinel is the sentinel both compositions must fail with, or nil when
 	// both must succeed.
 	wantSentinel error
-
-	// wantAgreedFailure marks a case where both compositions must fail and the
-	// class is whatever the implementation gives, which the sweep below then
-	// requires them to agree on.
-	//
-	// It replaces a wantUnclassifiedFailure flag that asserted the *absence* of
-	// a domain class. That assertion ratified a defect: a non-positive page
-	// bound is refused by a store guard that returns a bare errors.New
-	// (internal/store/memory/memory.go "event limit must be positive",
-	// internal/store/sqlstore/sqlstore.go "invalid Socket Mode response lease"),
-	// so classifyErrors matches nothing and mapError falls through to
-	// codes.Unavailable — HTTP 503, which asks a caller to retry a request that
-	// can never succeed, for a request that is simply malformed. Nine RPCs
-	// answer that way. Locking it in with a test meant giving those store guards
-	// a sentinel would turn the suite red for doing the right thing. This flag
-	// keeps the parity requirement, which is what the harness is for, and stops
-	// asserting the class is missing; it passes before and after the store is
-	// fixed. The fix itself belongs to internal/store and is reported.
-	wantAgreedFailure bool
 }
 
 func seedBaseline(t *testing.T, target *memory.Store) {
@@ -376,10 +357,6 @@ func TestCompositionsAgreeOnEveryErrorClassAndValue(t *testing.T) {
 				t.Fatalf("local error = %v, remote error = %v: one composition failed and the other did not", localErr, remoteErr)
 			}
 			switch {
-			case testCase.wantAgreedFailure:
-				if localErr == nil {
-					t.Fatal("both compositions succeeded, want a failure")
-				}
 			case testCase.wantSentinel == nil:
 				if localErr != nil {
 					t.Fatalf("both compositions failed with %v, want success", localErr)
@@ -1411,12 +1388,16 @@ func parityCases() []parityCase {
 			// The store owns the rule, so the refusal is the store's and neither
 			// composition invents one of its own.
 			//
-			// The refusal reaches a remote caller as codes.Unavailable today,
-			// because the store guard carries no sentinel; that is a defect in
-			// the guard, not a contract, and this case deliberately does not
-			// assert it either way. See wantAgreedFailure.
-			name:              "a page limit of zero",
-			wantAgreedFailure: true,
+			// The refusal is an invalid argument, and the case asserts it. A
+			// wantAgreedFailure flag used to hold this slot open while the store
+			// guards carried bare errors and a remote caller was answered
+			// codes.Unavailable — HTTP 503, a retry hint for a request that can
+			// never succeed. The guards carry store.ErrInvalidArgument now, so
+			// the contract is pinned like every other sentinel case; weakening
+			// it back to "any agreed failure" would let that regression return
+			// unseen.
+			name:         "a page limit of zero",
+			wantSentinel: storepkg.ErrInvalidArgument,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 0})
 				return nil, err
@@ -2477,7 +2458,9 @@ func parityCases() []parityCase {
 // deleted on the claim that "the implementation owns the answer, so both
 // compositions agree", which is exactly what this harness proves, and not one
 // deleted guard got a case. Nine RPCs turned a malformed request from HTTP 400
-// into HTTP 503 and nothing here saw it.
+// into HTTP 503 and nothing here saw it until the store guards gained
+// store.ErrInvalidArgument and the page-limit case above started asserting the
+// class instead of tolerating any agreed failure.
 //
 // The method set is read by reflection, and the methods a case exercises are
 // read from this file's own source, so a method added to chatapi.Service fails

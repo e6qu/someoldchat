@@ -163,7 +163,7 @@ func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, works
 		if err != nil || !member {
 			return record, member, err
 		}
-		return projectMessageSnapshot(ctx, state, record, snapshot)
+		return projectMessageSnapshot(ctx, state, record, snapshot, "")
 	}
 	delivered, err := events.Deliverable(record.Event)
 	if err != nil {
@@ -190,7 +190,7 @@ func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, works
 	if err != nil || !member {
 		return record, member, err
 	}
-	return projectMessageEvent(ctx, state, record, message)
+	return projectMessageEvent(ctx, state, record, message, "")
 }
 
 // PrepareAppEvent returns a Slack-shaped copy of a content-bearing app event
@@ -238,7 +238,7 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 	case "function_executed":
 		return prepareFunctionExecutedEvent(ctx, state, credentialKey, appID, authorizations, record)
 	default:
-		if channelID, scoped := eventChannelID(record.Event); scoped {
+		if channelID, scoped := eventChannelID(record.Event); scoped && !publicConversationLifecycleEvent(record.Event) {
 			authorizations, err = visibleAppAuthorizations(ctx, state, authorizations, channelID)
 			if err != nil {
 				return events.Record{}, false, err
@@ -246,6 +246,26 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 		}
 		return withEventAuthorizations(record, authorizations)
 	}
+}
+
+// publicConversationLifecycleEvent reports a lifecycle record about a public
+// channel. Slack addresses channel_created, channel_rename, channel_archive
+// and their kin to the workspace — a freshly created channel has no members
+// at all — so the membership filter that guards content-adjacent events must
+// not run for them. Private lifecycle records keep the filter: group_rename
+// to a non-member would leak the room's existence and name.
+func publicConversationLifecycleEvent(event events.Event) bool {
+	switch event.Topic {
+	case "conversation.created", "conversation.renamed", "conversation.archived", "conversation.unarchived", "conversation.deleted":
+	default:
+		return false
+	}
+	delivered, err := events.Deliverable(event)
+	if err != nil {
+		return false
+	}
+	isPrivate, ok := delivered.Bool("is_private")
+	return ok && !isPrivate
 }
 
 func prepareFunctionExecutedEvent(ctx context.Context, state AppEventProjectionStore, credentialKey []byte, appID domain.AppID, authorizations []domain.AppAuthorization, record events.Record) (events.Record, bool, error) {
@@ -327,13 +347,19 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 		return []string{"stars:read"}, nil
 	case strings.HasPrefix(event.Topic, "emoji."):
 		return []string{"emoji:read"}, nil
-	case strings.HasPrefix(event.Topic, "dnd."):
-		return []string{"dnd:read"}, nil
 	case strings.HasPrefix(event.Topic, "usergroup."):
 		return []string{"usergroups:read"}, nil
+	// The DND check precedes the generic user. prefix: the durable topics are
+	// user.dnd_snoozed and friends, and a "dnd." case here matched nothing, so
+	// dnd_updated was deliverable on a users:read grant the AsyncAPI does not
+	// accept for it.
+	case strings.HasPrefix(event.Topic, "user.dnd_"):
+		return []string{"dnd:read"}, nil
 	case strings.HasPrefix(event.Topic, "user."):
 		return []string{"users:read"}, nil
-	case strings.HasPrefix(event.Topic, "team."):
+	// team_rename's durable topic is workspace.name_changed; a "team." case
+	// here matched nothing, so the event would have required no scope at all.
+	case strings.HasPrefix(event.Topic, "workspace."):
 		return []string{"team:read"}, nil
 	case strings.HasPrefix(event.Topic, "link."):
 		return []string{"links:read"}, nil
@@ -376,6 +402,9 @@ func userCanSeeChannelEvent(ctx context.Context, state UserEventProjectionStore,
 	if !scoped {
 		return true, nil
 	}
+	if publicConversationLifecycleEvent(event) {
+		return true, nil
+	}
 	member, err := state.IsConversationMember(ctx, channelID, userID)
 	if errors.Is(err, store.ErrNotFound) {
 		return false, nil
@@ -411,7 +440,7 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 			return record, false, err
 		}
 		record, _, _ = withEventAuthorizations(record, authorizations)
-		return projectMessageSnapshot(ctx, state, record, snapshot)
+		return projectMessageSnapshot(ctx, state, record, snapshot, appBotUserID(authorizations))
 	}
 	delivered, err := events.Deliverable(record.Event)
 	if err != nil {
@@ -436,18 +465,31 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 		return record, false, err
 	}
 	record, _, _ = withEventAuthorizations(record, authorizations)
-	return projectMessageEvent(ctx, state, record, message)
+	return projectMessageEvent(ctx, state, record, message, appBotUserID(authorizations))
 }
 
 type messageEventProjectionStore interface {
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
 }
 
-func projectMessageEvent(ctx context.Context, state any, record events.Record, message domain.Message) (events.Record, bool, error) {
-	return projectMessageSnapshot(ctx, state, record, messageEventSnapshot{Current: message})
+func projectMessageEvent(ctx context.Context, state any, record events.Record, message domain.Message, botUserID domain.UserID) (events.Record, bool, error) {
+	return projectMessageSnapshot(ctx, state, record, messageEventSnapshot{Current: message}, botUserID)
 }
 
-func projectMessageSnapshot(ctx context.Context, state any, record events.Record, snapshot messageEventSnapshot) (events.Record, bool, error) {
+// appBotUserID names the receiving app's bot member, when the app has one:
+// it is the user the message text must mention for the app_mention companion
+// to be derived. Per-user delivery passes none — app_mention is an
+// application event.
+func appBotUserID(authorizations []domain.AppAuthorization) domain.UserID {
+	for _, authorization := range authorizations {
+		if authorization.TokenType == "bot" {
+			return authorization.UserID
+		}
+	}
+	return ""
+}
+
+func projectMessageSnapshot(ctx context.Context, state any, record events.Record, snapshot messageEventSnapshot, botUserID domain.UserID) (events.Record, bool, error) {
 	switch record.Event.Topic {
 	case "message.changed":
 		if snapshot.Previous == nil {
@@ -492,6 +534,11 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 		body, err := appEventMessage(ctx, state, snapshot.Current)
 		if err != nil {
 			return events.Record{}, false, err
+		}
+		// The marker is routing metadata for the events builder, which strips
+		// it and emits the app_mention companion; it never reaches a consumer.
+		if botUserID != "" && strings.Contains(snapshot.Current.Text, "<@"+string(botUserID)+">") {
+			body["app_mentioned"] = true
 		}
 		return encodeProjectedEvent(record, body)
 	}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 type Scope string
@@ -114,6 +115,14 @@ type Authenticator interface {
 	Authenticate(*http.Request) (Principal, error)
 }
 
+// The lookup stores share one error contract: an error wrapping
+// store.ErrNotFound means the credential does not exist, and any other error
+// means the store could not answer. Every implementation already speaks it —
+// the in-memory and SQL repositories return store.ErrNotFound for an unknown
+// credential, and the gRPC seam restores that sentinel across the wire while
+// an outage arrives unclassified — so the authenticators rely on it to keep a
+// backend outage from being reported as a bad credential.
+
 type TokenStore interface {
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
 }
@@ -180,6 +189,15 @@ var (
 	ErrAccountInactive = fmt.Errorf("%w: the account behind the credential is not active", ErrNotAuthenticated)
 
 	ErrMissingScope = errors.New("missing scope")
+
+	// ErrCredentialStoreUnavailable is not an authentication outcome at all:
+	// the credential store did not answer, so nothing about the presented
+	// credential is known. It deliberately does not wrap ErrNotAuthenticated —
+	// a caller that treats an outage as a bad credential answers
+	// `invalid_auth`, and official clients respond to that by discarding the
+	// token and re-authenticating, turning a transient backend failure into
+	// mass sign-outs. → `fatal_error` on the Web API, 503 on the web client.
+	ErrCredentialStoreUnavailable = errors.New("credential store did not answer")
 )
 
 type Static struct {
@@ -552,8 +570,11 @@ func (b Browser) Authenticate(r *http.Request) (Principal, error) {
 		return Principal{}, ErrNoToken
 	}
 	record, err := b.store.LookupSession(r.Context(), cookie.Value)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
 		return Principal{}, ErrInvalidToken
+	}
+	if err != nil {
+		return Principal{}, fmt.Errorf("%w: %v", ErrCredentialStoreUnavailable, err)
 	}
 	if record.Revoked {
 		return Principal{}, ErrTokenRevoked
@@ -599,8 +620,11 @@ func (s AppStored) Authenticate(r *http.Request) (Principal, error) {
 		return Principal{}, ErrNoToken
 	}
 	record, err := s.store.LookupAppToken(r.Context(), token)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
 		return Principal{}, ErrInvalidToken
+	}
+	if err != nil {
+		return Principal{}, fmt.Errorf("%w: %v", ErrCredentialStoreUnavailable, err)
 	}
 	if record.Revoked {
 		return Principal{}, ErrTokenRevoked
@@ -617,20 +641,22 @@ func (s AppStored) Authenticate(r *http.Request) (Principal, error) {
 
 // Authenticate resolves a bearer token to its principal.
 //
-// A lookup failure is reported as ErrInvalidToken rather than as a dependency
-// failure: the store contract for an unknown token is an error, and the
-// authenticator cannot tell that apart from an outage without importing the
-// store's sentinels. See the follow-up recorded for TokenStore, which should
-// distinguish "no such token" from "the token store is unreachable" so an outage
-// stops looking like a bad credential.
+// An unknown token and an unreachable token store are different answers: the
+// first is ErrInvalidToken, the second ErrCredentialStoreUnavailable. They
+// used to be collapsed onto ErrInvalidToken to avoid importing the store's
+// sentinels, which made every store outage read as a bad credential; the
+// error contract is now stated on the lookup interfaces instead.
 func (s Stored) Authenticate(r *http.Request) (Principal, error) {
 	token := requestToken(r)
 	if token == "" {
 		return Principal{}, ErrNoToken
 	}
 	record, err := s.store.LookupToken(r.Context(), token)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
 		return Principal{}, ErrInvalidToken
+	}
+	if err != nil {
+		return Principal{}, fmt.Errorf("%w: %v", ErrCredentialStoreUnavailable, err)
 	}
 	if record.Revoked {
 		return Principal{}, ErrTokenRevoked

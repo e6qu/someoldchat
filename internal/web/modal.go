@@ -394,7 +394,7 @@ func firstValue(values []string) string {
 func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	values, ok := h.decodeModalMutation(w, r)
@@ -451,7 +451,7 @@ func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 func (h Handler) viewAction(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	values, ok := h.decodeModalMutation(w, r)
@@ -542,7 +542,7 @@ func modalActionDispatchValue(action modalActionView, selected []string) (string
 func (h Handler) viewClose(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	fields, ok := h.decodeMutation(w, r, "That app modal could not be closed. Reload the workspace and try again.")
@@ -573,7 +573,7 @@ func (h Handler) viewClose(w http.ResponseWriter, r *http.Request) {
 func (h Handler) renderModalResult(w http.ResponseWriter, r *http.Request, principal auth.Principal, state composerState) {
 	reader, err := requireHistoryReader(principal)
 	if err != nil {
-		h.writeAuthError(w, err)
+		h.writeAuthError(w, r, err)
 		return
 	}
 	h.renderApp(w, r, reader, state)

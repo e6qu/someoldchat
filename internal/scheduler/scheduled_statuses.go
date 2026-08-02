@@ -16,6 +16,9 @@ type ScheduledStatusSource interface {
 	DueScheduledStatuses(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.ScheduledStatus, error)
 	EarliestScheduledStatusStart(context.Context, domain.WorkspaceID) (time.Time, error)
 	ActivateScheduledStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledStatusID, time.Time, time.Time, events.Event) (bool, error)
+	// GetUser exists because the profile-change event this worker emits
+	// carries the user object, and only the store holds it.
+	GetUser(context.Context, domain.UserID) (domain.User, error)
 }
 
 type ScheduledStatusWorker struct {
@@ -46,7 +49,12 @@ func (w ScheduledStatusWorker) RunOnceAt(ctx context.Context, workspaceID domain
 		if err := ctx.Err(); err != nil {
 			return completed, errors.Join(failures, err)
 		}
-		event, err := scheduledStatusEvent(value, now)
+		user, err := w.Source.GetUser(ctx, value.UserID)
+		if err != nil {
+			failures = errors.Join(failures, err)
+			continue
+		}
+		event, err := scheduledStatusEvent(value, user, now)
 		if err != nil {
 			failures = errors.Join(failures, err)
 			continue
@@ -63,19 +71,30 @@ func (w ScheduledStatusWorker) RunOnceAt(ctx context.Context, workspaceID domain
 	return completed, failures
 }
 
-func scheduledStatusEvent(value domain.ScheduledStatus, now time.Time) (events.Event, error) {
+func scheduledStatusEvent(value domain.ScheduledStatus, user domain.User, now time.Time) (events.Event, error) {
 	id, err := domain.NewEventID()
 	if err != nil {
 		return events.Event{}, err
 	}
+	// A started status snapshots the state activation produces; a missed one
+	// changed nothing, so the current user rides unmodified and the event
+	// records only that the schedule came and went.
 	reason := "scheduled_status_started"
+	statusChanged := true
 	if !value.EndsAt.After(now) {
 		reason = "scheduled_status_missed"
+		statusChanged = false
+	} else {
+		user.Profile.StatusText = value.StatusText
+		user.Profile.StatusEmoji = value.StatusEmoji
+		user.Profile.StatusExpiration = value.EndsAt
+		user.Profile.ActiveScheduledStatusID = value.ID
 	}
-	return events.New(id, value.WorkspaceID, value.UserID, events.NewPayload(
-		"user.profile_changed",
-		events.String("user_id", string(value.UserID)),
+	payload, err := events.UserChangePayload("user.profile_changed", user, false, statusChanged, now,
 		events.String("scheduled_status_id", string(value.ID)),
-		events.String("reason", reason),
-	), now)
+		events.String("reason", reason))
+	if err != nil {
+		return events.Event{}, err
+	}
+	return events.New(id, value.WorkspaceID, value.UserID, payload, now)
 }

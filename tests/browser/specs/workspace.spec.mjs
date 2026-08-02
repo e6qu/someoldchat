@@ -525,7 +525,19 @@ test('[DRAFT-01 DRAFT-02 A11Y-01] drafts persist on the server and Drafts & sent
   const composer = page.locator('form.composer textarea[name="text"]');
   const draft = `server draft qualification ${Date.now()}`;
   await Promise.all([
-    page.waitForResponse((response) => response.url().includes('/app/draft?') && response.status() === 204),
+    // Any page load or navigation also POSTs /app/draft (init persist and
+    // pagehide flush), so a bare "204 from /app/draft" can resolve on one of
+    // those while the debounced save of THIS draft is still pending, and the
+    // reload below then races it. Key the wait on the request that carries
+    // the new text; the body is form-encoded, so parse it rather than
+    // substring-matching (spaces arrive as "+").
+    page.waitForResponse(
+      (response) =>
+        response.url().includes('/app/draft?') &&
+        response.status() === 204 &&
+        response.request().method() === 'POST' &&
+        new URLSearchParams(response.request().postData() || '').get('text') === draft,
+    ),
     composer.fill(draft),
   ]);
   await page.evaluate(() => localStorage.clear());
@@ -601,6 +613,12 @@ test('[LATER-01 LATER-02 LATER-03 A11Y-01] Later saves privately and supports ev
 
 test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut, Later lifecycle, and built-in slash command', async ({ page, context, request }) => {
   await signIn(context);
+  // The Later pages reload themselves on reminder events. This journey is the
+  // CRUD contract, not live delivery, and the reminders it creates fire those
+  // very events — an EventSource replay right after landing reloads the page
+  // under an open editor or a running axe scan, which is the WebKit flake.
+  // Hold the stream shut so every state change observed is one this test made.
+  await page.route('**/events*', (route) => route.abort());
   const sourceText = `reminder source ${Date.now()}`;
   await postThroughTheAPI(request, sourceText);
   await page.goto('/app');
@@ -639,6 +657,7 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await reminder.getByRole('button', { name: 'Mark complete' }).click();
   await expect(page.getByRole('status')).toHaveText('Reminder completed.');
   await page.getByRole('link', { name: 'Completed' }).click();
+  await expect(page).toHaveURL(/\/app\/later\?.*state=completed/);
   reminder = page.locator('.later-item', { hasText: description });
   await expect(reminder).toContainText('Completed');
   await reminder.getByRole('button', { name: 'Delete reminder' }).click();
@@ -646,6 +665,7 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(page.locator('.later-item', { hasText: description })).toHaveCount(0);
 
   await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page).toHaveURL(/\/app(\?|$)/);
   const channelReminder = `channel reminder ${Date.now()}`;
   const composer = page.locator('form.composer textarea[name="text"]');
   await composer.fill(`/remind #general ${channelReminder} every Thursday at 9am`);
@@ -659,6 +679,7 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(channelItem.getByText('Edit', { exact: true })).toHaveCount(0);
 
   await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page).toHaveURL(/\/app(\?|$)/);
   await expect(page.locator('.message-text', { hasText: channelReminder })).toHaveCount(0);
   await composer.fill('/remind list');
   await page.getByRole('button', { name: 'Send' }).click();
@@ -1257,7 +1278,19 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
 
   const draft = `durable draft ${Date.now()}`;
   await Promise.all([
-    page.waitForResponse((response) => response.url().includes('/app/draft?') && response.status() === 204),
+    // Any page load or navigation also POSTs /app/draft (init persist and
+    // pagehide flush), so a bare "204 from /app/draft" can resolve on one of
+    // those while the debounced save of THIS draft is still pending, and the
+    // reload below then races it. Key the wait on the request that carries
+    // the new text; the body is form-encoded, so parse it rather than
+    // substring-matching (spaces arrive as "+").
+    page.waitForResponse(
+      (response) =>
+        response.url().includes('/app/draft?') &&
+        response.status() === 204 &&
+        response.request().method() === 'POST' &&
+        new URLSearchParams(response.request().postData() || '').get('text') === draft,
+    ),
     composer.fill(draft),
   ]);
   await page.reload();
@@ -2155,7 +2188,13 @@ test('[AUTH-03] signing out ends the session and the signed-out page is terminal
   await expect(page.getByText('Ask a workspace administrator how to sign in again.')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Sign in with Shauth' })).toHaveCount(0);
 
-  // The revoked session cannot reopen a protected page.
-  const protectedResponse = await page.goto('/app');
-  expect(protectedResponse.status()).toBe(401);
+  // The revoked session cannot reopen a protected page: the browser is sent
+  // into sign-in rather than shown protected content. A bare 401 used to be
+  // asserted here, but AUTH-03 requires only that protected content stays
+  // unreachable, AUTH-04 requires that the person is offered
+  // reauthentication, and the SSO validator expects exactly this 303 — a
+  // dead-end 401 page offered neither.
+  await page.goto('/app');
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page.locator('form.composer')).toHaveCount(0);
 });

@@ -20,7 +20,15 @@ import (
 
 const (
 	connectionLifetime = 30 * time.Second
-	maxEnvelopeBytes   = 1 << 20
+	// connectionRefreshAge is how long one WebSocket serves before the handler
+	// asks the client to reconnect with Slack's disconnect frame
+	// ({"type":"disconnect","reason":"refresh_requested"}). Slack refreshes
+	// Socket Mode connections on the order of half an hour; official SDKs
+	// treat the frame as an orderly handoff and reconnect without backoff,
+	// which is what lets a deployment drain a replica without dropping
+	// deliveries on the floor.
+	connectionRefreshAge = 30 * time.Minute
+	maxEnvelopeBytes     = 1 << 20
 	// Slack's Socket Mode contract keeps a connection alive with ping/pong. A
 	// peer that disappears without a TCP FIN is otherwise undetectable, and the
 	// connection plus its reader goroutine and its connection-limit slot stay
@@ -141,6 +149,10 @@ type Handler struct {
 	Interactions InteractionQueue
 	Responses    ResponseSink
 	Upgrader     websocket.Upgrader
+	// RefreshAge overrides connectionRefreshAge, the horizon at which one
+	// WebSocket is handed off with a refresh_requested disconnect frame. Zero
+	// selects the default; only tests shorten it.
+	RefreshAge time.Duration
 	// Logger records connection-level failures that are handled rather than
 	// returned to a caller: a released connection slot that could not be
 	// released, and a durable record that can never be delivered to an app.
@@ -205,6 +217,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(writeTimeout))
 	}
+	// disconnectWith announces the close in Slack's own vocabulary before the
+	// WebSocket close frame: {"type":"disconnect","reason":…}. A bare close
+	// reads as a failure to an official SDK; the frame makes it an instruction.
+	// "warning" is server trouble the client should reconnect through, and
+	// "refresh_requested" is the routine connection handoff.
+	disconnectWith := func(reason string, code int, detail string) {
+		_ = writeJSON(map[string]any{"type": "disconnect", "reason": reason, "debug_info": map[string]string{"host": servingHost(r)}})
+		closeWith(code, detail)
+	}
 	delivery := h.newDelivery(connection)
 	if delivery != nil {
 		defer func() {
@@ -225,7 +246,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	connectionCount, err := h.Store.CountSocketModeConnections(r.Context(), connection.AppID)
 	if err != nil {
-		closeWith(websocket.CloseInternalServerErr, "connection state unavailable")
+		disconnectWith("warning", websocket.CloseInternalServerErr, "connection state unavailable")
 		return
 	}
 	// debug_info.host identifies the host serving the connection. Reporting the
@@ -273,6 +294,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer leaseTicker.Stop()
 	pingTicker := time.NewTicker(pingPeriod)
 	defer pingTicker.Stop()
+	refreshAge := h.RefreshAge
+	if refreshAge <= 0 {
+		refreshAge = connectionRefreshAge
+	}
+	refreshTimer := time.NewTimer(refreshAge)
+	defer refreshTimer.Stop()
 	type pendingEnvelope struct {
 		sequence    uint64
 		interaction bool
@@ -315,7 +342,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if err := h.Responses.HandleSocketModeResponse(r.Context(), connection.AppID, envelope.EnvelopeID, envelope.Payload); err != nil {
-					closeWith(websocket.CloseInternalServerErr, "response payload routing failed")
+					disconnectWith("warning", websocket.CloseInternalServerErr, "response payload routing failed")
 					return
 				}
 			}
@@ -362,13 +389,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					closeWith(deliveryCloseCode(releaseErr))
 					return
 				}
-				closeWith(websocket.CloseTryAgainLater, "envelope was not acknowledged")
+				disconnectWith("warning", websocket.CloseTryAgainLater, "envelope was not acknowledged")
 				return
 			}
 			if interactionDelivery != nil {
 				interaction, ok, err := interactionDelivery.next(r.Context())
 				if err != nil {
-					closeWith(websocket.CloseInternalServerErr, "interaction source unavailable")
+					disconnectWith("warning", websocket.CloseInternalServerErr, "interaction source unavailable")
 					return
 				}
 				if ok {
@@ -389,7 +416,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			record, ok, err := delivery.next(r.Context())
 			if err != nil {
-				closeWith(websocket.CloseInternalServerErr, "event source unavailable")
+				disconnectWith("warning", websocket.CloseInternalServerErr, "event source unavailable")
 				return
 			}
 			if !ok {
@@ -414,7 +441,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				} else if errors.Is(err, events.ErrSlackEventIncomplete) || errors.Is(err, events.ErrPayloadFieldInvalid) {
 					h.logger().Error("Socket Mode dropped a record whose payload cannot fill its Slack event", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic, "error", err)
 				} else if !errors.Is(err, events.ErrPayloadInternal) && !errors.Is(err, events.ErrPayloadMalformed) && !errors.Is(err, events.ErrPayloadRecipientScoped) {
-					closeWith(websocket.CloseInternalServerErr, "event payload is invalid")
+					disconnectWith("warning", websocket.CloseInternalServerErr, "event payload is invalid")
 					return
 				} else {
 					h.logger().Warn("Socket Mode skipped an undeliverable event", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic, "error", err)
@@ -460,9 +487,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-leaseTicker.C:
 			if err := h.Store.RenewSocketModeConnection(r.Context(), connection.ID, time.Now().UTC().Add(connectionLifetime)); err != nil {
-				closeWith(websocket.CloseInternalServerErr, "connection lease unavailable")
+				disconnectWith("warning", websocket.CloseInternalServerErr, "connection lease unavailable")
 				return
 			}
+		case <-refreshTimer.C:
+			disconnectWith("refresh_requested", websocket.CloseNormalClosure, "refresh_requested")
+			return
 		}
 	}
 }
