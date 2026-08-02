@@ -1207,3 +1207,121 @@ func TestASingleWorkspaceDrawsNoSwitcher(t *testing.T) {
 		t.Fatalf("a lone workspace drew a switcher: %s", response.Body.String())
 	}
 }
+
+// CONNECT-01..03 in the browser: the details panel is where "who else is in
+// this channel" is already asked, so an external organization belongs beside a
+// person. It must distinguish an outstanding invitation from a connection —
+// an invitation is not a place in the channel — and say what accepting it
+// means before it is sent.
+func TestTheConnectPanelSeparatesInvitationsFromConnections(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+	store.SeedUser(domain.User{ID: "U1-second", WorkspaceID: "T2", Email: "admin@example.test", Name: "Admin"})
+	if err := store.SetWorkspaceRole(ctx, "T2", "U1-second", domain.WorkspaceRoleAdmin, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+
+	details := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app?channel=C1&details=1", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	before := details()
+	for _, expected := range []string{"Shared with other organizations", "Only this workspace is in this channel", "read this channel"} {
+		if !strings.Contains(before, expected) {
+			t.Fatalf("the Connect panel is missing %q: %s", expected, before)
+		}
+	}
+
+	sent := adminMutationRequest(http.MethodPost, "/app/connect/invite?channel=C1", "target=T2")
+	sentResponse := httptest.NewRecorder()
+	handler.ServeHTTP(sentResponse, sent)
+	if sentResponse.Code != http.StatusSeeOther {
+		t.Fatalf("invite=%d body=%s", sentResponse.Code, sentResponse.Body.String())
+	}
+	pending := details()
+	// An outstanding invitation is not a connection: the panel must still say
+	// only this workspace is in the channel.
+	if !strings.Contains(pending, "Only this workspace is in this channel") || !strings.Contains(pending, "Second") {
+		t.Fatalf("an invitation was rendered as a connection: %s", pending)
+	}
+
+	page, err := store.ListSharedInvites(ctx, "T1", domain.SharedInvitePending, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Invites) != 1 {
+		t.Fatalf("invites=%+v err=%v", page.Invites, err)
+	}
+	invite := page.Invites[0]
+	approve := adminMutationRequest(http.MethodPost, "/app/connect/approve?channel=C1", "invite_id="+string(invite.ID))
+	approveResponse := httptest.NewRecorder()
+	handler.ServeHTTP(approveResponse, approve)
+	if approveResponse.Code != http.StatusSeeOther {
+		t.Fatalf("approve=%d body=%s", approveResponse.Code, approveResponse.Body.String())
+	}
+	// Still not a connection until the other organization accepts.
+	if !strings.Contains(details(), "Only this workspace is in this channel") {
+		t.Fatalf("an approved invitation was rendered as a connection: %s", details())
+	}
+
+	if _, err := (service.Messages{Store: store}).AcceptSharedInvite(ctx, "T2", "U1-second", invite.ID); err != nil {
+		t.Fatal(err)
+	}
+	connected := details()
+	// The organization renders as its identifier: a host administrator is not a
+	// member of the workspace it invited, so its name is not readable from
+	// here. See Handler.workspaceName.
+	if strings.Contains(connected, "Only this workspace is in this channel") || !strings.Contains(connected, "In this channel: T2") {
+		t.Fatalf("an accepted invitation is not rendered as a connection: %s", connected)
+	}
+}
+
+// One control withdraws an invitation whichever side of the state machine it
+// is on: two buttons that mean the same thing would make an administrator
+// guess which applies.
+func TestWithdrawingWorksOnPendingAndApprovedInvitations(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+	messages := service.Messages{Store: store}
+
+	pending, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/connect/deny?channel=C1", "invite_id="+string(pending.ID)))
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("deny pending=%d body=%s", response.Code, response.Body.String())
+	}
+	stored, err := store.GetSharedInvite(ctx, pending.ID)
+	if err != nil || stored.Status != domain.SharedInviteRevoked {
+		t.Fatalf("pending invitation=%+v err=%v", stored, err)
+	}
+
+	approved, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", approved.ID); err != nil {
+		t.Fatal(err)
+	}
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, adminMutationRequest(http.MethodPost, "/app/connect/deny?channel=C1", "invite_id="+string(approved.ID)))
+	if second.Code != http.StatusSeeOther {
+		t.Fatalf("deny approved=%d body=%s", second.Code, second.Body.String())
+	}
+	settled, err := store.GetSharedInvite(ctx, approved.ID)
+	if err != nil || settled.Status != domain.SharedInviteRevoked {
+		t.Fatalf("approved invitation=%+v err=%v", settled, err)
+	}
+}

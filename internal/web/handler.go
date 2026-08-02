@@ -315,6 +315,31 @@ type conversationDetailsView struct {
 	NotificationLevel string
 	FollowEveryThread bool
 	ArchiveVerb       string
+	// Slack Connect. Connected names the organizations already in the channel;
+	// Outstanding names the invitations still waiting on someone, so the panel
+	// distinguishes "shared with" from "asked to share with" rather than
+	// implying an invitation is a connection.
+	Connected    []connectOrganizationView
+	Outstanding  []connectInviteView
+	CanConnect   bool
+	ConnectURL   string
+	ConnectHosts []conversationView
+}
+
+type connectOrganizationView struct {
+	ID   string
+	Name string
+}
+
+type connectInviteView struct {
+	ID         string
+	Target     string
+	Status     string
+	Expires    string
+	CanApprove bool
+	CanRevoke  bool
+	ApproveURL string
+	DenyURL    string
 }
 
 type pageData struct {
@@ -862,6 +887,11 @@ const pageStyle = `<style>
 .workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}
 .sidebar{background:var(--accent);color:var(--on-accent);padding:16px 10px;display:flex;flex-direction:column;gap:14px;overflow:auto}
 .workspace-name{font-weight:800;padding:0 10px}
+.connect-invites{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
+.connect-invites li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--line);border-radius:8px}
+.connect-actions{display:flex;gap:8px}
+.connect-invite{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:8px}
+.connect-invite label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
 .workspace-switch summary{cursor:pointer;list-style:none}
 .workspace-switch summary::-webkit-details-marker{display:none}
 .workspace-switch summary::after{content:" ▾"}
@@ -1673,6 +1703,27 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button type="submit">Change to Private</button>
           </form>
         </details>
+        {{end}}
+      </section>
+      {{end}}
+      {{if .Details.IsChannel}}
+      <section class="conversation-details-section" id="conversation-connect" aria-labelledby="conversation-connect-heading">
+        <h3 id="conversation-connect-heading">Shared with other organizations</h3>
+        {{if .Details.Connected}}<p>In this channel: {{range $index, $org := .Details.Connected}}{{if $index}}, {{end}}{{$org.Name}}{{end}}</p>{{else}}<p class="read-only">Only this workspace is in this channel.</p>{{end}}
+        {{if .Details.Outstanding}}<ul class="connect-invites" aria-label="Outstanding invitations">{{range .Details.Outstanding}}<li>
+          <span><strong>{{.Target}}</strong> <span class="status">{{.Status}}</span>{{if .Expires}}<br><span class="status">valid until {{.Expires}}</span>{{end}}</span>
+          <span class="connect-actions">
+          {{if .CanApprove}}<form method="post" action="{{.ApproveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_id" value="{{.ID}}"><button type="submit">Approve</button></form>{{end}}
+          {{if .CanRevoke}}<form method="post" action="{{.DenyURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_id" value="{{.ID}}"><button type="submit">Withdraw</button></form>{{end}}
+          </span>
+        </li>{{end}}</ul>{{end}}
+        {{if .Details.CanConnect}}
+        <form class="connect-invite" method="post" action="{{.Details.ConnectURL}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label>Invite an organization<select name="target">{{range .Details.ConnectHosts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+          <button type="submit">Send invitation</button>
+        </form>
+        <p class="read-only">An invitation is recorded here and takes effect only when the other organization accepts it. Everyone there will be able to read this channel's history from the moment they join.</p>
         {{end}}
       </section>
       {{end}}
@@ -3425,6 +3476,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/files/delete", h.deleteFile)
 	mux.HandleFunc("GET /app/remote-files", h.remoteFiles)
 	mux.HandleFunc("POST /app/workspace/switch", h.switchWorkspace)
+	mux.HandleFunc("POST /app/connect/invite", h.connectInvite)
+	mux.HandleFunc("POST /app/connect/approve", h.connectApprove)
+	mux.HandleFunc("POST /app/connect/deny", h.connectDeny)
 	mux.HandleFunc("GET /app/huddle", h.huddleFragment)
 	mux.HandleFunc("POST /app/huddle/start", h.huddleMutation("started", h.startHuddle, "Huddle started"))
 	mux.HandleFunc("POST /app/huddle/join", h.huddleMutation("joined", h.joinHuddle, "You joined the huddle"))
@@ -5012,6 +5066,27 @@ func (h Handler) participantNames(ctx context.Context, principal auth.Principal,
 // directory queries. Slack caps an invite at 1,000 users; the same bound keeps
 // this human-facing selector finite and makes an oversized workspace explicit
 // instead of silently pretending that the first page is the full membership.
+// workspaceName resolves an organization's name for display, falling back to
+// its identifier.
+//
+// The fallback is the ordinary case for a connected organization, not an error:
+// WorkspaceInfo requires the reader to be a member, and a host workspace's
+// administrator is by definition not a member of the organization it invited.
+// Showing the identifier is honest — it is the name this deployment can prove —
+// where a blank row would hide a real participant. Resolving the name properly
+// needs a read that says "the public identity of an organization I share a
+// channel with", which is a cross-workspace directory this product does not
+// have.
+func (h Handler) workspaceName(ctx context.Context, principal auth.Principal, id domain.WorkspaceID) string {
+	if id == "" {
+		return ""
+	}
+	if workspace, err := h.Messages.WorkspaceInfo(ctx, id, principal.UserID); err == nil && strings.TrimSpace(workspace.Name) != "" {
+		return workspace.Name
+	}
+	return string(id)
+}
+
 func (h Handler) newConversationDetails(ctx context.Context, principal auth.Principal, workspace domain.Workspace, conversation domain.Conversation, isMember bool) (*conversationDetailsView, error) {
 	const maxDirectoryPages = 10
 
@@ -5080,6 +5155,58 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 			break
 		}
 	}
+	// The Slack Connect panel. A read failure leaves it empty rather than
+	// failing the whole details view: the conversation is still readable, and
+	// a modal that will not open because a sharing list could not be read is a
+	// worse outcome than a missing section.
+	connected := make([]connectOrganizationView, 0)
+	outstanding := make([]connectInviteView, 0)
+	connectDestinations := make([]conversationView, 0)
+	if isChannel {
+		if teams, _, _, teamsErr := h.Messages.AdminConversationTeams(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 100}); teamsErr == nil {
+			for _, team := range teams {
+				if team == conversation.WorkspaceID {
+					continue
+				}
+				connected = append(connected, connectOrganizationView{ID: string(team), Name: h.workspaceName(ctx, principal, team)})
+			}
+		}
+		canApprove := principal.HasScope(auth.ScopeConversationsConnectManage)
+		for _, status := range []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved} {
+			page, listErr := h.Messages.ListSharedInvites(ctx, principal.WorkspaceID, principal.UserID, status, domain.PageRequest{Limit: 25})
+			if listErr != nil {
+				continue
+			}
+			for _, invite := range page.Invites {
+				if invite.ConversationID != conversation.ID {
+					continue
+				}
+				view := connectInviteView{
+					ID: string(invite.ID), Status: string(invite.Status),
+					Target:     h.workspaceName(ctx, principal, invite.TargetWorkspaceID),
+					CanApprove: canApprove && invite.Status == domain.SharedInvitePending,
+					CanRevoke:  canApprove,
+					ApproveURL: "/app/connect/approve?channel=" + url.QueryEscape(string(conversation.ID)),
+					DenyURL:    "/app/connect/deny?channel=" + url.QueryEscape(string(conversation.ID)),
+				}
+				if invite.TargetEmail != "" && view.Target == "" {
+					view.Target = invite.TargetEmail
+				}
+				if !invite.ExpiresAt.IsZero() {
+					view.Expires = formatTime(invite.ExpiresAt)
+				}
+				outstanding = append(outstanding, view)
+			}
+		}
+		if summaries, workspacesErr := h.Messages.UserWorkspaces(ctx, principal.WorkspaceID, principal.UserID); workspacesErr == nil {
+			for _, summary := range summaries {
+				if summary.Workspace.ID == principal.WorkspaceID {
+					continue
+				}
+				connectDestinations = append(connectDestinations, conversationView{ID: string(summary.Workspace.ID), Name: summary.Workspace.Name})
+			}
+		}
+	}
 	name := conversationName(conversation)
 	conversationType := "Channel"
 	switch {
@@ -5142,6 +5269,11 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		NotificationLevel: string(notificationPreferences.Level),
 		FollowEveryThread: notificationPreferences.FollowEveryThread,
 		ArchiveVerb:       archiveVerb,
+		Connected:         connected,
+		Outstanding:       outstanding,
+		CanConnect:        canManage && isChannel && !conversation.Archived && principal.HasScope(auth.ScopeConversationsConnectWrite),
+		ConnectURL:        "/app/connect/invite?channel=" + url.QueryEscape(string(conversation.ID)),
+		ConnectHosts:      connectDestinations,
 	}, nil
 }
 
