@@ -63,6 +63,7 @@ service.invalid_profile
 service.invalid_reaction
 service.invalid_reminder
 service.invalid_remote_file
+service.invalid_retention_duration
 service.invalid_scheduled_status
 service.invalid_search
 service.invalid_shared_invite
@@ -87,6 +88,7 @@ service.not_in_conversation
 service.not_workspace_admin
 service.oauth_app_mismatch
 service.reminder_time_in_past
+service.retention_not_supported
 service.scheduled_status_limit
 service.scheduled_time_in_past
 service.scheduled_time_too_far

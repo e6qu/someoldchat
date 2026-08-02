@@ -79,6 +79,9 @@ type Store struct {
 	outboxLeases                  map[uint64]memoryLease
 	delivered                     map[uint64]bool
 	idempotency                   map[string]domain.MessageID
+	retentionPolicies             map[domain.WorkspaceID]domain.RetentionPolicy
+	conversationRetention         map[domain.ConversationID]domain.ConversationRetention
+	retentionSweptAt              map[domain.ConversationID]time.Time
 	nextAttempt                   map[uint64]time.Time
 	readCursors                   map[string]domain.ReadCursor
 	workspaceNotificationPrefs    map[string]domain.WorkspaceNotificationPreferences
@@ -188,7 +191,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), sharedInvites: make(map[domain.SharedInviteID]domain.SharedInvite), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), sharedInvites: make(map[domain.SharedInviteID]domain.SharedInvite), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), retentionPolicies: make(map[domain.WorkspaceID]domain.RetentionPolicy), conversationRetention: make(map[domain.ConversationID]domain.ConversationRetention), retentionSweptAt: make(map[domain.ConversationID]time.Time), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -4504,6 +4507,260 @@ func (s *Store) SetConversationPrivate(_ context.Context, conversation domain.Co
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	return value, nil
+}
+
+func (s *Store) GetRetentionPolicy(_ context.Context, workspace domain.WorkspaceID) (domain.RetentionPolicy, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, exists := s.workspaces[workspace]; !exists {
+		return domain.RetentionPolicy{}, store.ErrNotFound
+	}
+	return s.retentionPolicies[workspace], nil
+}
+
+func (s *Store) SetRetentionPolicy(_ context.Context, workspace domain.WorkspaceID, policy domain.RetentionPolicy, event events.Event) error {
+	if !policy.Valid() {
+		return store.InvalidArgument("retention durations must be zero or a positive number of days below the maximum")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[workspace]; !exists {
+		return store.ErrNotFound
+	}
+	s.retentionPolicies[workspace] = policy
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetConversationRetention(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) (domain.ConversationRetention, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.conversations[conversation]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.ConversationRetention{}, store.ErrNotFound
+	}
+	return s.conversationRetention[conversation], nil
+}
+
+func (s *Store) SetConversationRetention(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, days int, updatedAt time.Time, event events.Event) error {
+	if days <= 0 || !domain.ValidRetentionDays(days) {
+		return store.InvalidArgument("a conversation retention override must be a positive number of days below the maximum")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.conversations[conversation]
+	if !exists || value.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	s.conversationRetention[conversation] = domain.ConversationRetention{ConversationID: conversation, DurationDays: days, UpdatedAt: updatedAt.UTC()}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) RemoveConversationRetention(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.conversations[conversation]
+	if !exists || value.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.conversationRetention, conversation)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ClaimRetentionSweep(_ context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.ConversationID, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("a retention claim requires a positive limit")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	claimed := make([]domain.ConversationID, 0, limit)
+	for id, conversation := range s.conversations {
+		if len(claimed) == limit {
+			break
+		}
+		if workspace != "" && conversation.WorkspaceID != workspace {
+			continue
+		}
+		if swept, exists := s.retentionSweptAt[id]; exists && swept.After(before) {
+			continue
+		}
+		// Advancing the watermark IS the claim; holding the lock makes it the
+		// same atomic step the SQL profile gets from its conditional UPDATE.
+		s.retentionSweptAt[id] = sweptAt.UTC()
+		claimed = append(claimed, id)
+	}
+	slices.Sort(claimed)
+	return claimed, nil
+}
+
+func (s *Store) SweepRetention(_ context.Context, request domain.RetentionSweepRequest) (domain.RetentionSweep, error) {
+	if request.Limit <= 0 {
+		return domain.RetentionSweep{}, store.InvalidArgument("a retention sweep requires a positive limit")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conversation, exists := s.conversations[request.ConversationID]
+	if !exists || conversation.WorkspaceID != request.WorkspaceID {
+		return domain.RetentionSweep{}, store.ErrNotFound
+	}
+	result := domain.RetentionSweep{ConversationID: request.ConversationID, SweptAt: request.SweptAt.UTC(), Complete: true}
+	if !request.MessageHorizon.IsZero() {
+		result.Messages, result.Complete = s.sweepMessagesLocked(request)
+	}
+	if !request.FileHorizon.IsZero() {
+		result.ExpiredBlobs = s.sweepFilesLocked(request)
+		result.Files = len(result.ExpiredBlobs)
+	}
+	return result, nil
+}
+
+// sweepMessagesLocked applies the same thread rule the SQL profile applies: a
+// thread is retained until its newest reply expires, so a reply is never left
+// without a parent to render under.
+func (s *Store) sweepMessagesLocked(request domain.RetentionSweepRequest) (int, bool) {
+	horizon := request.MessageHorizon.UTC()
+	live := map[domain.MessageTimestamp]struct{}{}
+	for _, message := range s.messages[request.ConversationID] {
+		if message.ThreadTimestamp != "" && !message.CreatedAt.Before(horizon) {
+			live[message.ThreadTimestamp] = struct{}{}
+		}
+	}
+	retained := make([]domain.Message, 0, len(s.messages[request.ConversationID]))
+	removed := 0
+	complete := true
+	for _, message := range s.messages[request.ConversationID] {
+		switch {
+		case !message.CreatedAt.Before(horizon):
+			retained = append(retained, message)
+		case removed == request.Limit:
+			complete = false
+			retained = append(retained, message)
+		case s.retainedByThreadLocked(message, live):
+			retained = append(retained, message)
+		default:
+			s.forgetMessageLocked(request.ConversationID, message)
+			removed++
+		}
+	}
+	s.messages[request.ConversationID] = retained
+	return removed, complete
+}
+
+func (s *Store) retainedByThreadLocked(message domain.Message, live map[domain.MessageTimestamp]struct{}) bool {
+	if message.ThreadTimestamp != "" {
+		_, active := live[message.ThreadTimestamp]
+		return active
+	}
+	_, active := live[domain.NewMessageTimestamp(message.CreatedAt)]
+	return active
+}
+
+// forgetMessageLocked is the memory profile's cascade. It must remove exactly
+// what the SQL profile's statement list removes, or the two profiles disagree
+// about what a retention sweep destroys.
+func (s *Store) forgetMessageLocked(conversation domain.ConversationID, message domain.Message) {
+	delete(s.reactions, message.ID)
+	delete(s.pins, message.ID)
+	for _, stars := range s.stars {
+		delete(stars, message.ID)
+	}
+	for id, item := range s.savedItems {
+		if item.MessageID == message.ID {
+			delete(s.savedItems, id)
+		}
+	}
+	for id, item := range s.activityItems {
+		if item.MessageID == message.ID {
+			delete(s.activityItems, id)
+		}
+	}
+	for key, id := range s.idempotency {
+		if id == message.ID {
+			delete(s.idempotency, key)
+		}
+	}
+	if message.ThreadTimestamp == "" {
+		root := domain.NewMessageTimestamp(message.CreatedAt)
+		for key := range s.threadFollows {
+			if strings.Contains(key, string(conversation)) && strings.HasSuffix(key, string(root)) {
+				delete(s.threadFollows, key)
+			}
+		}
+	}
+}
+
+// sweepFilesLocked expires a file on its own upload date, and only when no
+// other conversation still shares it: a file in two channels outlives the
+// stricter of them.
+func (s *Store) sweepFilesLocked(request domain.RetentionSweepRequest) []domain.ExpiredBlob {
+	horizon := request.FileHorizon.UTC()
+	expired := make([]domain.ExpiredBlob, 0)
+	for id, file := range s.files {
+		if len(expired) == request.Limit {
+			break
+		}
+		if file.WorkspaceID != request.WorkspaceID || file.Deleted || !file.CreatedAt.Before(horizon) {
+			continue
+		}
+		shares := s.fileShares[id]
+		if !slices.Contains(shares, request.ConversationID) {
+			continue
+		}
+		if len(shares) > 1 {
+			continue
+		}
+		expired = append(expired, domain.ExpiredBlob{FileID: id, BlobKey: file.BlobKey})
+	}
+	slices.SortFunc(expired, func(left, right domain.ExpiredBlob) int {
+		return strings.Compare(string(left.FileID), string(right.FileID))
+	})
+	for _, blob := range expired {
+		delete(s.files, blob.FileID)
+		delete(s.fileShares, blob.FileID)
+		for id, comment := range s.fileComments {
+			if comment.File == blob.FileID {
+				delete(s.fileComments, id)
+			}
+		}
+		for conversation, messages := range s.messages {
+			for index := range messages {
+				messages[index].Files = slices.DeleteFunc(append([]domain.File(nil), messages[index].Files...), func(file domain.File) bool { return file.ID == blob.FileID })
+			}
+			s.messages[conversation] = messages
+		}
+	}
+	return expired
+}
+
+func (s *Store) LastRetentionSweep(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	latest := time.Time{}
+	for id, swept := range s.retentionSweptAt {
+		conversation, exists := s.conversations[id]
+		if !exists || conversation.WorkspaceID != workspace {
+			continue
+		}
+		if swept.After(latest) {
+			latest = swept
+		}
+	}
+	return latest, nil
+}
+
+func (s *Store) AppendRetentionEvents(_ context.Context, workspace domain.WorkspaceID, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[workspace]; !exists {
+		return store.ErrNotFound
+	}
+	s.outbox = append(s.outbox, emitted...)
+	return nil
 }
 
 func (s *Store) GetConversationPrefs(_ context.Context, conversation domain.ConversationID) (domain.ConversationPrefs, error) {

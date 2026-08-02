@@ -84,6 +84,22 @@ func (f fixture) message(t *testing.T, ctx context.Context, name string, created
 	return message
 }
 
+// reply posts into an existing thread. The thread rule is the one part of
+// retention neither profile can infer from the other, so a contract that
+// exercises it needs replies as a first-class fixture step.
+func (f fixture) reply(t *testing.T, ctx context.Context, name string, root domain.MessageTimestamp, createdAt time.Time) domain.Message {
+	t.Helper()
+	message := domain.Message{
+		ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "reply " + name, ThreadTimestamp: root, Attachments: "[]",
+		CreatedAt: domain.MessageInstant(createdAt),
+	}
+	if err := f.repository.CreateMessage(ctx, message, f.event("event-"+name, "message.created", string(message.ID)), ""); err != nil {
+		t.Fatalf("create reply %s: %v", name, err)
+	}
+	return message
+}
+
 func messageOrderIsChronological(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)
@@ -1937,6 +1953,197 @@ func slackConnectCapacityIsClaimedTransactionally(t *testing.T, open opener) {
 	// no caller can move an invitation somewhere it may not go.
 	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInviteApproved, domain.SharedInvitePending, time.Unix(1_700_001_300, 0).UTC(), f.event("connect-back", "shared_invite.created", string(invite.ID))); err == nil {
 		t.Fatal("an approved invitation was moved back to pending")
+	}
+}
+
+// Retention deletion is permanent and irreversible, so the two profiles have
+// to agree exactly on which rows disappear. This pins the whole cascade: what
+// goes, what survives, and the thread rule that decides between them.
+//
+// The thread rule is the subtle part. A thread is retained until its newest
+// reply expires — deleting a root while its replies survive would leave replies
+// with no parent to render under — and Slack documents nothing about it, so
+// both profiles implement it from this contract rather than from each other.
+func retentionDeletesTheSameContentOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	base := time.Unix(1_700_000_000, 0).UTC()
+	horizon := base.Add(100 * 24 * time.Hour)
+	old := func(name string, at time.Time) domain.Message { return f.message(t, ctx, name, at) }
+
+	// Expired and standalone: goes.
+	lone := old("retention-lone", base)
+	// Expired root, but a reply is still inside the horizon: the whole thread
+	// stays, however old the root is.
+	activeRoot := old("retention-active-root", base.Add(time.Minute))
+	activeRootTS := domain.NewMessageTimestamp(activeRoot.CreatedAt)
+	f.reply(t, ctx, "retention-active-reply", activeRootTS, horizon.Add(24*time.Hour))
+	// Expired root whose only reply is also expired: both go.
+	deadRoot := old("retention-dead-root", base.Add(2*time.Minute))
+	deadRootTS := domain.NewMessageTimestamp(deadRoot.CreatedAt)
+	deadReply := f.reply(t, ctx, "retention-dead-reply", deadRootTS, base.Add(3*time.Minute))
+	// Inside the horizon: stays.
+	recent := old("retention-recent", horizon.Add(48*time.Hour))
+
+	// The lone message carries everything that references a message, so the
+	// cascade is exercised rather than assumed.
+	if err := f.repository.AddReaction(ctx, domain.Reaction{Message: lone.ID, Name: "wave", UserID: f.userID, CreatedAt: base}, f.event("retention-reaction", "reaction.added", string(lone.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.AddPin(ctx, domain.Pin{Message: lone.ID, UserID: f.userID, CreatedAt: base}, f.event("retention-pin", "pin.added", string(lone.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.repository.CreateSavedItem(ctx, domain.SavedItem{
+		ID: domain.SavedItemID("SI-retention-" + f.suffix), WorkspaceID: f.workspaceID, UserID: f.userID,
+		MessageID: lone.ID, Conversation: f.channelID, State: domain.SavedItemInProgress,
+		CreatedAt: base, UpdatedAt: base,
+	}, f.event("retention-saved", "saved_item.created", string(lone.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	swept, err := f.repository.SweepRetention(ctx, domain.RetentionSweepRequest{
+		WorkspaceID: f.workspaceID, ConversationID: f.channelID,
+		MessageHorizon: horizon, SweptAt: horizon, Limit: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept.Messages != 3 || !swept.Complete {
+		t.Fatalf("sweep=%+v, want the lone message and the dead thread's two, completely", swept)
+	}
+
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	survived := map[domain.MessageID]struct{}{}
+	for _, message := range page.Messages {
+		survived[message.ID] = struct{}{}
+	}
+	for _, id := range []domain.MessageID{activeRoot.ID, recent.ID} {
+		if _, ok := survived[id]; !ok {
+			t.Fatalf("%s was deleted but its thread is still active or it is inside the horizon", id)
+		}
+	}
+	for _, id := range []domain.MessageID{lone.ID, deadRoot.ID, deadReply.ID} {
+		if _, ok := survived[id]; ok {
+			t.Fatalf("%s is past the horizon with no live reply and should be gone", id)
+		}
+	}
+
+	// Permanent, not tombstoned: GetMessage still answers for a soft-deleted
+	// message, so this is the assertion that separates the two.
+	if _, err := f.repository.GetMessage(ctx, lone.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a swept message is still addressable: %v", err)
+	}
+	// And everything that pointed at it is gone too.
+	if saved, err := f.repository.ListSavedItems(ctx, f.workspaceID, f.userID, domain.SavedItemInProgress, domain.PageRequest{Limit: 10}); err != nil || len(saved.Items) != 0 {
+		t.Fatalf("saved items=%+v err=%v, want the saved reference swept with its message", saved.Items, err)
+	}
+
+	// A second sweep finds nothing: the operation is idempotent, which is what
+	// makes the compare-and-set claim safe to lose.
+	again, err := f.repository.SweepRetention(ctx, domain.RetentionSweepRequest{
+		WorkspaceID: f.workspaceID, ConversationID: f.channelID,
+		MessageHorizon: horizon, SweptAt: horizon, Limit: 50,
+	})
+	if err != nil || again.Messages != 0 {
+		t.Fatalf("second sweep=%+v err=%v, want nothing left to do", again, err)
+	}
+}
+
+// The sweep is claimed by advancing a watermark, so two workers racing over one
+// workspace each get a disjoint set of conversations and neither does the
+// other's work.
+func retentionSweepsAreClaimedExactlyOnce(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	for index := 0; index < 4; index++ {
+		id := domain.ConversationID(fmt.Sprintf("C-sweep-%d-%s", index, f.suffix))
+		if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: id, WorkspaceID: f.workspaceID, Name: fmt.Sprintf("sweep-%d-%s", index, f.suffix)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := time.Unix(1_700_000_000, 0).UTC()
+	sweptAt := before.Add(time.Hour)
+
+	first, err := f.repository.ClaimRetentionSweep(ctx, f.workspaceID, before, sweptAt, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.repository.ClaimRetentionSweep(ctx, f.workspaceID, before, sweptAt, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) == 0 {
+		t.Fatal("the first claim took nothing")
+	}
+	if len(second) != 0 {
+		t.Fatalf("a second claim over the same window took %v, want nothing", second)
+	}
+	// Once the interval has passed they are claimable again — that is the daily
+	// cadence, not a one-shot.
+	third, err := f.repository.ClaimRetentionSweep(ctx, f.workspaceID, sweptAt.Add(time.Minute), sweptAt.Add(time.Hour), 10)
+	if err != nil || len(third) != len(first) {
+		t.Fatalf("third claim=%d err=%v, want the same conversations available again", len(third), err)
+	}
+}
+
+// A workspace default governs a channel that has no override; an override wins
+// while it exists; removing it returns the channel to the default.
+func conversationRetentionOverridesTheWorkspaceDefault(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	if policy, err := f.repository.GetRetentionPolicy(ctx, f.workspaceID); err != nil || policy.MessageDays != 0 || policy.FileDays != 0 {
+		t.Fatalf("policy=%+v err=%v, want an unconfigured workspace to keep everything", policy, err)
+	}
+	if err := f.repository.SetRetentionPolicy(ctx, f.workspaceID, domain.RetentionPolicy{MessageDays: 90, FileDays: 30}, f.event("retention-policy", "retention.policy_changed", string(f.workspaceID))); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := f.repository.GetRetentionPolicy(ctx, f.workspaceID)
+	if err != nil || policy.MessageDays != 90 || policy.FileDays != 30 {
+		t.Fatalf("policy=%+v err=%v", policy, err)
+	}
+
+	override, err := f.repository.GetConversationRetention(ctx, f.workspaceID, f.channelID)
+	if err != nil || override.DurationDays != 0 {
+		t.Fatalf("override=%+v err=%v, want none", override, err)
+	}
+	if got := override.Effective(policy); got != 90 {
+		t.Fatalf("effective=%d, want the workspace default", got)
+	}
+
+	if err := f.repository.SetConversationRetention(ctx, f.workspaceID, f.channelID, 7, time.Unix(1_700_000_500, 0).UTC(), f.event("retention-override", "retention.override_changed", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	override, err = f.repository.GetConversationRetention(ctx, f.workspaceID, f.channelID)
+	if err != nil || override.DurationDays != 7 {
+		t.Fatalf("override=%+v err=%v", override, err)
+	}
+	if got := override.Effective(policy); got != 7 {
+		t.Fatalf("effective=%d, want the override", got)
+	}
+
+	if err := f.repository.RemoveConversationRetention(ctx, f.workspaceID, f.channelID, f.event("retention-removed", "retention.override_removed", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	override, err = f.repository.GetConversationRetention(ctx, f.workspaceID, f.channelID)
+	if err != nil || override.DurationDays != 0 {
+		t.Fatalf("override after removal=%+v err=%v, want the workspace default to govern again", override, err)
+	}
+	// Removing an override a channel never had is not an error.
+	if err := f.repository.RemoveConversationRetention(ctx, f.workspaceID, f.channelID, f.event("retention-removed-again", "retention.override_removed", string(f.channelID))); err != nil {
+		t.Fatalf("removing an absent override: %v", err)
+	}
+	// A duration outside Slack's bounds is refused on both profiles.
+	if err := f.repository.SetConversationRetention(ctx, f.workspaceID, f.channelID, domain.RetentionMaximumDays, time.Unix(1_700_000_600, 0).UTC(), f.event("retention-too-long", "retention.override_changed", string(f.channelID))); err == nil {
+		t.Fatal("a duration at the maximum was accepted")
 	}
 }
 

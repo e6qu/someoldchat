@@ -91,6 +91,15 @@ type Service interface {
 	// The Slack Connect invitation lifecycle. Approval and acceptance are
 	// separate methods because CONNECT-02 makes them separate decisions, taken
 	// by different organizations.
+	// Retention. ConversationRetention returns the override and the duration
+	// that actually governs, so no caller resolves the two itself and none can
+	// resolve them differently from the sweep.
+	WorkspaceRetention(context.Context, domain.WorkspaceID, domain.UserID) (domain.RetentionPolicy, error)
+	SetWorkspaceRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.RetentionPolicy) (domain.RetentionPolicy, error)
+	LastRetentionSweep(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
+	ConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationRetention, int, error)
+	SetConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) error
+	RemoveConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
 	InviteShared(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, string) (domain.SharedInvite, error)
 	ApproveSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
 	DenySharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)

@@ -76,8 +76,10 @@ CREATE TABLE IF NOT EXISTS external_identities (workspace_id TEXT NOT NULL REFER
 CREATE TABLE IF NOT EXISTS conversations (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  name TEXT NOT NULL, topic TEXT NOT NULL DEFAULT '', purpose TEXT NOT NULL DEFAULT '', archived INTEGER NOT NULL DEFAULT 0, is_private INTEGER NOT NULL DEFAULT 0, is_direct INTEGER NOT NULL DEFAULT 0, is_group_direct INTEGER NOT NULL DEFAULT 0, direct_key TEXT NOT NULL DEFAULT '',
- name_folded TEXT NOT NULL DEFAULT '', topic_folded TEXT NOT NULL DEFAULT '', purpose_folded TEXT NOT NULL DEFAULT ''
+ name_folded TEXT NOT NULL DEFAULT '', topic_folded TEXT NOT NULL DEFAULT '', purpose_folded TEXT NOT NULL DEFAULT '',
+ retention_swept_at INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS conversations_retention_sweep ON conversations(workspace_id, retention_swept_at, id);
 CREATE TABLE IF NOT EXISTS workspace_default_channels (workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (workspace_id, conversation_id));
 CREATE TABLE IF NOT EXISTS conversation_teams (conversation_id TEXT NOT NULL REFERENCES conversations(id), team_id TEXT NOT NULL REFERENCES workspaces(id), org_channel INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (conversation_id, team_id));
 CREATE TABLE IF NOT EXISTS shared_invites (
@@ -160,6 +162,14 @@ CREATE TABLE IF NOT EXISTS socket_mode_interactions (
  acknowledged_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS socket_mode_interactions_claim ON socket_mode_interactions(app_id, acknowledged_at, retry_at, lease_expires_at, created_at, envelope_id);
+CREATE TABLE IF NOT EXISTS workspace_retention (
+ workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+ message_days INTEGER NOT NULL DEFAULT 0, file_days INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS conversation_retention (
+ conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
+ duration_days INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS conversation_prefs (
  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
  can_thread_types TEXT NOT NULL DEFAULT '[]', can_thread_users TEXT NOT NULL DEFAULT '[]',
@@ -295,6 +305,7 @@ CREATE TABLE IF NOT EXISTS remote_file_shares (
  PRIMARY KEY (remote_file_id, conversation_id)
 );
 CREATE INDEX IF NOT EXISTS files_workspace_id ON files(workspace_id, id);
+CREATE INDEX IF NOT EXISTS files_workspace_created ON files(workspace_id, created_at, id);
 -- outbox.undeliverable quarantines a record whose payload predates the typed
 -- payload contract (a bare identifier instead of a self-describing JSON
 -- object). Such a row can never be delivered, so every consumer read excludes
@@ -495,7 +506,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 132
+const schemaVersion = 133
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2975,6 +2986,36 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 133 {
+		// Retention. Two policy tables and one watermark: the workspace
+		// default, the per-channel override Slack's API configures, and the
+		// instant a conversation was last swept — which is both the daily
+		// cadence and the claim two workers compete for.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workspace_retention (
+			workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+			message_days INTEGER NOT NULL DEFAULT 0, file_days INTEGER NOT NULL DEFAULT 0)`); err != nil {
+			return fmt.Errorf("migrate workspace retention: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS conversation_retention (
+			conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
+			duration_days INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+			return fmt.Errorf("migrate conversation retention: %w", err)
+		}
+		columns, err := s.tableColumns(ctx, db, "conversations")
+		if err != nil {
+			return err
+		}
+		if !columns["retention_swept_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE conversations ADD COLUMN retention_swept_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate conversation retention watermark: %w", err)
+			}
+		}
+		// Files are swept workspace-wide by upload date; messages already have
+		// messages_conversation_created, which the per-conversation sweep uses.
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS files_workspace_created ON files(workspace_id, created_at, id)`); err != nil {
+			return fmt.Errorf("index files by age: %w", err)
+		}
+	}
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -3337,7 +3378,7 @@ func scanMessage(row rowScanner) (domain.Message, error) {
 		&editedAt, &message.EditedBy, &message.Subtype); err != nil {
 		return domain.Message{}, err
 	}
-	parsed, err := domain.ParseStoredTime(created)
+	parsed, err := domain.ParseStoredTime(string(created))
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -5400,6 +5441,14 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM stars WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		// saved_items.message_id carries an enforced foreign key, so deleting a
+		// conversation in which anyone had saved a message failed outright
+		// until this line existed. activity_items and idempotency have no key
+		// to enforce it, so they orphaned silently instead.
+		`DELETE FROM saved_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM activity_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM idempotency WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM thread_follows WHERE conversation_id = ?`,
 		`DELETE FROM message_files WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM messages WHERE conversation = ?`,
 		`DELETE FROM conversation_members WHERE conversation_id = ?`,
@@ -8853,6 +8902,430 @@ func (s *Store) ConvertGroupDirectToPrivate(ctx context.Context, conversion doma
 		return domain.Conversation{}, err
 	}
 	return value, nil
+}
+
+func (s *Store) GetConversationRetention(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) (domain.ConversationRetention, error) {
+	// One statement, for the reason GetConversationPrefs gives: a
+	// GetConversation round trip followed by a second read could observe two
+	// different database states. sql.ErrNoRows here means the conversation is
+	// missing; an absent override yields zero columns and no error.
+	var duration, updated sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT r.duration_days, r.updated_at FROM conversations c
+		LEFT JOIN conversation_retention r ON r.conversation_id = c.id
+		WHERE c.id = ? AND c.workspace_id = ?`, conversation, workspace).Scan(&duration, &updated)
+	if err != nil {
+		return domain.ConversationRetention{}, translateNotFound(err)
+	}
+	if !duration.Valid || duration.Int64 <= 0 {
+		return domain.ConversationRetention{}, nil
+	}
+	value := domain.ConversationRetention{ConversationID: conversation, DurationDays: int(duration.Int64)}
+	if updated.Valid && updated.Int64 != 0 {
+		value.UpdatedAt = time.Unix(updated.Int64, 0).UTC()
+	}
+	return value, nil
+}
+
+func (s *Store) SetConversationRetention(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, days int, updatedAt time.Time, event events.Event) error {
+	if days <= 0 || !domain.ValidRetentionDays(days) {
+		return store.InvalidArgument("a conversation retention override must be a positive number of days below the maximum")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := conversationBelongsToWorkspace(ctx, tx, workspace, conversation); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_retention(conversation_id, duration_days, updated_at)
+		VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET duration_days = excluded.duration_days, updated_at = excluded.updated_at`,
+		conversation, days, updatedAt.UTC().Unix()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RemoveConversationRetention(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := conversationBelongsToWorkspace(ctx, tx, workspace, conversation); err != nil {
+		return err
+	}
+	// Removing an override a channel never had is not an error: the caller
+	// asked for the channel to follow the workspace default, and it does.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_retention WHERE conversation_id = ?`, conversation); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func conversationBelongsToWorkspace(ctx context.Context, tx *sql.Tx, workspace domain.WorkspaceID, conversation domain.ConversationID) error {
+	var present int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id = ? AND workspace_id = ?`, conversation, workspace).Scan(&present); err != nil {
+		return translateNotFound(err)
+	}
+	return nil
+}
+
+func (s *Store) GetRetentionPolicy(ctx context.Context, workspace domain.WorkspaceID) (domain.RetentionPolicy, error) {
+	var messageDays, fileDays sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT r.message_days, r.file_days FROM workspaces w
+		LEFT JOIN workspace_retention r ON r.workspace_id = w.id WHERE w.id = ?`, workspace).Scan(&messageDays, &fileDays)
+	if err != nil {
+		return domain.RetentionPolicy{}, translateNotFound(err)
+	}
+	policy := domain.RetentionPolicy{}
+	if messageDays.Valid {
+		policy.MessageDays = int(messageDays.Int64)
+	}
+	if fileDays.Valid {
+		policy.FileDays = int(fileDays.Int64)
+	}
+	return policy, nil
+}
+
+func (s *Store) SetRetentionPolicy(ctx context.Context, workspace domain.WorkspaceID, policy domain.RetentionPolicy, event events.Event) error {
+	if !policy.Valid() {
+		return store.InvalidArgument("retention durations must be zero or a positive number of days below the maximum")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var present int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, workspace).Scan(&present); err != nil {
+		return translateNotFound(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_retention(workspace_id, message_days, file_days)
+		VALUES (?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET message_days = excluded.message_days, file_days = excluded.file_days`,
+		workspace, policy.MessageDays, policy.FileDays); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ClaimRetentionSweep advances each returned conversation's watermark in the
+// same statement that selects it, so the advance IS the claim. Two workers can
+// both read the row; only one UPDATE matches the stale watermark, and the
+// loser's RowsAffected is zero.
+func (s *Store) ClaimRetentionSweep(ctx context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.ConversationID, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("a retention claim requires a positive limit")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM conversations
+		WHERE (? = '' OR workspace_id = ?) AND retention_swept_at <= ? ORDER BY retention_swept_at, id LIMIT ?`,
+		workspace, workspace, before.UTC().Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]domain.ConversationID, 0, limit)
+	for rows.Next() {
+		var id domain.ConversationID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	claimed := make([]domain.ConversationID, 0, len(candidates))
+	for _, id := range candidates {
+		result, err := s.db.ExecContext(ctx, `UPDATE conversations SET retention_swept_at = ? WHERE id = ? AND retention_swept_at <= ?`,
+			sweptAt.UTC().Unix(), id, before.UTC().Unix())
+		if err != nil {
+			return nil, err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if changed == 1 {
+			claimed = append(claimed, id)
+		}
+	}
+	return claimed, nil
+}
+
+func (s *Store) SweepRetention(ctx context.Context, request domain.RetentionSweepRequest) (domain.RetentionSweep, error) {
+	if request.Limit <= 0 {
+		return domain.RetentionSweep{}, store.InvalidArgument("a retention sweep requires a positive limit")
+	}
+	result := domain.RetentionSweep{ConversationID: request.ConversationID, SweptAt: request.SweptAt.UTC(), Complete: true}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.RetentionSweep{}, err
+	}
+	defer tx.Rollback()
+	if err := conversationBelongsToWorkspace(ctx, tx, request.WorkspaceID, request.ConversationID); err != nil {
+		return domain.RetentionSweep{}, err
+	}
+	if !request.MessageHorizon.IsZero() {
+		expired, complete, err := expiredMessages(ctx, tx, request)
+		if err != nil {
+			return domain.RetentionSweep{}, err
+		}
+		result.Complete = complete
+		if len(expired) > 0 {
+			if err := deleteMessagesTx(ctx, tx, request.ConversationID, expired); err != nil {
+				return domain.RetentionSweep{}, err
+			}
+			result.Messages = len(expired)
+		}
+	}
+	if !request.FileHorizon.IsZero() {
+		files, err := expiredFiles(ctx, tx, request)
+		if err != nil {
+			return domain.RetentionSweep{}, err
+		}
+		if len(files) > 0 {
+			if err := deleteFilesTx(ctx, tx, files); err != nil {
+				return domain.RetentionSweep{}, err
+			}
+			result.Files = len(files)
+			result.ExpiredBlobs = files
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.RetentionSweep{}, err
+	}
+	return result, nil
+}
+
+// expiredFiles finds files shared into this conversation whose upload date has
+// passed the file horizon and which no other conversation still shares. A file
+// in two channels outlives the stricter of them: deleting it because one
+// channel expired would silently remove it from the other.
+func expiredFiles(ctx context.Context, tx *sql.Tx, request domain.RetentionSweepRequest) ([]domain.ExpiredBlob, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT f.id, f.blob_key FROM files f
+		JOIN file_shares fs ON fs.file_id = f.id
+		WHERE fs.conversation_id = ? AND f.workspace_id = ? AND f.deleted = 0 AND f.created_at < ?
+		AND NOT EXISTS (SELECT 1 FROM file_shares other WHERE other.file_id = f.id AND other.conversation_id <> ?)
+		ORDER BY f.created_at, f.id LIMIT ?`,
+		request.ConversationID, request.WorkspaceID, domain.NewStoredTime(request.FileHorizon), request.ConversationID, request.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	expired := make([]domain.ExpiredBlob, 0, request.Limit)
+	for rows.Next() {
+		var value domain.ExpiredBlob
+		if err := rows.Scan(&value.FileID, &value.BlobKey); err != nil {
+			return nil, err
+		}
+		expired = append(expired, value)
+	}
+	return expired, rows.Err()
+}
+
+// deleteFilesTx removes the file rows and everything pointing at them. The
+// bytes are not touched here: the caller journals one blob-delete event per
+// file and the existing blob cleanup worker reclaims them, which is the same
+// path an ordinary file deletion already takes.
+func deleteFilesTx(ctx context.Context, tx *sql.Tx, expired []domain.ExpiredBlob) error {
+	placeholders := make([]string, 0, len(expired))
+	arguments := make([]any, 0, len(expired))
+	for _, value := range expired {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, value.FileID)
+	}
+	list := "(" + strings.Join(placeholders, ",") + ")"
+	for _, statement := range []string{
+		`DELETE FROM file_shares WHERE file_id IN ` + list,
+		`DELETE FROM message_files WHERE file_id IN ` + list,
+		`DELETE FROM file_comments WHERE file_id IN ` + list,
+		`DELETE FROM files WHERE id IN ` + list,
+	} {
+		if _, err := tx.ExecContext(ctx, statement, arguments...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// expiredMessageIDs applies the thread rule. It is computed in Go rather than
+// in SQL because a reply's thread_timestamp is a domain.MessageTimestamp while
+// created_at is domain.StoredTime — two different encodings of the same
+// instant, which no portable single statement can group by.
+//
+// A thread is retained until its newest reply expires: deleting a root while
+// its replies survive would leave replies with no parent to render under, and
+// MSG-04 already says deletion does not take a whole thread unless Slack does.
+func expiredMessages(ctx context.Context, tx *sql.Tx, request domain.RetentionSweepRequest) ([]expiredMessage, bool, error) {
+	horizon := domain.NewStoredTime(request.MessageHorizon)
+	// Every thread whose newest reply is still inside the horizon. Its root
+	// and all of its replies are retained however old they are.
+	live := map[domain.MessageTimestamp]struct{}{}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT thread_timestamp FROM messages
+		WHERE conversation = ? AND thread_timestamp <> '' AND created_at >= ?`, request.ConversationID, horizon)
+	if err != nil {
+		return nil, false, err
+	}
+	for rows.Next() {
+		var timestamp domain.MessageTimestamp
+		if err := rows.Scan(&timestamp); err != nil {
+			rows.Close()
+			return nil, false, err
+		}
+		live[timestamp] = struct{}{}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+
+	// One more than the limit, so a full page tells us there is more to do.
+	candidates, err := tx.QueryContext(ctx, `SELECT id, created_at, thread_timestamp FROM messages
+		WHERE conversation = ? AND created_at < ? ORDER BY created_at, id LIMIT ?`,
+		request.ConversationID, horizon, request.Limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer candidates.Close()
+	expired := make([]expiredMessage, 0, request.Limit)
+	complete := true
+	for candidates.Next() {
+		var value expiredMessage
+		if err := candidates.Scan(&value.ID, &value.Created, &value.Thread); err != nil {
+			return nil, false, err
+		}
+		if len(expired) == request.Limit {
+			complete = false
+			break
+		}
+		if retainedByThread(value.Created, value.Thread, live) {
+			continue
+		}
+		expired = append(expired, value)
+	}
+	if err := candidates.Err(); err != nil {
+		return nil, false, err
+	}
+	return expired, complete, nil
+}
+
+// retainedByThread reports whether one message survives because its thread is
+// still active — either it is a reply in such a thread, or it is the root of
+// one.
+func retainedByThread(created domain.StoredTime, thread domain.MessageTimestamp, live map[domain.MessageTimestamp]struct{}) bool {
+	if thread != "" {
+		_, active := live[thread]
+		return active
+	}
+	instant, err := domain.ParseStoredTime(string(created))
+	if err != nil {
+		// An unparseable instant is not a licence to delete: retain it and let
+		// an operator find it, rather than destroying what we cannot date.
+		return true
+	}
+	_, active := live[domain.NewMessageTimestamp(instant)]
+	return active
+}
+
+// deleteMessagesTx is the cascade. It follows the dependency order
+// DeleteConversation established, and adds the three tables that one omits —
+// saved_items (whose message_id foreign key is enforced), activity_items and
+// thread_follows. Retention is permanent, so these rows go rather than being
+// tombstoned.
+func deleteMessagesTx(ctx context.Context, tx *sql.Tx, conversation domain.ConversationID, expired []expiredMessage) error {
+	placeholders := make([]string, 0, len(expired))
+	arguments := make([]any, 0, len(expired))
+	roots := make([]any, 0, len(expired))
+	rootPlaceholders := make([]string, 0, len(expired))
+	for _, value := range expired {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, value.ID)
+		if value.Thread != "" {
+			continue
+		}
+		// A message with no thread_timestamp is its own root, so anyone
+		// following it is following something that is about to stop existing.
+		if instant, err := domain.ParseStoredTime(string(value.Created)); err == nil {
+			rootPlaceholders = append(rootPlaceholders, "?")
+			roots = append(roots, domain.NewMessageTimestamp(instant))
+		}
+	}
+	list := "(" + strings.Join(placeholders, ",") + ")"
+	for _, statement := range []string{
+		`DELETE FROM reactions WHERE message_id IN ` + list,
+		`DELETE FROM pins WHERE message_id IN ` + list,
+		`DELETE FROM stars WHERE message_id IN ` + list,
+		`DELETE FROM saved_items WHERE message_id IN ` + list,
+		`DELETE FROM activity_items WHERE message_id IN ` + list,
+		`DELETE FROM message_files WHERE message_id IN ` + list,
+		`DELETE FROM idempotency WHERE message_id IN ` + list,
+		`DELETE FROM messages WHERE id IN ` + list,
+	} {
+		if _, err := tx.ExecContext(ctx, statement, arguments...); err != nil {
+			return err
+		}
+	}
+	if len(rootPlaceholders) == 0 {
+		return nil
+	}
+	// thread_follows is keyed by the root's timestamp rather than its message
+	// id, so it cannot ride the id list; a follow whose root is gone would
+	// otherwise keep delivering replies to a thread nobody can open.
+	followArguments := append([]any{conversation}, roots...)
+	_, err := tx.ExecContext(ctx, `DELETE FROM thread_follows WHERE conversation_id = ? AND root_timestamp IN (`+strings.Join(rootPlaceholders, ",")+`)`, followArguments...)
+	return err
+}
+
+// expiredMessage is one row the sweep has decided to delete, carrying the two
+// facts the cascade needs beyond its id: whether it is a thread root, and when
+// it was created so its root timestamp can be reconstructed.
+type expiredMessage struct {
+	ID      domain.MessageID
+	Created domain.StoredTime
+	Thread  domain.MessageTimestamp
+}
+
+func (s *Store) LastRetentionSweep(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	var swept sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MAX(retention_swept_at) FROM conversations WHERE workspace_id = ?`, workspace).Scan(&swept); err != nil {
+		return time.Time{}, err
+	}
+	if !swept.Valid || swept.Int64 == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(swept.Int64, 0).UTC(), nil
+}
+
+func (s *Store) AppendRetentionEvents(ctx context.Context, workspace domain.WorkspaceID, emitted []events.Event) error {
+	if len(emitted) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var present int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, workspace).Scan(&present); err != nil {
+		return translateNotFound(err)
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) GetConversationPrefs(ctx context.Context, conversation domain.ConversationID) (domain.ConversationPrefs, error) {

@@ -319,6 +319,12 @@ var topicRules = []topicRule{
 	// the pinned snapshot predates huddles and the current reference documents
 	// none — so these are named as this product's own facts rather than mapped
 	// onto a Slack event they are not.
+	// Retention deletion emits one summary per conversation per sweep, not one
+	// event per deleted message: Slack emits no event for retention deletion at
+	// all, and a workspace draining years of backlog would otherwise write
+	// millions of records this product's own retention does not remove.
+	{topic: "retention.swept", note: "not pinned: Slack emits no event for retention deletion"},
+	{topic: "retention.policy_changed", note: "not pinned: Slack emits no event for a retention policy change"},
 	// Slack Connect invitations have no documented event either: the snapshot
 	// predates Slack Connect and the current reference documents no event for
 	// the invitation lifecycle, so these are this product's own facts.

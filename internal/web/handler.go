@@ -319,11 +319,17 @@ type conversationDetailsView struct {
 	// Outstanding names the invitations still waiting on someone, so the panel
 	// distinguishes "shared with" from "asked to share with" rather than
 	// implying an invitation is a connection.
-	Connected    []connectOrganizationView
-	Outstanding  []connectInviteView
-	CanConnect   bool
-	ConnectURL   string
-	ConnectHosts []conversationView
+	Connected   []connectOrganizationView
+	Outstanding []connectInviteView
+	CanConnect  bool
+	// Retention. RetentionDays is the duration that actually governs, so the
+	// form opens on what is being applied rather than on an empty box.
+	CanSetRetention  bool
+	RetentionDays    int
+	RetentionCustom  bool
+	RetentionSummary string
+	ConnectURL       string
+	ConnectHosts     []conversationView
 }
 
 type connectOrganizationView struct {
@@ -1717,6 +1723,19 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </section>
       {{end}}
       {{if .Details.IsChannel}}
+      {{if .Details.CanSetRetention}}
+      <section class="conversation-details-section" id="conversation-retention" aria-labelledby="conversation-retention-heading">
+        <h3 id="conversation-retention-heading">How long messages are kept</h3>
+        <p>{{.Details.RetentionSummary}}</p>
+        <form class="connect-invite" method="post" action="/app/conversation/retention?channel={{.Details.ID}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label>Keep for<input name="duration_days" type="number" min="1" max="36499" value="{{.Details.RetentionDays}}"><span class="read-only">days</span></label>
+          <button type="submit">Use this limit here</button>
+        </form>
+        {{if .Details.RetentionCustom}}<form method="post" action="/app/conversation/retention/remove?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Follow the workspace default instead</button></form>{{end}}
+        <p class="read-only">Deletion is permanent. A shorter limit here deletes sooner than the workspace default; it cannot keep messages for longer than a channel-specific limit would.</p>
+      </section>
+      {{end}}
       <section class="conversation-details-section" id="conversation-connect" aria-labelledby="conversation-connect-heading">
         <h3 id="conversation-connect-heading">Shared with other organizations</h3>
         {{if .Details.Connected}}<p>In this channel: {{range $index, $org := .Details.Connected}}{{if $index}}, {{end}}{{$org.Name}}{{end}}</p>{{else}}<p class="read-only">Only this workspace is in this channel.</p>{{end}}
@@ -3519,6 +3538,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /app/admin/analytics", h.analyticsPage)
 		mux.HandleFunc("POST /app/admin/settings/identity", h.workspaceIdentitySet)
 		mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
+		mux.HandleFunc("POST /app/admin/settings/retention", h.workspaceRetentionSet)
 		mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
 		// Deliberately reachable signed-out: the person it is for has no
 		// account yet. See internal/web/invite.go for why it carries no secret.
@@ -3540,6 +3560,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/files/delete", h.deleteFile)
 	mux.HandleFunc("GET /app/remote-files", h.remoteFiles)
 	mux.HandleFunc("POST /app/workspace/switch", h.switchWorkspace)
+	mux.HandleFunc("POST /app/conversation/retention", h.conversationRetentionSet)
+	mux.HandleFunc("POST /app/conversation/retention/remove", h.conversationRetentionRemove)
 	mux.HandleFunc("POST /app/connect/invite", h.connectInvite)
 	mux.HandleFunc("POST /app/connect/approve", h.connectApprove)
 	mux.HandleFunc("POST /app/connect/deny", h.connectDeny)
@@ -5279,6 +5301,28 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 			}
 		}
 	}
+	// Retention is administrative, and a group direct message or the workspace
+	// default channel cannot carry a custom limit at all — the same refusal the
+	// API makes, so the control is absent rather than present and rejecting.
+	retentionAllowed := isChannel && principal.HasScope(auth.ScopeAdminConversationsWrite)
+	retentionDays, retentionCustom := 0, false
+	retentionNote := ""
+	if retentionAllowed {
+		override, effective, retentionErr := h.Messages.ConversationRetention(ctx, principal.WorkspaceID, principal.UserID, conversation.ID)
+		if retentionErr != nil {
+			retentionAllowed = false
+		} else {
+			retentionDays, retentionCustom = effective, override.DurationDays > 0
+			switch {
+			case effective == 0:
+				retentionNote = "Messages here are kept forever, following the workspace default."
+			case retentionCustom:
+				retentionNote = "This channel has its own limit."
+			default:
+				retentionNote = "This channel follows the workspace default."
+			}
+		}
+	}
 	name := conversationName(conversation)
 	conversationType := "Channel"
 	switch {
@@ -5344,6 +5388,10 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		Connected:         connected,
 		Outstanding:       outstanding,
 		CanConnect:        canManage && isChannel && !conversation.Archived && principal.HasScope(auth.ScopeConversationsConnectWrite),
+		CanSetRetention:   retentionAllowed,
+		RetentionDays:     retentionDays,
+		RetentionCustom:   retentionCustom,
+		RetentionSummary:  retentionNote,
 		ConnectURL:        "/app/connect/invite?channel=" + url.QueryEscape(string(conversation.ID)),
 		ConnectHosts:      connectDestinations,
 	}, nil

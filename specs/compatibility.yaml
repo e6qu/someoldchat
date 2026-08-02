@@ -1088,9 +1088,19 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.createForObjects/
   - method: admin.conversations.getCustomRetention
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.getCustomRetention/
+    evidence:
+      - internal/api/slack/retention_test.go
+      - internal/scheduler/retention_test.go
+      - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
+      - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
+      - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.linkObjects
     status: unimplemented
     provenance: slack-reference
@@ -1100,13 +1110,33 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.lookup/
   - method: admin.conversations.removeCustomRetention
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.removeCustomRetention/
+    evidence:
+      - internal/api/slack/retention_test.go
+      - internal/scheduler/retention_test.go
+      - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
+      - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
+      - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.setCustomRetention
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.setCustomRetention/
+    evidence:
+      - internal/api/slack/retention_test.go
+      - internal/scheduler/retention_test.go
+      - tests/persistence-qualification/divergence_test.go
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
+      - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
+      - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
+      - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.unlinkObjects
     status: unimplemented
     provenance: slack-reference

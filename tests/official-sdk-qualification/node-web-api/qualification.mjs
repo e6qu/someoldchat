@@ -725,6 +725,29 @@ assert.equal(connectedChannelInfo.ok, true);
 assert.equal(Array.isArray(connectedChannelInfo.channels), true);
 assert.equal((await client.admin.conversations.disconnectShared({ channel_id: "C1", leaving_team_ids: ["T1"] })).ok, true);
 
+// Retention. The workspace default governs a channel with no override; the
+// per-channel API sets and removes one; getCustomRetention reports the duration
+// that actually applies either way.
+const noRetention = await client.admin.conversations.getCustomRetention({ channel_id: "C-retention" });
+assert.equal(noRetention.ok, true);
+assert.equal(noRetention.is_policy_enabled, false);
+
+assert.equal((await client.admin.conversations.setCustomRetention({ channel_id: "C-retention", duration_days: 30 })).ok, true);
+const withRetention = await client.admin.conversations.getCustomRetention({ channel_id: "C-retention" });
+assert.equal(withRetention.is_policy_enabled, true);
+assert.equal(withRetention.duration_days, 30);
+
+// Slack's bound is greater than zero and below 36500; both ends are refused.
+for (const duration of [0, 36500]) {
+	await assert.rejects(
+		client.admin.conversations.setCustomRetention({ channel_id: "C-retention", duration_days: duration }),
+		(error) => error.data.error === "invalid_duration",
+	);
+}
+
+assert.equal((await client.admin.conversations.removeCustomRetention({ channel_id: "C-retention" })).ok, true);
+assert.equal((await client.admin.conversations.getCustomRetention({ channel_id: "C-retention" })).is_policy_enabled, false);
+
 // Slack Connect, walked across the boundary it exists for. The host sends and
 // approves; the invited organization accepts, through its own credential —
 // doing it all with one token would prove the opposite of what CONNECT-02

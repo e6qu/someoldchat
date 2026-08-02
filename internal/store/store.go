@@ -523,6 +523,47 @@ type Store interface {
 	SetConversationPrivate(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)
 	GetConversationPrefs(context.Context, domain.ConversationID) (domain.ConversationPrefs, error)
 	SetConversationPrefs(context.Context, domain.ConversationID, domain.ConversationPrefs, events.Event) (domain.ConversationPrefs, error)
+	// GetConversationRetention returns a channel's message-retention override,
+	// or a zero value when it has none. An absent override is not an error:
+	// most channels follow the workspace default, and making that the error
+	// path would force every caller to distinguish "no override" from "could
+	// not read".
+	GetRetentionPolicy(context.Context, domain.WorkspaceID) (domain.RetentionPolicy, error)
+	SetRetentionPolicy(context.Context, domain.WorkspaceID, domain.RetentionPolicy, events.Event) error
+	GetConversationRetention(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.ConversationRetention, error)
+	SetConversationRetention(context.Context, domain.WorkspaceID, domain.ConversationID, int, time.Time, events.Event) error
+	RemoveConversationRetention(context.Context, domain.WorkspaceID, domain.ConversationID, events.Event) error
+	// ClaimRetentionSweep returns conversations in this workspace whose
+	// retention has not been applied since the given instant, claiming each by
+	// advancing its watermark in the same statement that selects it.
+	//
+	// The advance is the claim: two workers can select the same conversation,
+	// only one can move its watermark, and the loser simply finds nothing.
+	// This is compare-and-set rather than a lease because the work is
+	// idempotent — deleting content that is already gone is a no-op — so a
+	// lost race costs a wasted query and nothing else.
+	ClaimRetentionSweep(context.Context, domain.WorkspaceID, time.Time, time.Time, int) ([]domain.ConversationID, error)
+	// SweepRetention permanently deletes the messages and files in one
+	// conversation that its effective policy has expired, together with
+	// everything that references them, in one transaction.
+	//
+	// This is the only hard delete of message content in the product. Slack's
+	// retention deletion is permanent, so a tombstone would be a lie: the row
+	// goes, and the storage it occupied is actually recovered.
+	//
+	// A thread is retained until its newest reply expires. Slack documents
+	// nothing here, and deleting a root while its replies survive would leave
+	// replies with no parent to render under.
+	SweepRetention(context.Context, domain.RetentionSweepRequest) (domain.RetentionSweep, error)
+	// LastRetentionSweep is the most recent instant any conversation in the
+	// workspace was swept, which is the signal that the worker is alive. The
+	// oldest watermark would say how far behind it is, but the newest is what
+	// distinguishes "running" from "stopped", and a stopped sweep is the
+	// failure that silently breaks the promise the policy makes.
+	LastRetentionSweep(context.Context, domain.WorkspaceID) (time.Time, error)
+	// AppendRetentionEvents journals a completed sweep's announcements. See
+	// scheduler.RetentionSource for why this is separate from the deletion.
+	AppendRetentionEvents(context.Context, domain.WorkspaceID, []events.Event) error
 	AddEmoji(context.Context, domain.CustomEmoji, events.Event) error
 	ListEmojis(context.Context, domain.WorkspaceID) ([]domain.CustomEmoji, error)
 	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error

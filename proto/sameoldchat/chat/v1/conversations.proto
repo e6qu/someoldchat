@@ -53,6 +53,48 @@ service ConversationsService {
   rpc AcceptSharedInvite(SharedInviteMutationRequest) returns (Conversation);
   rpc ListSharedInvites(SharedInvitesRequest) returns (SharedInvitePage);
   rpc SetExternalInvitePermissions(ExternalInvitePermissionsRequest) returns (Conversation);
+  // Named GetWorkspaceRetention because an rpc named RetentionPolicy would
+  // shadow the RetentionPolicy message type for every later return here.
+  rpc GetWorkspaceRetention(RetentionPolicyRequest) returns (RetentionPolicy);
+  rpc SetWorkspaceRetention(RetentionPolicyRequest) returns (RetentionPolicy);
+  rpc GetLastRetentionSweep(RetentionPolicyRequest) returns (LastRetentionSweepResponse);
+  rpc GetConversationRetention(ConversationRetentionRequest) returns (ConversationRetentionResponse);
+  rpc SetConversationRetention(ConversationRetentionRequest) returns (RetentionMutationResponse);
+  rpc RemoveConversationRetention(ConversationRetentionRequest) returns (RetentionMutationResponse);
+}
+
+message RetentionPolicy {
+  int32 message_days = 1;
+  int32 file_days = 2;
+}
+
+message RetentionPolicyRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  RetentionPolicy policy = 3;
+}
+
+message RetentionMutationResponse {
+  bool ok = 1;
+}
+
+message LastRetentionSweepResponse {
+  int64 swept_at = 1;
+}
+
+message ConversationRetentionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  int32 duration_days = 4;
+}
+
+message ConversationRetentionResponse {
+  int32 duration_days = 1;
+  int64 updated_at = 2;
+  // effective_days is the duration that actually governs this conversation,
+  // resolved once here so no caller resolves it differently from the sweep.
+  int32 effective_days = 3;
 }
 
 message SharedInvite {

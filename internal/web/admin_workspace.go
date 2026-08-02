@@ -21,10 +21,13 @@ import (
 // words which governance controls do not exist here rather than drawing an
 // inert switch for them.
 //
-// Retention is the largest of those. It has no policy type, no storage, no
-// read-path enforcement and no sweep: a toggle would promise deletion that
-// never happens, which is worse than an absent control because an
-// administrator would stop looking for the missing capability.
+// Retention used to be the largest of those, and this page said so. It now has
+// a policy, storage, a sweep and an API, so the control is real — and it says
+// two things a working toggle still owes the person using it: that deletion is
+// permanent, and that it runs on a schedule rather than the instant content
+// expires, which is Slack's behaviour too. The last-swept line exists so a
+// stalled worker is visible; without it, a workspace could believe a policy was
+// being applied for weeks after it stopped.
 
 type workspaceSettingsData struct {
 	CSRFToken       string
@@ -33,9 +36,17 @@ type workspaceSettingsData struct {
 	Description     string
 	IconURL         string
 	Discoverability string
-	Options         []workspaceDiscoverabilityOption
-	Channels        []workspaceDefaultChannelOption
-	CanWrite        bool
+	// Retention. The summary and the swept line are what make the control
+	// honest: a duration alone would not tell an administrator whether the
+	// policy is actually being applied.
+	MessageRetentionDays  int
+	FileRetentionDays     int
+	RetentionSummary      string
+	RetentionSweptAt      string
+	RetentionSweptMachine string
+	Options               []workspaceDiscoverabilityOption
+	Channels              []workspaceDefaultChannelOption
+	CanWrite              bool
 }
 
 type workspaceDiscoverabilityOption struct {
@@ -93,10 +104,21 @@ const workspaceSettingsMarkup = `{{define "title"}}Workspace settings · SameOld
 {{if .CanWrite}}<p><button class="toggle" type="submit">Save default channels</button></p>{{end}}
 </form>
 </section>
+<section class="card" aria-labelledby="retention-heading">
+<div class="section-head"><h2 id="retention-heading">Message and file retention</h2><p>Deletion under this policy is permanent and cannot be undone. It runs on a schedule rather than the instant something expires, so content stays readable for up to a day after its age passes the limit.</p></div>
+<form class="setup" method="post" action="/app/admin/settings/retention">
+<input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label>Keep messages for<input name="message_days" type="number" min="0" max="36499" value="{{.MessageRetentionDays}}" {{if not .CanWrite}}disabled{{end}}><span class="read-only">days · 0 keeps them forever</span></label>
+<label>Keep files for<input name="file_days" type="number" min="0" max="36499" value="{{.FileRetentionDays}}" {{if not .CanWrite}}disabled{{end}}><span class="read-only">days · 0 keeps them forever</span></label>
+{{if .CanWrite}}<button class="toggle" type="submit">Save retention</button>{{end}}
+</form>
+<p class="read-only">{{.RetentionSummary}}</p>
+{{if .RetentionSweptAt}}<p class="read-only">Last swept <time datetime="{{.RetentionSweptMachine}}" data-local-time>{{.RetentionSweptAt}}</time>. A conversation is swept about once a day; if this is much older, the retention worker is not running.</p>{{else}}<p class="read-only">Nothing has been swept yet.</p>{{end}}
+<p class="read-only">A channel can be given a shorter limit of its own from its conversation details. Canvases and lists are not covered by retention here and are kept indefinitely.</p>
+</section>
 <section class="card" aria-labelledby="absent-heading">
 <div class="section-head"><h2 id="absent-heading">Not governed here</h2><p>These are absent rather than off. A switch that changed nothing would be worse than no switch, because you would stop looking for the missing capability.</p></div>
 <ul>
-<li><strong>Message and file retention.</strong> This deployment keeps everything until it is deleted by hand. There is no retention policy, no scheduled deletion and no enforcement on read.</li>
 <li><strong>Audio and video.</strong> Huddles and calls carry no media transport here.</li>
 </ul>
 <p><a href="/app/admin/analytics">Workspace analytics</a> · <a href="/app/admin/audit">Audit</a> · <a href="/app/admin/auth">Access and invitations</a></p>
@@ -195,6 +217,20 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 		Discoverability: string(workspace.Discoverability),
 		CanWrite:        principal.HasScope(auth.ScopeAdminUsersWrite),
 	}
+	if policy, policyErr := h.Messages.WorkspaceRetention(r.Context(), principal.WorkspaceID, principal.UserID); policyErr == nil {
+		data.MessageRetentionDays = policy.MessageDays
+		data.FileRetentionDays = policy.FileDays
+		data.RetentionSummary = retentionSummary(policy)
+	} else {
+		// A policy that cannot be read must not render as "keep forever": that
+		// would tell an administrator their retention is off when it may be
+		// deleting content right now.
+		data.RetentionSummary = "The retention policy could not be read, so what is shown above may not be what is being applied."
+	}
+	if swept, sweptErr := h.Messages.LastRetentionSweep(r.Context(), principal.WorkspaceID, principal.UserID); sweptErr == nil && !swept.IsZero() {
+		data.RetentionSweptAt = formatTime(swept)
+		data.RetentionSweptMachine = swept.UTC().Format(time.RFC3339Nano)
+	}
 	for _, option := range workspaceDiscoverabilityChoices {
 		option.Selected = option.Value == workspace.Discoverability
 		data.Options = append(data.Options, option)
@@ -210,6 +246,44 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.writeHTMLWithPolicy(w, workspaceSettingsTemplate, data, http.StatusOK, "the workspace settings could not be rendered", authAdminContentSecurityPolicy)
+}
+
+// retentionSummary says in words what the two numbers mean together, because
+// "90" and "0" in adjacent boxes do not tell an administrator that their files
+// outlive their messages.
+func retentionSummary(policy domain.RetentionPolicy) string {
+	switch {
+	case policy.MessageDays == 0 && policy.FileDays == 0:
+		return "Nothing is deleted by policy. Messages and files are kept until someone removes them."
+	case policy.MessageDays == 0:
+		return "Messages are kept forever. Files are deleted permanently once they pass their limit."
+	case policy.FileDays == 0:
+		return "Messages are deleted permanently once they pass their limit. Files are kept forever."
+	default:
+		return "Messages and files are both deleted permanently once they pass their limits."
+	}
+}
+
+func (h Handler) workspaceRetentionSet(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.workspaceSettingsMutation(w, r, "")
+	if !ok {
+		return
+	}
+	messageDays, messageErr := strconv.Atoi(strings.TrimSpace(fields["message_days"]))
+	fileDays, fileErr := strconv.Atoi(strings.TrimSpace(fields["file_days"]))
+	if messageErr != nil || fileErr != nil {
+		h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_duration", Title: "Request rejected", Message: "A retention limit is a number of days, or 0 to keep everything."})
+		return
+	}
+	if _, err := h.Messages.SetWorkspaceRetention(r.Context(), principal.WorkspaceID, principal.UserID, domain.RetentionPolicy{MessageDays: messageDays, FileDays: fileDays}); err != nil {
+		if errors.Is(err, service.ErrInvalidRetentionDuration) {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_duration", Title: "Request rejected", Message: "A retention limit must be between 0 and 36499 days."})
+			return
+		}
+		h.writeAuthAdminProblem(w, r, workspaceSettingsProblem(err, "The retention policy was not changed."))
+		return
+	}
+	h.redirectSettings(w, r, "Retention saved")
 }
 
 func (h Handler) workspaceIdentitySet(w http.ResponseWriter, r *http.Request) {

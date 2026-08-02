@@ -75,6 +75,9 @@ func runQualification(t *testing.T, open opener) {
 		{"huddles converge and end with their last participant", huddlesConvergeAndEndWithTheirLastParticipant},
 		{"workspaces for an address agree on every profile", workspacesForAnAddressAgreeOnEveryProfile},
 		{"Slack Connect capacity is claimed transactionally", slackConnectCapacityIsClaimedTransactionally},
+		{"retention deletes the same content on every profile", retentionDeletesTheSameContentOnEveryProfile},
+		{"retention sweeps are claimed exactly once", retentionSweepsAreClaimedExactlyOnce},
+		{"conversation retention overrides the workspace default", conversationRetentionOverridesTheWorkspaceDefault},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

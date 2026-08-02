@@ -16,6 +16,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/scheduler"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	store2 "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -987,14 +988,26 @@ func TestWorkspaceSettingsWriteThroughAndNameWhatIsAbsent(t *testing.T) {
 		}
 		return response.Body.String()
 	}
-	// Retention has no implementation anywhere, so the page must say it is
-	// absent rather than draw a switch for it.
+	// Retention is implemented now, so this asserts the opposite of what it
+	// used to: the control exists, and it still tells the truth about what it
+	// does. Deletion under it is permanent and applied on a schedule, and both
+	// have to be on the page before someone sets a limit.
 	before := page()
-	if !strings.Contains(before, "Message and file retention") || !strings.Contains(before, "no retention policy") {
-		t.Fatalf("the settings page does not say retention is absent: %s", before)
+	for _, expected := range []string{
+		"Message and file retention",
+		`name="message_days"`,
+		`name="file_days"`,
+		"permanent and cannot be undone",
+		"runs on a schedule",
+		"Nothing is deleted by policy",
+	} {
+		if !strings.Contains(before, expected) {
+			t.Fatalf("the retention control is missing %q: %s", expected, before)
+		}
 	}
-	if strings.Contains(before, `name="retention`) {
-		t.Fatalf("the settings page draws a retention control nothing enforces: %s", before)
+	// What genuinely has no implementation still says so.
+	if !strings.Contains(before, "Audio and video") {
+		t.Fatalf("the settings page stopped naming what is absent: %s", before)
 	}
 
 	identity := adminMutationRequest(http.MethodPost, "/app/admin/settings/identity", "name=Renamed&description=A+described+workspace&icon_url=https%3A%2F%2Ficons.example.test%2Ft1.png")
@@ -1323,5 +1336,127 @@ func TestWithdrawingWorksOnPendingAndApprovedInvitations(t *testing.T) {
 	settled, err := store.GetSharedInvite(ctx, approved.ID)
 	if err != nil || settled.Status != domain.SharedInviteRevoked {
 		t.Fatalf("approved invitation=%+v err=%v", settled, err)
+	}
+}
+
+// The retention control has to write through and read back, and the page has
+// to report whether the sweep is actually running — a policy that silently
+// stopped being applied is the failure a scheduled deletion hides.
+func TestRetentionControlWritesThroughAndReportsTheSweep(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+
+	page := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app/admin/settings", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	if !strings.Contains(page(), "Nothing has been swept yet") {
+		t.Fatalf("a workspace that has never swept does not say so: %s", page())
+	}
+
+	saved := adminMutationRequest(http.MethodPost, "/app/admin/settings/retention", "message_days=90&file_days=0")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, saved)
+	if response.Code != http.StatusOK {
+		t.Fatalf("save=%d body=%s", response.Code, response.Body.String())
+	}
+	policy, err := store.GetRetentionPolicy(ctx, "T1")
+	if err != nil || policy.MessageDays != 90 || policy.FileDays != 0 {
+		t.Fatalf("policy=%+v err=%v", policy, err)
+	}
+	// The summary says in words what two numbers in adjacent boxes do not.
+	rendered := page()
+	if !strings.Contains(rendered, `value="90"`) || !strings.Contains(rendered, "Files are kept forever") {
+		t.Fatalf("the page does not reflect what was saved: %s", rendered)
+	}
+
+	// Once a sweep has run, the page says when — so a stalled worker shows.
+	if _, err := (service.Messages{Store: store}).SetWorkspaceRetention(ctx, "T1", "U1", domain.RetentionPolicy{MessageDays: 90}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := scheduler.NewRetentionWorker(store, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.RunOnce(ctx, "T1"); err != nil {
+		t.Fatal(err)
+	}
+	swept := page()
+	if strings.Contains(swept, "Nothing has been swept yet") || !strings.Contains(swept, "Last swept") {
+		t.Fatalf("the page does not report the sweep that ran: %s", swept)
+	}
+}
+
+// A limit outside Slack's range is a caller mistake, not an outage.
+func TestRetentionControlRefusesAnImpossibleLimit(t *testing.T) {
+	handler, _ := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	for _, body := range []string{"message_days=40000&file_days=0", "message_days=forever&file_days=0"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/settings/retention", body))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d body=%s", body, response.Code, response.Body.String())
+		}
+	}
+}
+
+// A channel may be given a shorter limit than the workspace, from the panel
+// that already answers "what governs this channel". The control opens on the
+// duration actually being applied rather than an empty box, and says which of
+// the two it is.
+func TestAChannelCanTakeItsOwnRetentionLimit(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	if _, err := (service.Messages{Store: store}).SetWorkspaceRetention(ctx, "T1", "U1", domain.RetentionPolicy{MessageDays: 365}); err != nil {
+		t.Fatal(err)
+	}
+
+	details := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app?channel=C1&details=1", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	inherited := details()
+	if !strings.Contains(inherited, "follows the workspace default") || !strings.Contains(inherited, `value="365"`) {
+		t.Fatalf("the panel does not open on the governing duration: %s", inherited)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/conversation/retention?channel=C1", "duration_days=14"))
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("set=%d body=%s", response.Code, response.Body.String())
+	}
+	override, err := store.GetConversationRetention(ctx, "T1", "C1")
+	if err != nil || override.DurationDays != 14 {
+		t.Fatalf("override=%+v err=%v", override, err)
+	}
+	if !strings.Contains(details(), "This channel has its own limit") {
+		t.Fatalf("the panel does not say the channel now differs: %s", details())
+	}
+
+	removed := httptest.NewRecorder()
+	handler.ServeHTTP(removed, adminMutationRequest(http.MethodPost, "/app/conversation/retention/remove?channel=C1", ""))
+	if removed.Code != http.StatusSeeOther {
+		t.Fatalf("remove=%d body=%s", removed.Code, removed.Body.String())
+	}
+	after, err := store.GetConversationRetention(ctx, "T1", "C1")
+	if err != nil || after.DurationDays != 0 {
+		t.Fatalf("override after removal=%+v err=%v", after, err)
 	}
 }

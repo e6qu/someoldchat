@@ -1918,6 +1918,67 @@ func decodeProtoSharedInvite(value *chatv1.SharedInvite) (domain.SharedInvite, e
 	return result, nil
 }
 
+func encodeProtoRetentionPolicy(value domain.RetentionPolicy) *chatv1.RetentionPolicy {
+	return &chatv1.RetentionPolicy{MessageDays: int32(value.MessageDays), FileDays: int32(value.FileDays)}
+}
+
+func decodeProtoRetentionPolicy(value *chatv1.RetentionPolicy) (domain.RetentionPolicy, error) {
+	policy := domain.RetentionPolicy{MessageDays: int(value.GetMessageDays()), FileDays: int(value.GetFileDays())}
+	if !policy.Valid() {
+		return domain.RetentionPolicy{}, errors.New("typed retention policy is outside the permitted range")
+	}
+	return policy, nil
+}
+
+func (r Remote) WorkspaceRetention(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.RetentionPolicy, error) {
+	out, err := r.conversations.GetWorkspaceRetention(ctx, &chatv1.RetentionPolicyRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.RetentionPolicy{}, err
+	}
+	return decodeProtoRetentionPolicy(out)
+}
+
+func (r Remote) SetWorkspaceRetention(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.RetentionPolicy) (domain.RetentionPolicy, error) {
+	out, err := r.conversations.SetWorkspaceRetention(ctx, &chatv1.RetentionPolicyRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Policy: encodeProtoRetentionPolicy(policy)})
+	if err != nil {
+		return domain.RetentionPolicy{}, err
+	}
+	return decodeProtoRetentionPolicy(out)
+}
+
+func (r Remote) LastRetentionSweep(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (time.Time, error) {
+	out, err := r.conversations.GetLastRetentionSweep(ctx, &chatv1.RetentionPolicyRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return time.Time{}, err
+	}
+	if out.GetSweptAt() == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(out.GetSweptAt(), 0).UTC(), nil
+}
+
+func (r Remote) ConversationRetention(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationRetention, int, error) {
+	out, err := r.conversations.GetConversationRetention(ctx, &chatv1.ConversationRetentionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
+	if err != nil {
+		return domain.ConversationRetention{}, 0, err
+	}
+	override := domain.ConversationRetention{ConversationID: conversationID, DurationDays: int(out.GetDurationDays())}
+	if out.GetUpdatedAt() != 0 {
+		override.UpdatedAt = time.Unix(out.GetUpdatedAt(), 0).UTC()
+	}
+	return override, int(out.GetEffectiveDays()), nil
+}
+
+func (r Remote) SetConversationRetention(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, days int) error {
+	_, err := r.conversations.SetConversationRetention(ctx, &chatv1.ConversationRetentionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), DurationDays: int32(days)})
+	return err
+}
+
+func (r Remote) RemoveConversationRetention(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
+	_, err := r.conversations.RemoveConversationRetention(ctx, &chatv1.ConversationRetentionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
+	return err
+}
+
 func (r Remote) InviteShared(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID, email string) (domain.SharedInvite, error) {
 	out, err := r.conversations.InviteShared(ctx, &chatv1.InviteSharedRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), TargetWorkspaceId: string(target), TargetEmail: email})
 	if err != nil {
@@ -4955,6 +5016,67 @@ func (s *Server) AdminDenyInviteRequest(ctx context.Context, input *chatv1.Invit
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+// GetWorkspaceRetention is the transport name; see the comment on the rpc.
+func (s *Server) GetWorkspaceRetention(ctx context.Context, input *chatv1.RetentionPolicyRequest) (*chatv1.RetentionPolicy, error) {
+	policy, err := s.implementation.WorkspaceRetention(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoRetentionPolicy(policy), nil
+}
+
+func (s *Server) SetWorkspaceRetention(ctx context.Context, input *chatv1.RetentionPolicyRequest) (*chatv1.RetentionPolicy, error) {
+	policy, err := decodeProtoRetentionPolicy(input.GetPolicy())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	saved, err := s.implementation.SetWorkspaceRetention(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), policy)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoRetentionPolicy(saved), nil
+}
+
+// GetLastRetentionSweep is the transport name; the Get prefix keeps it beside
+// GetWorkspaceRetention, which had to take one to avoid shadowing its type.
+func (s *Server) GetLastRetentionSweep(ctx context.Context, input *chatv1.RetentionPolicyRequest) (*chatv1.LastRetentionSweepResponse, error) {
+	swept, err := s.implementation.LastRetentionSweep(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	response := &chatv1.LastRetentionSweepResponse{}
+	if !swept.IsZero() {
+		response.SweptAt = swept.Unix()
+	}
+	return response, nil
+}
+
+func (s *Server) GetConversationRetention(ctx context.Context, input *chatv1.ConversationRetentionRequest) (*chatv1.ConversationRetentionResponse, error) {
+	override, effective, err := s.implementation.ConversationRetention(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	response := &chatv1.ConversationRetentionResponse{DurationDays: int32(override.DurationDays), EffectiveDays: int32(effective)}
+	if !override.UpdatedAt.IsZero() {
+		response.UpdatedAt = override.UpdatedAt.Unix()
+	}
+	return response, nil
+}
+
+func (s *Server) SetConversationRetention(ctx context.Context, input *chatv1.ConversationRetentionRequest) (*chatv1.RetentionMutationResponse, error) {
+	if err := s.implementation.SetConversationRetention(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), int(input.GetDurationDays())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.RetentionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) RemoveConversationRetention(ctx context.Context, input *chatv1.ConversationRetentionRequest) (*chatv1.RetentionMutationResponse, error) {
+	if err := s.implementation.RemoveConversationRetention(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.RetentionMutationResponse{Ok: true}, nil
 }
 
 func (s *Server) InviteShared(ctx context.Context, input *chatv1.InviteSharedRequest) (*chatv1.SharedInvite, error) {

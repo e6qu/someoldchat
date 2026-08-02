@@ -222,6 +222,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.getTeams", h.adminConversationGetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.setTeams", h.adminConversationSetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.disconnectShared", h.adminConversationDisconnectShared)
+	mux.HandleFunc("POST /api/admin.conversations.getCustomRetention", h.adminConversationGetCustomRetention)
+	mux.HandleFunc("POST /api/admin.conversations.setCustomRetention", h.adminConversationSetCustomRetention)
+	mux.HandleFunc("POST /api/admin.conversations.removeCustomRetention", h.adminConversationRemoveCustomRetention)
 	mux.HandleFunc("POST /api/conversations.inviteShared", h.conversationInviteShared)
 	mux.HandleFunc("POST /api/conversations.acceptSharedInvite", h.conversationAcceptSharedInvite)
 	mux.HandleFunc("POST /api/conversations.approveSharedInvite", h.conversationApproveSharedInvite)
@@ -8862,6 +8865,15 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	}
 	// An invitation somebody else already decided is not a malformed request:
 	// the caller did nothing wrong and retrying cannot help.
+	// A duration outside Slack's range is a caller mistake with its own
+	// documented code, and a conversation type that cannot carry a policy is a
+	// refusal rather than a missing channel.
+	if errors.Is(err, service.ErrInvalidRetentionDuration) {
+		return "invalid_duration"
+	}
+	if errors.Is(err, service.ErrRetentionNotSupported) {
+		return "channel_type_not_supported"
+	}
 	if errors.Is(err, service.ErrSharedInviteSettled) {
 		return "already_resolved"
 	}
