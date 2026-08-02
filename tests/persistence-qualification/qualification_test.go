@@ -68,6 +68,8 @@ func runQualification(t *testing.T, open opener) {
 		{"a conversation change and its notice commit together", conversationNoticesCommitWithTheirChange},
 		{"thread summaries are batched and identical across profiles", threadSummariesAreBatchedAndIdentical},
 		{"activity follows the read cursor in both directions", activityFollowsTheReadCursorBothWays},
+		{"a deleted file is deleted on every message that carries it", aDeletedFileIsDeletedOnEveryMessageThatCarriesIt},
+		{"deleting the last carrier retracts the file share", deletingTheLastCarrierRetractsTheFileShare},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

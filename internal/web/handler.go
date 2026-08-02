@@ -247,12 +247,18 @@ type messageView struct {
 }
 
 type fileView struct {
+	ID          string
 	Name        string
 	Title       string
 	MIMEType    string
 	Size        string
 	DownloadURL string
 	Deleted     bool
+	// DeleteURL is set only for a file this reader may actually delete. The
+	// service is uploader-only, so rendering the control for anyone else
+	// would be a button that always fails — the universal contract forbids a
+	// control that does not do what its name promises.
+	DeleteURL string
 }
 
 type reactionView struct {
@@ -1102,6 +1108,8 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .thread-summary{margin:2px 0 0;font-size:12px}
 .thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
 .thread-last-reply{color:var(--muted);margin-left:6px}
+.file-delete summary{cursor:pointer;color:var(--muted);font-size:12px}
+.file-delete p{margin:6px 0;font-size:12px;color:var(--muted)}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
@@ -1149,7 +1157,13 @@ const messagesPartial = `{{define "messages"}}
       <div class="message-file">
         <span class="message-file-icon" aria-hidden="true">FILE</span>
         <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span></span>
-        {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{end}}
+        {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{if $file.DeleteURL}}<details class="file-delete"><summary>Delete file</summary>
+          <form method="post" action="{{$file.DeleteURL}}" hx-post="{{$file.DeleteURL}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <p>Deleting {{$file.Title}} removes it from every message and search result in this workspace. This cannot be undone.</p>
+            <button type="submit">Delete this file</button>
+          </form>
+        </details>{{end}}{{end}}
       </div>{{end}}</div>{{end}}
     {{if $message.Blocks}}
     <div class="message-blocks" aria-label="Structured message">
@@ -1292,6 +1306,7 @@ const messagesPartial = `{{define "messages"}}
         <summary>Delete</summary>
         <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          {{if $message.Files}}<p>This message shares a file. Deleting it also removes the file from this conversation, unless another message here shares it too. The file itself is kept.</p>{{end}}
           <button type="submit">Delete this message</button>
         </form>
       </details>
@@ -1366,6 +1381,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         {{if .CanSchedule}}<a class="side-link" href="/app/drafts?channel={{.Channel}}" aria-label="Drafts and sent"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Drafts &amp; sent</span></a>{{end}}
         <a class="side-link" href="/app/dms" aria-label="Direct messages"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">DMs</span></a>
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
+        <a class="side-link" href="/app/remote-files?channel={{.Channel}}" aria-label="Remote files"><span class="side-icon" aria-hidden="true">⇗</span><span class="side-text">Remote files</span></a>
         <a class="side-link" href="/app/canvases" aria-label="Canvases"><span class="side-icon" aria-hidden="true">▤</span><span class="side-text">Canvases</span></a>
         <a class="side-link" href="/app/lists" aria-label="Lists"><span class="side-icon" aria-hidden="true">☷</span><span class="side-text">Lists</span></a>
         <a class="side-link" href="/app/workflows" aria-label="Workflows"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">Workflows</span></a>
@@ -3331,6 +3347,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app", h.index)
 	mux.HandleFunc("GET /archives/{channelID}/{timestamp}", h.archivePermalink)
 	mux.HandleFunc("POST /app/message/forward", h.forwardMessage)
+	mux.HandleFunc("POST /app/files/delete", h.deleteFile)
+	mux.HandleFunc("GET /app/remote-files", h.remoteFiles)
+	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
+	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)
 	mux.HandleFunc("POST /app/read/unread", h.markUnreadFromHere)
 	mux.HandleFunc("GET /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("POST /oauth/authorize", h.oauthAuthorize)
@@ -3535,6 +3555,35 @@ func requireHistoryReader(principal auth.Principal) (historyReader, error) {
 // forwarded message never pretends the forwarder wrote it, and the
 // destination is validated as one this actor may post to — ACT-03 requires a
 // forward not to disclose a destination the actor cannot reach.
+// deleteFile removes a hosted file. Slack's delete is workspace-wide — the
+// file leaves every message, search result and preview that referenced it —
+// so the confirmation names that consequence rather than asking a bare
+// "are you sure", which FILE-06 requires and the universal contract's
+// destructive-action rule insists on.
+func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the conversation and try again."); !ok {
+		return
+	}
+	fileID := domain.FileID(strings.TrimSpace(r.URL.Query().Get("file")))
+	if fileID == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The file was not deleted", "Reload the conversation and try again.")
+		return
+	}
+	if err := h.Messages.DeleteFile(r.Context(), principal.WorkspaceID, principal.UserID, fileID); err != nil {
+		// The service is uploader-only and answers a missing file and someone
+		// else's file identically, so this cannot be used to probe for files.
+		h.writeMessageMutationError(w, r, err, "deleted")
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	h.redirectMutation(w, r, appURL(channel, "", "", "", "")+"&notice="+url.QueryEscape("File deleted"))
+}
+
 func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
@@ -4619,11 +4668,15 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			if title == "" {
 				title = file.Name
 			}
-			view.Files = append(view.Files, fileView{
-				Name: file.Name, Title: title, MIMEType: file.MIMEType,
+			fileItem := fileView{
+				ID: string(file.ID), Name: file.Name, Title: title, MIMEType: file.MIMEType,
 				Size: formatFileSize(file.Size), Deleted: file.Deleted,
 				DownloadURL: "/app/files/" + url.PathEscape(string(file.ID)),
-			})
+			}
+			if !file.Deleted && file.Uploader == principal.UserID && principal.HasScope(auth.ScopeFilesWrite) {
+				fileItem.DeleteURL = mutationURL("/app/files/delete", channel, timestamp, threadTimestamp, before) + "&file=" + url.QueryEscape(string(file.ID))
+			}
+			view.Files = append(view.Files, fileItem)
 		}
 		if !ephemeral {
 			view.Shortcuts = messageShortcuts

@@ -9972,6 +9972,54 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 }
 
 func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updateMessageTx(ctx, tx, message, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteMessage(ctx context.Context, message domain.Message, event events.Event, unshares []store.FileUnshare) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updateMessageTx(ctx, tx, message, event); err != nil {
+		return err
+	}
+	for _, unshare := range unshares {
+		// A share ends only with the last live message carrying the file into
+		// this conversation, so the delete is conditional on there being none.
+		result, err := tx.ExecContext(ctx, `DELETE FROM file_shares WHERE file_id = ? AND conversation_id = ?
+			AND NOT EXISTS (
+				SELECT 1 FROM message_files mf_carrier
+				JOIN messages m_carrier ON m_carrier.id = mf_carrier.message_id
+				WHERE mf_carrier.file_id = ? AND m_carrier.conversation = ?
+				AND m_carrier.deleted = 0 AND m_carrier.id <> ?
+			)`, unshare.FileID, message.Conversation, unshare.FileID, message.Conversation, message.ID)
+		if err != nil {
+			return err
+		}
+		removed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if removed == 0 {
+			continue
+		}
+		if err := insertOutbox(ctx, tx, unshare.Event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func updateMessageTx(ctx context.Context, tx *sql.Tx, message domain.Message, event events.Event) error {
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
 		return err
@@ -9987,11 +10035,6 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	deleted := 0
 	if message.Deleted {
 		deleted = 1
@@ -10007,10 +10050,7 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return insertOutbox(ctx, tx, event)
 }
 
 func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event events.Event) error {

@@ -1876,6 +1876,7 @@ func TestWorkspacePagesCarryTheSameProtectionAsTheAdminPage(t *testing.T) {
 		"/app?channel=Cdev",
 		"/app/timeline?channel=Cdev",
 		"/app/members",
+		"/app/remote-files",
 		"/app/search?q=hello&channel=Cdev",
 		"/app?channel=Cmissing",
 		// Failures. Each of these answered with a bare line of text and no
@@ -2732,7 +2733,7 @@ func TestApplicationRedirectsUnauthenticatedBrowserToLogin(t *testing.T) {
 // never leak into the web tree.
 func TestDeepApplicationPagesRedirectAnonymousVisitorsToSignIn(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	for _, target := range []string{"/app/members", "/app/later", "/app/workflows", "/app/canvases", "/archives/Cdev/p1700000000000000"} {
+	for _, target := range []string{"/app/members", "/app/later", "/app/workflows", "/app/canvases", "/app/remote-files", "/archives/Cdev/p1700000000000000"} {
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
 		if response.Code != http.StatusSeeOther {
@@ -4160,4 +4161,106 @@ func TestForwardAndMarkUnreadFromAMessage(t *testing.T) {
 		t.Fatalf("cursor=%s, want it to sit before the message that was marked unread", cursor.LastRead)
 	}
 	requireContains(t, "timeline after marking unread", get(t, mux, "/app?channel=Cdev").Body.String(), `class="unread-divider"`)
+}
+
+// FILE-06: an uploader can delete a hosted file, and the confirmation names
+// the workspace-wide consequence rather than asking a bare "are you sure".
+// The control appears only for a file this reader may actually delete — the
+// service is uploader-only, so rendering it for anyone else would be a button
+// that always fails.
+func TestFileDeleteIsOfferedOnlyToItsUploader(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+	file := domain.File{
+		ID: "Fdelete", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt", Title: "Report",
+		MIMEType: "text/plain", BlobKey: "blob/report", Size: 12, CreatedAt: time.Now().UTC(),
+	}
+	event := events.Event{ID: "Efile", WorkspaceID: "T1", Topic: "file.created", Payload: `{"type":"file.created","event_ts":"1700000000.000000","file_id":"Fdelete"}`, CreatedAt: time.Now().UTC()}
+	if err := store.CreateFile(ctx, file, event); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{ID: "Mfile", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: "sharing a file", Attachments: "[]", CreatedAt: domain.MessageInstant(time.Now().UTC())}
+	shareEvent := events.Event{ID: "Eshare", WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message.created","event_ts":"1700000000.000001","message_id":"Mfile"}`, CreatedAt: message.CreatedAt}
+	if err := store.CreateFileShareMessage(ctx, []domain.FileID{"Fdelete"}, message, []events.Event{shareEvent}); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "own file", body, "Delete file", "removes it from every message and search result")
+
+	deleted := postForm(t, mux, "/app/files/delete?channel=Cdev&file=Fdelete", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete=%d: %s", deleted.Code, deleted.Body)
+	}
+	if _, _, err := messages.OpenFile(ctx, "T1", "U1", "Fdelete"); err == nil {
+		t.Fatal("the file is still readable after deletion")
+	}
+	after := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireMissing(t, "deleted file", after, "Delete file")
+}
+
+// Deleting a message that shares a file retracts the file's share into that
+// conversation, so the control has to say so before it is used. A confirmation
+// that names only the message understates what the button does.
+func TestDeletingASharingMessageWarnsThatTheFileLeavesTheChannel(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	file := domain.File{
+		ID: "Fshared", WorkspaceID: "T1", Uploader: "U1", Name: "plan.txt", Title: "Plan",
+		MIMEType: "text/plain", BlobKey: "blob/plan", Size: 4, CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateFile(ctx, file, events.Event{ID: "Efshared", WorkspaceID: "T1", Topic: "file.created", Payload: `{"type":"file.created","event_ts":"1700000000.000000","file_id":"Fshared"}`, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{ID: "Mshared", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: "the plan", Attachments: "[]", CreatedAt: domain.MessageInstant(time.Now().UTC())}
+	if err := store.CreateFileShareMessage(ctx, []domain.FileID{"Fshared"}, message,
+		[]events.Event{{ID: "Emshared", WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message.created","event_ts":"1700000000.000001","message_id":"Mshared"}`, CreatedAt: message.CreatedAt}}); err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, "sharing message", get(t, mux, "/app?channel=Cdev").Body.String(),
+		"This message shares a file", "also removes the file from this conversation")
+
+	timestamp := string(domain.NewMessageTimestamp(message.CreatedAt))
+	deleted := postForm(t, mux, "/app/message/delete?channel=Cdev&ts="+url.QueryEscape(timestamp), url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete=%d: %s", deleted.Code, deleted.Body)
+	}
+	stored, err := store.GetFile(ctx, "Fshared")
+	if err != nil {
+		t.Fatalf("the file itself was destroyed by deleting a message that shared it: %v", err)
+	}
+	if len(stored.SharedChannels) != 0 {
+		t.Fatalf("the file is still shared into %v with no message sharing it", stored.SharedChannels)
+	}
+}
+
+// FILE-07: remote files are visible in the client, and the surface never
+// claims to host bytes it does not have — it links out and says so.
+func TestRemoteFilesAreVisibleAndNeverClaimToBeHosted(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	messages := service.Messages{Store: store}
+	if _, err := messages.AddRemoteFile(ctx, "T1", "U1", domain.RemoteFile{
+		ExternalID: "ext-1", Title: "Quarterly plan", FileType: "gdoc",
+		ExternalURL: "https://files.example.test/quarterly", IndexableContents: "revenue and headcount",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app/remote-files?channel=Cdev").Body.String()
+	requireContains(t, "remote files", body,
+		"Quarterly plan", "gdoc", "ext-1",
+		"https://files.example.test/quarterly",
+		"Open where it is hosted", "Hosted elsewhere",
+		"The contents stay with the app that hosts them",
+	)
+	// It must not offer a download: this deployment does not have the bytes.
+	requireMissing(t, "remote files", body, "/app/files/", "download")
+
+	shared := postForm(t, mux, "/app/remote-files/share?file=ext-1&channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "destination": {"Cdev"},
+	}.Encode(), false)
+	if shared.Code != http.StatusSeeOther {
+		t.Fatalf("share=%d: %s", shared.Code, shared.Body)
+	}
+	requireContains(t, "shared remote file", get(t, mux, "/app/remote-files?channel=Cdev").Body.String(), "Shared in", "#general")
 }

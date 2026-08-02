@@ -6197,7 +6197,21 @@ func (m Messages) Delete(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if err != nil {
 		return domain.Message{}, err
 	}
-	if err := m.Store.UpdateMessage(ctx, message, event); err != nil {
+	// Deleting the message retracts the shares it carried, so every file on it
+	// is a candidate for file.unshared. The store journals only the candidates
+	// whose share actually ended; see store.Store.DeleteMessage.
+	unshares := make([]store.FileUnshare, 0, len(message.Files))
+	for _, file := range message.Files {
+		unshared := file
+		unshared.SharedChannels = slices.DeleteFunc(append([]domain.ConversationID(nil), file.SharedChannels...),
+			func(channel domain.ConversationID) bool { return channel == conversation })
+		unshareEvent, eventErr := fileEventAt(workspaceID, userID, "file.unshared", unshared, conversation, time.Now().UTC())
+		if eventErr != nil {
+			return domain.Message{}, eventErr
+		}
+		unshares = append(unshares, store.FileUnshare{FileID: file.ID, Event: unshareEvent})
+	}
+	if err := m.Store.DeleteMessage(ctx, message, event, unshares); err != nil {
 		return domain.Message{}, err
 	}
 	return message, nil

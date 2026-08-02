@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1438,6 +1439,154 @@ func conversationNoticesCommitWithTheirChange(t *testing.T, open opener) {
 		if message.Text == "" {
 			t.Fatalf("%s notice carries no text", want)
 		}
+	}
+}
+
+// Deleting a file must delete it everywhere it was shared. The message that
+// shared it survives — Slack keeps the post and marks the attachment gone —
+// so every profile has to report the attachment's current state when it hands
+// out the message, not the state it had when it was posted. A profile that
+// snapshots the file onto the message keeps offering a download link and the
+// original title for bytes that are no longer there, and keeps offering the
+// uploader a delete control for a file already deleted.
+func aDeletedFileIsDeletedOnEveryMessageThatCarriesIt(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	file := domain.File{
+		ID: domain.FileID("F-shared-" + f.suffix), WorkspaceID: f.workspaceID, Uploader: f.userID,
+		Name: "budget.txt", Title: "Budget", MIMEType: "text/plain",
+		BlobKey: string(f.workspaceID) + "/budget", Size: 9, CreatedAt: time.Unix(1_700_000_500, 0).UTC(),
+	}
+	if err := f.repository.CreateFile(ctx, file, f.event("shared-file", "file.created", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	share := domain.Message{
+		ID: domain.MessageID("M-file-share-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "here is the budget", Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Unix(1_700_000_501, 0).UTC()),
+	}
+	if err := f.repository.CreateFileShareMessage(ctx, []domain.FileID{file.ID}, share,
+		[]events.Event{f.event("shared-file-message", "message.created", string(share.ID))}); err != nil {
+		t.Fatal(err)
+	}
+	attached := func(stage string) domain.File {
+		t.Helper()
+		page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		for _, message := range page.Messages {
+			if message.ID != share.ID {
+				continue
+			}
+			if len(message.Files) != 1 {
+				t.Fatalf("%s: the share message carries %d files, want 1", stage, len(message.Files))
+			}
+			return message.Files[0]
+		}
+		t.Fatalf("%s: the share message is gone from the channel", stage)
+		return domain.File{}
+	}
+	before := attached("before deletion")
+	if before.Deleted || before.Title != file.Title || !slices.Contains(before.SharedChannels, f.channelID) {
+		t.Fatalf("before deletion the attachment reads %+v, want the live file shared into the channel", before)
+	}
+
+	if err := f.repository.DeleteFile(ctx, file.ID, f.event("shared-file-delete", "file.deleted", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	after := attached("after deletion")
+	if !after.Deleted {
+		t.Fatalf("after deletion the attachment still reads as live: %+v", after)
+	}
+	if _, err := f.repository.GetFile(ctx, file.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the deleted file is still readable: %v", err)
+	}
+}
+
+// A file is visible to whoever can read a conversation it is shared into, and
+// the share is a row of its own. Deleting the message that shared it therefore
+// has to retract the share, or the file stays readable in that channel — and
+// keeps appearing in files.list — with nothing left on screen that put it
+// there. The share survives while another live message still carries the file,
+// and the retraction is journalled as file.unshared exactly when it happens.
+func deletingTheLastCarrierRetractsTheFileShare(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	file := domain.File{
+		ID: domain.FileID("F-carried-" + f.suffix), WorkspaceID: f.workspaceID, Uploader: f.userID,
+		Name: "plan.txt", Title: "Plan", MIMEType: "text/plain",
+		BlobKey: string(f.workspaceID) + "/plan", Size: 4, CreatedAt: time.Unix(1_700_000_600, 0).UTC(),
+	}
+	if err := f.repository.CreateFile(ctx, file, f.event("carried-file", "file.created", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	carrier := func(name string, at time.Time) domain.Message {
+		t.Helper()
+		message := domain.Message{
+			ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+			AuthorID: f.userID, Text: name, Attachments: "[]", CreatedAt: domain.MessageInstant(at),
+		}
+		if err := f.repository.CreateFileShareMessage(ctx, []domain.FileID{file.ID}, message,
+			[]events.Event{f.event(name, "message.created", string(message.ID))}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return message
+	}
+	first := carrier("carrier-one", time.Unix(1_700_000_601, 0).UTC())
+	second := carrier("carrier-two", time.Unix(1_700_000_602, 0).UTC())
+
+	sharedChannels := func(stage string) []domain.ConversationID {
+		t.Helper()
+		stored, err := f.repository.GetFile(ctx, file.ID)
+		if err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		return stored.SharedChannels
+	}
+	unsharedEvents := func(stage string) int {
+		t.Helper()
+		records, err := f.repository.ListEventsAfter(ctx, f.workspaceID, 0, 200)
+		if err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		count := 0
+		for _, record := range records {
+			if record.Event.Topic == "file.unshared" {
+				count++
+			}
+		}
+		return count
+	}
+
+	deleteCarrier := func(message domain.Message, name string) {
+		t.Helper()
+		message.Deleted = true
+		unshareEvent := f.event(name+"-unshare", "file.unshared", string(file.ID))
+		if err := f.repository.DeleteMessage(ctx, message, f.event(name+"-delete", "message.deleted", string(message.ID)),
+			[]store.FileUnshare{{FileID: file.ID, Event: unshareEvent}}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+
+	deleteCarrier(first, "first")
+	if channels := sharedChannels("after the first delete"); !slices.Contains(channels, f.channelID) {
+		t.Fatalf("the share ended while another message still carried the file: %v", channels)
+	}
+	if count := unsharedEvents("after the first delete"); count != 0 {
+		t.Fatalf("file.unshared was journalled %d times while the share was still open", count)
+	}
+
+	deleteCarrier(second, "second")
+	if channels := sharedChannels("after the last delete"); slices.Contains(channels, f.channelID) {
+		t.Fatalf("the file is still shared into the channel with no message carrying it: %v", channels)
+	}
+	if count := unsharedEvents("after the last delete"); count != 1 {
+		t.Fatalf("file.unshared was journalled %d times for one retracted share", count)
 	}
 }
 

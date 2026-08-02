@@ -115,6 +115,15 @@ type ListItemCreation struct {
 	Event events.Event
 }
 
+// FileUnshare pairs a file carried by a message with the event to journal if
+// deleting that message retracts the file's last share into the conversation.
+// The event is a candidate: only the store knows whether another live message
+// still holds the share open. See Store.DeleteMessage.
+type FileUnshare struct {
+	FileID domain.FileID
+	Event  events.Event
+}
+
 // BetterAccessGrant reports whether one grant should replace another as the
 // grant that decided a resolved access level.
 //
@@ -521,6 +530,18 @@ type Store interface {
 	GetMessageByCreatedAt(context.Context, domain.ConversationID, time.Time) (domain.Message, error)
 	GetIdempotentMessage(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Message, error)
 	UpdateMessage(context.Context, domain.Message, events.Event) error
+	// DeleteMessage marks one message deleted and retracts the file shares that
+	// message was carrying. A file is visible to whoever can see a conversation
+	// it is shared into, and the share is a row of its own: without this, the
+	// only message that ever shared a file into a channel could be deleted and
+	// the file stayed readable there, and files.list kept listing it, forever.
+	//
+	// A share survives while any other live message in the same conversation
+	// still carries the file, so the store — not the caller — decides which
+	// shares end. The caller supplies one candidate event per file the message
+	// carries; the store journals exactly those whose share it removed, in the
+	// order given, inside the same transaction as the deletion.
+	DeleteMessage(context.Context, domain.Message, events.Event, []FileUnshare) error
 	// CreateMessage stores a message and the event announcing it in one
 	// transaction, at an instant no other message in the same conversation owns.
 	//

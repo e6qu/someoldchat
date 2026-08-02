@@ -1770,7 +1770,7 @@ func (s *Store) ExpandDirectConversation(_ context.Context, expansion domain.Dir
 			if original.Deleted {
 				continue
 			}
-			copy := cloneMessage(original)
+			copy := s.cloneMessage(original)
 			copy.ID, err = domain.NewMessageID()
 			if err != nil {
 				return err
@@ -4592,7 +4592,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 			message, messageErr := s.messageLocked(item.MessageID)
 			conversation, conversationExists := s.conversations[item.Conversation]
 			if messageErr == nil && !message.Deleted && conversationExists && s.canViewActivitySourceLocked(workspace, user, conversation) {
-				item.Message = cloneMessage(message)
+				item.Message = s.cloneMessage(message)
 				item.SourceAvailable = true
 			}
 		}
@@ -5204,7 +5204,7 @@ func (s *Store) GetMessage(_ context.Context, id domain.MessageID) (domain.Messa
 	for _, values := range s.messages {
 		for _, message := range values {
 			if message.ID == id {
-				return cloneMessage(message), nil
+				return s.cloneMessage(message), nil
 			}
 		}
 	}
@@ -5232,7 +5232,7 @@ func (s *Store) GetMessageByCreatedAt(_ context.Context, conversation domain.Con
 	wanted := domain.MessageInstant(createdAt)
 	for _, message := range s.messages[conversation] {
 		if domain.MessageInstant(message.CreatedAt).Equal(wanted) {
-			return cloneMessage(message), nil
+			return s.cloneMessage(message), nil
 		}
 	}
 	return domain.Message{}, store.ErrNotFound
@@ -5340,7 +5340,7 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 				if reaction.UserID != user {
 					continue
 				}
-				item := domain.UserReaction{Conversation: conversationID, Message: cloneMessage(message), Reaction: reaction}
+				item := domain.UserReaction{Conversation: conversationID, Message: s.cloneMessage(message), Reaction: reaction}
 				if after == "" || userReactionKey(item) > after {
 					values = appendSorted(values, item, request.Limit+1, func(left, right domain.UserReaction) bool { return userReactionKey(left) < userReactionKey(right) })
 				}
@@ -5491,7 +5491,7 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 		if star.Message.WorkspaceID != workspace || star.Message.Deleted || (after != "" && starKey(star) <= after) {
 			continue
 		}
-		star.Message = cloneMessage(star.Message)
+		star.Message = s.cloneMessage(star.Message)
 		values = appendSorted(values, star, request.Limit+1, func(left, right domain.Star) bool { return starKey(left) < starKey(right) })
 	}
 	hasMore := len(values) > request.Limit
@@ -7372,6 +7372,54 @@ func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event e
 	return store.ErrNotFound
 }
 
+func (s *Store) DeleteMessage(_ context.Context, message domain.Message, event events.Event, unshares []store.FileUnshare) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := s.messages[message.Conversation]
+	for index := range values {
+		if values[index].ID != message.ID {
+			continue
+		}
+		message.Unfurls = copyUnfurls(message.Unfurls)
+		values[index] = message
+		s.messages[message.Conversation] = values
+		s.outbox = append(s.outbox, event)
+		for _, unshare := range unshares {
+			if s.fileIsCarriedElsewhereLocked(unshare.FileID, message.Conversation, message.ID) {
+				continue
+			}
+			channels := s.fileShares[unshare.FileID]
+			retained := slices.DeleteFunc(append([]domain.ConversationID(nil), channels...), func(channel domain.ConversationID) bool {
+				return channel == message.Conversation
+			})
+			if len(retained) == len(channels) {
+				continue
+			}
+			s.fileShares[unshare.FileID] = retained
+			s.outbox = append(s.outbox, unshare.Event)
+		}
+		return nil
+	}
+	return store.ErrNotFound
+}
+
+// fileIsCarriedElsewhereLocked reports whether any live message other than the
+// one being deleted still shares the file into the conversation. Sharing the
+// same file twice is ordinary, so the share only ends with the last carrier.
+func (s *Store) fileIsCarriedElsewhereLocked(fileID domain.FileID, conversation domain.ConversationID, excluding domain.MessageID) bool {
+	for _, message := range s.messages[conversation] {
+		if message.ID == excluding || message.Deleted {
+			continue
+		}
+		for _, file := range message.Files {
+			if file.ID == fileID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // cloneInviteRequest, cloneWorkspace and cloneMessage exist for the same reason
 // cloneUserGroup and cloneCall do: a value returned from this repository must not
 // alias the slice or map that still lives inside it, or a caller can mutate store
@@ -7387,14 +7435,25 @@ func cloneWorkspace(value domain.Workspace) domain.Workspace {
 	return value
 }
 
-func cloneMessage(value domain.Message) domain.Message {
+// cloneMessage re-reads every attached file from the file table rather than
+// returning the copy that was current when the message was posted. The SQL
+// profiles join message_files to files on every read, so a snapshot here
+// diverges the moment a file is deleted, renamed or shared: a deleted file
+// kept rendering as a live download with its original title.
+func (s *Store) cloneMessage(value domain.Message) domain.Message {
 	if value.Unfurls != nil {
 		value.Unfurls = copyUnfurls(value.Unfurls)
 	}
-	value.Files = append([]domain.File(nil), value.Files...)
-	for index := range value.Files {
-		value.Files[index].SharedChannels = append([]domain.ConversationID(nil), value.Files[index].SharedChannels...)
+	files := make([]domain.File, 0, len(value.Files))
+	for _, attached := range value.Files {
+		current, exists := s.files[attached.ID]
+		if !exists {
+			current = attached
+		}
+		current.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[attached.ID]...)
+		files = append(files, current)
 	}
+	value.Files = files
 	return value
 }
 
@@ -7721,7 +7780,7 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
 				continue
 			}
-			window = append(window, cloneMessage(values[index]))
+			window = append(window, s.cloneMessage(values[index]))
 		}
 	} else {
 		for index := 0; index < len(values) && len(window) <= request.Limit; index++ {
@@ -7731,7 +7790,7 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
 				continue
 			}
-			window = append(window, cloneMessage(values[index]))
+			window = append(window, s.cloneMessage(values[index]))
 		}
 	}
 	hasMore := len(window) > request.Limit
@@ -7786,7 +7845,7 @@ func (s *Store) ListAuthoredMessages(_ context.Context, workspace domain.Workspa
 			if request.Descending {
 				less = func(left, right domain.Message) bool { return messageBefore(right, left) }
 			}
-			values = appendSorted(values, cloneMessage(message), request.Limit+1, less)
+			values = appendSorted(values, s.cloneMessage(message), request.Limit+1, less)
 		}
 	}
 	hasMore := len(values) > request.Limit
@@ -7864,7 +7923,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 					return messageBefore(right, left)
 				}
 			}
-			values = appendSorted(values, cloneMessage(message), search.Page.Limit+1, less)
+			values = appendSorted(values, s.cloneMessage(message), search.Page.Limit+1, less)
 		}
 	}
 	s.mu.RUnlock()
@@ -7922,7 +7981,7 @@ func (s *Store) ListThreadMessages(_ context.Context, conversation domain.Conver
 		}
 		if (message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp) || message.ThreadTimestamp == timestamp {
 			if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
-				values = appendSorted(values, cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
+				values = appendSorted(values, s.cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
 			}
 		}
 	}
