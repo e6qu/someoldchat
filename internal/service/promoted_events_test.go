@@ -355,3 +355,54 @@ func TestAppInstallCommitsTheInstalledEvent(t *testing.T) {
 		t.Fatalf("another app received the install announcement: %q err=%v", other, err)
 	}
 }
+
+// TestUninstallAnnouncementReachesTheOpenSocket drives the whole uninstall
+// journey at the service seam: the announcement commits with the uninstall,
+// PrepareAppEvent admits it with the zero authorizations the uninstall
+// caused, and the socket claim path returns it without consulting the
+// manifest of an installation that no longer exists.
+func TestUninstallAnnouncementReachesTheOpenSocket(t *testing.T) {
+	ctx := context.Background()
+	state := memory.New()
+	state.SeedWorkspace(domain.Workspace{ID: "T1"})
+	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	now := time.Now().UTC()
+	if err := state.CreateApp(ctx, domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Doomed", ClientID: "client",
+		SigningSecretHash: "signing", SigningSecretCiphertext: "cipher", VerificationTokenHash: "verify",
+		VerificationTokenCiphertext: "cipher", ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, CreatedBy: "U1", CreatedAt: now,
+		Manifest: `{"display_information":{"name":"Doomed"}}`,
+	}, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: state, AppCredentialKey: appEventTestKey}
+	if err := messages.UninstallApp(ctx, "client", "secret", "T1", "A1"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		record, _, _, claimed, err := messages.ClaimAppEvent(ctx, "A1", "socket", "conn-1", time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claimed {
+			if record.Event.Topic != "app.uninstalled" {
+				t.Fatalf("claimed %s, want app.uninstalled", record.Event.Topic)
+			}
+			bodies, err := events.SlackEventBodies(record, "A1")
+			if err != nil || len(bodies) != 1 || !strings.Contains(string(bodies[0]), `"type":"app_uninstalled"`) {
+				t.Fatalf("bodies=%q err=%v", bodies, err)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the open socket never received the uninstall announcement")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

@@ -198,7 +198,18 @@ func (m Messages) UninstallApp(ctx context.Context, clientID, clientSecret strin
 	if client.AppID != appID {
 		return ErrOAuthAppMismatch
 	}
-	return m.Store.UninstallApp(ctx, workspaceID, appID)
+	// The announcement commits with the uninstall. It is target-routed and
+	// automatic, and the storage reads carve its topic out of the
+	// enabled-installation scope so the app can still receive the one event
+	// that explains why everything else stopped.
+	announcement, err := newEvent(workspaceID, "", events.NewPayload("app.uninstalled",
+		events.String("app_id", string(appID)),
+		events.String("target_app_id", string(appID)),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.UninstallApp(ctx, workspaceID, appID, announcement)
 }
 
 func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
@@ -290,6 +301,21 @@ func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface
 			continue
 		}
 		record = prepared
+		// The uninstall announcement needs no manifest: it is automatic (no
+		// subscription can be consulted — the installation is gone) and
+		// SlackEventBodies already applies its target routing. Consulting
+		// installedApp here would fail on the disabled installation and park
+		// the record in retry forever.
+		if record.Event.Topic == "app.uninstalled" {
+			bodies, err := events.SlackEventBodies(record, string(appID))
+			if err != nil || len(bodies) == 0 {
+				if err := m.Store.AckAppEvent(ctx, appID, surface, owner, record.Sequence); err != nil {
+					return events.Record{}, 0, "", false, err
+				}
+				continue
+			}
+			return record, attempt, reason, true, nil
+		}
 		snapshot, parsed, err := m.installedApp(ctx, record.Event.WorkspaceID, appID)
 		if err != nil {
 			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "app_configuration_unavailable", time.Now().UTC())

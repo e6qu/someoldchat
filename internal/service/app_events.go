@@ -231,6 +231,12 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 		return withEventAuthorizations(record, authorizations)
 	}
 	switch record.Event.Topic {
+	case "app.uninstalled":
+		// The uninstall revoked every authorization the app had, and Slack
+		// still delivers the announcement: zero authorizations are the fact
+		// the event reports, not a reason to withhold it. Target routing in
+		// the payload keeps it addressed to the uninstalled app alone.
+		return record, true, nil
 	case "message.created", "message.changed", "message.deleted":
 		return prepareAppMessageEvent(ctx, state, authorizations, record)
 	case "file.created", "file.shared", "file.unshared":

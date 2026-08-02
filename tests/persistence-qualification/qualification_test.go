@@ -63,6 +63,8 @@ func runQualification(t *testing.T, open opener) {
 		{"message timestamps are unique per conversation", messageTimestampsAreUniquePerConversation},
 		{"the creator of a conversation is a member of it", conversationCreatorIsAMember},
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
+		{"revoking an app token announces tokens_revoked once", revokingAnAppTokenAnnouncesTokensRevokedOnce},
+		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -322,6 +324,7 @@ func draftsAndSentRepositoryContract(t *testing.T, open opener) {
 type qualificationStore interface {
 	store.Store
 	SeedAppToken(context.Context, string, domain.AppTokenRecord) error
+	SeedToken(context.Context, string, domain.TokenRecord) error
 	SeedWorkspace(context.Context, domain.Workspace) error
 	SeedUser(context.Context, domain.User) error
 	SeedConversation(context.Context, domain.Conversation) error

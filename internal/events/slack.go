@@ -1060,3 +1060,40 @@ func appLifecycleEvent(eventType string) builder {
 		return []Inner{inner}, nil
 	}
 }
+
+// tokensRevoked renders Slack's tokens_revoked frame: the user identities
+// whose tokens were withdrawn, split by token class exactly as the payload
+// recorded them.
+func tokensRevoked(delivered Delivered, _ Surface) ([]Inner, error) {
+	oauth, oauthOK := delivered.Strings("oauth_user_ids")
+	bot, botOK := delivered.Strings("bot_user_ids")
+	if (!oauthOK || len(oauth) == 0) && (!botOK || len(bot) == 0) {
+		return nil, fmt.Errorf("%w: %s payload names no revoked tokens", ErrSlackEventIncomplete, delivered.Type)
+	}
+	if oauth == nil {
+		oauth = []string{}
+	}
+	if bot == nil {
+		bot = []string{}
+	}
+	tokens, err := encodeObject(map[string]json.RawMessage{
+		"oauth": mustEncodeStrings(oauth),
+		"bot":   mustEncodeStrings(bot),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPayloadFieldInvalid, err)
+	}
+	inner, err := newInner("tokens_revoked", delivered, JSON("tokens", tokens))
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+func mustEncodeStrings(values []string) json.RawMessage {
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return json.RawMessage("[]")
+	}
+	return encoded
+}

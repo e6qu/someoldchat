@@ -504,3 +504,23 @@ func UserChangePayload(topic string, user domain.User, deleted, statusChanged bo
 	fields = append(fields, extra...)
 	return NewPayload(topic, fields...), nil
 }
+
+// TokensRevokedEvent builds the durable record for one withdrawn application
+// token. It lives here — not in a producer — because revocation reaches the
+// repositories directly on the far side of the auth seam, so the repositories
+// themselves mint the record inside the revoking mutation; a single shared
+// constructor keeps the two storage implementations from drifting.
+func TokensRevokedEvent(workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, tokenType string, at time.Time) (Event, error) {
+	id, err := domain.NewEventID()
+	if err != nil {
+		return Event{}, err
+	}
+	field := "oauth_user_ids"
+	if tokenType == "bot" {
+		field = "bot_user_ids"
+	}
+	return New(id, workspaceID, userID, NewPayload("app.tokens_revoked",
+		String("target_app_id", string(appID)),
+		Strings(field, []string{string(userID)}),
+	), at)
+}

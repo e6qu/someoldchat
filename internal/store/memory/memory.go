@@ -676,8 +676,21 @@ func (s *Store) RevokeToken(_ context.Context, token string) error {
 	if !ok {
 		return store.ErrNotFound
 	}
+	alreadyRevoked := record.Revoked
 	record.Revoked = true
 	s.tokens[key] = record
+	// The tokens_revoked announcement is minted here, inside the mutation:
+	// revocation arrives at this repository directly across the auth seam, so
+	// no service layer is guaranteed to be on the call path. Only an
+	// application token produces one — a personal token has no app to tell —
+	// and re-revoking announces nothing.
+	if record.AppID != "" && !alreadyRevoked {
+		event, err := events.TokensRevokedEvent(record.WorkspaceID, record.UserID, record.AppID, record.TokenType, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		s.outbox = append(s.outbox, event)
+	}
 	return nil
 }
 
@@ -2251,7 +2264,7 @@ func (s *Store) ListAppInstallations(_ context.Context, appID domain.AppID) ([]d
 	return values, nil
 }
 
-func (s *Store) UninstallApp(_ context.Context, workspaceID domain.WorkspaceID, appID domain.AppID) error {
+func (s *Store) UninstallApp(_ context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, written ...events.Event) error {
 	if workspaceID == "" || appID == "" {
 		return store.InvalidArgument("app installation identity is required")
 	}
@@ -2264,6 +2277,7 @@ func (s *Store) UninstallApp(_ context.Context, workspaceID domain.WorkspaceID, 
 	}
 	installation.Enabled = false
 	s.appInstallations[key] = installation
+	s.outbox = append(s.outbox, written...)
 	for key, token := range s.tokens {
 		if token.WorkspaceID == workspaceID && token.AppID == appID {
 			token.Revoked = true
@@ -7340,9 +7354,14 @@ func (s *Store) ListAppEventsAfter(_ context.Context, appID domain.AppID, after 
 	}
 	s.mu.RLock()
 	workspaces := make(map[domain.WorkspaceID]struct{})
+	// A disabled installation still admits the app.uninstalled topic: the
+	// announcement of the uninstall must outlive the installation it announces.
+	uninstalled := make(map[domain.WorkspaceID]struct{})
 	for _, installation := range s.appInstallations {
 		if installation.AppID == appID && installation.Enabled {
 			workspaces[installation.WorkspaceID] = struct{}{}
+		} else if installation.AppID == appID {
+			uninstalled[installation.WorkspaceID] = struct{}{}
 		}
 	}
 	result := make([]events.Record, 0, limit)
@@ -7352,7 +7371,9 @@ func (s *Store) ListAppEventsAfter(_ context.Context, appID domain.AppID, after 
 			continue
 		}
 		if _, ok := workspaces[event.WorkspaceID]; !ok {
-			continue
+			if _, wasInstalled := uninstalled[event.WorkspaceID]; !wasInstalled || event.Topic != "app.uninstalled" {
+				continue
+			}
 		}
 		result = append(result, events.Record{Sequence: current, Event: event})
 		if len(result) == limit {
@@ -7379,12 +7400,15 @@ func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, ow
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	workspaces := make(map[domain.WorkspaceID]struct{})
+	uninstalled := make(map[domain.WorkspaceID]struct{})
 	for _, installation := range s.appInstallations {
 		if installation.AppID == appID && installation.Enabled {
 			workspaces[installation.WorkspaceID] = struct{}{}
+		} else if installation.AppID == appID {
+			uninstalled[installation.WorkspaceID] = struct{}{}
 		}
 	}
-	if len(workspaces) == 0 {
+	if len(workspaces) == 0 && len(uninstalled) == 0 {
 		return events.Record{}, 0, "", false, store.ErrNotFound
 	}
 	key := appEventCursorKey(appID, surface)
@@ -7401,7 +7425,9 @@ func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, ow
 			continue
 		}
 		if _, installed := workspaces[event.WorkspaceID]; !installed {
-			continue
+			if _, wasInstalled := uninstalled[event.WorkspaceID]; !wasInstalled || event.Topic != "app.uninstalled" {
+				continue
+			}
 		}
 		cursor.LeasedSequence = sequence
 		cursor.LeaseOwner = owner
