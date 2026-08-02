@@ -324,9 +324,9 @@ type Store interface {
 	// The bool reports whether durable state changed.
 	SetDirectConversationOpen(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool, events.Event) (bool, error)
 	CreateConversation(context.Context, domain.Conversation, domain.UserID, events.Event) error
-	RenameConversation(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)
-	SetConversationTopic(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)
-	SetConversationPurpose(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)
+	RenameConversation(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationTopic(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationPurpose(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
 	SetConversationArchived(context.Context, domain.ConversationID, bool, events.Event) (domain.Conversation, error)
 	DeleteConversation(context.Context, domain.WorkspaceID, domain.ConversationID, events.Event) error
 	SetConversationAccessGroups(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.UserGroupID, events.Event) error
@@ -468,9 +468,15 @@ type Store interface {
 	ListEmojis(context.Context, domain.WorkspaceID) ([]domain.CustomEmoji, error)
 	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error
 	RenameEmoji(context.Context, domain.WorkspaceID, string, string, events.Event) error
-	AddConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event) error
+	// AddConversationMember and its siblings accept the notice message the
+	// change posts into the conversation — Slack's channel_join,
+	// channel_leave, channel_topic, channel_purpose and channel_name
+	// messages. The notice commits inside the same transaction as the change
+	// it describes, so a crash cannot leave a renamed channel or a new member
+	// with no visible record of how that happened.
+	AddConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event, ...domain.Message) error
 	InviteConversationMembers(context.Context, domain.ConversationID, []domain.UserID, events.Event) error
-	RemoveConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event) error
+	RemoveConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event, ...domain.Message) error
 	GetReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
 	GetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)

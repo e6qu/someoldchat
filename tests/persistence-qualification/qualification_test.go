@@ -65,6 +65,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 		{"revoking an app token announces tokens_revoked once", revokingAnAppTokenAnnouncesTokensRevokedOnce},
 		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
+		{"a conversation change and its notice commit together", conversationNoticesCommitWithTheirChange},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

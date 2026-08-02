@@ -3551,7 +3551,11 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.RenameConversation(ctx, conversationID, name, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelName, name)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.RenameConversation(ctx, conversationID, name, event, notice)
 }
 
 func (m Messages) SetConversationTopic(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, topic string) (domain.Conversation, error) {
@@ -3566,7 +3570,11 @@ func (m Messages) SetConversationTopic(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.SetConversationTopic(ctx, conversationID, topic, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelTopic, topic)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.SetConversationTopic(ctx, conversationID, topic, event, notice)
 }
 
 func (m Messages) SetConversationPurpose(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, purpose string) (domain.Conversation, error) {
@@ -3581,7 +3589,11 @@ func (m Messages) SetConversationPurpose(ctx context.Context, workspaceID domain
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.SetConversationPurpose(ctx, conversationID, purpose, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelPurpose, purpose)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.SetConversationPurpose(ctx, conversationID, purpose, event, notice)
 }
 
 func (m Messages) SetConversationArchived(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, archived bool) (domain.Conversation, error) {
@@ -3649,7 +3661,11 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	if err := m.Store.AddConversationMember(ctx, conversationID, userID, event); err != nil {
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelJoin, "")
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := m.Store.AddConversationMember(ctx, conversationID, userID, event, notice); err != nil {
 		return domain.Conversation{}, err
 	}
 	return conversation, nil
@@ -4441,7 +4457,11 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveConversationMember(ctx, conversationID, userID, event)
+	notice, err := conversationNotice(workspaceID, conversationID, userID, domain.MessageSubtypeChannelLeave, "")
+	if err != nil {
+		return err
+	}
+	return m.Store.RemoveConversationMember(ctx, conversationID, userID, event, notice)
 }
 
 func (m Messages) isDefaultConversation(ctx context.Context, workspaceID domain.WorkspaceID, conversationID domain.ConversationID) (bool, error) {
@@ -6247,6 +6267,49 @@ func conversationPayload(topic string, conversationID domain.ConversationID) eve
 // the channel_* and group_* vocabularies, and the acting user. `created` is
 // recorded only where the event IS the creation, because the domain
 // conversation carries no creation instant of its own.
+// conversationNotice builds the message a conversation change posts into the
+// conversation — Slack's channel_join, channel_leave, channel_topic,
+// channel_purpose and channel_name messages. It is written by the same store
+// call as the change it describes, so the two commit together.
+//
+// The text is the Slack phrasing, with the actor as a mention the client
+// resolves like any other: the notice is an ordinary durable message that
+// happens to carry a subtype, not a second rendering path.
+func conversationNotice(workspaceID domain.WorkspaceID, conversationID domain.ConversationID, actorID domain.UserID, subtype domain.MessageSubtype, detail string) (domain.Message, error) {
+	id, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	text := ""
+	switch subtype {
+	case domain.MessageSubtypeChannelJoin:
+		text = "<@" + string(actorID) + "> has joined the channel"
+	case domain.MessageSubtypeChannelLeave:
+		text = "<@" + string(actorID) + "> has left the channel"
+	case domain.MessageSubtypeChannelTopic:
+		text = "<@" + string(actorID) + "> set the channel topic: " + detail
+		if strings.TrimSpace(detail) == "" {
+			text = "<@" + string(actorID) + "> cleared the channel topic"
+		}
+	case domain.MessageSubtypeChannelPurpose:
+		text = "<@" + string(actorID) + "> set the channel purpose: " + detail
+		if strings.TrimSpace(detail) == "" {
+			text = "<@" + string(actorID) + "> cleared the channel purpose"
+		}
+	case domain.MessageSubtypeChannelName:
+		text = "<@" + string(actorID) + "> renamed the channel to " + detail
+	default:
+		return domain.Message{}, ErrInvalidMessage
+	}
+	return domain.Message{
+		ID: id, WorkspaceID: workspaceID, Conversation: conversationID, AuthorID: actorID,
+		Text: text, Subtype: subtype, CreatedAt: domain.MessageInstant(time.Now()),
+		// Normalized exactly as a composed message is, so the two storage
+		// profiles cannot disagree about what an empty attachment list is.
+		Attachments: "[]",
+	}, nil
+}
+
 func conversationLifecycleEvent(workspaceID domain.WorkspaceID, topic string, conversation domain.Conversation, actorID domain.UserID) (events.Event, error) {
 	now := time.Now().UTC()
 	fields := []events.Field{

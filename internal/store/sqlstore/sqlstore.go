@@ -3177,6 +3177,40 @@ func (s *Store) outboxColumns(ctx context.Context, db queryExecutor) (map[string
 	return s.tableColumns(ctx, db, "outbox")
 }
 
+// insertConversationNotice writes the message a conversation change posts
+// into the conversation, inside that change's own transaction. A notice that
+// commits separately can be lost by a crash, leaving a membership or a
+// renamed channel with no visible record of how it got that way.
+//
+// It is deliberately narrower than CreateMessage: a notice carries no
+// idempotency key, no scheduled-message claim and no blocks, so none of that
+// machinery has to be reasoned about here. The timestamp collision that
+// CreateMessage resolves by retrying is resolved here the same way, by
+// stepping to the next free microsecond, because a notice must never fail a
+// membership change.
+func insertConversationNotice(ctx context.Context, tx *sql.Tx, notice domain.Message) error {
+	for attempt := 0; attempt < 1000; attempt++ {
+		stored := domain.NewStoredTime(notice.CreatedAt)
+		var owner domain.MessageID
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation = ? AND created_at = ?`, notice.Conversation, stored).Scan(&owner); {
+		case err == nil:
+			notice.CreatedAt = notice.CreatedAt.Add(time.Microsecond)
+			continue
+		case errors.Is(err, sql.ErrNoRows):
+		default:
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded, edited_at, edited_by, subtype)
+			VALUES (?, ?, ?, ?, '', ?, '', '[]', '', '', '', ?, 0, '{}', ?, '', '', ?)`,
+			notice.ID, notice.WorkspaceID, notice.Conversation, notice.AuthorID, notice.Text, stored,
+			domain.FoldSearchText(notice.Text), notice.Subtype); err != nil {
+			return classify(err)
+		}
+		return nil
+	}
+	return store.ErrMessageTimestampTaken
+}
+
 // messageSelectColumns is the one message projection every read shares. The
 // list used to be written out at each of ten call sites, so a column added to
 // the table reached some readers and not others — exactly the drift that made
@@ -4950,7 +4984,7 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	return tx.Commit()
 }
 
-func (s *Store) RenameConversation(ctx context.Context, conversation domain.ConversationID, name string, event events.Event) (domain.Conversation, error) {
+func (s *Store) RenameConversation(ctx context.Context, conversation domain.ConversationID, name string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -4970,6 +5004,11 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return domain.Conversation{}, err
+		}
+	}
 	var value domain.Conversation
 	var private, direct, groupDirect, archived int
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
@@ -4982,7 +5021,7 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.ConversationID, topic string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -5002,6 +5041,11 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return domain.Conversation{}, err
+		}
+	}
 	var value domain.Conversation
 	var private, direct, groupDirect, archived int
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
@@ -5014,7 +5058,7 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.ConversationID, purpose string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -5033,6 +5077,11 @@ func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.
 	}
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
+	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return domain.Conversation{}, err
+		}
 	}
 	var value domain.Conversation
 	var private, direct, groupDirect, archived int
@@ -8466,7 +8515,7 @@ func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, o
 	return tx.Commit()
 }
 
-func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -8498,6 +8547,11 @@ func (s *Store) AddConversationMember(ctx context.Context, conversation domain.C
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
+	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -8563,7 +8617,7 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 	return tx.Commit()
 }
 
-func (s *Store) RemoveConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) RemoveConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -8588,6 +8642,11 @@ func (s *Store) RemoveConversationMember(ctx context.Context, conversation domai
 	}
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return err
+	}
+	for _, notice := range notices {
+		if err := insertConversationNotice(ctx, tx, notice); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -839,9 +839,26 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil || len(search.Messages) != 1 || search.Messages[0].ID != keyed.ID {
 		t.Fatalf("search=%+v err=%v", search, err)
 	}
+	// History now also carries the notices the rename, topic and purpose
+	// changes above posted — Slack's channel_name, channel_topic and
+	// channel_purpose messages, which are ordinary durable messages with a
+	// subtype. The two composed messages must still be there, in order, and
+	// every notice must name its subtype.
 	page, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Messages) != 2 || page.Messages[0].ID != retried.ID || page.Messages[1].ID != keyed.ID {
+	if err != nil || len(page.Messages) < 2 || page.Messages[0].ID != retried.ID || page.Messages[1].ID != keyed.ID {
 		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	notices := map[domain.MessageSubtype]bool{}
+	for _, message := range page.Messages[2:] {
+		if message.Subtype == "" {
+			t.Fatalf("history carries an unexpected composed message: %+v", message)
+		}
+		notices[message.Subtype] = true
+	}
+	for _, want := range []domain.MessageSubtype{domain.MessageSubtypeChannelName, domain.MessageSubtypeChannelTopic, domain.MessageSubtypeChannelPurpose} {
+		if !notices[want] {
+			t.Fatalf("history is missing the %s notice: %+v", want, page.Messages)
+		}
 	}
 	replies, err := remote.Replies(ctx, "T1", "U1", "C1", timestamp, domain.PageRequest{Limit: 10})
 	if err != nil || len(replies.Messages) != 0 {

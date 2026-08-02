@@ -1945,7 +1945,7 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 	return nil
 }
 
-func (s *Store) RenameConversation(_ context.Context, conversation domain.ConversationID, name string, event events.Event) (domain.Conversation, error) {
+func (s *Store) RenameConversation(_ context.Context, conversation domain.ConversationID, name string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -1962,10 +1962,11 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	value.Name = name
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -1975,10 +1976,11 @@ func (s *Store) SetConversationTopic(_ context.Context, conversation domain.Conv
 	value.Topic = topic
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -1988,6 +1990,7 @@ func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.Co
 	value.Purpose = purpose
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return value, nil
 }
 
@@ -4211,7 +4214,31 @@ func (s *Store) SetConversationPrefs(_ context.Context, conversation domain.Conv
 	return value, nil
 }
 
-func (s *Store) AddConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+// appendConversationNotices records the messages a conversation change posts
+// into the conversation. The caller holds the lock, so the notice and the
+// change it describes become visible together — the in-memory equivalent of
+// the SQL transaction.
+func (s *Store) appendConversationNotices(notices []domain.Message) {
+	for _, notice := range notices {
+		for {
+			taken := false
+			for _, existing := range s.messages[notice.Conversation] {
+				if existing.CreatedAt.Equal(notice.CreatedAt) {
+					taken = true
+					break
+				}
+			}
+			if !taken {
+				break
+			}
+			notice.CreatedAt = notice.CreatedAt.Add(time.Microsecond)
+		}
+		notice.Unfurls = copyUnfurls(notice.Unfurls)
+		s.messages[notice.Conversation] = append(s.messages[notice.Conversation], notice)
+	}
+}
+
+func (s *Store) AddConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
@@ -4229,6 +4256,7 @@ func (s *Store) AddConversationMember(_ context.Context, conversation domain.Con
 	}
 	s.memberships[conversation][user] = struct{}{}
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return nil
 }
 
@@ -4277,7 +4305,7 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 	return nil
 }
 
-func (s *Store) RemoveConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) RemoveConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, exists := s.conversations[conversation]
@@ -4298,6 +4326,7 @@ func (s *Store) RemoveConversationMember(_ context.Context, conversation domain.
 		}
 	}
 	s.outbox = append(s.outbox, event)
+	s.appendConversationNotices(notices)
 	return nil
 }
 

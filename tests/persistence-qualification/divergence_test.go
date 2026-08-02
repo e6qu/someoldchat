@@ -1383,3 +1383,60 @@ func uninstallAnnouncementOutlivesTheInstallation(t *testing.T, open opener) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Slack's channel_join, channel_topic and channel_name messages are the
+// visible record of how a channel came to be the way it is. They are written
+// by the same store call as the change they describe, so a crash cannot leave
+// a renamed channel with no notice — and every profile must agree, including
+// on the normalized empty attachment list, or the same notice reads
+// differently depending on where it was stored.
+func conversationNoticesCommitWithTheirChange(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	joiner := domain.UserID("U-joiner-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: joiner, WorkspaceID: f.workspaceID, Name: "joiner"}); err != nil {
+		t.Fatal(err)
+	}
+	joinNotice := domain.Message{
+		ID: domain.MessageID("M-join-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: joiner, Text: "<@" + string(joiner) + "> has joined the channel",
+		Subtype: domain.MessageSubtypeChannelJoin, Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Now()),
+	}
+	if err := f.repository.AddConversationMember(ctx, f.channelID, joiner, f.event("notice-join", "conversation.member_added", string(f.channelID)), joinNotice); err != nil {
+		t.Fatal(err)
+	}
+	renameNotice := domain.Message{
+		ID: domain.MessageID("M-rename-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "<@" + string(f.userID) + "> renamed the channel to renamed-" + f.suffix,
+		Subtype: domain.MessageSubtypeChannelName, Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Now().Add(time.Millisecond)),
+	}
+	if _, err := f.repository.RenameConversation(ctx, f.channelID, "renamed-"+f.suffix, f.event("notice-rename", "conversation.renamed", string(f.channelID)), renameNotice); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[domain.MessageSubtype]domain.Message{}
+	for _, message := range page.Messages {
+		if message.Subtype != "" {
+			found[message.Subtype] = message
+		}
+	}
+	for _, want := range []domain.MessageSubtype{domain.MessageSubtypeChannelJoin, domain.MessageSubtypeChannelName} {
+		message, ok := found[want]
+		if !ok {
+			t.Fatalf("the %s notice did not commit with its change: %+v", want, page.Messages)
+		}
+		if message.Attachments != "[]" {
+			t.Fatalf("%s notice attachments=%q, want the normalized empty list every profile writes", want, message.Attachments)
+		}
+		if message.Text == "" {
+			t.Fatalf("%s notice carries no text", want)
+		}
+	}
+}
