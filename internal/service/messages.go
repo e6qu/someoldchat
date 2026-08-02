@@ -4492,6 +4492,37 @@ func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain
 	return m.Store.RemoveConversationMember(ctx, conversationID, targetID, event)
 }
 
+// ReadCursor reports where a member has read to in a conversation. MarkRead
+// has always been on this seam; the reader was not, so nothing above the
+// store could render an unread divider or answer "which message is the first
+// unread one" without writing a cursor to find out.
+func (m Messages) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ReadCursor, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.ReadCursor{}, err
+	}
+	cursor, err := m.Store.GetReadCursor(ctx, workspaceID, userID, conversationID)
+	if errors.Is(err, store.ErrNotFound) {
+		// A member who has never marked anything read has read nothing, which
+		// is a cursor at the zero instant rather than a missing record: every
+		// caller would otherwise have to translate the same absence.
+		return domain.ReadCursor{WorkspaceID: workspaceID, UserID: userID, Conversation: conversationID}, nil
+	}
+	if err != nil {
+		return domain.ReadCursor{}, err
+	}
+	return cursor, nil
+}
+
+// ThreadSummaries reports what each named thread root has accumulated. The
+// caller must be able to read the conversation; the summary discloses reply
+// counts and participants, which are conversation content.
+func (m Messages) ThreadSummaries(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return nil, err
+	}
+	return m.Store.ThreadSummaries(ctx, conversationID, roots)
+}
+
 func (m Messages) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.ReadCursor, error) {
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.ReadCursor{}, err

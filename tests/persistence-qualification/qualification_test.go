@@ -66,6 +66,7 @@ func runQualification(t *testing.T, open opener) {
 		{"revoking an app token announces tokens_revoked once", revokingAnAppTokenAnnouncesTokensRevokedOnce},
 		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
 		{"a conversation change and its notice commit together", conversationNoticesCommitWithTheirChange},
+		{"thread summaries are batched and identical across profiles", threadSummariesAreBatchedAndIdentical},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

@@ -3075,6 +3075,39 @@ func (r Remote) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoReadCursor(out)
 }
 
+func (r Remote) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ReadCursor, error) {
+	out, err := r.interactions.GetReadCursor(ctx, &chatv1.ReadCursorRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+	})
+	if err != nil {
+		return domain.ReadCursor{}, err
+	}
+	return decodeProtoReadCursor(out)
+}
+
+func (r Remote) ThreadSummaries(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
+	timestamps := make([]string, 0, len(roots))
+	for _, root := range roots {
+		timestamps = append(timestamps, string(root))
+	}
+	out, err := r.interactions.ThreadSummaries(ctx, &chatv1.ThreadSummariesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		ThreadTimestamps: timestamps,
+	})
+	if err != nil {
+		return nil, err
+	}
+	summaries := make(map[domain.MessageTimestamp]domain.ThreadSummary, len(out.GetSummaries()))
+	for root, encoded := range out.GetSummaries() {
+		summary, err := decodeProtoThreadSummary(encoded)
+		if err != nil {
+			return nil, err
+		}
+		summaries[domain.MessageTimestamp(root)] = summary
+	}
+	return summaries, nil
+}
+
 func (r Remote) DispatchSlashCommand(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, threadTimestamp domain.MessageTimestamp, command, text, responseBaseURL string) error {
 	out, err := r.interactions.DispatchSlashCommand(ctx, &chatv1.SlashCommandRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
@@ -6114,6 +6147,30 @@ func (s *Server) MarkRead(ctx context.Context, input *chatv1.MarkReadRequest) (*
 	return s.markReadProto(ctx, input)
 }
 
+func (s *Server) GetReadCursor(ctx context.Context, input *chatv1.ReadCursorRequest) (*chatv1.ReadCursor, error) {
+	cursor, err := s.implementation.ReadCursor(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoReadCursor(cursor), nil
+}
+
+func (s *Server) ThreadSummaries(ctx context.Context, input *chatv1.ThreadSummariesRequest) (*chatv1.ThreadSummariesResponse, error) {
+	roots := make([]domain.MessageTimestamp, 0, len(input.GetThreadTimestamps()))
+	for _, root := range input.GetThreadTimestamps() {
+		roots = append(roots, domain.MessageTimestamp(root))
+	}
+	summaries, err := s.implementation.ThreadSummaries(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), roots)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make(map[string]*chatv1.ThreadSummary, len(summaries))
+	for root, summary := range summaries {
+		encoded[string(root)] = encodeProtoThreadSummary(summary)
+	}
+	return &chatv1.ThreadSummariesResponse{Summaries: encoded}, nil
+}
+
 func (s *Server) DispatchSlashCommand(ctx context.Context, input *chatv1.SlashCommandRequest) (*chatv1.InteractionMutationResponse, error) {
 	if err := s.implementation.DispatchSlashCommand(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetCommand(), input.GetText(), input.GetResponseBaseUrl()); err != nil {
 		return nil, mapError(err)
@@ -8177,6 +8234,35 @@ func decodeProtoMessage(value *chatv1.Message) (domain.Message, error) {
 		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(), Files: files,
 		EditedAt: edited, EditedBy: domain.UserID(value.GetEditedBy()), Subtype: domain.MessageSubtype(value.GetSubtype()),
 	}, nil
+}
+
+// The converter pair is over one summary, not the map: the map is routing,
+// and a per-entity pair is what the round-trip property can fill and compare
+// field by field.
+func encodeProtoThreadSummary(value domain.ThreadSummary) *chatv1.ThreadSummary {
+	participants := make([]string, 0, len(value.Participants))
+	for _, participant := range value.Participants {
+		participants = append(participants, string(participant))
+	}
+	return &chatv1.ThreadSummary{
+		ReplyCount: int32(value.ReplyCount), Participants: participants,
+		LastReplyAt: optionalRFC3339(value.LastReplyAt),
+	}
+}
+
+func decodeProtoThreadSummary(value *chatv1.ThreadSummary) (domain.ThreadSummary, error) {
+	summary := domain.ThreadSummary{ReplyCount: int(value.GetReplyCount())}
+	for _, participant := range value.GetParticipants() {
+		summary.Participants = append(summary.Participants, domain.UserID(participant))
+	}
+	if raw := value.GetLastReplyAt(); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return domain.ThreadSummary{}, errors.New("typed thread summary last_reply_at is invalid")
+		}
+		summary.LastReplyAt = parsed.UTC()
+	}
+	return summary, nil
 }
 
 func encodeProtoRTMConnection(value domain.RTMConnection) *chatv1.RTMConnection {

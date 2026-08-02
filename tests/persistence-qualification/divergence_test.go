@@ -1440,3 +1440,73 @@ func conversationNoticesCommitWithTheirChange(t *testing.T, open opener) {
 		}
 	}
 }
+
+// A timeline renders many parents at once, so thread summaries are read in
+// one batched call rather than one read per parent. Every profile must return
+// the same counts, the same participant list in the same order, and the same
+// last-reply instant — a summary that differs by storage engine would render
+// a different "N replies" line to the same person on two deployments.
+func threadSummariesAreBatchedAndIdentical(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	second := domain.UserID("U-replier-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: second, WorkspaceID: f.workspaceID, Name: "replier"}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Unix(1_700_000_400, 0).UTC()
+	rootA := f.message(t, ctx, "thread-root-a", base)
+	rootB := f.message(t, ctx, "thread-root-b", base.Add(time.Second))
+	rootATS := domain.NewMessageTimestamp(rootA.CreatedAt)
+	rootBTS := domain.NewMessageTimestamp(rootB.CreatedAt)
+
+	reply := func(name string, root domain.MessageTimestamp, author domain.UserID, at time.Time) {
+		t.Helper()
+		message := domain.Message{
+			ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+			AuthorID: author, Text: "reply " + name, ThreadTimestamp: root, Attachments: "[]",
+			CreatedAt: domain.MessageInstant(at),
+		}
+		if err := f.repository.CreateMessage(ctx, message, f.event("evt-"+name, "message.created", string(message.ID)), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply("reply-a1", rootATS, f.userID, base.Add(10*time.Second))
+	reply("reply-a2", rootATS, second, base.Add(20*time.Second))
+	reply("reply-a3", rootATS, second, base.Add(30*time.Second))
+	reply("reply-b1", rootBTS, second, base.Add(40*time.Second))
+
+	summaries, err := f.repository.ThreadSummaries(ctx, f.channelID, []domain.MessageTimestamp{rootATS, rootBTS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := summaries[rootATS]
+	if a.ReplyCount != 3 {
+		t.Fatalf("root A replies=%d, want 3", a.ReplyCount)
+	}
+	if len(a.Participants) != 2 || a.Participants[0] > a.Participants[1] {
+		t.Fatalf("root A participants=%v, want two distinct authors in sorted order", a.Participants)
+	}
+	if !a.LastReplyAt.Equal(domain.MessageInstant(base.Add(30 * time.Second))) {
+		t.Fatalf("root A last reply=%s, want the newest reply's instant", a.LastReplyAt)
+	}
+	b := summaries[rootBTS]
+	if b.ReplyCount != 1 || len(b.Participants) != 1 || b.Participants[0] != second {
+		t.Fatalf("root B summary=%+v", b)
+	}
+	// A root with no replies is absent rather than zero-valued, and an empty
+	// request reads nothing at all.
+	unknown := domain.NewMessageTimestamp(base.Add(9 * time.Hour))
+	more, err := f.repository.ThreadSummaries(ctx, f.channelID, []domain.MessageTimestamp{unknown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := more[unknown]; present {
+		t.Fatalf("a root with no replies reported a summary: %+v", more)
+	}
+	empty, err := f.repository.ThreadSummaries(ctx, f.channelID, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty request summaries=%+v err=%v", empty, err)
+	}
+}

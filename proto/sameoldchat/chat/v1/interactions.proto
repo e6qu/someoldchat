@@ -19,6 +19,30 @@ message MarkReadRequest {
   string timestamp = 4;
 }
 
+message ReadCursorRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message ThreadSummariesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  repeated string thread_timestamps = 4;
+}
+
+// ThreadSummary reports what one thread root has accumulated.
+message ThreadSummary {
+  int32 reply_count = 1;
+  repeated string participants = 2;
+  string last_reply_at = 3;
+}
+
+message ThreadSummariesResponse {
+  map<string, ThreadSummary> summaries = 1;
+}
+
 message SlashCommandRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -173,6 +197,10 @@ message SocketModeInteractionResponseRequest {
 
 service InteractionsService {
   rpc MarkRead(MarkReadRequest) returns (ReadCursor);
+  // Named GetReadCursor because an rpc named ReadCursor would shadow the
+  // ReadCursor message type for every later return in this service.
+  rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);
+  rpc ThreadSummaries(ThreadSummariesRequest) returns (ThreadSummariesResponse);
   rpc DispatchSlashCommand(SlashCommandRequest) returns (InteractionMutationResponse);
   rpc DispatchBlockAction(BlockActionRequest) returns (InteractionMutationResponse);
   rpc DispatchViewBlockAction(ViewBlockActionRequest) returns (InteractionMutationResponse);

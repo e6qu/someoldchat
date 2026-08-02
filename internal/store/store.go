@@ -477,6 +477,11 @@ type Store interface {
 	AddConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event, ...domain.Message) error
 	InviteConversationMembers(context.Context, domain.ConversationID, []domain.UserID, events.Event) error
 	RemoveConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event, ...domain.Message) error
+	// ThreadSummaries reports reply counts, participants and last-reply
+	// instants for the named thread roots in one read. A timeline renders
+	// fifty parents at a time, so this is deliberately batched: the
+	// per-parent alternative is fifty queries per page.
+	ThreadSummaries(context.Context, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
 	GetReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
 	GetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)

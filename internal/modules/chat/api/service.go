@@ -254,6 +254,8 @@ type Service interface {
 	LeaveConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
 	KickConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID) error
 	MarkRead(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.ReadCursor, error)
+	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
+	ThreadSummaries(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
 	WorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationLevel, []string, bool, bool) (domain.WorkspaceNotificationPreferences, error)
 	ConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationNotificationPreferences, error)

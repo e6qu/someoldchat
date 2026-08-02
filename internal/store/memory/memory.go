@@ -4448,6 +4448,51 @@ func (s *Store) SetThreadFollowed(_ context.Context, workspace domain.WorkspaceI
 	return nil
 }
 
+func (s *Store) ThreadSummaries(_ context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
+	summaries := make(map[domain.MessageTimestamp]domain.ThreadSummary, len(roots))
+	if conversation == "" || len(roots) == 0 {
+		return summaries, nil
+	}
+	wanted := make(map[domain.MessageTimestamp]struct{}, len(roots))
+	for _, root := range roots {
+		if strings.TrimSpace(string(root)) != "" {
+			wanted[root] = struct{}{}
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	participants := make(map[domain.MessageTimestamp]map[domain.UserID]struct{}, len(wanted))
+	for _, message := range s.messages[conversation] {
+		if message.Deleted || message.ThreadTimestamp == "" {
+			continue
+		}
+		if _, ok := wanted[message.ThreadTimestamp]; !ok {
+			continue
+		}
+		summary := summaries[message.ThreadTimestamp]
+		summary.ReplyCount++
+		if message.CreatedAt.After(summary.LastReplyAt) {
+			summary.LastReplyAt = message.CreatedAt
+		}
+		summaries[message.ThreadTimestamp] = summary
+		if participants[message.ThreadTimestamp] == nil {
+			participants[message.ThreadTimestamp] = make(map[domain.UserID]struct{})
+		}
+		participants[message.ThreadTimestamp][message.AuthorID] = struct{}{}
+	}
+	for root, authors := range participants {
+		summary := summaries[root]
+		for author := range authors {
+			summary.Participants = append(summary.Participants, author)
+		}
+		// Map iteration is unordered; the SQL profile returns a sorted list,
+		// so sorting here is what makes the two projections identical.
+		slices.Sort(summary.Participants)
+		summaries[root] = summary
+	}
+	return summaries, nil
+}
+
 func (s *Store) GetReadCursor(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (domain.ReadCursor, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

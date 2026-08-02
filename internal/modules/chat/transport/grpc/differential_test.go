@@ -1744,7 +1744,29 @@ func parityCases() []parityCase {
 				for _, member := range members.Users {
 					identifiers = append(identifiers, member.ID)
 				}
-				return []any{cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore, isMember}, nil
+				// The cursor a member has is read back through the seam, and a
+				// thread's accumulated replies are summarized in one batched
+				// call: both are what the unread divider and the parent
+				// message's "N replies" line are built from.
+				readBack, err := chat.ReadCursor(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				reply, err := chat.Post(ctx, "T1", "U2", "C1", "in thread", timestampOf(message), "")
+				if err != nil {
+					return nil, err
+				}
+				_ = reply
+				summaries, err := chat.ThreadSummaries(ctx, "T1", "U1", "C1", []domain.MessageTimestamp{timestampOf(message)})
+				if err != nil {
+					return nil, err
+				}
+				summary := summaries[timestampOf(message)]
+				return []any{
+					cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore, isMember,
+					readBack.Conversation, readBack.LastRead == cursor.LastRead,
+					summary.ReplyCount, summary.Participants, !summary.LastReplyAt.IsZero(),
+				}, nil
 			},
 		},
 		{

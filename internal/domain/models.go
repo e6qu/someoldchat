@@ -1764,6 +1764,19 @@ func (s MessageSubtype) System() bool {
 	return s != "" && s != MessageSubtypeMeMessage
 }
 
+// ThreadSummary is what a parent message reports about its replies: how many
+// there are, who wrote them, and when the last one landed. Slack renders it
+// under the parent as "N replies · last reply …", and it is the reason a
+// timeline can show a thread without opening it.
+//
+// It is computed per parent by one batched query, never by counting a
+// per-parent reply page: fifty rendered parents must not become fifty reads.
+type ThreadSummary struct {
+	ReplyCount   int
+	Participants []UserID
+	LastReplyAt  time.Time
+}
+
 type MessageStreamStart struct {
 	Conversation    ConversationID
 	ThreadTimestamp MessageTimestamp

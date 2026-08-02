@@ -8651,6 +8651,67 @@ func (s *Store) RemoveConversationMember(ctx context.Context, conversation domai
 	return tx.Commit()
 }
 
+func (s *Store) ThreadSummaries(ctx context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
+	summaries := make(map[domain.MessageTimestamp]domain.ThreadSummary, len(roots))
+	if conversation == "" || len(roots) == 0 {
+		return summaries, nil
+	}
+	placeholders := make([]string, 0, len(roots))
+	args := make([]any, 0, len(roots)+1)
+	args = append(args, conversation)
+	for _, root := range roots {
+		if strings.TrimSpace(string(root)) == "" {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, string(root))
+	}
+	if len(placeholders) == 0 {
+		return summaries, nil
+	}
+	// One row per (root, author) keeps the participant list and the counts in
+	// a single read; the (conversation, thread_timestamp, created_at, id)
+	// index added with the subtype columns serves it as a range scan.
+	rows, err := s.db.QueryContext(ctx, `SELECT thread_timestamp, author_id, COUNT(*), MAX(created_at)
+		FROM messages
+		WHERE conversation = ? AND deleted = 0 AND thread_timestamp IN (`+strings.Join(placeholders, ", ")+`)
+		GROUP BY thread_timestamp, author_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var root domain.MessageTimestamp
+		var author domain.UserID
+		var count int
+		var latest string
+		if err := rows.Scan(&root, &author, &count, &latest); err != nil {
+			return nil, err
+		}
+		parsed, err := domain.ParseStoredTime(latest)
+		if err != nil {
+			return nil, err
+		}
+		summary := summaries[root]
+		summary.ReplyCount += count
+		summary.Participants = append(summary.Participants, author)
+		if parsed.After(summary.LastReplyAt) {
+			summary.LastReplyAt = parsed
+		}
+		summaries[root] = summary
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Participants arrive grouped by author, so the order depends on the
+	// engine's grouping; sorting makes the projection identical everywhere.
+	for root, summary := range summaries {
+		slices.Sort(summary.Participants)
+		summaries[root] = summary
+	}
+	return summaries, nil
+}
+
 func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (domain.ReadCursor, error) {
 	var cursor domain.ReadCursor
 	var updated string
