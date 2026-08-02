@@ -12,7 +12,6 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -179,7 +178,6 @@ func connectWorkspace(t *testing.T) (*memory.Store, http.Handler) {
 	if err := store.SeedToken(ctx, "session-two", domain.TokenRecord{WorkspaceID: "T2", UserID: "U-two", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()}); err != nil {
 		t.Fatal(err)
 	}
-	_ = service.Messages{}
 	return store, mux
 }
 

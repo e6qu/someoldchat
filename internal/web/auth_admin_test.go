@@ -3,9 +3,9 @@ package web
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"

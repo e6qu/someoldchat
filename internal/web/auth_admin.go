@@ -127,22 +127,22 @@ const authAdminErrorMarkup = `{{define "title"}}{{.Title}} · SameOldChat{{end}}
 var authAdminErrorTemplate = mustPage(authAdminErrorMarkup)
 
 type authAdminPageData struct {
-	CSRFToken      string
-	Notice         string
-	CanReadApps    bool
-	CanWriteApps   bool
-	CanReadUsers   bool
-	CanWriteUsers  bool
-	Methods        []authAdminMethodView
-	Users          []authAdminUserView
-	NextPageURL    string
-	InviteTiers    []authAdminTierOption
-	InviteChannels []conversationView
+	CSRFToken       string
+	Notice          string
+	CanReadApps     bool
+	CanWriteApps    bool
+	CanReadUsers    bool
+	CanWriteUsers   bool
+	Methods         []authAdminMethodView
+	Users           []authAdminUserView
+	NextPageURL     string
+	InviteTiers     []authAdminTierOption
+	InviteChannels  []conversationView
 	InviteRequests  []authAdminInviteView
 	ApprovedInvites []authAdminInviteView
 	MoreInvitesURL  string
-	AppRequests    []authAdminAppView
-	MoreAppsURL    string
+	AppRequests     []authAdminAppView
+	MoreAppsURL     string
 }
 
 // authAdminTierOption is the invitation tier as one closed choice. The service
@@ -172,7 +172,7 @@ func authAdminTierLabel(request domain.InviteRequest) string {
 }
 
 type authAdminInviteView struct {
-	ID               domain.InviteRequestID
+	ID domain.InviteRequestID
 	// Link is the page to send to the invited person. It is only set for an
 	// approved invitation, because that is the only state the page can be
 	// acted on from.
@@ -494,7 +494,6 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(rendered.Bytes())
 }
-
 
 // invitationLink is the address to hand to the invited person. It is absolute
 // when the deployment knows its own public URL, because the link leaves this

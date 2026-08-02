@@ -2129,7 +2129,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				workspace, err := chat.SetWorkspaceNotificationPreferences(
-					ctx, "T1", "U1", domain.NotificationAll, []string{"release", "customer escalation"}, false, true,
+					ctx, "T1", "U1", domain.NotificationAll, []string{"release", "customer escalation"}, false, true, true,
 				)
 				if err != nil {
 					return nil, err
