@@ -6107,6 +6107,21 @@ func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.Workspace
 	return m.Store.RecordAccess(ctx, domain.AccessLog{WorkspaceID: workspaceID, UserID: userID, Username: user.Name, CreatedAt: time.Now().UTC(), IP: ip, UserAgent: userAgent})
 }
 
+// AnalyticsBusiestChannels bounds the busiest-channel list the dashboard asks
+// for. It is a product decision, not a store one, so it lives here.
+const AnalyticsBusiestChannels = 10
+
+// WorkspaceAnalytics reports what the workspace holds and what has happened in
+// it since an instant the caller chooses. It is administrative: the counts span
+// private conversations the actor is not in, which is why it requires the
+// workspace administrator role rather than mere membership.
+func (m Messages) WorkspaceAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, since time.Time) (domain.WorkspaceAnalytics, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	return m.Store.WorkspaceAnalytics(ctx, workspaceID, since.UTC(), AnalyticsBusiestChannels)
+}
+
 func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return nil, false, err

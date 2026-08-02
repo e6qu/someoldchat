@@ -71,6 +71,7 @@ func runQualification(t *testing.T, open opener) {
 		{"a deleted file is deleted on every message that carries it", aDeletedFileIsDeletedOnEveryMessageThatCarriesIt},
 		{"deleting the last carrier retracts the file share", deletingTheLastCarrierRetractsTheFileShare},
 		{"accepting an invitation commits the whole membership", acceptingAnInvitationCommitsTheWholeMembership},
+		{"workspace analytics count the same on every profile", workspaceAnalyticsCountTheSameOnEveryProfile},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

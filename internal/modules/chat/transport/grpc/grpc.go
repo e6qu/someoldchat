@@ -357,6 +357,52 @@ func (r Remote) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID
 	}
 	return nil
 }
+func (r Remote) WorkspaceAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, since time.Time) (domain.WorkspaceAnalytics, error) {
+	input := &chatv1.WorkspaceAnalyticsRequest{WorkspaceId: string(workspaceID), UserId: string(userID)}
+	if !since.IsZero() {
+		input.Since = since.Unix()
+	}
+	out, err := r.audit.GetWorkspaceAnalytics(ctx, input)
+	if err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	return decodeProtoWorkspaceAnalytics(out), nil
+}
+
+func encodeProtoWorkspaceAnalytics(value domain.WorkspaceAnalytics) *chatv1.WorkspaceAnalytics {
+	busiest := make([]*chatv1.ChannelActivity, 0, len(value.BusiestChannels))
+	for _, entry := range value.BusiestChannels {
+		busiest = append(busiest, &chatv1.ChannelActivity{ConversationId: string(entry.ConversationID), Name: entry.Name, Messages: int32(entry.Messages)})
+	}
+	result := &chatv1.WorkspaceAnalytics{
+		Members: int32(value.Members), ActiveMembers: int32(value.ActiveMembers), Guests: int32(value.Guests), Admins: int32(value.Admins),
+		PublicChannels: int32(value.PublicChannels), PrivateChannels: int32(value.PrivateChannels), ArchivedChannels: int32(value.ArchivedChannels),
+		Messages: int32(value.Messages), RecentMessages: int32(value.RecentMessages),
+		Files: int32(value.Files), RecentFiles: int32(value.RecentFiles), BusiestChannels: busiest,
+	}
+	if !value.Since.IsZero() {
+		result.Since = value.Since.Unix()
+	}
+	return result
+}
+
+func decodeProtoWorkspaceAnalytics(value *chatv1.WorkspaceAnalytics) domain.WorkspaceAnalytics {
+	busiest := make([]domain.ChannelActivity, 0, len(value.GetBusiestChannels()))
+	for _, entry := range value.GetBusiestChannels() {
+		busiest = append(busiest, domain.ChannelActivity{ConversationID: domain.ConversationID(entry.GetConversationId()), Name: entry.GetName(), Messages: int(entry.GetMessages())})
+	}
+	result := domain.WorkspaceAnalytics{
+		Members: int(value.GetMembers()), ActiveMembers: int(value.GetActiveMembers()), Guests: int(value.GetGuests()), Admins: int(value.GetAdmins()),
+		PublicChannels: int(value.GetPublicChannels()), PrivateChannels: int(value.GetPrivateChannels()), ArchivedChannels: int(value.GetArchivedChannels()),
+		Messages: int(value.GetMessages()), RecentMessages: int(value.GetRecentMessages()),
+		Files: int(value.GetFiles()), RecentFiles: int(value.GetRecentFiles()), BusiestChannels: busiest,
+	}
+	if value.GetSince() != 0 {
+		result.Since = time.Unix(value.GetSince(), 0).UTC()
+	}
+	return result
+}
+
 func (r Remote) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
 	input := &chatv1.AccessLogsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(limit), Page: int32(page)}
 	if !before.IsZero() {
@@ -5727,6 +5773,19 @@ func (s *Server) ListEphemeral(ctx context.Context, input *chatv1.EphemeralMessa
 		result = append(result, encodeProtoEphemeralMessage(value))
 	}
 	return &chatv1.EphemeralMessagesResponse{Messages: result}, nil
+}
+
+// GetWorkspaceAnalytics is the transport name; see the comment on the rpc.
+func (s *Server) GetWorkspaceAnalytics(ctx context.Context, input *chatv1.WorkspaceAnalyticsRequest) (*chatv1.WorkspaceAnalytics, error) {
+	since := time.Time{}
+	if input.GetSince() != 0 {
+		since = time.Unix(input.GetSince(), 0).UTC()
+	}
+	value, err := s.implementation.WorkspaceAnalytics(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), since)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspaceAnalytics(value), nil
 }
 
 func (s *Server) RecordAccess(ctx context.Context, input *chatv1.RecordAccessRequest) (*chatv1.AccessMutationResponse, error) {

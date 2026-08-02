@@ -2746,4 +2746,5 @@ var parityGaps = map[string]struct{}{
 	"WorkflowStepCompleted":                   {},
 	"WorkflowStepFailed":                      {},
 	"WorkflowUpdateStep":                      {},
+	"WorkspaceAnalytics":                      {},
 }

@@ -344,7 +344,10 @@ func conversionCases() map[string]conversionCase {
 		"ListItemPage": {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
 		"ListDownload": {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
 		"AccessLog":    {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
-		"View":         {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
+		"WorkspaceAnalytics": {sample: &domain.WorkspaceAnalytics{}, through: through(encodeProtoWorkspaceAnalytics, func(value *chatv1.WorkspaceAnalytics) (domain.WorkspaceAnalytics, error) {
+			return decodeProtoWorkspaceAnalytics(value), nil
+		})},
+		"View": {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
 		"AppHome": {
 			sample: &appHomeRoundTrip{},
 			through: through(

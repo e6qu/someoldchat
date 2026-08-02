@@ -1984,6 +1984,40 @@ type EphemeralMessage struct {
 	CreatedAt    time.Time
 }
 
+// WorkspaceAnalytics is the shape of the administration dashboard: counts a
+// workspace owner needs to answer "how big is this and is it being used",
+// derived from the durable rows rather than from a metrics pipeline this
+// product does not have.
+//
+// Every "recent" figure is relative to one instant the caller passes, so the
+// dashboard and any export made from the same call describe the same window —
+// a store that chose its own window would make two readers disagree.
+type WorkspaceAnalytics struct {
+	Members          int
+	ActiveMembers    int
+	Guests           int
+	Admins           int
+	PublicChannels   int
+	PrivateChannels  int
+	ArchivedChannels int
+	Messages         int
+	RecentMessages   int
+	Files            int
+	RecentFiles      int
+	// BusiestChannels are the conversations with the most messages in the
+	// window, most first. Direct conversations are excluded: they are private
+	// between their members and are not workspace activity an administrator
+	// governs.
+	BusiestChannels []ChannelActivity
+	Since           time.Time
+}
+
+type ChannelActivity struct {
+	ConversationID ConversationID
+	Name           string
+	Messages       int
+}
+
 type AccessLog struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID

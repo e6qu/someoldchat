@@ -1672,6 +1672,62 @@ func acceptingAnInvitationCommitsTheWholeMembership(t *testing.T, open opener) {
 	}
 }
 
+// The analytics dashboard is counted from the durable rows on every load, so
+// two storage profiles that count differently show an administrator two
+// different workspaces. The window is a parameter for the same reason: a store
+// that chose its own would make the page and any export from the same call
+// describe different spans.
+func workspaceAnalyticsCountTheSameOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	private := domain.ConversationID("C-private-" + f.suffix)
+	archived := domain.ConversationID("C-archived-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: f.workspaceID, Name: "private", IsPrivate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: archived, WorkspaceID: f.workspaceID, Name: "archived", Archived: true}); err != nil {
+		t.Fatal(err)
+	}
+	guest := domain.UserID("U-guest-" + f.suffix)
+	if err := f.repository.CreateUser(ctx, domain.User{ID: guest, WorkspaceID: f.workspaceID, Email: "guest-" + f.suffix + "@example.com", Name: "guest", RealName: "guest"},
+		domain.WorkspaceMembership{WorkspaceID: f.workspaceID, UserID: guest, Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
+		f.event("guest-created", "user.created", string(guest))); err != nil {
+		t.Fatal(err)
+	}
+
+	window := time.Unix(1_700_000_000, 0).UTC()
+	// Two inside the window and one before it, so a store that ignores the
+	// window and one that applies it cannot both pass.
+	f.message(t, ctx, "analytics-old", window.Add(-48*time.Hour))
+	f.message(t, ctx, "analytics-one", window.Add(time.Hour))
+	f.message(t, ctx, "analytics-two", window.Add(2*time.Hour))
+
+	analytics, err := f.repository.WorkspaceAnalytics(ctx, f.workspaceID, window, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Members != 2 || analytics.ActiveMembers != 2 || analytics.Guests != 1 {
+		t.Fatalf("people=%+v, want two members of whom one is a guest", analytics)
+	}
+	if analytics.PublicChannels != 1 || analytics.PrivateChannels != 1 || analytics.ArchivedChannels != 1 {
+		t.Fatalf("channels=%+v", analytics)
+	}
+	if analytics.Messages != 3 || analytics.RecentMessages != 2 {
+		t.Fatalf("messages=%d recent=%d, want three of which two are in the window", analytics.Messages, analytics.RecentMessages)
+	}
+	if len(analytics.BusiestChannels) != 1 || analytics.BusiestChannels[0].ConversationID != f.channelID || analytics.BusiestChannels[0].Messages != 2 {
+		t.Fatalf("busiest=%+v", analytics.BusiestChannels)
+	}
+	// The bound is honoured, and a zero bound asks for no list rather than an
+	// unbounded one.
+	none, err := f.repository.WorkspaceAnalytics(ctx, f.workspaceID, window, 0)
+	if err != nil || len(none.BusiestChannels) != 0 {
+		t.Fatalf("bounded=%+v err=%v", none.BusiestChannels, err)
+	}
+}
+
 // A timeline renders many parents at once, so thread summaries are read in
 // one batched call rather than one read per parent. Every profile must return
 // the same counts, the same participant list in the same order, and the same

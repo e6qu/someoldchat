@@ -964,3 +964,141 @@ func TestTheAuditPageRefusesAnUnprivilegedReader(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+// ADMIN-02: the settings page carries exactly what has a durable backend, and
+// each control writes through to workspace state. A page that drew a control
+// for a policy nothing enforces would be worse than no page.
+func TestWorkspaceSettingsWriteThroughAndNameWhatIsAbsent(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+
+	page := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app/admin/settings", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	// Retention has no implementation anywhere, so the page must say it is
+	// absent rather than draw a switch for it.
+	before := page()
+	if !strings.Contains(before, "Message and file retention") || !strings.Contains(before, "no retention policy") {
+		t.Fatalf("the settings page does not say retention is absent: %s", before)
+	}
+	if strings.Contains(before, `name="retention`) {
+		t.Fatalf("the settings page draws a retention control nothing enforces: %s", before)
+	}
+
+	identity := adminMutationRequest(http.MethodPost, "/app/admin/settings/identity", "name=Renamed&description=A+described+workspace&icon_url=https%3A%2F%2Ficons.example.test%2Ft1.png")
+	identityResponse := httptest.NewRecorder()
+	handler.ServeHTTP(identityResponse, identity)
+	if identityResponse.Code != http.StatusOK {
+		t.Fatalf("identity status=%d body=%s", identityResponse.Code, identityResponse.Body.String())
+	}
+	discoverability := adminMutationRequest(http.MethodPost, "/app/admin/settings/discoverability", "discoverability=unlisted")
+	discoverabilityResponse := httptest.NewRecorder()
+	handler.ServeHTTP(discoverabilityResponse, discoverability)
+	if discoverabilityResponse.Code != http.StatusOK {
+		t.Fatalf("discoverability status=%d body=%s", discoverabilityResponse.Code, discoverabilityResponse.Body.String())
+	}
+	defaults := adminMutationRequest(http.MethodPost, "/app/admin/settings/default-channels", "channel_ids=C1&channel_ids=C2")
+	defaultsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(defaultsResponse, defaults)
+	if defaultsResponse.Code != http.StatusOK {
+		t.Fatalf("default channels status=%d body=%s", defaultsResponse.Code, defaultsResponse.Body.String())
+	}
+
+	workspace, err := store.GetWorkspace(ctx, "T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.Name != "Renamed" || workspace.Description != "A described workspace" || workspace.IconURL != "https://icons.example.test/t1.png" {
+		t.Fatalf("workspace=%+v", workspace)
+	}
+	if workspace.Discoverability != domain.WorkspaceDiscoverabilityUnlisted {
+		t.Fatalf("discoverability=%q", workspace.Discoverability)
+	}
+	if len(workspace.DefaultChannelIDs) != 2 {
+		t.Fatalf("default channels=%v", workspace.DefaultChannelIDs)
+	}
+	after := page()
+	if !strings.Contains(after, `value="Renamed"`) || !strings.Contains(after, `value="unlisted" checked`) {
+		t.Fatalf("the settings page does not show what was saved: %s", after)
+	}
+}
+
+// A value the workspace does not accept is a caller mistake, not an outage:
+// reporting it as "temporarily unavailable" tells an administrator to retry
+// something that can never succeed.
+func TestWorkspaceSettingsRefuseAnUnknownDiscoverability(t *testing.T) {
+	handler, _ := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/settings/discoverability", "discoverability=whenever"))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+// ADMIN-02: the analytics dashboard counts the durable rows. Nothing here is
+// sampled or delayed, so the page and the store must agree exactly.
+func TestAnalyticsCountsWhatTheWorkspaceHolds(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design", IsPrivate: true})
+	store.SeedConversation(domain.Conversation{ID: "C3", WorkspaceID: "T1", Name: "old", Archived: true})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedConversationMember("C2", "U1")
+	messages := service.Messages{Store: store}
+	for index := 0; index < 3; index++ {
+		if _, err := messages.Post(ctx, "T1", "U1", "C1", "counted "+strconv.Itoa(index), "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", "C2", "private", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/app/admin/analytics?days=30", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{"Workspace analytics", "Busiest channels", "#general", "last 30 days"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("the analytics page is missing %q: %s", expected, body)
+		}
+	}
+	analytics, err := messages.WorkspaceAnalytics(ctx, "T1", "U1", time.Now().UTC().Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.PublicChannels != 1 || analytics.PrivateChannels != 1 || analytics.ArchivedChannels != 1 {
+		t.Fatalf("channel counts=%+v", analytics)
+	}
+	if analytics.Messages != 4 || analytics.RecentMessages != 4 {
+		t.Fatalf("message counts=%+v", analytics)
+	}
+	if len(analytics.BusiestChannels) == 0 || analytics.BusiestChannels[0].ConversationID != "C1" || analytics.BusiestChannels[0].Messages != 3 {
+		t.Fatalf("busiest=%+v", analytics.BusiestChannels)
+	}
+	// The window is a closed set: an arbitrary one is a caller mistake.
+	bad := httptest.NewRequest(http.MethodGet, "/app/admin/analytics?days=4000", nil)
+	bad.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	badResponse := httptest.NewRecorder()
+	handler.ServeHTTP(badResponse, bad)
+	if badResponse.Code != http.StatusBadRequest {
+		t.Fatalf("window status=%d", badResponse.Code)
+	}
+}

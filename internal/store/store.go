@@ -348,6 +348,11 @@ type Store interface {
 	// withdrawn — the update matched no row and reported not found.
 	SetInviteRequestStatus(context.Context, domain.WorkspaceID, domain.InviteRequestID, domain.InviteRequestStatus, domain.InviteRequestStatus, time.Time, events.Event) error
 	ListInviteRequests(context.Context, domain.WorkspaceID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
+	// WorkspaceAnalytics counts what one workspace holds, and what has
+	// happened in it since a caller-supplied instant. The instant is a
+	// parameter so the page and any export built from the same call describe
+	// the same window.
+	WorkspaceAnalytics(context.Context, domain.WorkspaceID, time.Time, int) (domain.WorkspaceAnalytics, error)
 	// FindInviteRequestByEmail returns the one invitation for an address in a
 	// given state, or ErrNotFound. The address is the whole match: acceptance
 	// is decided against an email a provider has verified, so an invitation

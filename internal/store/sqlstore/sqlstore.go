@@ -5385,6 +5385,71 @@ func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.Workspace
 	return value, nil
 }
 
+func (s *Store) WorkspaceAnalytics(ctx context.Context, workspace domain.WorkspaceID, since time.Time, busiest int) (domain.WorkspaceAnalytics, error) {
+	if busiest < 0 {
+		return domain.WorkspaceAnalytics{}, store.InvalidArgument("the busiest-channel bound must not be negative")
+	}
+	result := domain.WorkspaceAnalytics{Since: since.UTC()}
+	// domain.NewStoredTime, never a raw RFC3339: created_at is TEXT and is
+	// compared lexically, and only the stored form has a fixed-width fraction.
+	// A variable-width rendering makes one instant a byte prefix of another and
+	// the comparison silently wrong.
+	storedSince := domain.NewStoredTime(since)
+	if err := s.db.QueryRowContext(ctx, `SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN m.active = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN m.restricted = 1 OR m.ultra_restricted = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN m.role IN ('admin', 'owner') THEN 1 ELSE 0 END), 0)
+		FROM users u LEFT JOIN workspace_members m ON m.workspace_id = u.workspace_id AND m.user_id = u.id
+		WHERE u.workspace_id = ? AND u.deleted = 0`, workspace).
+		Scan(&result.Members, &result.ActiveMembers, &result.Guests, &result.Admins); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT
+			COALESCE(SUM(CASE WHEN archived = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN archived = 0 AND is_private = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN archived = 0 AND is_private = 0 THEN 1 ELSE 0 END), 0)
+		FROM conversations WHERE workspace_id = ? AND is_direct = 0 AND is_group_direct = 0`, workspace).
+		Scan(&result.ArchivedChannels, &result.PrivateChannels, &result.PublicChannels); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0)
+		FROM messages WHERE workspace_id = ? AND deleted = 0`, storedSince, workspace).
+		Scan(&result.Messages, &result.RecentMessages); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0)
+		FROM files WHERE workspace_id = ? AND deleted = 0`, storedSince, workspace).
+		Scan(&result.Files, &result.RecentFiles); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	if busiest == 0 {
+		return result, nil
+	}
+	// Ties break on the identifier so two profiles, and two calls, order the
+	// same list the same way.
+	rows, err := s.db.QueryContext(ctx, `SELECT m.conversation, c.name, COUNT(*) AS total
+		FROM messages m JOIN conversations c ON c.id = m.conversation
+		WHERE m.workspace_id = ? AND m.deleted = 0 AND m.created_at >= ?
+		AND c.is_direct = 0 AND c.is_group_direct = 0
+		GROUP BY m.conversation, c.name ORDER BY total DESC, m.conversation LIMIT ?`, workspace, storedSince, busiest)
+	if err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entry domain.ChannelActivity
+		if err := rows.Scan(&entry.ConversationID, &entry.Name, &entry.Messages); err != nil {
+			return domain.WorkspaceAnalytics{}, err
+		}
+		result.BusiestChannels = append(result.BusiestChannels, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.WorkspaceAnalytics{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) FindInviteRequestByEmail(ctx context.Context, workspace domain.WorkspaceID, email string, status domain.InviteRequestStatus) (domain.InviteRequest, error) {
 	normalized := domain.NormalizeEmail(email)
 	if normalized == "" {

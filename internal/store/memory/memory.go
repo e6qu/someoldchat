@@ -2204,6 +2204,87 @@ func (s *Store) ListInviteRequests(_ context.Context, workspace domain.Workspace
 	return page, err
 }
 
+func (s *Store) WorkspaceAnalytics(_ context.Context, workspace domain.WorkspaceID, since time.Time, busiest int) (domain.WorkspaceAnalytics, error) {
+	if busiest < 0 {
+		return domain.WorkspaceAnalytics{}, store.InvalidArgument("the busiest-channel bound must not be negative")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := domain.WorkspaceAnalytics{Since: since.UTC()}
+	for _, user := range s.users {
+		if user.WorkspaceID != workspace || user.Deleted {
+			continue
+		}
+		result.Members++
+		membership, exists := s.members[string(workspace)+"\x00"+string(user.ID)]
+		if !exists {
+			continue
+		}
+		if membership.Active {
+			result.ActiveMembers++
+		}
+		if membership.Guest() {
+			result.Guests++
+		}
+		if membership.Role == domain.WorkspaceRoleAdmin || membership.Role == domain.WorkspaceRoleOwner {
+			result.Admins++
+		}
+	}
+	activity := make([]domain.ChannelActivity, 0, len(s.conversations))
+	for id, conversation := range s.conversations {
+		if conversation.WorkspaceID != workspace {
+			continue
+		}
+		if !conversation.IsDirect && !conversation.IsGroupDirect {
+			switch {
+			case conversation.Archived:
+				result.ArchivedChannels++
+			case conversation.IsPrivate:
+				result.PrivateChannels++
+			default:
+				result.PublicChannels++
+			}
+		}
+		recent := 0
+		for _, message := range s.messages[id] {
+			if message.Deleted {
+				continue
+			}
+			result.Messages++
+			if !since.IsZero() && message.CreatedAt.Before(since) {
+				continue
+			}
+			result.RecentMessages++
+			recent++
+		}
+		if recent > 0 && !conversation.IsDirect && !conversation.IsGroupDirect {
+			activity = append(activity, domain.ChannelActivity{ConversationID: id, Name: conversation.Name, Messages: recent})
+		}
+	}
+	for _, file := range s.files {
+		if file.WorkspaceID != workspace || file.Deleted {
+			continue
+		}
+		result.Files++
+		if since.IsZero() || !file.CreatedAt.Before(since) {
+			result.RecentFiles++
+		}
+	}
+	// Ties break on the identifier so two profiles, and two calls, order the
+	// same list the same way.
+	sort.Slice(activity, func(left, right int) bool {
+		if activity[left].Messages != activity[right].Messages {
+			return activity[left].Messages > activity[right].Messages
+		}
+		return activity[left].ConversationID < activity[right].ConversationID
+	})
+	if busiest < len(activity) {
+		activity = activity[:busiest]
+	}
+	result.BusiestChannels = activity
+	return result, nil
+}
+
 func (s *Store) FindInviteRequestByEmail(_ context.Context, workspace domain.WorkspaceID, email string, status domain.InviteRequestStatus) (domain.InviteRequest, error) {
 	normalized := domain.NormalizeEmail(email)
 	if normalized == "" {
