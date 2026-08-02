@@ -1722,6 +1722,66 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Automatic presence is derived, not stored: the two compositions
+			// have to agree that a member who has just been seen is active and
+			// that a heartbeat is idempotent.
+			name: "automatic presence follows recorded activity",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.RecordActivity(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
+				if err := chat.RecordActivity(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
+				user, err := chat.UserInfo(ctx, "T1", "U1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// The instant itself is wall-clock and differs between runs;
+				// what must agree is that it was recorded and that automatic
+				// presence reads it as active.
+				return []any{user.LastActiveAt.IsZero(), user.Presence.CurrentAt(user.LastActiveAt, user.LastActiveAt.Add(time.Second))}, nil
+			},
+		},
+		{
+			// The Threads view is assembled from three reads the two
+			// compositions could easily disagree about: which follows exist,
+			// what the root says, and how many replies fall after the read
+			// cursor.
+			name: "followed threads",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				root, err := chat.Post(ctx, "T1", "U1", "C1", "thread root", "", "")
+				if err != nil {
+					return nil, err
+				}
+				rootTimestamp := timestampOf(root)
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "first reply", rootTimestamp, ""); err != nil {
+					return nil, err
+				}
+				if err := chat.SetThreadFollowed(ctx, "T1", "U1", "C1", rootTimestamp, true); err != nil {
+					return nil, err
+				}
+				followed, err := chat.FollowedThreads(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				projected := make([]any, 0, len(followed.Threads))
+				for _, thread := range followed.Threads {
+					projected = append(projected, []any{string(thread.Conversation), thread.RootText, string(thread.RootAuthorID), thread.ReplyCount, thread.UnreadReplies})
+				}
+				// Unfollowing removes it, which is the half a list test that
+				// only ever adds cannot see.
+				if err := chat.SetThreadFollowed(ctx, "T1", "U1", "C1", rootTimestamp, false); err != nil {
+					return nil, err
+				}
+				after, err := chat.FollowedThreads(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{projected, len(after.Threads)}, nil
+			},
+		},
+		{
 			// Mark-all-read is the one cursor write whose result is a count
 			// rather than a cursor, so the two compositions can disagree about
 			// how many conversations moved without any single cursor read

@@ -282,6 +282,8 @@ type Service interface {
 	KickConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID) error
 	MarkRead(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.ReadCursor, error)
 	MarkAllRead(context.Context, domain.WorkspaceID, domain.UserID) (int, error)
+	FollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
+	RecordActivity(context.Context, domain.WorkspaceID, domain.UserID) error
 	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	ThreadSummaries(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)

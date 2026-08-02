@@ -2287,11 +2287,12 @@ test('[NAV-02 A11Y-01] the shortcuts dialog documents the keyboard layer and is 
   await help.getByRole('button', { name: 'Close keyboard shortcuts' }).click();
   await expect(help).toBeHidden();
 
-  // Scoped to the dialog. The surrounding timeline carries a pre-existing
-  // WCAG 2.2 target-size failure recorded in specs/product-gap-audit.md: the
-  // hover action toolbar is absolutely positioned over the message above it,
-  // so its links report as partially obscured. Fixing that is a layout change
-  // to Slack's overlapping-toolbar idiom, not something this journey decides.
+  // Scoped to the dialog. The timeline around it carries a WCAG 2.2
+  // target-size failure recorded in specs/product-gap-audit.md, and this change
+  // tried the obvious fix — moving the toolbar into its own message's top
+  // padding — which destabilised the message chrome enough to break three
+  // unrelated journeys. It is a layout decision about Slack's overlapping-
+  // toolbar idiom, and it is not this journey's to make.
   await expectNoSeriousAccessibilityViolations(page, '#keyboard-help');
 
   // And the chord itself opens it.
@@ -2347,6 +2348,72 @@ test('[NAV-02 NAV-04] section movement, unread movement, and mark-all-read work 
   // sidebar that agrees.
   await expect(page.locator('.channel-actions .notice')).toContainText(/Marked \d+ conversations? read|Everything was already read/);
   await expect(page.locator('.side-section[aria-label="Channels"] .side-link[aria-label*="unread messages"]')).toHaveCount(0);
+});
+
+test('[AUTH-04] workspace administration exists and refuses a member rather than 404ing', async ({ page, context }) => {
+  await signIn(context);
+
+  // Every administration route used to be registered only alongside a
+  // configured identity provider, so this deployment — which runs on the static
+  // development session — answered 404 for all of them. A 404 tells an operator
+  // their deployment is broken; a 403 tells a member their account is not
+  // privileged. Those are different problems and the surface now distinguishes
+  // them.
+  //
+  // This session cannot go further, and deliberately so: cmd/server grants the
+  // shared static session member scopes only, because a shared bearer token
+  // must not carry control-plane authority. Exercising the administration
+  // journeys themselves needs a session this deployment will not mint — see
+  // specs/product-gap-audit.md.
+  for (const path of ['/app/admin/settings', '/app/admin/analytics', '/app/admin/audit']) {
+    const response = await page.goto(path);
+    expect(response.status(), `${path} must exist and refuse, not 404`).toBe(403);
+  }
+
+  // Identity-provider administration keeps the dependency it actually has.
+  const providers = await page.goto('/app/admin/auth');
+  expect(providers.status()).toBe(404);
+
+  // And a member is not offered a link to what they cannot use.
+  await page.goto('/app');
+  await expect(page.getByRole('link', { name: 'Workspace settings' })).toHaveCount(0);
+});
+
+test('[NAV-07 NAV-08] the Threads view lists followed threads and Unreads groups what is unread', async ({ page, context, request }) => {
+  await signIn(context);
+  const { primary } = await slackModifiers(page);
+
+  const rootText = `threads view root ${Date.now()}`;
+  const root = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: 'Cdev', text: rootText },
+  });
+  const rootPayload = await root.json();
+  expect(rootPayload.ok, JSON.stringify(rootPayload)).toBe(true);
+  const reply = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: 'Cdev', text: 'threads view reply', thread_ts: rootPayload.ts },
+  });
+  expect((await reply.json()).ok).toBe(true);
+
+  // Replying is what starts following a thread in Slack, and the Threads view
+  // is the only surface that has ever read those follow records.
+  await page.goto('/app/threads');
+  await expect(page.getByRole('heading', { name: 'Threads', exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByText(rootText)).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.goto('/app/unreads');
+  await expect(page.getByRole('heading', { name: 'Unreads', exact: true, level: 2 })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Both are reachable by the chords Slack publishes for them.
+  await page.goto('/app');
+  await page.keyboard.press(`${primary}+Shift+T`);
+  await expect(page).toHaveURL(/\/app\/threads/);
+  await page.goto('/app');
+  await page.keyboard.press(`${primary}+Shift+A`);
+  await expect(page).toHaveURL(/\/app\/unreads/);
 });
 
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {

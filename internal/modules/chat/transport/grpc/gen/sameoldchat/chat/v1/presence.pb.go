@@ -155,17 +155,18 @@ func (x *UserProfile) GetActiveScheduledStatusId() string {
 }
 
 type User struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Email         string                 `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
-	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	RealName      string                 `protobuf:"bytes,5,opt,name=real_name,json=realName,proto3" json:"real_name,omitempty"`
-	Profile       *UserProfile           `protobuf:"bytes,6,opt,name=profile,proto3" json:"profile,omitempty"`
-	Presence      string                 `protobuf:"bytes,7,opt,name=presence,proto3" json:"presence,omitempty"`
-	Deleted       bool                   `protobuf:"varint,8,opt,name=deleted,proto3" json:"deleted,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Id                   string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId          string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Email                string                 `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
+	Name                 string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	RealName             string                 `protobuf:"bytes,5,opt,name=real_name,json=realName,proto3" json:"real_name,omitempty"`
+	Profile              *UserProfile           `protobuf:"bytes,6,opt,name=profile,proto3" json:"profile,omitempty"`
+	Presence             string                 `protobuf:"bytes,7,opt,name=presence,proto3" json:"presence,omitempty"`
+	Deleted              bool                   `protobuf:"varint,8,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	LastActiveAtUnixNano int64                  `protobuf:"varint,9,opt,name=last_active_at_unix_nano,json=lastActiveAtUnixNano,proto3" json:"last_active_at_unix_nano,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -252,6 +253,13 @@ func (x *User) GetDeleted() bool {
 		return x.Deleted
 	}
 	return false
+}
+
+func (x *User) GetLastActiveAtUnixNano() int64 {
+	if x != nil {
+		return x.LastActiveAtUnixNano
+	}
+	return 0
 }
 
 type SetUserPresenceRequest struct {
@@ -1158,7 +1166,7 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"image_1024\x18\n" +
 	" \x01(\tR\timage1024\x12+\n" +
 	"\x11status_expiration\x18\v \x01(\x03R\x10statusExpiration\x12;\n" +
-	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\"\xf2\x01\n" +
+	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\"\xaa\x02\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +
@@ -1167,7 +1175,8 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\treal_name\x18\x05 \x01(\tR\brealName\x12:\n" +
 	"\aprofile\x18\x06 \x01(\v2 .sameoldchat.chat.v1.UserProfileR\aprofile\x12\x1a\n" +
 	"\bpresence\x18\a \x01(\tR\bpresence\x12\x18\n" +
-	"\adeleted\x18\b \x01(\bR\adeleted\"p\n" +
+	"\adeleted\x18\b \x01(\bR\adeleted\x126\n" +
+	"\x18last_active_at_unix_nano\x18\t \x01(\x03R\x14lastActiveAtUnixNano\"p\n" +
 	"\x16SetUserPresenceRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1a\n" +

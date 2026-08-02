@@ -84,6 +84,25 @@ persists at the same scope as Slack; and preserves contrast, focus, charts,
 syntax, emoji, files, and app-rendered content. Changing appearance MUST not
 reload or discard in-progress work.
 
+## NAV-07 — Review the threads you follow
+
+Slack's Threads view lists the threads a member follows, most recently replied
+first, with the containing conversation, the root message, the reply count and
+how many replies the member has not read. A thread whose root has been deleted
+MUST leave the view rather than appear as a row that opens onto nothing.
+
+Unread MUST be derived from the member's read position in the containing
+conversation. A second, thread-only read position would let the Threads view
+and the conversation disagree about the same replies.
+
+## NAV-08 — Triage unread conversations
+
+Slack's Unreads view groups every unread message by conversation so a member
+can clear a backlog without opening each conversation in turn. It MUST offer
+marking one conversation read and marking every conversation read, and where it
+bounds what it shows it MUST say what it has not shown rather than present a
+truncated list as complete.
+
 ## Evidence
 
 - Execute every documented shortcut in Chromium, Firefox, and WebKit on the
@@ -102,9 +121,13 @@ reload or discard in-progress work.
 | NAV-04 | [Slack keyboard shortcuts](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands) | Option or Alt with arrow keys moves among conversations. |
 | NAV-05 | [Navigate Slack with your keyboard](https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard) | Slack preserves message navigation and focused reading position. |
 | NAV-06 | [Change your Slack theme](https://slack.com/help/articles/205166337-Change-your-Slack-theme) | Slack persists member-selected appearance across the client. |
+| NAV-07 | [Manage threads in Slack](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions) | Slack collects the threads a member follows into a dedicated view. |
+| NAV-08 | [Manage your unread messages](https://slack.com/help/articles/360043207674-Manage-your-unread-messages) | Slack collects unread messages into a dedicated view with per-conversation and workspace-wide mark-as-read. |
 
 Sources checked 2026-07-29:
 
 - [Slack keyboard shortcuts and commands](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands)
 - [Navigate Slack with your keyboard](https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard)
 - [Change your Slack theme](https://slack.com/help/articles/205166337-Change-your-Slack-theme)
+- [Use threads to organize discussions](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions)
+- [Manage your unread messages](https://slack.com/help/articles/360043207674-Manage-your-unread-messages)

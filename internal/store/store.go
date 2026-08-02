@@ -310,6 +310,10 @@ type Store interface {
 	EarliestScheduledStatusStart(context.Context, domain.WorkspaceID) (time.Time, error)
 	ActivateScheduledStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledStatusID, time.Time, time.Time, events.Event) (bool, error)
 	SetUserPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.Presence, events.Event) (domain.User, error)
+	// TouchUserActivity records that a member was seen, which is what makes
+	// automatic presence automatic. It journals nothing: a heartbeat is derived
+	// state, not something a consumer needs delivered.
+	TouchUserActivity(context.Context, domain.WorkspaceID, domain.UserID, time.Time) error
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
 	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
@@ -605,6 +609,11 @@ type Store interface {
 	SetConversationNotificationPreferences(context.Context, domain.ConversationNotificationPreferences, events.Event) error
 	IsThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (bool, error)
 	SetThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, bool, events.Event) error
+	// ListFollowedThreads is the Threads view. It answers newest-reply-first,
+	// because a threads view ordered by anything else is a list of threads the
+	// member has already dealt with. A followed thread whose root has been
+	// deleted is omitted rather than shown as an empty row.
+	ListFollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
 	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
 	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)

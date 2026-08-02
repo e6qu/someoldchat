@@ -31,6 +31,7 @@ message User {
   UserProfile profile = 6;
   string presence = 7;
   bool deleted = 8;
+  int64 last_active_at_unix_nano = 9;
 }
 
 message SetUserPresenceRequest {

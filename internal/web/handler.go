@@ -370,7 +370,10 @@ type pageData struct {
 	WorkspaceName        string
 	CSRFToken            string
 	ShowProfile          bool
-	ShowAdmin            bool
+	// ShowAdmin gates workspace administration; ShowAuthAdmin gates the
+	// identity-provider page, which needs a provider to have anything to say.
+	ShowAdmin     bool
+	ShowAuthAdmin bool
 	// Keyboard is the client's whole keyboard layer, rendered into the help
 	// dialog Command/Control+/ opens. It comes from keyboardSections so the
 	// dialog cannot describe a binding the page does not announce.
@@ -1065,7 +1068,8 @@ const workspaceRefinements = `<style>
 .keyboard-help{width:min(720px,calc(100vw - 28px));max-height:min(680px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.keyboard-help::backdrop{background:#0008}
 .keyboard-help-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,220px) auto;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}.keyboard-help-head h2{margin:0;font-size:1.1rem}.keyboard-help-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:8px 10px}.keyboard-help-head button{border:0;background:transparent;color:var(--muted);font-size:22px;line-height:1}
 .keyboard-help-body{padding:6px 16px 16px;overflow:auto;max-height:calc(min(680px,100vh - 28px) - 74px)}.keyboard-help-body h3{margin:16px 0 6px;font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.keyboard-help-body dl{display:grid;gap:2px;margin:0}
-.keyboard-help-body dl>div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:14px;padding:7px 8px;border-radius:6px}.keyboard-help-body dl>div:nth-child(odd){background:var(--hover)}.keyboard-help-body dt{margin:0;min-width:0}.keyboard-help-body dt small{display:block;color:var(--muted);font-size:.78rem;font-weight:400}.keyboard-help-body dd{margin:0;display:flex;gap:6px;white-space:nowrap}
+.keyboard-help-body dl>div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:14px;padding:7px 8px;border-radius:6px}
+.keyboard-help-body dl>div[hidden],.keyboard-help-body section[hidden]{display:none}.keyboard-help-body dl>div:nth-child(odd){background:var(--hover)}.keyboard-help-body dt{margin:0;min-width:0}.keyboard-help-body dt small{display:block;color:var(--muted);font-size:.78rem;font-weight:400}.keyboard-help-body dd{margin:0;display:flex;gap:6px;white-space:nowrap}
 .keyboard-help-body kbd{border:1px solid var(--field-line);border-bottom-width:2px;border-radius:5px;background:var(--panel);padding:2px 6px;font:600 12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
 .keyboard-help-empty{padding:26px;text-align:center;color:var(--muted)}
 .search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
@@ -1489,6 +1493,8 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </div>
       <nav class="side-section" aria-label="Workspace navigation">
         <div class="side-label">Workspace</div>
+        <a class="side-link" href="/app/unreads?channel={{.Channel}}" aria-label="Unreads" {{ariaKeyshortcuts "Unreads"}}><span class="side-icon" aria-hidden="true">◍</span><span class="side-text">Unreads</span></a>
+        <a class="side-link" href="/app/threads?channel={{.Channel}}" aria-label="Threads" {{ariaKeyshortcuts "Threads"}}><span class="side-icon" aria-hidden="true">⌸</span><span class="side-text">Threads</span></a>
         <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
         <a class="side-link" href="/app/notifications?channel={{.Channel}}" aria-label="Notification preferences"><span class="side-icon" aria-hidden="true">◌</span><span class="side-text">Notifications</span></a>
         <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
@@ -1501,7 +1507,8 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         <a class="side-link" href="/app/workflows" aria-label="Workflows"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">Workflows</span></a>
         <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
         <a class="side-link" href="/app/developer/apps" aria-label="Developer apps"><span class="side-icon" aria-hidden="true">⌘</span><span class="side-text">Developer apps</span></a>
-        {{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
+        {{if .ShowAdmin}}<a class="side-link" href="/app/admin/settings" aria-label="Workspace settings"><span class="side-icon" aria-hidden="true">⚙</span><span class="side-text">Workspace settings</span></a>{{end}}
+        {{if .ShowAuthAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
       </nav>
       {{if .Apps}}<nav class="side-section" aria-label="Apps"><div class="side-label">Apps</div>{{range .Apps}}<a class="side-link" href="/app/apps/{{.ID}}?channel={{$.Channel}}"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">{{.Name}}</span></a>{{end}}</nav>{{end}}
       <nav class="side-section" aria-label="Channels">
@@ -3524,6 +3531,14 @@ if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='k'){
 var directsLink=document.querySelector('.side-link[aria-label="Direct messages"]');
 if(directsLink&&ownPath(directsLink.getAttribute('href'))){event.preventDefault();window.location.assign(directsLink.getAttribute('href'));return}
 }
+if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='a'){
+var unreadsLink=document.querySelector('.side-link[aria-label="Unreads"]');
+if(unreadsLink&&ownPath(unreadsLink.getAttribute('href'))){event.preventDefault();window.location.assign(unreadsLink.getAttribute('href'));return}
+}
+if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='t'){
+var threadsLink=document.querySelector('.side-link[aria-label="Threads"]');
+if(threadsLink&&ownPath(threadsLink.getAttribute('href'))){event.preventDefault();window.location.assign(threadsLink.getAttribute('href'));return}
+}
 if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='s'){
 var laterLink=document.querySelector('.side-link[aria-keyshortcuts~="Meta+Shift+S"]');
 if(laterLink&&ownPath(laterLink.getAttribute('href'))){event.preventDefault();window.location.assign(laterLink.getAttribute('href'));return}
@@ -3642,6 +3657,21 @@ announce('Reconnecting to live updates…');
 };
 topics.forEach(function(topic){stream.addEventListener(topic,deliver)});
 }
+var activityCsrf=document.querySelector('#composer input[name=_csrf],form input[name=_csrf]');
+if(activityCsrf&&window.fetch){
+var lastBeat=0;
+var beat=function(){
+var now=Date.now();
+if(document.hidden||now-lastBeat<120000)return;
+lastBeat=now;
+var body=new URLSearchParams();
+body.set('_csrf',activityCsrf.value);
+fetch('/app/active',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()}).catch(function(){});
+};
+beat();
+['pointerdown','keydown','visibilitychange'].forEach(function(name){document.addEventListener(name,beat,{passive:true})});
+window.setInterval(beat,300000);
+}
 var markRead=document.getElementById('mark-read');
 if(markRead)submitQuietly(markRead);
 toBottom(document.getElementById('timeline'));
@@ -3670,14 +3700,11 @@ func (h Handler) Register(mux *http.ServeMux) {
 		h.Login.Register(mux)
 		mux.HandleFunc("GET /auth/validation", h.validation)
 		mux.HandleFunc("GET /me", h.me)
+		// Identity-provider administration, and only that: every route here
+		// reads or writes a provider, a provider-backed user, or an invitation
+		// addressed to one. Without a provider there is nothing for them to
+		// administer, so they are the routes that legitimately depend on one.
 		mux.HandleFunc("GET /app/admin/auth", h.authAdminPage)
-		mux.HandleFunc("GET /app/admin/audit", h.auditPage)
-		mux.HandleFunc("GET /app/admin/settings", h.workspaceSettingsPage)
-		mux.HandleFunc("GET /app/admin/analytics", h.analyticsPage)
-		mux.HandleFunc("POST /app/admin/settings/identity", h.workspaceIdentitySet)
-		mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
-		mux.HandleFunc("POST /app/admin/settings/retention", h.workspaceRetentionSet)
-		mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
 		// Deliberately reachable signed-out: the person it is for has no
 		// account yet. See internal/web/invite.go for why it carries no secret.
 		mux.HandleFunc("GET /app/invite/{inviteRequestID}", h.invitationPage)
@@ -3687,11 +3714,25 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/admin.auth.users.create", h.authUserCreate)
 		mux.HandleFunc("GET /api/admin.auth.users.list", h.authUsersList)
 		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
-		mux.HandleFunc("POST /app/admin/invites/approve", h.authInviteRequestDecision(true))
-		mux.HandleFunc("POST /app/admin/invites/deny", h.authInviteRequestDecision(false))
-		mux.HandleFunc("POST /app/admin/apps/approve", h.authAppDecision(true))
-		mux.HandleFunc("POST /app/admin/apps/restrict", h.authAppDecision(false))
 	}
+	// Workspace administration is not identity-provider administration. These
+	// govern retention, discoverability, default channels, analytics, the audit
+	// log, and the invitation and app-request queues — none of which needs a
+	// provider to exist, and all of which a deployment running on the static
+	// development session still has to be able to govern. They were registered
+	// only alongside a configured provider, so such a deployment had no
+	// administration at all: the pages answered 404, not 403.
+	mux.HandleFunc("GET /app/admin/audit", h.auditPage)
+	mux.HandleFunc("GET /app/admin/settings", h.workspaceSettingsPage)
+	mux.HandleFunc("GET /app/admin/analytics", h.analyticsPage)
+	mux.HandleFunc("POST /app/admin/settings/identity", h.workspaceIdentitySet)
+	mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
+	mux.HandleFunc("POST /app/admin/settings/retention", h.workspaceRetentionSet)
+	mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
+	mux.HandleFunc("POST /app/admin/invites/approve", h.authInviteRequestDecision(true))
+	mux.HandleFunc("POST /app/admin/invites/deny", h.authInviteRequestDecision(false))
+	mux.HandleFunc("POST /app/admin/apps/approve", h.authAppDecision(true))
+	mux.HandleFunc("POST /app/admin/apps/restrict", h.authAppDecision(false))
 	mux.HandleFunc("GET /app", h.index)
 	mux.HandleFunc("GET /archives/{channelID}/{timestamp}", h.archivePermalink)
 	mux.HandleFunc("POST /app/message/forward", h.forwardMessage)
@@ -3718,6 +3759,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("POST /app/read/all", h.markAllRead)
+	mux.HandleFunc("POST /app/active", h.recordActivity)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/search/suggestions", h.searchSuggestions)
 	mux.HandleFunc("GET /app/emoji/options", h.emojiOptions)
@@ -3729,6 +3771,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/notifications/preferences", h.setWorkspaceNotifications)
 	mux.HandleFunc("POST /app/notifications/dnd", h.setNotificationSnooze)
 	mux.HandleFunc("GET /app/later", h.later)
+	mux.HandleFunc("GET /app/threads", h.threadsPage)
+	mux.HandleFunc("GET /app/unreads", h.unreadsPage)
 	mux.HandleFunc("GET /app/drafts", h.draftsAndSent)
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
 	mux.HandleFunc("GET /app/dms", h.directMessages)
@@ -4304,6 +4348,28 @@ func (h Handler) markAllRead(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, h.viewURL(r, "")+"&notice="+url.QueryEscape(notice))
 }
 
+// recordActivity is the automatic-presence heartbeat. It answers 204 and
+// nothing else: the client sends it in the background and has no use for a
+// body, and a page that re-rendered on every heartbeat would be worse than no
+// automatic presence at all.
+func (h Handler) recordActivity(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The heartbeat could not be read."); !ok {
+		return
+	}
+	if err := h.Messages.RecordActivity(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
+		// A missed heartbeat costs a member nothing but an early "away", so it
+		// is not worth an error page.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // signInTarget starts the exact provider the deployment can complete. A
 // configured provider that the workspace has disabled would answer the bare
 // "authorization method is disabled" page, so entry falls back to the provider
@@ -4592,7 +4658,8 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		WorkspaceName:    workspaceName,
 		CSRFToken:        csrfToken,
 		ShowProfile:      h.canShowIdentity(),
-		ShowAdmin:        h.canShowAuthorizationAdmin(r.Context(), principal),
+		ShowAdmin:        h.canShowWorkspaceAdmin(r.Context(), principal),
+		ShowAuthAdmin:    h.Login != nil && h.canShowWorkspaceAdmin(r.Context(), principal),
 		Keyboard:         keyboardHelp(),
 		ReminderUnread:   reminderUnread,
 		IsMember:         isMember,
@@ -7501,7 +7568,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	data := membersData{
 		Members:        members,
 		Profile:        profile,
-		Presence:       current.Presence.Current(),
+		Presence:       current.Presence.CurrentAt(current.LastActiveAt, time.Now().UTC()),
 		StatusExpires:  webUnixSeconds(profile.StatusExpiration),
 		AvatarURL:      profileImageURL(profile),
 		UserInitial:    initial(displayName(current)),
@@ -7774,10 +7841,7 @@ func (h Handler) canShowIdentity() bool {
 	return h.Login != nil && h.Login.hasOpenIDConnectProvider() && immutableReleaseRevision.MatchString(h.ReleaseRevision)
 }
 
-func (h Handler) canShowAuthorizationAdmin(ctx context.Context, principal auth.Principal) bool {
-	if h.Login == nil {
-		return false
-	}
+func (h Handler) canShowWorkspaceAdmin(ctx context.Context, principal auth.Principal) bool {
 	hasScope := false
 	for _, scope := range []auth.Scope{auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite} {
 		if principal.HasScope(scope) {

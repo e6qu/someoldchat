@@ -91,9 +91,14 @@ func TestKeyboardHelpIsReachableWithoutAKeyboardShortcut(t *testing.T) {
 	}
 }
 
-func renderWorkspacePage(t *testing.T) string {
+func renderWorkspacePage(t *testing.T, existing ...*http.ServeMux) string {
 	t.Helper()
-	_, mux := browserWorkspace(t, auth.AllScopes())
+	var mux *http.ServeMux
+	if len(existing) == 1 {
+		mux = existing[0]
+	} else {
+		_, mux = browserWorkspace(t, auth.AllScopes())
+	}
 	request := httptest.NewRequest(http.MethodGet, "/app?channel=Cdev", nil)
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	request.Header.Set("Sec-Fetch-Site", "same-origin")

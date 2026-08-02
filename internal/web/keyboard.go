@@ -62,6 +62,8 @@ func keyboardSections() []keyboardSection {
 			{Action: "Move to the previous section", Apple: "Meta+Shift+F6", Other: "Control+Shift+F6"},
 			{Action: "Activity", Apple: "Control+3", Other: "Control+Shift+3",
 				Note: "Slack's Command/Control+Shift+M is desktop-only; the web client uses the numbered navigation-tab shortcut."},
+			{Action: "Unreads", Apple: "Meta+Shift+A", Other: "Control+Shift+A"},
+			{Action: "Threads", Apple: "Meta+Shift+T", Other: "Control+Shift+T"},
 			{Action: "Direct messages", Apple: "Meta+Shift+K", Other: "Control+Shift+K"},
 			{Action: "Later", Apple: "Meta+Shift+S", Other: "Control+Shift+S"},
 			{Action: "Conversation details", Apple: "Meta+Shift+I", Other: "Control+Shift+I"},

@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
  status_text TEXT NOT NULL DEFAULT '', status_emoji TEXT NOT NULL DEFAULT '', status_expiration INTEGER NOT NULL DEFAULT 0, active_scheduled_status_id TEXT NOT NULL DEFAULT '',
  image_24 TEXT NOT NULL DEFAULT '', image_32 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '',
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
- deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto'
+ deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto', last_active_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES users(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), expiration_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS scheduled_statuses (
@@ -506,7 +506,38 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 134
+// lastActiveScan reads users.last_active_at directly into the user being
+// scanned. It exists because the column is read at eight sites: a bare int64
+// at each of them is eight opportunities to scan the value and forget to
+// assign it, which fails silently as "this member has never been seen".
+type lastActiveScan struct{ into *time.Time }
+
+func (s lastActiveScan) Scan(value any) error {
+	if s.into == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case nil:
+		*s.into = time.Time{}
+	case int64:
+		if typed == 0 {
+			*s.into = time.Time{}
+			return nil
+		}
+		*s.into = time.Unix(typed, 0).UTC()
+	case float64:
+		if typed == 0 {
+			*s.into = time.Time{}
+			return nil
+		}
+		*s.into = time.Unix(int64(typed), 0).UTC()
+	default:
+		return fmt.Errorf("unsupported last_active_at value %T", value)
+	}
+	return nil
+}
+
+const schemaVersion = 135
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3030,6 +3061,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 135 {
+		// Automatic presence needs to know when a member was last seen.
+		// Without it `auto` resolved to "active" unconditionally, so a member
+		// who chose automatic presence and closed their laptop stayed active
+		// forever and automatic presence was indistinguishable from a manual
+		// "always active".
+		columns, err := s.tableColumns(ctx, db, "users")
+		if err != nil {
+			return err
+		}
+		if !columns["last_active_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN last_active_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate user last activity: %w", err)
+			}
+		}
+	}
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -3704,7 +3751,7 @@ func (s *Store) GetUser(ctx context.Context, id domain.UserID) (domain.User, err
 	var value domain.User
 	var deleted int
 	var statusExpiration int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence FROM users WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.Name, &value.RealName, &value.Profile.DisplayName, &value.Profile.StatusText, &value.Profile.StatusEmoji, &statusExpiration, &value.Profile.Image24, &value.Profile.Image32, &value.Profile.Image48, &value.Profile.Image72, &value.Profile.Image192, &value.Profile.Image512, &value.Profile.Image1024, &deleted, &value.Presence)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at FROM users WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.Name, &value.RealName, &value.Profile.DisplayName, &value.Profile.StatusText, &value.Profile.StatusEmoji, &statusExpiration, &value.Profile.Image24, &value.Profile.Image32, &value.Profile.Image48, &value.Profile.Image72, &value.Profile.Image192, &value.Profile.Image512, &value.Profile.Image1024, &deleted, &value.Presence, lastActiveScan{&value.LastActiveAt})
 	value.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
 	value.Deleted = deleted != 0
 	return value, translateNotFound(err)
@@ -3816,7 +3863,7 @@ func (s *Store) FindUserByEmail(ctx context.Context, workspace domain.WorkspaceI
 	var value domain.User
 	var deleted int
 	var statusExpiration int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence FROM users WHERE workspace_id = ? AND email = ? AND deleted = 0 LIMIT 1`, workspace, domain.NormalizeEmail(email)).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.Name, &value.RealName, &value.Profile.DisplayName, &value.Profile.StatusText, &value.Profile.StatusEmoji, &statusExpiration, &value.Profile.Image24, &value.Profile.Image32, &value.Profile.Image48, &value.Profile.Image72, &value.Profile.Image192, &value.Profile.Image512, &value.Profile.Image1024, &deleted, &value.Presence)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at FROM users WHERE workspace_id = ? AND email = ? AND deleted = 0 LIMIT 1`, workspace, domain.NormalizeEmail(email)).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.Name, &value.RealName, &value.Profile.DisplayName, &value.Profile.StatusText, &value.Profile.StatusEmoji, &statusExpiration, &value.Profile.Image24, &value.Profile.Image32, &value.Profile.Image48, &value.Profile.Image72, &value.Profile.Image192, &value.Profile.Image512, &value.Profile.Image1024, &deleted, &value.Presence, lastActiveScan{&value.LastActiveAt})
 	value.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
 	value.Deleted = deleted != 0
 	return value, translateNotFound(err)
@@ -3853,7 +3900,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 	var user domain.User
 	var deleted int
 	var statusExpiration int64
-	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence FROM users WHERE id = ?`, userID).Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at FROM users WHERE id = ?`, userID).Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}); err != nil {
 		return domain.User{}, err
 	}
 	user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -3868,7 +3915,7 @@ func (s *Store) DueUserStatuses(ctx context.Context, workspaceID domain.Workspac
 	if limit <= 0 {
 		return nil, store.InvalidArgument("status expiration limit must be positive")
 	}
-	query := `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence
+	query := `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at
 		FROM users WHERE deleted = 0 AND status_expiration > 0 AND status_expiration <= ?`
 	args := []any{now.UTC().Unix()}
 	if workspaceID != "" {
@@ -3887,7 +3934,7 @@ func (s *Store) DueUserStatuses(ctx context.Context, workspaceID domain.Workspac
 		var user domain.User
 		var deleted int
 		var statusExpiration int64
-		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
+		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}); err != nil {
 			return nil, err
 		}
 		user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -4169,7 +4216,7 @@ func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.Workspac
 	var user domain.User
 	var deleted int
 	var statusExpiration int64
-	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence FROM users WHERE id = ?`, userID).Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at FROM users WHERE id = ?`, userID).Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}); err != nil {
 		return domain.User{}, err
 	}
 	user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -4411,7 +4458,7 @@ func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, req
 	if err != nil {
 		return domain.UserPage{}, err
 	}
-	query := `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence FROM users WHERE workspace_id = ?`
+	query := `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at FROM users WHERE workspace_id = ?`
 	args := []any{workspace}
 	if after != "" {
 		query += ` AND id > ?`
@@ -4429,7 +4476,7 @@ func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, req
 		var user domain.User
 		var deleted int
 		var statusExpiration int64
-		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
+		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}); err != nil {
 			return domain.UserPage{}, err
 		}
 		user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -4458,7 +4505,7 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return domain.AdminUserPage{}, err
 	}
-	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, m.role, m.active, m.restricted, m.ultra_restricted FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
+	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, m.role, m.active, m.restricted, m.ultra_restricted FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
 	args := []any{workspace}
 	if after != "" {
 		query += ` AND u.id > ?`
@@ -4476,7 +4523,7 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 		var value domain.AdminUser
 		var deleted, active, restricted, ultraRestricted int
 		var statusExpiration int64
-		if err := rows.Scan(&value.User.ID, &value.User.WorkspaceID, &value.User.Email, &value.User.Name, &value.User.RealName, &value.User.Profile.DisplayName, &value.User.Profile.StatusText, &value.User.Profile.StatusEmoji, &statusExpiration, &value.User.Profile.Image24, &value.User.Profile.Image32, &value.User.Profile.Image48, &value.User.Profile.Image72, &value.User.Profile.Image192, &value.User.Profile.Image512, &value.User.Profile.Image1024, &deleted, &value.User.Presence, &value.Membership.Role, &active, &restricted, &ultraRestricted); err != nil {
+		if err := rows.Scan(&value.User.ID, &value.User.WorkspaceID, &value.User.Email, &value.User.Name, &value.User.RealName, &value.User.Profile.DisplayName, &value.User.Profile.StatusText, &value.User.Profile.StatusEmoji, &statusExpiration, &value.User.Profile.Image24, &value.User.Profile.Image32, &value.User.Profile.Image48, &value.User.Profile.Image72, &value.User.Profile.Image192, &value.User.Profile.Image512, &value.User.Profile.Image1024, &deleted, &value.User.Presence, lastActiveScan{&value.User.LastActiveAt}, &value.Membership.Role, &active, &restricted, &ultraRestricted); err != nil {
 			return domain.AdminUserPage{}, err
 		}
 		value.User.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -4510,7 +4557,7 @@ func (s *Store) ListUsersByRole(ctx context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return domain.UserPage{}, err
 	}
-	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ? AND m.role = ? AND m.active = 1 AND u.deleted = 0`
+	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ? AND m.role = ? AND m.active = 1 AND u.deleted = 0`
 	args := []any{workspace, role}
 	if after != "" {
 		query += ` AND u.id > ?`
@@ -4528,7 +4575,7 @@ func (s *Store) ListUsersByRole(ctx context.Context, workspace domain.WorkspaceI
 		var user domain.User
 		var deleted int
 		var statusExpiration int64
-		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
+		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}); err != nil {
 			return domain.UserPage{}, err
 		}
 		user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -4563,7 +4610,7 @@ func (s *Store) ListConversationMembers(ctx context.Context, conversation domain
 	if err != nil {
 		return domain.UserPage{}, err
 	}
-	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence FROM users u JOIN conversation_members m ON m.user_id = u.id WHERE m.conversation_id = ? AND u.deleted = 0`
+	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at FROM users u JOIN conversation_members m ON m.user_id = u.id WHERE m.conversation_id = ? AND u.deleted = 0`
 	args := []any{conversation}
 	if after != "" {
 		query += ` AND u.id > ?`
@@ -4581,7 +4628,7 @@ func (s *Store) ListConversationMembers(ctx context.Context, conversation domain
 		var user domain.User
 		var deleted int
 		var statusExpiration int64
-		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
+		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}); err != nil {
 			return domain.UserPage{}, err
 		}
 		user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -9692,6 +9739,166 @@ func (s *Store) RemoveConversationMember(ctx context.Context, conversation domai
 		}
 	}
 	return tx.Commit()
+}
+
+// ListFollowedThreads answers the Threads view in three reads rather than one
+// join, because the two sides cannot be joined: a root is identified by a
+// MessageTimestamp string and a message row is keyed by created_at as
+// StoredTime, which are different encodings of the same instant. Converting in
+// Go is the only portable way to relate them, and doing it here keeps that one
+// awkward fact in a single place.
+func (s *Store) ListFollowedThreads(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FollowedThreadPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.FollowedThreadPage{}, err
+	}
+	limit := request.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT conversation_id, root_timestamp FROM thread_follows WHERE workspace_id = ? AND user_id = ?`, workspace, user)
+	if err != nil {
+		return domain.FollowedThreadPage{}, err
+	}
+	type follow struct {
+		conversation domain.ConversationID
+		root         domain.MessageTimestamp
+	}
+	follows := make([]follow, 0, limit)
+	for rows.Next() {
+		var value follow
+		if err := rows.Scan(&value.conversation, &value.root); err != nil {
+			rows.Close()
+			return domain.FollowedThreadPage{}, err
+		}
+		follows = append(follows, value)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return domain.FollowedThreadPage{}, err
+	}
+	rows.Close()
+	if len(follows) == 0 {
+		return domain.FollowedThreadPage{}, nil
+	}
+
+	byConversation := map[domain.ConversationID][]domain.MessageTimestamp{}
+	for _, value := range follows {
+		byConversation[value.conversation] = append(byConversation[value.conversation], value.root)
+	}
+	threads := make([]domain.FollowedThread, 0, len(follows))
+	for conversation, roots := range byConversation {
+		name, readAt, err := s.followedThreadContext(ctx, workspace, user, conversation)
+		if err != nil {
+			return domain.FollowedThreadPage{}, err
+		}
+		summaries, err := s.ThreadSummaries(ctx, conversation, roots)
+		if err != nil {
+			return domain.FollowedThreadPage{}, err
+		}
+		for _, root := range roots {
+			rootText, rootAuthor, found, err := s.messageAtTimestamp(ctx, conversation, root)
+			if err != nil {
+				return domain.FollowedThreadPage{}, err
+			}
+			if !found {
+				// The root was deleted. Slack drops the thread from the view
+				// rather than showing a row that opens onto nothing.
+				continue
+			}
+			summary := summaries[root]
+			unread, err := s.unreadRepliesAfter(ctx, conversation, root, readAt)
+			if err != nil {
+				return domain.FollowedThreadPage{}, err
+			}
+			threads = append(threads, domain.FollowedThread{
+				Conversation: conversation, ConversationName: name, Root: root,
+				RootText: rootText, RootAuthorID: rootAuthor,
+				ReplyCount: summary.ReplyCount, UnreadReplies: unread, LastReplyAt: summary.LastReplyAt,
+			})
+		}
+	}
+	sort.Slice(threads, func(left, right int) bool {
+		if !threads[left].LastReplyAt.Equal(threads[right].LastReplyAt) {
+			return threads[left].LastReplyAt.After(threads[right].LastReplyAt)
+		}
+		return threads[left].Root > threads[right].Root
+	})
+	page := domain.FollowedThreadPage{Threads: threads}
+	if len(page.Threads) > limit {
+		page.Threads = page.Threads[:limit]
+		page.HasMore = true
+	}
+	return page, nil
+}
+
+func (s *Store) followedThreadContext(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (string, domain.StoredTime, error) {
+	var name string
+	if err := s.db.QueryRowContext(ctx, `SELECT name FROM conversations WHERE id = ?`, conversation).Scan(&name); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", "", err
+	}
+	var readAt domain.StoredTime
+	cursor, err := s.GetReadCursor(ctx, workspace, user, conversation)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return "", "", err
+	}
+	if err == nil {
+		parsed, parseErr := domain.ParseMessageTimestamp(cursor.LastRead)
+		if parseErr != nil {
+			return "", "", parseErr
+		}
+		readAt = domain.NewStoredTime(parsed)
+	}
+	return name, readAt, nil
+}
+
+func (s *Store) messageAtTimestamp(ctx context.Context, conversation domain.ConversationID, at domain.MessageTimestamp) (string, domain.UserID, bool, error) {
+	instant, err := domain.ParseMessageTimestamp(at)
+	if err != nil {
+		return "", "", false, err
+	}
+	var text string
+	var author domain.UserID
+	err = s.db.QueryRowContext(ctx, `SELECT text, author_id FROM messages WHERE conversation = ? AND created_at = ? AND deleted = 0`, conversation, domain.NewStoredTime(instant)).Scan(&text, &author)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	return text, author, err == nil, err
+}
+
+func (s *Store) unreadRepliesAfter(ctx context.Context, conversation domain.ConversationID, root domain.MessageTimestamp, readAt domain.StoredTime) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE conversation = ? AND thread_timestamp = ? AND deleted = 0 AND created_at > ?`, conversation, string(root), readAt).Scan(&count)
+	return count, err
+}
+
+// TouchUserActivity records that a member was seen. It is deliberately not an
+// event: automatic presence is derived state, and journalling every heartbeat
+// would fill the outbox with a fact no consumer needs delivered.
+//
+// The write is conditional on moving the value forward, so a stale request from
+// a slow connection cannot drag a member's presence backwards.
+func (s *Store) TouchUserActivity(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, at time.Time) error {
+	if at.IsZero() {
+		return store.InvalidArgument("user activity requires an instant")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET last_active_at = ? WHERE id = ? AND workspace_id = ? AND last_active_at < ?`,
+		at.UTC().Unix(), user, workspace, at.UTC().Unix())
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		// Either the member does not exist, or the stored instant is already at
+		// or ahead of this one. Only the first is an error, and it is the one a
+		// caller can act on.
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ? AND workspace_id = ?`, user, workspace).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) ThreadSummaries(ctx context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {

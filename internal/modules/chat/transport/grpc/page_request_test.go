@@ -53,6 +53,7 @@ var pageRequestExemptions = func() map[string]map[string]string {
 		"ConversationMembers",
 		"Files",
 		"ListItems",
+		"FollowedThreads",
 		"ListSharedInvites",
 		"ListUserGroups",
 		"Pins",
