@@ -12,7 +12,7 @@ Measured on 2026-08-02:
 - 199 current methods are recorded as behavior-compatible, 35 as
   SDK-compatible, two as schema-compatible, and none as live-differential
   `verified-against-slack`;
-- the Events API surface emits 38 event names: the message family (with the
+- the Events API surface emits 40 event names: the message family (with the
   message_changed/message_deleted subtypes and the projection-derived
   app_mention), reactions, pins, stars, membership, app_home_opened,
   function_executed, app_installed, the file events including file_public,
@@ -20,10 +20,18 @@ Measured on 2026-08-02:
   channel_*/group_* rename/archive/unarchive/delete pairs), emoji_changed,
   the subteam family, team_join, user_change with its user_profile_changed
   and user_status_changed companions, dnd_updated, team_rename, and the
-  RTM-only presence_change. Recorded event gaps: tokens_revoked,
-  app_uninstalled, dnd_updated_user, link_shared, message metadata, typing,
-  and the Slack Connect and Grid families — see the events-api decision in
+  RTM-only presence_change, plus tokens_revoked (minted inside the store's
+  revoking mutation, on both sides of the auth seam) and app_uninstalled
+  (whose announcement outlives the installation it announces). Recorded
+  event gaps: dnd_updated_user, link_shared, message metadata, typing, and
+  the Slack Connect and Grid families — see the events-api decision in
   compatibility.yaml;
+- the Web API enforces its rate-limiting contract: 429 with Retry-After and
+  the pinned rate_limited code, a uniform per-method budget at Tier 4's
+  documented floor per credential, and chat.postMessage's documented
+  one-per-second-per-channel allowance. Recorded boundaries: budgets are
+  replica-local, and per-method tier assignments below the Tier 4 floor are
+  not modelled;
 - the current official Node Web API SDK exercises the product end to end,
   including app manifests, OAuth, Socket Mode, interactions, message streaming,
   Block Kit validation, hosted-datastore CRUD/bulk operations, and an external
