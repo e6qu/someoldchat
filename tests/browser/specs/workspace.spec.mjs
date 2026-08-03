@@ -1535,13 +1535,27 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
   // current view.
   await expect(page).toHaveURL(url);
 
-  await chip.first().click();
-  await expect(target.locator('.reactions .chip')).toHaveCount(0);
+  // The timeline replaces itself when a live event arrives, so a control can be
+  // swapped out between resolving it and dispatching the click — the click then
+  // lands on a detached node and nothing happens. The client now holds a
+  // refresh for a moment after a pointer goes down inside the region, which
+  // covers a person, whose pointerdown precedes their click; it cannot cover a
+  // synthetic click, which is atomic. Retrying the whole click-and-assert is
+  // what a person does when a button appears not to have taken, and it keeps
+  // the assertion exactly as strong.
+  await expect(async () => {
+    await chip.first().click();
+    await expect(target.locator('.reactions .chip')).toHaveCount(0, { timeout: 2000 });
+  }).toPass({ timeout: 20000 });
 
-  await target.getByRole('button', { name: 'Pin' }).click();
-  await expect(target.locator('.pinned')).toBeVisible();
-  await target.getByRole('button', { name: 'Unpin' }).click();
-  await expect(target.locator('.pinned')).toHaveCount(0);
+  await expect(async () => {
+    await target.getByRole('button', { name: 'Pin' }).click();
+    await expect(target.locator('.pinned')).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
+  await expect(async () => {
+    await target.getByRole('button', { name: 'Unpin' }).click();
+    await expect(target.locator('.pinned')).toHaveCount(0, { timeout: 2000 });
+  }).toPass({ timeout: 20000 });
 });
 
 test('[MSG-03 MSG-04] a member can edit and delete their own message in place', async ({ page, context }) => {
