@@ -497,16 +497,28 @@ type documentCardView struct {
 }
 
 type canvasData struct {
-	ID             string
-	Title          string
-	Body           string
-	SectionID      string
+	ID    string
+	Title string
+	// Sections is the canvas as it is stored. A canvas with several sections
+	// used to be flattened into one blob of joined text and marked read-only,
+	// so a canvas an app created through canvases.create — which has taken
+	// structured sections since it was built — could be read but never edited,
+	// and its structure was invisible.
+	Sections       []canvasSectionView
 	UpdatedAt      string
 	CSRFToken      string
 	CanWrite       bool
 	CanDelete      bool
 	ReadOnlyReason string
 	Notice         string
+}
+
+type canvasSectionView struct {
+	ID       string
+	Type     string
+	Text     string
+	Editable bool
+	Position int
 }
 
 type listData struct {
@@ -962,7 +974,8 @@ const pageStyle = `<style>
 .message:target{background:var(--hover);outline:2px solid var(--focus)}
 .avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}.avatar img{width:100%;height:100%;object-fit:cover}.avatar.avatar-emoji{font-size:10px;text-transform:none;overflow-wrap:anywhere}
 .message-body{min-width:0}
-.message-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
+.message-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.message:has(.message-actions)>.message-body>.message-head{padding-right:min(46%,300px)}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
 .author{font-weight:800}
 a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;margin:0 -4px;border-radius:5px}a.time:hover{background:var(--hover)}
 .time{color:var(--muted);font-size:12px}
@@ -1108,7 +1121,7 @@ const workspaceRefinements = `<style>
 .channel-actions button:hover{background:var(--hover)}
 .timeline{padding-top:12px}
 .message{position:relative;border-radius:6px;padding-top:8px;padding-bottom:8px}
-.message-actions{position:absolute;z-index:3;right:8px;top:-15px;display:flex;min-height:0;gap:2px;padding:3px 5px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);opacity:0;visibility:hidden}
+.message-actions{position:absolute;z-index:3;right:8px;top:4px;display:flex;min-height:0;gap:2px;padding:3px 5px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);opacity:0;visibility:hidden}
 .message:hover .message-actions,.message:focus .message-actions,.message:focus-within .message-actions{opacity:1;visibility:visible}
 .message-actions a,.message-actions button,.message-actions summary{display:inline-flex;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 .message-actions a:hover,.message-actions button:hover,.message-actions summary:hover{background:var(--hover);color:var(--text);text-decoration:none}
@@ -2431,10 +2444,21 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(860px,calc(100% - 32px));margin:28px auto 56px}.canvas{padding:28px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.canvas h2{margin:0 0 8px}.canvas .meta{color:var(--muted);font-size:12px}.canvas-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
-.editor{display:grid;gap:11px;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.editor label{display:grid;gap:6px;font-weight:700}.editor input,.editor textarea{padding:10px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor textarea{min-height:300px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
+.canvas-section{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.canvas-section:first-of-type{border-top:0;padding-top:0}
+.editor{display:grid;gap:11px;margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}.editor label{display:grid;gap:6px;font-weight:700}.editor input,.editor textarea{padding:10px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor textarea{min-height:300px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><h2>{{.Title}}</h2><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p><div class="canvas-body">{{.Body}}</div>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value="{{.SectionID}}"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000">{{.Body}}</textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}{{if .CanDelete}}<form class="delete" method="post" action="/app/canvases/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Delete canvas</button></form>{{end}}</article></main>{{end}}`
+{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><h2>{{.Title}}</h2><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}
+{{range .Sections}}<section class="canvas-section" aria-label="Canvas part {{.Position}}{{if .Type}}, {{.Type}}{{end}}">
+  <div class="canvas-body">{{.Text}}</div>
+  {{if and $.CanWrite .Editable}}<form class="editor" method="post" action="/app/canvases/{{$.ID}}/update">
+    <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}">
+    <label>Title<input name="title" maxlength="255" value="{{$.Title}}" required></label>
+    <label>Section {{.Position}} content<textarea name="body" maxlength="100000">{{.Text}}</textarea></label>
+    <div class="actions"><button type="submit">Save section {{.Position}}</button></div>
+  </form>{{else if $.CanWrite}}<p class="notice" role="note">This section is {{.Type}} content. It is shown as stored; editing it here would flatten it, so this client does not offer that.</p>{{end}}
+</section>{{end}}
+{{if and .CanWrite (not .Sections)}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value=""><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000"></textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}{{if .CanDelete}}<form class="delete" method="post" action="/app/canvases/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Delete canvas</button></form>{{end}}</article></main>{{end}}`
 
 var canvasTemplate = mustPage(canvasMarkup)
 
@@ -7196,6 +7220,30 @@ func pageCSRFToken(r *http.Request) (string, error) {
 	return auth.CSRFToken(session.Value), nil
 }
 
+// canvasSections reads the canvas as the document it is. Only a markdown
+// section is editable here: this client has no editor for the richer section
+// types the API accepts, and offering a plain textarea for one would silently
+// flatten it on save. Those sections render as stored and say they are not
+// editable, which is the difference between "this client cannot edit it" and
+// "this canvas cannot be edited".
+func canvasSections(value domain.Canvas) ([]canvasSectionView, bool) {
+	var document struct {
+		Sections []domain.CanvasSection `json:"sections"`
+	}
+	if json.Unmarshal([]byte(value.DocumentContent), &document) != nil {
+		return nil, false
+	}
+	views := make([]canvasSectionView, 0, len(document.Sections))
+	for index, section := range document.Sections {
+		views = append(views, canvasSectionView{
+			ID: section.ID, Type: section.Type, Text: section.Text,
+			Editable: section.Type == "markdown" || section.Type == "",
+			Position: index + 1,
+		})
+	}
+	return views, true
+}
+
 func canvasEditor(value domain.Canvas) (body, sectionID string, editable bool) {
 	var document struct {
 		Sections []domain.CanvasSection `json:"sections"`
@@ -7279,13 +7327,13 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	}
 	owner := value.OwnerID == principal.UserID
 	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
-	body, sectionID, plainEditable := canvasEditor(value)
+	sections, readable := canvasSections(value)
 	canEdit := canWrite && principal.HasScope(auth.ScopeCanvasesWrite)
 	readOnlyReason := ""
-	if canEdit && !plainEditable {
-		readOnlyReason = "This canvas contains structured content. SameOldChat keeps it read-only here so headings, lists, and embeds are not flattened."
+	if !readable {
+		readOnlyReason = "This canvas could not be read as a document. It is shown as stored so nothing is lost, and editing is disabled until it can be parsed."
 	}
-	h.writeHTML(w, canvasTemplate, canvasData{ID: string(value.ID), Title: value.Title, Body: body, SectionID: sectionID, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && plainEditable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+	h.writeHTML(w, canvasTemplate, canvasData{ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
 }
 
 func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
@@ -7323,14 +7371,35 @@ func (h Handler) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusNotFound, "The canvas was not saved", "It no longer exists or you no longer have access.")
 		return
 	}
-	_, sectionID, editable := canvasEditor(current)
-	if !editable || fields["section_id"] != sectionID {
-		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its document structure changed. Reload it before editing.")
+	sections, readable := canvasSections(current)
+	if !readable {
+		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its document could not be read. Reload it before editing.")
 		return
 	}
+	// The section being edited must still be there, still be the same section,
+	// and still be one this client can edit. A canvas whose structure changed
+	// under the editor is a conflict, not a silent overwrite of whatever now
+	// occupies that position.
+	sectionID := strings.TrimSpace(fields["section_id"])
 	operation := "replace"
 	if sectionID == "" {
+		if len(sections) != 0 {
+			h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its document structure changed. Reload it before editing.")
+			return
+		}
 		operation = "insert_at_end"
+	} else {
+		known := false
+		for _, section := range sections {
+			if section.ID == sectionID && section.Editable {
+				known = true
+				break
+			}
+		}
+		if !known {
+			h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "That section is no longer part of this canvas, or is not one this client can edit. Reload it before editing.")
+			return
+		}
 	}
 	changes, _ := json.Marshal([]map[string]any{
 		{"operation": "replace", "title_content": map[string]string{"title": strings.TrimSpace(fields["title"])}},

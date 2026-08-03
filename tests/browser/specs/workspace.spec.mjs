@@ -1866,8 +1866,10 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await page.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByRole('heading', { name: canvasName })).toBeVisible();
   await page.getByLabel('Title').fill(`${canvasName} revised`);
-  await page.getByLabel('Content').fill('One atomic revision');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  // Each section carries its own editor, so the control names the section it
+  // saves. A canvas created through the UI has exactly one.
+  await page.getByLabel('Section 1 content').fill('One atomic revision');
+  await page.getByRole('button', { name: 'Save section 1' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
   await page.getByRole('link', { name: 'Canvases' }).click();
   await expect(page.getByRole('heading', { name: `${canvasName} revised` })).toBeVisible();
@@ -2287,13 +2289,12 @@ test('[NAV-02 A11Y-01] the shortcuts dialog documents the keyboard layer and is 
   await help.getByRole('button', { name: 'Close keyboard shortcuts' }).click();
   await expect(help).toBeHidden();
 
-  // Scoped to the dialog. The timeline around it carries a WCAG 2.2
-  // target-size failure recorded in specs/product-gap-audit.md, and this change
-  // tried the obvious fix — moving the toolbar into its own message's top
-  // padding — which destabilised the message chrome enough to break three
-  // unrelated journeys. It is a layout decision about Slack's overlapping-
-  // toolbar idiom, and it is not this journey's to make.
-  await expectNoSeriousAccessibilityViolations(page, '#keyboard-help');
+  // Unscoped. The message action toolbar used to be permanently visible while
+  // absolutely positioned over the message above it, so axe reported its links
+  // as partially obscured under WCAG 2.2 target-size. It now appears on hover
+  // or focus, which is what Slack does and what the overlap was always
+  // predicated on.
+  await expectNoSeriousAccessibilityViolations(page);
 
   // And the chord itself opens it.
   await page.keyboard.press(`${primary}+Slash`);
