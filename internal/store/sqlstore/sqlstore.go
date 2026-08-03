@@ -607,6 +607,15 @@ func insertOutboxForConversation(ctx context.Context, tx *sql.Tx, event events.E
 type Store struct {
 	db                     *sql.DB
 	migrationLockStatement string
+	// retryableMigrationError reports whether a failed migration should be
+	// tried again. It is supplied by the driver because this package must not
+	// import one: recognising SQLSTATE 40P01 means knowing pgconn's error type,
+	// and that knowledge belongs with the driver that produces it.
+	retryableMigrationError func(error) bool
+	// migrateAttempt is the single-pass migration, replaceable so the retry
+	// itself can be tested. A deadlock cannot be provoked on demand from a
+	// test, and a retry nothing exercises is a retry nobody knows works.
+	migrateAttempt func(context.Context) error
 	// sqliteDialect records whether the underlying engine is SQLite-compatible, so
 	// SQLite-only statements are attempted only where they mean something.
 	sqliteDialect bool
@@ -814,15 +823,18 @@ func FromDqliteDB(ctx context.Context, db *sql.DB) (*Store, error) {
 // FromPostgresDB initializes the repository against a PostgreSQL database
 // opened by the PostgreSQL adapter. The adapter owns PostgreSQL-specific
 // connection settings and SQL translation.
-func FromPostgresDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, false, nil, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext('sameoldchat-schema-migration'))`)
+func FromPostgresDB(ctx context.Context, db *sql.DB, retryable ...func(error) bool) (*Store, error) {
+	return fromDB(ctx, db, false, nil, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext('sameoldchat-schema-migration'))`, retryable...)
 }
 
-func fromDB(ctx context.Context, db *sql.DB, sqliteDialect bool, pragmas []string, migrationLockStatement string) (*Store, error) {
+func fromDB(ctx context.Context, db *sql.DB, sqliteDialect bool, pragmas []string, migrationLockStatement string, retryable ...func(error) bool) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("SQL store requires a database handle")
 	}
 	s := &Store{db: db, migrationLockStatement: migrationLockStatement, sqliteDialect: sqliteDialect, now: systemClock}
+	if len(retryable) == 1 {
+		s.retryableMigrationError = retryable[0]
+	}
 	if pragmas != nil {
 		if err := s.configure(ctx, pragmas...); err != nil {
 			return nil, err
@@ -1311,7 +1323,53 @@ func (s *Store) SeedConversationMember(ctx context.Context, conversation domain.
 // migration transaction takes a real write lock on every SQLite-family engine.
 const sqliteMigrationLockStatement = `UPDATE schema_migration_lock SET acquired = acquired + 1 WHERE id = 1`
 
+// Migrate brings the schema to the current version, retrying the whole
+// transaction when the database aborts it to break a deadlock.
+//
+// A deadlock here is expected rather than exceptional, and it is not the fence
+// failing. Migration is fenced by an advisory lock, but the column-wide
+// backfills are released from that fence on purpose so a replica can start
+// serving before they finish — see the note at the end of migrateLocked. That
+// means one replica's backfill UPDATE can be holding row locks on a table
+// while the next replica's CREATE INDEX wants the table, and PostgreSQL breaks
+// the cycle by aborting one of them. It aborted the migration, `Open` returned
+// the error, and the replica failed to start. Several replicas rolling out
+// together is exactly when that happens.
+//
+// Retrying is the documented response to SQLSTATE 40P01 and 40001: the
+// transaction is atomic, so nothing partial survives the abort, and the next
+// attempt runs against whatever the winner committed.
 func (s *Store) Migrate(ctx context.Context) error {
+	attempt_ := s.migrateAttempt
+	if attempt_ == nil {
+		attempt_ = s.migrateOnce
+	}
+	var err error
+	for attempt := 0; attempt < migrationAttempts; attempt++ {
+		if err = attempt_(ctx); err == nil {
+			return nil
+		}
+		if s.retryableMigrationError == nil || !s.retryableMigrationError(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * migrationRetryDelay):
+		}
+	}
+	return fmt.Errorf("migrate schema after %d attempts: %w", migrationAttempts, err)
+}
+
+// migrationAttempts and migrationRetryDelay bound the retry. A deadlock is
+// resolved the moment one side is aborted, so the wait is short and the count
+// small: this is a lost race, not an unavailable database.
+const (
+	migrationAttempts   = 5
+	migrationRetryDelay = 150 * time.Millisecond
+)
+
+func (s *Store) migrateOnce(ctx context.Context) error {
 	connection, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire migration connection: %w", err)
