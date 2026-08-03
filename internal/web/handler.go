@@ -974,8 +974,7 @@ const pageStyle = `<style>
 .message:target{background:var(--hover);outline:2px solid var(--focus)}
 .avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}.avatar img{width:100%;height:100%;object-fit:cover}.avatar.avatar-emoji{font-size:10px;text-transform:none;overflow-wrap:anywhere}
 .message-body{min-width:0}
-.message-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.message:has(.message-actions)>.message-body>.message-head{padding-right:min(46%,300px)}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
+.message-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
 .author{font-weight:800}
 a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;margin:0 -4px;border-radius:5px}a.time:hover{background:var(--hover)}
 .time{color:var(--muted);font-size:12px}
@@ -1023,7 +1022,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .chip[aria-pressed=true]{border-color:var(--action);font-weight:800}
 .chip-count{font-variant-numeric:tabular-nums;font-weight:700}
 .message-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.message-actions a,.message-actions button{display:inline-flex;align-items:center;min-height:24px;color:var(--muted);background:transparent;border:0;padding:2px 4px;margin:0 -4px;border-radius:5px;text-decoration:none;font-size:12px}
+.message-actions a,.message-actions button{display:inline-flex;flex:0 0 auto;align-items:center;min-height:24px;color:var(--muted);background:transparent;border:0;padding:2px 4px;margin:0 -4px;border-radius:5px;text-decoration:none;font-size:12px}
 .message-actions a:hover,.message-actions button:hover{color:var(--action);text-decoration:underline}
 .inline-form{display:inline-flex;gap:6px;align-items:center}
 .inline-form input[type=text]{width:130px;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:3px 6px}
@@ -1120,10 +1119,9 @@ const workspaceRefinements = `<style>
 .huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
 .channel-actions button:hover{background:var(--hover)}
 .timeline{padding-top:12px}
-.message{position:relative;border-radius:6px;padding-top:8px;padding-bottom:8px}
-.message-actions{position:absolute;z-index:3;right:8px;top:4px;display:flex;min-height:0;gap:2px;padding:3px 5px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);opacity:0;visibility:hidden}
-.message:hover .message-actions,.message:focus .message-actions,.message:focus-within .message-actions{opacity:1;visibility:visible}
-.message-actions a,.message-actions button,.message-actions summary{display:inline-flex;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
+.message{border-radius:6px;padding-top:8px;padding-bottom:8px}
+.message-actions{position:relative;display:flex;flex-wrap:wrap;justify-content:flex-end;min-height:0;gap:2px;margin-top:6px;padding:3px 5px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong)}
+.message:hover .message-actions a,.message-actions button,.message-actions summary{display:inline-flex;flex:0 0 auto;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 .message-actions a:hover,.message-actions button:hover,.message-actions summary:hover{background:var(--hover);color:var(--text);text-decoration:none}
 .message-actions details{display:inline-block;position:relative}
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}

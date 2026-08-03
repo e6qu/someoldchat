@@ -1151,6 +1151,22 @@ test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer
   await threadComposer.fill(replyText);
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(thread.locator('.message-text').last()).toHaveText(replyText);
+
+  // A11Y-01, measured rather than inferred. The action toolbar used to be an
+  // absolutely positioned overlay whose children could shrink, so in a narrow
+  // container — the thread pane is the narrowest — a control could render nine
+  // pixels wide and fail WCAG 2.2 target-size. That only happened where the
+  // text was wide enough to force the squeeze, which meant it reproduced on
+  // CI's Linux font metrics and not on a developer's machine. Measuring the
+  // rendered boxes catches it wherever it happens instead of wherever axe
+  // happens to be looking.
+  const undersized = await page.evaluate(() => Array.from(
+    document.querySelectorAll('.message-actions a, .message-actions button, .message-actions summary'),
+  ).map((node) => {
+    const box = node.getBoundingClientRect();
+    return { label: node.textContent.trim().slice(0, 24), width: box.width, height: box.height };
+  }).filter((size) => size.width < 24 || size.height < 24));
+  expect(undersized, 'every message action must meet the 24px minimum target size').toEqual([]);
 });
 
 // The composer advertised "Enter to send · Shift+Enter for a new line" and no
