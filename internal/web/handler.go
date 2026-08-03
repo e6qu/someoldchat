@@ -1072,6 +1072,12 @@ const workspaceRefinements = `<style>
 .keyboard-help-body dl>div[hidden],.keyboard-help-body section[hidden]{display:none}.keyboard-help-body dl>div:nth-child(odd){background:var(--hover)}.keyboard-help-body dt{margin:0;min-width:0}.keyboard-help-body dt small{display:block;color:var(--muted);font-size:.78rem;font-weight:400}.keyboard-help-body dd{margin:0;display:flex;gap:6px;white-space:nowrap}
 .keyboard-help-body kbd{border:1px solid var(--field-line);border-bottom-width:2px;border-radius:5px;background:var(--panel);padding:2px 6px;font:600 12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
 .keyboard-help-empty{padding:26px;text-align:center;color:var(--muted)}
+.call-card{display:grid;gap:6px;margin:4px 0;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+.call-title{margin:0;font-weight:800}
+.call-state{margin:0;color:var(--muted);font-size:12px}
+.call-participants{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none;color:var(--muted);font-size:12px}
+.call-join{justify-self:start;display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border-radius:6px;background:var(--action);color:var(--on-strong);font-weight:800;text-decoration:none}
+.call-unavailable{margin:0;color:var(--muted)}
 .search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
 .top-profile{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:7px;background:#ffffff35;font-weight:800;text-transform:uppercase}
 .workspace{grid-template-columns:260px minmax(0,1fr)}
@@ -1286,6 +1292,14 @@ const messagesPartial = `{{define "messages"}}
               {{else}}<label><span class="sr-only">{{$action.Text}}</span><select class="block-action block-action-select" name="value"{{if $action.Multiple}} multiple{{end}} required>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}{{end}}
             {{if $action.Dispatch}}</form>{{else}}</div>{{end}}
           {{end}}</div>{{end}}
+          {{if $block.Call}}<div class="call-card">
+            {{if $block.Call.Unavailable}}<p class="call-unavailable">This call is no longer available.</p>
+            {{else}}<p class="call-title">{{if $block.Call.Title}}{{$block.Call.Title}}{{else}}Call{{end}}</p>
+            <p class="call-state">{{if $block.Call.Active}}In progress{{else}}Ended{{end}}{{if $block.Call.Participants}} · {{len $block.Call.Participants}} in the call{{end}}</p>
+            {{if $block.Call.Participants}}<ul class="call-participants">{{range $block.Call.Participants}}<li>{{.}}</li>{{end}}</ul>{{end}}
+            {{if and $block.Call.Active $block.Call.JoinURL}}<a class="call-join" href="{{$block.Call.JoinURL}}" rel="noreferrer noopener">Join call</a>
+            {{else if $block.Call.JoinURL}}<p class="call-state">This call has ended. The link it was created with is no longer offered.</p>{{end}}{{end}}
+          </div>{{end}}
           {{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
           {{if $block.LinkURL}}<a href="{{$block.LinkURL}}" rel="noreferrer noopener">{{$block.LinkLabel}}</a>{{end}}
         </div>{{end}}
@@ -4972,6 +4986,58 @@ func markDaysAndFirstUnread(views []messageView, messages []domain.Message, last
 // newMessageList builds the single type the message partial renders. It also
 // reports a user-facing notice when an adjacent read (reactions, pins) is
 // degraded, instead of failing the whole conversation view.
+// resolveCallBlocks fills in Slack's call blocks from the calls the workspace
+// actually knows about. A message carries only `{"type":"call","call_id":…}`,
+// so before this the block rendered as nothing at all: an app could register a
+// call through calls.add, post a message referring to it, and the member would
+// see an empty message.
+//
+// Each distinct identifier is read once per page. There is normally none, and a
+// page carrying more than a handful is not a shape Slack produces; the bound
+// keeps a crafted message from turning one render into an unbounded number of
+// reads.
+func (h Handler) resolveCallBlocks(ctx context.Context, principal auth.Principal, messages []messageView) {
+	const maximumCallsPerPage = 20
+	resolved := map[string]*callBlockView{}
+	for index := range messages {
+		for block := range messages[index].Blocks {
+			id := messages[index].Blocks[block].CallID
+			if id == "" {
+				continue
+			}
+			view, seen := resolved[id]
+			if !seen {
+				if len(resolved) >= maximumCallsPerPage {
+					continue
+				}
+				view = &callBlockView{Unavailable: true}
+				if call, err := h.Messages.GetCall(ctx, principal.WorkspaceID, principal.UserID, domain.CallID(id)); err == nil {
+					view = &callBlockView{
+						Title:        call.Title,
+						JoinURL:      call.JoinURL,
+						Participants: h.callParticipantNames(ctx, principal, call.Participants),
+						Active:       call.Active(),
+					}
+				}
+				resolved[id] = view
+			}
+			messages[index].Blocks[block].Call = view
+		}
+	}
+}
+
+func (h Handler) callParticipantNames(ctx context.Context, principal auth.Principal, participants []domain.UserID) []string {
+	if len(participants) == 0 {
+		return nil
+	}
+	names := h.newUserNames(ctx, principal)
+	values := make([]string, 0, len(participants))
+	for _, participant := range participants {
+		values = append(values, names.name(participant))
+	}
+	return values
+}
+
 func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, request messageListRequest) (messageList, string) {
 	conversation := request.Conversation
 	csrfToken := request.CSRFToken
@@ -5196,6 +5262,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	// that were actually rendered: the loop above drops soft-deleted rows, so
 	// the two slices only line up once both are built.
 	markDaysAndFirstUnread(list.Messages, rendered, request.LastRead)
+	h.resolveCallBlocks(ctx, principal, list.Messages)
 	return list, notice
 }
 
