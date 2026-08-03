@@ -100,6 +100,16 @@ claim more.
 
 ## Evidence
 
+- REMIND-04 and REMIND-API-01 are not browser journeys, for two different
+  reasons. Reminder delivery is performed by `cmd/worker`, which the browser
+  harness does not run and could not usefully run: its servers use `-store
+  memory`, so a separate worker process would share no state with them.
+  Qualifying delivery in a browser needs the harness moved to a durable store
+  with a worker beside each server, which is a change to the harness, not a
+  test. REMIND-API-01 is a deprecated app-facing contract whose own text
+  restricts it to SDK evidence; a browser citation would be evidence of the
+  wrong kind.
+
 Implemented evidence:
 
 - `make external-contract-qualification` fetches Slack's current official

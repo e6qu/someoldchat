@@ -4099,6 +4099,15 @@ func (h Handler) archivePermalink(w http.ResponseWriter, r *http.Request) {
 		// A message that no longer exists, or one in a conversation this
 		// member may not read, are the same answer: the link resolves to
 		// nothing they can see, and it must not disclose which.
+		//
+		// The wording is this handler's own rather than writeStoreError's,
+		// which says "That conversation is not available". For a permalink that
+		// is usually false — the conversation is generally fine and the message
+		// is not — and it sends a reader looking for the wrong problem.
+		if errors.Is(err, store.ErrNotFound) {
+			h.writePageError(w, http.StatusNotFound, "That message is not available", "It may have been deleted, or it may be in a conversation you cannot read. Pick a conversation from the sidebar to keep reading.")
+			return
+		}
 		h.writeStoreError(w, err, "That message is no longer available.")
 		return
 	}

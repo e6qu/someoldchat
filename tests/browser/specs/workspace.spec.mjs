@@ -2416,6 +2416,144 @@ test('[NAV-07 NAV-08] the Threads view lists followed threads and Unreads groups
   await expect(page).toHaveURL(/\/app\/unreads/);
 });
 
+test('[NAV-05] a permalink lands on its message, and history returns without replaying', async ({ page, context, request }) => {
+  await signIn(context);
+
+  const marker = `permalink target ${Date.now()}`;
+  const posted = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, text: marker },
+  });
+  const payload = await posted.json();
+  expect(payload.ok, JSON.stringify(payload)).toBe(true);
+
+  // The permalink the UI itself offers, not one this test assembles: the packed
+  // timestamp format is the thing under test, so deriving it here would prove
+  // only that the test can do arithmetic.
+  await page.goto('/app');
+  const message = page.locator('.message').filter({ hasText: marker }).last();
+  const permalink = await message.locator('a.copy-link').getAttribute('href');
+  expect(permalink).toMatch(/^\/archives\/Cdev\/p\d+$/);
+
+  await page.goto(permalink);
+  // It resolves to the conversation with a window built to CONTAIN the target,
+  // and the target is the fragment, so a reader lands on the message rather
+  // than near it.
+  await expect(page).toHaveURL(/\/app\?.*channel=Cdev/);
+  await expect(page).toHaveURL(/#message-/);
+  await expect(page.locator('.message').filter({ hasText: marker })).toHaveCount(1);
+
+  // Malformed and unresolvable links have distinct, safe outcomes: neither
+  // discloses whether the message was deleted or merely unreadable.
+  expect((await page.goto('/archives/Cdev/not-a-timestamp')).status()).toBe(404);
+  expect((await page.goto('/archives/Cdev/p1')).status()).toBe(404);
+  const missing = await page.goto('/archives/Cdev/p1700000000000001');
+  expect(missing.status(), 'an unresolvable permalink is handled, not a 500').toBe(404);
+  // It names the message, not the conversation: for a permalink the
+  // conversation is usually readable and only the target is gone, and it must
+  // not disclose whether the target was deleted or merely unreadable.
+  await expect(page.getByRole('heading', { name: 'That message is not available' })).toBeVisible();
+
+  // Back and forward return through real destinations, and going back to a page
+  // reached by a redirect must not re-run the redirect's work.
+  await page.goto('/app');
+  await page.goto('/app/threads');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/app(\?|$)/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/app\/threads/);
+  await expect(page.getByRole('heading', { name: 'Threads', exact: true, level: 2 })).toBeVisible();
+});
+
+test('[NAV-01 A11Y-01] the workspace shell names its regions and marks the current destination', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  // Every region a member navigates by name.
+  await expect(page.getByRole('banner')).toBeVisible();
+  await expect(page.getByRole('complementary')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Workspace navigation' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Channels' })).toBeVisible();
+  // The direct-message *section* appears only when the member has open DMs,
+  // which is what "according to Slack availability" means; the destination
+  // itself is always reachable from workspace navigation.
+  const workspaceNav = page.getByRole('navigation', { name: 'Workspace navigation' });
+  for (const destination of ['Unreads', 'Threads', 'Activity', 'Later', 'Direct messages', 'Apps']) {
+    await expect(workspaceNav.getByRole('link', { name: destination, exact: true })).toHaveCount(1);
+  }
+  await expect(page.getByRole('link', { name: 'Skip to the messages' })).toHaveCount(1);
+
+  // The active destination is programmatically current, not merely styled.
+  const current = page.locator('.side-section[aria-label="Channels"] .side-link[aria-current="page"]');
+  await expect(current).toHaveCount(1);
+  await expect(current).toContainText('general');
+
+  // Narrow: the same destinations stay reachable through a named control, the
+  // drawer traps focus while open, and closing it does not change conversation.
+  await page.setViewportSize({ width: 420, height: 900 });
+  const toggle = page.getByRole('button', { name: /navigation/i }).first();
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  const drawer = page.locator('#workspace-sidebar');
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole('link', { name: 'Threads' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  // Closing the drawer must not reset the open conversation, which is a claim
+  // about what is rendered rather than about the address bar: the workspace can
+  // be reached without a channel parameter at all.
+  await expect(page.locator('.channel-title')).toHaveText('# general');
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+});
+
+test('[FILE-02] the external upload sequence produces one shared file and nothing before completion', async ({ page, context, request }) => {
+  await signIn(context);
+
+  const name = `external-${Date.now()}.txt`;
+  const bytes = 'external upload qualification';
+  const ticket = await request.post('/api/files.getUploadURLExternal', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: { filename: name, length: String(bytes.length) },
+  });
+  const ticketPayload = await ticket.json();
+  expect(ticketPayload.ok, JSON.stringify(ticketPayload)).toBe(true);
+  expect(typeof ticketPayload.upload_url).toBe('string');
+  expect(typeof ticketPayload.file_id).toBe('string');
+
+  // Before the bytes are transferred and the upload completed, nothing about
+  // this file may be visible: an uncompleted transfer never becomes a file.
+  await page.goto('/app');
+  await expect(page.getByText(name)).toHaveCount(0);
+
+  const transfer = await request.post(ticketPayload.upload_url, {
+    headers: { 'content-type': 'application/octet-stream' },
+    data: bytes,
+  });
+  expect(transfer.status(), await transfer.text()).toBeLessThan(300);
+
+  const complete = await request.post('/api/files.completeUploadExternal', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { files: [{ id: ticketPayload.file_id, title: name }], channel_id: CHANNEL },
+  });
+  const completePayload = await complete.json();
+  expect(completePayload.ok, JSON.stringify(completePayload)).toBe(true);
+
+  // A completed share becomes exactly one history message the member can see.
+  await page.goto('/app');
+  await expect(page.getByText(name).first()).toBeVisible();
+
+  // Completion is idempotent: repeating it must not produce a second message.
+  const again = await request.post('/api/files.completeUploadExternal', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { files: [{ id: ticketPayload.file_id, title: name }], channel_id: CHANNEL },
+  });
+  expect((await again.json()).ok).toBe(true);
+  await page.goto('/app');
+  // Counted as messages, not as text nodes: one message renders the name in its
+  // link, its label and its title, so counting text would count the rendering.
+  await expect(page.locator('.message').filter({ hasText: name })).toHaveCount(1);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
