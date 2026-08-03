@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/app/localchat"
+	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -121,6 +122,67 @@ func TestResolveRefusesAStaticSessionAlongsideAnIdentityProvider(t *testing.T) {
 	_, err := settings.resolve()
 	if err == nil || !strings.Contains(err.Error(), "-session-token") {
 		t.Fatalf("error = %v, want a static-session refusal", err)
+	}
+}
+
+// -session-admin escalates a credential every holder shares, so its refusals
+// matter more than the escalation itself. Each of these three is a separate
+// way the flag could otherwise reach a deployment that has real identities.
+func TestResolveRefusesAnAdministrativeSessionWithoutASession(t *testing.T) {
+	settings := localConfig()
+	settings.sessionAdmin = true
+	_, err := settings.resolve()
+	if err == nil || !strings.Contains(err.Error(), "-session-admin") {
+		t.Fatalf("error = %v, want -session-admin refused without -session-token", err)
+	}
+}
+
+func TestResolveRefusesAnAdministrativeSessionAlongsideAnIdentityProvider(t *testing.T) {
+	settings := localConfig()
+	settings.sessionToken = "dev-session"
+	settings.sessionAdmin = true
+	settings.oidcIssuer = "https://id.example.com"
+	settings.oidcClientID = "client"
+	settings.oidcClientSecret = "secret"
+	settings.authWorkspace = "Tdev"
+	settings.authLookupUser = "Udev"
+	settings.authPublicURL = "https://chat.example.com"
+	settings.authStateKeyHex = strings.Repeat("ab", 32)
+	_, err := settings.resolve()
+	if err == nil || !strings.Contains(err.Error(), "-session") {
+		t.Fatalf("error = %v, want the escalated session refused alongside a provider", err)
+	}
+}
+
+// The default is the security property: without the flag the shared session is
+// a plain member, and the API token is never escalated even with it.
+func TestAdministrativeSessionEscalatesTheSessionAndNotTheAPIToken(t *testing.T) {
+	plain := localConfig()
+	plain.sessionToken = "dev-session"
+	resolvedPlain, err := plain.resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := auth.ScopesForWorkspaceRole(domain.WorkspaceRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolvedPlain.sessionScopes) != len(member.Values()) {
+		t.Fatalf("session scopes = %d, want the member set by default", len(resolvedPlain.sessionScopes))
+	}
+
+	escalated := localConfig()
+	escalated.sessionToken = "dev-session"
+	escalated.sessionAdmin = true
+	resolvedAdmin, err := escalated.resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolvedAdmin.sessionScopes) <= len(resolvedPlain.sessionScopes) {
+		t.Fatalf("escalated session scopes = %d, want more than the member set (%d)", len(resolvedAdmin.sessionScopes), len(resolvedPlain.sessionScopes))
+	}
+	if len(resolvedAdmin.scopes) != len(resolvedPlain.scopes) {
+		t.Fatalf("API token scopes changed with -session-admin: %d vs %d — only the browser session may be escalated", len(resolvedAdmin.scopes), len(resolvedPlain.scopes))
 	}
 }
 

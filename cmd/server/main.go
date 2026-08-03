@@ -109,6 +109,14 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// identity provider is configured, because a shared bearer session bypasses
 	// every provider check, every revocation, and every workspace role.
 	sessionToken := flags.String("session-token", os.Getenv("SAMEOLDCHAT_SESSION_TOKEN"), "static development browser session token; rejected when an identity provider is configured")
+	// -session-admin exists because the administration journeys cannot be
+	// qualified without an administrator, and the static development session is
+	// a plain member by design: a token every holder shares must not carry
+	// control-plane authority by default. Making it opt-in, refusing it
+	// wherever a real identity exists, and announcing it at startup keeps that
+	// default intact while giving a development deployment a way to reach its
+	// own administration.
+	sessionAdmin := flags.Bool("session-admin", os.Getenv("SAMEOLDCHAT_SESSION_ADMIN") == "1", "grant the static development browser session workspace-administrator scopes; requires -session-token and is rejected when an identity provider is configured")
 	metricsListen := flags.String("metrics-listen", os.Getenv("SAMEOLDCHAT_METRICS_LISTEN"), "operator-only listen address publishing /metrics; empty serves no metrics endpoint")
 	authWorkspace := flags.String("auth-workspace", os.Getenv("SAMEOLDCHAT_AUTH_WORKSPACE"), "workspace for external authorization (required when enabled)")
 	authLookupUser := flags.String("auth-lookup-user", os.Getenv("SAMEOLDCHAT_AUTH_LOOKUP_USER"), "existing user used to authorize external identity lookup (required when enabled)")
@@ -152,7 +160,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		dqliteDirectory: *dqliteDirectory, dqliteAddress: *dqliteAddress, dqliteCluster: *dqliteCluster, dqliteDatabase: *dqliteDatabase,
 		blobDirectory: *blobDirectory, blobS3Bucket: *blobS3Bucket, blobS3Prefix: *blobS3Prefix,
 		chatAddress: *chatAddress, chatCA: *chatCA, chatServerName: *chatServerName, chatClientCert: *chatClientCert, chatClientKey: *chatClientKey,
-		apiToken: *apiToken, sessionToken: *sessionToken,
+		apiToken: *apiToken, sessionToken: *sessionToken, sessionAdmin: *sessionAdmin,
 		authWorkspace: *authWorkspace, authLookupUser: *authLookupUser, authPublicURL: *authPublicURL, authStateKeyHex: *authStateKeyHex, appCredentialKeyHex: *appCredentialKeyHex,
 		bootstrapAdminEmail: *bootstrapAdminEmail, appToken: *appToken, appID: *appID, socketHost: *socketHost,
 		googleClientID: *googleClientID, googleClientSecret: *googleClientSecret,
@@ -572,6 +580,7 @@ type startupConfig struct {
 	chatClientKey       string
 	apiToken            string
 	sessionToken        string
+	sessionAdmin        bool
 	authWorkspace       string
 	authLookupUser      string
 	authPublicURL       string
@@ -602,6 +611,8 @@ type resolvedConfig struct {
 	lookupUser            string
 	apiToken              string
 	sessionToken          string
+	sessionAdmin          bool
+	sessionScopes         []string
 	authStateKey          []byte
 	appCredentialKey      []byte
 	scopes                []string
@@ -689,6 +700,19 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 			return resolvedConfig{}, fmt.Errorf("-session-token is a static browser session shared by every holder and cannot be combined with the configured identity provider (%s); remove -session-token", strings.Join(providers, ", "))
 		}
 	}
+	// -session-admin fails closed twice over: it is meaningless without the
+	// session it escalates, and it is refused wherever a real identity exists.
+	// The second check is not redundant with the one above — it must still hold
+	// if -session-token ever becomes permissible alongside a provider.
+	if c.sessionAdmin {
+		if strings.TrimSpace(c.sessionToken) == "" {
+			return resolvedConfig{}, errors.New("-session-admin escalates the static development browser session and requires -session-token")
+		}
+		if providers := c.configuredProviders(); len(providers) != 0 {
+			return resolvedConfig{}, fmt.Errorf("-session-admin cannot be combined with the configured identity provider (%s): a workspace with real identities administers itself through them, not through a token every holder shares", strings.Join(providers, ", "))
+		}
+	}
+	resolved.sessionAdmin = c.sessionAdmin
 	if (c.appToken != "") != (c.appID != "") {
 		return resolvedConfig{}, errors.New("Socket Mode requires both -app-token and -app-id")
 	}
@@ -766,11 +790,21 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 			return resolvedConfig{}, errors.New("-oidc-issuer, -oidc-client-id, and -oidc-client-secret must be supplied together")
 		}
 	}
-	scopes, err := developmentScopes()
+	scopes, err := developmentScopes(false)
 	if err != nil {
 		return resolvedConfig{}, err
 	}
 	resolved.scopes = scopes
+	// Only the browser session is escalated, never the API token. They are
+	// seeded together and used to share one scope set, but they are not the
+	// same risk: the token is what an integration holds, and nothing about
+	// qualifying an administration page needs it to gain control-plane
+	// authority as a side effect.
+	sessionScopes, err := developmentScopes(c.sessionAdmin)
+	if err != nil {
+		return resolvedConfig{}, err
+	}
+	resolved.sessionScopes = sessionScopes
 	return resolved, nil
 }
 
@@ -837,8 +871,15 @@ func (c startupConfig) localOnlySettings() []string {
 // control plane. The member role is the authority a signed-in user has by
 // default, and auth.ScopesForWorkspaceRole is the only place that mapping
 // lives, so the two cannot drift.
-func developmentScopes() ([]string, error) {
-	scopes, err := auth.ScopesForWorkspaceRole(domain.WorkspaceRoleMember)
+// developmentScopes is member-level unless a deployment has explicitly asked for
+// an administrative development session. The default is the security property:
+// a token every holder shares must not carry control-plane authority.
+func developmentScopes(administrator bool) ([]string, error) {
+	role := domain.WorkspaceRoleMember
+	if administrator {
+		role = domain.WorkspaceRoleAdmin
+	}
+	scopes, err := auth.ScopesForWorkspaceRole(role)
 	if err != nil {
 		return nil, err
 	}
@@ -873,7 +914,12 @@ func seedDevelopmentCredentials(ctx context.Context, runtime localchat.Runtime, 
 	if strings.TrimSpace(resolved.sessionToken) == "" {
 		return nil
 	}
-	if err := runtime.SessionSeeder.SeedSession(ctx, resolved.sessionToken, domain.SessionRecord{WorkspaceID: domain.WorkspaceID(resolved.workspace), UserID: domain.UserID(resolved.lookupUser), Scopes: resolved.scopes, ExpiresAt: now.Add(devSessionLifetime)}); err != nil {
+	if resolved.sessionAdmin {
+		logger.Warn("development browser session has workspace-administrator scopes",
+			"reason", "-session-admin", "session_lifetime", devSessionLifetime.String(),
+			"note", "every holder of the session token administers this workspace")
+	}
+	if err := runtime.SessionSeeder.SeedSession(ctx, resolved.sessionToken, domain.SessionRecord{WorkspaceID: domain.WorkspaceID(resolved.workspace), UserID: domain.UserID(resolved.lookupUser), Scopes: resolved.sessionScopes, ExpiresAt: now.Add(devSessionLifetime)}); err != nil {
 		return fmt.Errorf("seed browser session: %w", err)
 	}
 	return nil
