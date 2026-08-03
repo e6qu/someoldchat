@@ -6880,7 +6880,7 @@ func (h Handler) searchFilterOptions(ctx context.Context, principal auth.Princip
 			name := displayName(user)
 			members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
 		}
-		if !page.HasMore {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == userRequest.Cursor {
 			break
 		}
 		userRequest.Cursor = page.NextCursor
@@ -6907,7 +6907,7 @@ func (h Handler) visibleChannelOptions(ctx context.Context, principal auth.Princ
 			}
 			conversations = append(conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation)})
 		}
-		if !page.HasMore {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == conversationRequest.Cursor {
 			break
 		}
 		conversationRequest.Cursor = page.NextCursor
@@ -8806,7 +8806,7 @@ func (h Handler) joinedChannelByName(ctx context.Context, principal auth.Princip
 				return conversation, nil
 			}
 		}
-		if !page.HasMore || page.NextCursor == "" {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
 			return domain.Conversation{}, store.ErrNotFound
 		}
 		request.Cursor = page.NextCursor

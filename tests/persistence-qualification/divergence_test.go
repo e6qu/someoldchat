@@ -298,6 +298,48 @@ func followedThreadsAgreeAcrossProfiles(t *testing.T, open opener) {
 	}
 }
 
+// The Threads view reads its roots in chunks, because how many threads a member
+// follows in one conversation is their choice and every SQL engine caps bound
+// parameters per statement. This walks more roots than one chunk holds and
+// asserts the page is still whole: chunking is the kind of change that loses or
+// repeats rows at the seam between batches, and both profiles have to agree it
+// does neither.
+func followedThreadsSurviveMoreRootsThanOneChunk(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	const roots = 250
+	base := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	for index := 0; index < roots; index++ {
+		at := base.Add(time.Duration(index) * time.Second)
+		f.message(t, ctx, fmt.Sprintf("M-bulk-%03d", index), at)
+		if err := f.repository.SetThreadFollowed(ctx, f.workspaceID, f.userID, f.channelID, domain.NewMessageTimestamp(at), true,
+			f.event(fmt.Sprintf("bulk-follow-%03d", index), "thread.followed", string(f.channelID))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := f.repository.ListFollowedThreads(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 200})
+	if err != nil {
+		t.Fatalf("listing %d followed threads failed: %v", roots, err)
+	}
+	if len(page.Threads) != 200 || !page.HasMore {
+		t.Fatalf("threads = %d hasMore = %v, want a full page of 200 and more to come", len(page.Threads), page.HasMore)
+	}
+	// Every row is distinct and carries the root it names: a chunk boundary
+	// that repeated or dropped a batch would still fill the page.
+	seen := make(map[domain.MessageTimestamp]struct{}, len(page.Threads))
+	for _, thread := range page.Threads {
+		if _, repeated := seen[thread.Root]; repeated {
+			t.Fatalf("root %q appeared twice across chunk boundaries", thread.Root)
+		}
+		seen[thread.Root] = struct{}{}
+		if thread.RootText == "" {
+			t.Fatalf("thread %q came back with no root text, so its chunk did not resolve", thread.Root)
+		}
+	}
+}
+
 func createMessageValidatesAndIsReferential(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

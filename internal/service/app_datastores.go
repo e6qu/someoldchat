@@ -181,7 +181,9 @@ func (m Messages) CountAppDatastoreItems(ctx context.Context, workspaceID domain
 			return 0, err
 		}
 		total += len(page.Items)
-		if !page.HasMore {
+		// A cursor that does not advance ends the count, which would otherwise
+		// grow without bound off a repeated page.
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == query.Page.Cursor {
 			return total, nil
 		}
 		query.Page.Cursor = page.NextCursor

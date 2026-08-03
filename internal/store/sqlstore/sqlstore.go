@@ -4436,6 +4436,21 @@ func decodeUnfurls(raw string) (map[string]string, error) {
 	return value, nil
 }
 
+// closeRows ends an iteration and reports the error the loop may have stopped
+// on. Rows.Close does not surface it — it returns only the error from closing —
+// so a loop that ended early because the query failed is indistinguishable from
+// one that ran out of rows. Six loops in this file closed without ever asking,
+// and each of them turned a database failure into a short answer reported as
+// success: an OAuth rotation that left stale access tokens live, and message
+// activity that silently skipped recipients.
+func closeRows(rows *sql.Rows) error {
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	return rows.Close()
+}
+
 func unixSeconds(value time.Time) int64 {
 	if value.IsZero() {
 		return 0
@@ -8120,7 +8135,7 @@ func (s *Store) exchangeOAuthRefreshTokenOnce(ctx context.Context, clientID, sec
 		}
 		staleAccessHashes = append(staleAccessHashes, hash)
 	}
-	if err := rows.Close(); err != nil {
+	if err := closeRows(rows); err != nil {
 		return domain.OAuthToken{}, err
 	}
 	for _, hash := range staleAccessHashes {
@@ -9795,25 +9810,30 @@ func (s *Store) ListFollowedThreads(ctx context.Context, workspace domain.Worksp
 		if err != nil {
 			return domain.FollowedThreadPage{}, err
 		}
+		// Two reads per conversation, not two per thread. This used to issue
+		// messageAtTimestamp and unreadRepliesAfter for every followed root, so
+		// a member following two hundred threads opened the Threads view with
+		// four hundred queries behind it.
+		roots_, err := s.threadRoots(ctx, conversation, roots)
+		if err != nil {
+			return domain.FollowedThreadPage{}, err
+		}
+		unread, err := s.unreadRepliesByRoot(ctx, conversation, roots, readAt)
+		if err != nil {
+			return domain.FollowedThreadPage{}, err
+		}
 		for _, root := range roots {
-			rootText, rootAuthor, found, err := s.messageAtTimestamp(ctx, conversation, root)
-			if err != nil {
-				return domain.FollowedThreadPage{}, err
-			}
+			rootMessage, found := roots_[root]
 			if !found {
 				// The root was deleted. Slack drops the thread from the view
 				// rather than showing a row that opens onto nothing.
 				continue
 			}
 			summary := summaries[root]
-			unread, err := s.unreadRepliesAfter(ctx, conversation, root, readAt)
-			if err != nil {
-				return domain.FollowedThreadPage{}, err
-			}
 			threads = append(threads, domain.FollowedThread{
 				Conversation: conversation, ConversationName: name, Root: root,
-				RootText: rootText, RootAuthorID: rootAuthor,
-				ReplyCount: summary.ReplyCount, UnreadReplies: unread, LastReplyAt: summary.LastReplyAt,
+				RootText: rootMessage.text, RootAuthorID: rootMessage.author,
+				ReplyCount: summary.ReplyCount, UnreadReplies: unread[root], LastReplyAt: summary.LastReplyAt,
 			})
 		}
 	}
@@ -9851,24 +9871,118 @@ func (s *Store) followedThreadContext(ctx context.Context, workspace domain.Work
 	return name, readAt, nil
 }
 
-func (s *Store) messageAtTimestamp(ctx context.Context, conversation domain.ConversationID, at domain.MessageTimestamp) (string, domain.UserID, bool, error) {
-	instant, err := domain.ParseMessageTimestamp(at)
-	if err != nil {
-		return "", "", false, err
+// sqlParameterChunk bounds how many values one IN clause carries. Every SQL
+// engine caps bound parameters per statement — SQLite at SQLITE_MAX_VARIABLE_NUMBER
+// (999 before 3.32, 32766 after) and PostgreSQL at 65535 — and the number of
+// followed roots in one conversation is chosen by a member, not by this code.
+// The bound is deliberately far below every one of those limits rather than
+// tuned to any of them, because the profile a deployment picked is not
+// something this query should have to know.
+const sqlParameterChunk = 200
+
+func chunkTimestamps(values []domain.MessageTimestamp) [][]domain.MessageTimestamp {
+	chunks := make([][]domain.MessageTimestamp, 0, len(values)/sqlParameterChunk+1)
+	for start := 0; start < len(values); start += sqlParameterChunk {
+		end := start + sqlParameterChunk
+		if end > len(values) {
+			end = len(values)
+		}
+		chunks = append(chunks, values[start:end])
 	}
-	var text string
-	var author domain.UserID
-	err = s.db.QueryRowContext(ctx, `SELECT text, author_id FROM messages WHERE conversation = ? AND created_at = ? AND deleted = 0`, conversation, domain.NewStoredTime(instant)).Scan(&text, &author)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", false, nil
-	}
-	return text, author, err == nil, err
+	return chunks
 }
 
-func (s *Store) unreadRepliesAfter(ctx context.Context, conversation domain.ConversationID, root domain.MessageTimestamp, readAt domain.StoredTime) (int, error) {
-	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE conversation = ? AND thread_timestamp = ? AND deleted = 0 AND created_at > ?`, conversation, string(root), readAt).Scan(&count)
-	return count, err
+type threadRoot struct {
+	text   string
+	author domain.UserID
+}
+
+// threadRoots reads every named root of one conversation in a single query. A
+// root is identified by the instant it was created, so the timestamps are
+// converted to StoredTime here and matched on created_at.
+func (s *Store) threadRoots(ctx context.Context, conversation domain.ConversationID, all []domain.MessageTimestamp) (map[domain.MessageTimestamp]threadRoot, error) {
+	found := make(map[domain.MessageTimestamp]threadRoot, len(all))
+	for _, roots := range chunkTimestamps(all) {
+		if err := s.threadRootChunk(ctx, conversation, roots, found); err != nil {
+			return nil, err
+		}
+	}
+	return found, nil
+}
+
+func (s *Store) threadRootChunk(ctx context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp, found map[domain.MessageTimestamp]threadRoot) error {
+	if len(roots) == 0 {
+		return nil
+	}
+	placeholders := make([]string, 0, len(roots))
+	arguments := make([]any, 0, len(roots)+1)
+	arguments = append(arguments, conversation)
+	byStored := make(map[domain.StoredTime]domain.MessageTimestamp, len(roots))
+	for _, root := range roots {
+		instant, err := domain.ParseMessageTimestamp(root)
+		if err != nil {
+			return err
+		}
+		stored := domain.NewStoredTime(instant)
+		byStored[stored] = root
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, stored)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT created_at, text, author_id FROM messages WHERE conversation = ? AND deleted = 0 AND created_at IN (`+strings.Join(placeholders, ", ")+`)`, arguments...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var created domain.StoredTime
+		var value threadRoot
+		if err := rows.Scan(&created, &value.text, &value.author); err != nil {
+			return err
+		}
+		if root, ok := byStored[created]; ok {
+			found[root] = value
+		}
+	}
+	return rows.Err()
+}
+
+// unreadRepliesByRoot counts, for every named root at once, the replies that
+// fall after the member's read position in the conversation.
+func (s *Store) unreadRepliesByRoot(ctx context.Context, conversation domain.ConversationID, all []domain.MessageTimestamp, readAt domain.StoredTime) (map[domain.MessageTimestamp]int, error) {
+	counts := make(map[domain.MessageTimestamp]int, len(all))
+	for _, roots := range chunkTimestamps(all) {
+		if err := s.unreadReplyChunk(ctx, conversation, roots, readAt, counts); err != nil {
+			return nil, err
+		}
+	}
+	return counts, nil
+}
+
+func (s *Store) unreadReplyChunk(ctx context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp, readAt domain.StoredTime, counts map[domain.MessageTimestamp]int) error {
+	if len(roots) == 0 {
+		return nil
+	}
+	placeholders := make([]string, 0, len(roots))
+	arguments := make([]any, 0, len(roots)+2)
+	arguments = append(arguments, conversation, readAt)
+	for _, root := range roots {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, string(root))
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT thread_timestamp, COUNT(*) FROM messages WHERE conversation = ? AND deleted = 0 AND created_at > ? AND thread_timestamp IN (`+strings.Join(placeholders, ", ")+`) GROUP BY thread_timestamp`, arguments...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var root domain.MessageTimestamp
+		var count int
+		if err := rows.Scan(&root, &count); err != nil {
+			return err
+		}
+		counts[root] = count
+	}
+	return rows.Err()
 }
 
 // TouchUserActivity records that a member was seen. It is deliberately not an
@@ -10204,6 +10318,22 @@ func (s *Store) LatestMessageTimestamps(ctx context.Context, workspace domain.Wo
 	if len(conversations) == 0 {
 		return latest, nil
 	}
+	// Chunked for the same reason threadRoots is: the caller decides how many
+	// conversations to ask about, and one IN clause per call would refuse
+	// outright past SQLite's bound-parameter limit.
+	for start := 0; start < len(conversations); start += sqlParameterChunk {
+		end := start + sqlParameterChunk
+		if end > len(conversations) {
+			end = len(conversations)
+		}
+		if err := s.latestMessageChunk(ctx, workspace, conversations[start:end], latest); err != nil {
+			return nil, err
+		}
+	}
+	return latest, nil
+}
+
+func (s *Store) latestMessageChunk(ctx context.Context, workspace domain.WorkspaceID, conversations []domain.ConversationID, latest map[domain.ConversationID]domain.MessageTimestamp) error {
 	placeholders := make([]string, len(conversations))
 	arguments := make([]any, 0, len(conversations)+1)
 	arguments = append(arguments, workspace)
@@ -10213,22 +10343,22 @@ func (s *Store) LatestMessageTimestamps(ctx context.Context, workspace domain.Wo
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT conversation, MAX(created_at) FROM messages WHERE workspace_id = ? AND deleted = 0 AND conversation IN (`+strings.Join(placeholders, ", ")+`) GROUP BY conversation`, arguments...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var conversation domain.ConversationID
 		var created domain.StoredTime
 		if err := rows.Scan(&conversation, &created); err != nil {
-			return nil, err
+			return err
 		}
 		instant, err := created.Time()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		latest[conversation] = domain.NewMessageTimestamp(instant)
 	}
-	return latest, rows.Err()
+	return rows.Err()
 }
 
 func activityCursor(item domain.ActivityItem) string {
@@ -10306,7 +10436,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 		}
 		items = append(items, item)
 	}
-	if err := rows.Close(); err != nil {
+	if err := closeRows(rows); err != nil {
 		return domain.ActivityPage{}, err
 	}
 	if err := rows.Err(); err != nil {
@@ -10334,7 +10464,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 			}
 			item.Kinds = append(item.Kinds, kind)
 		}
-		if err := kindRows.Close(); err != nil {
+		if err := closeRows(kindRows); err != nil {
 			return domain.ActivityPage{}, err
 		}
 		if item.ReminderID != "" {
@@ -10889,7 +11019,7 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 		members = append(members, user)
 		visible[user] = struct{}{}
 	}
-	if err := rows.Close(); err != nil {
+	if err := closeRows(rows); err != nil {
 		return err
 	}
 	// Private access-group restrictions remain authoritative for notification
@@ -10918,7 +11048,7 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 				}
 				allowed[user] = struct{}{}
 			}
-			if err := groupRows.Close(); err != nil {
+			if err := closeRows(groupRows); err != nil {
 				return err
 			}
 			for user := range visible {
@@ -10956,7 +11086,7 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 			}
 			mentioned[user] = struct{}{}
 		}
-		if err := groupRows.Close(); err != nil {
+		if err := closeRows(groupRows); err != nil {
 			return err
 		}
 	}
@@ -10985,7 +11115,7 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 			}
 			visible[user] = struct{}{}
 		}
-		if err := activeRows.Close(); err != nil {
+		if err := closeRows(activeRows); err != nil {
 			return err
 		}
 	}

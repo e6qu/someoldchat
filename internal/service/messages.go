@@ -1171,7 +1171,7 @@ func (m Messages) resolveSearchConversation(ctx context.Context, workspaceID dom
 				return conversation.ID
 			}
 		}
-		if !page.HasMore {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
 			break
 		}
 		request.Cursor = page.NextCursor
@@ -1202,7 +1202,7 @@ func (m Messages) resolveSearchUser(ctx context.Context, workspaceID domain.Work
 				}
 			}
 		}
-		if !page.HasMore {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
 			break
 		}
 		request.Cursor = page.NextCursor
@@ -3400,7 +3400,7 @@ func (m Messages) TeamBillableInfo(ctx context.Context, workspaceID domain.Works
 			}
 			result.Users = append(result.Users, domain.BillableUser{UserID: user.ID, BillingActive: membership.Active && !user.Deleted})
 		}
-		if !page.HasMore {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
 			return result, nil
 		}
 		request.Cursor = page.NextCursor
@@ -4751,7 +4751,11 @@ func (m Messages) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceI
 				unread = append(unread, conversation.ID)
 			}
 		}
-		if page.NextCursor == "" {
+		if page.NextCursor == "" || page.NextCursor == request.Cursor {
+			// A cursor that does not advance ends the walk. The alternative is
+			// a loop whose termination depends on a value the store chose,
+			// which is a hang rather than an error and would be reached first
+			// by the workspace with the most conversations.
 			break
 		}
 		request.Cursor = page.NextCursor

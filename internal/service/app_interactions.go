@@ -1358,7 +1358,7 @@ func (m Messages) escapeSlashCommandText(ctx context.Context, workspaceID domain
 				}
 			}
 		}
-		if !page.HasMore || page.NextCursor == "" {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
 			break
 		}
 		cursor = page.NextCursor
@@ -1375,7 +1375,7 @@ func (m Messages) escapeSlashCommandText(ctx context.Context, workspaceID domain
 				channels[strings.ToLower(conversation.Name)] = conversation
 			}
 		}
-		if !page.HasMore || page.NextCursor == "" {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
 			break
 		}
 		cursor = page.NextCursor
