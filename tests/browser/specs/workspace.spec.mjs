@@ -2554,6 +2554,54 @@ test('[FILE-02] the external upload sequence produces one shared file and nothin
   await expect(page.locator('.message').filter({ hasText: name })).toHaveCount(1);
 });
 
+test('[CALL-01] an app-registered call renders as a joinable card and loses the control when it ends', async ({ page, context, request }) => {
+  await signIn(context);
+
+  // Slack's calls.* are for third-party call providers: the app registers the
+  // call and Slack renders a card for it. Slack supplies no media for these
+  // either, so this is the whole of CALL-01 and not a media feature.
+  const title = `Release sync ${Date.now()}`;
+  const added = await request.post('/api/calls.add', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: {
+      external_unique_id: `browser-call-${Date.now()}`,
+      join_url: 'https://calls.example/join/browser',
+      title,
+      // Slack takes calls.add users as a JSON-encoded array, not a nested one.
+      users: JSON.stringify([{ slack_id: 'Udev' }]),
+    },
+  });
+  const call = await added.json();
+  expect(call.ok, JSON.stringify(call)).toBe(true);
+
+  const posted = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, text: title, blocks: [{ type: 'call', call_id: call.call.id }] },
+  });
+  expect((await posted.json()).ok).toBe(true);
+
+  await page.goto('/app');
+  const card = page.locator('.call-card').last();
+  await expect(card).toBeVisible();
+  await expect(card).toContainText(title);
+  await expect(card).toContainText('In progress');
+  await expect(card.getByRole('link', { name: 'Join call' })).toHaveAttribute('href', 'https://calls.example/join/browser');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Ending the call keeps the card as history and withdraws the control: the
+  // message stays meaningful and nothing offers a link nobody can join.
+  const ended = await request.post('/api/calls.end', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { id: call.call.id, duration: 600 },
+  });
+  expect((await ended.json()).ok).toBe(true);
+
+  await page.goto('/app');
+  const finished = page.locator('.call-card').last();
+  await expect(finished).toContainText('Ended');
+  await expect(finished.getByRole('link', { name: 'Join call' })).toHaveCount(0);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

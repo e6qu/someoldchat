@@ -37,6 +37,23 @@ type messageBlockView struct {
 	Caption   string
 	HeaderRow bool
 	Actions   []messageActionView
+	// CallID and Call render Slack's call block. CallID is what the message
+	// carries; Call is what the workspace knows about it, filled in after the
+	// blocks are decoded.
+	CallID string
+	Call   *callBlockView
+}
+
+// callBlockView is an app-registered call as a member sees it. It is
+// deliberately not the whole domain.Call: the external identifiers an app uses
+// to reconcile its own records are not something a reader needs, and the
+// desktop join URL is a client capability this client does not have.
+type callBlockView struct {
+	Title        string
+	JoinURL      string
+	Participants []string
+	Active       bool
+	Unavailable  bool
 }
 
 type messageActionView struct {
@@ -292,6 +309,18 @@ func newMessageBlockView(value map[string]any) (messageBlockView, bool) {
 		for index := range block.Actions {
 			block.Actions[index].Dispatch = boolValue(value["dispatch_action"])
 		}
+	case "call":
+		// Slack's call block carries only the identifier; everything a member
+		// reads — the title, who is in it, whether it is still running, and
+		// where joining goes — belongs to the call object the app registered
+		// through calls.add. Resolving it needs the store, which this pure
+		// function does not have, so the identifier is carried out to
+		// resolveCallBlocks and the block renders as unavailable if nothing
+		// resolves it.
+		block.CallID = strings.TrimSpace(stringValue(value["call_id"]))
+		if block.CallID == "" {
+			return block, false
+		}
 	case "video":
 		block.Text = textObjectValue(value["title"])
 		if description := textObjectValue(value["description"]); description != "" {
@@ -352,7 +381,11 @@ func newMessageBlockView(value map[string]any) (messageBlockView, bool) {
 	if block.Kind == "" {
 		block.Kind = "section"
 	}
-	return block, block.Text != "" || block.HTML != "" || len(block.Fields) > 0 || block.ImageURL != "" || len(block.Table) > 0 || len(block.Actions) > 0 || blockType == "divider"
+	// A block with nothing human-facing is dropped rather than rendered as an
+	// empty box. A call block is the one kind whose human-facing content is not
+	// in the block at all — it is in the call the identifier names — so it
+	// qualifies on carrying the identifier.
+	return block, block.Text != "" || block.HTML != "" || len(block.Fields) > 0 || block.ImageURL != "" || len(block.Table) > 0 || len(block.Actions) > 0 || block.CallID != "" || blockType == "divider"
 }
 
 func containerWidth(value any) string {
