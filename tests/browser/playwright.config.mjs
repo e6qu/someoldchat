@@ -12,6 +12,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: /administration\.spec\.mjs/,
       use: {
         baseURL: 'http://127.0.0.1:18080',
         browserName: 'chromium',
@@ -20,8 +21,25 @@ export default defineConfig({
           : {},
       },
     },
-    { name: 'firefox', use: { baseURL: 'http://127.0.0.1:18081', browserName: 'firefox' } },
-    { name: 'webkit', use: { baseURL: 'http://127.0.0.1:18082', browserName: 'webkit' } },
+    { name: 'firefox', testIgnore: /administration\.spec\.mjs/, use: { baseURL: 'http://127.0.0.1:18081', browserName: 'firefox' } },
+    { name: 'webkit', testIgnore: /administration\.spec\.mjs/, use: { baseURL: 'http://127.0.0.1:18082', browserName: 'webkit' } },
+    // Administration runs against its own server because the escalation is the
+    // point: -session-admin gives the shared session control-plane scopes, and
+    // the other three projects must keep asserting what a plain member sees.
+    // One engine, because these surfaces are server-rendered forms with no
+    // engine-specific behaviour, and a fourth server per engine would triple
+    // the harness for no additional evidence.
+    {
+      name: 'chromium-admin',
+      testMatch: /administration\.spec\.mjs/,
+      use: {
+        baseURL: 'http://127.0.0.1:18083',
+        browserName: 'chromium',
+        launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+          ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+          : {},
+      },
+    },
   ],
   webServer: [
     {
@@ -39,6 +57,12 @@ export default defineConfig({
     {
       command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18082 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-webkit" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -api-rate-limit=false',
       url: 'http://127.0.0.1:18082/healthz',
+      timeout: 120_000,
+      reuseExistingServer: false,
+    },
+    {
+      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18083 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-admin" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -session-admin -api-rate-limit=false',
+      url: 'http://127.0.0.1:18083/healthz',
       timeout: 120_000,
       reuseExistingServer: false,
     },

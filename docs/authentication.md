@@ -53,6 +53,18 @@ For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 and the server exits 2 when both are present, so a deployment with single
 sign-on must not set it; `terraform/ecs-runtime` therefore creates no
 session-token secret at all.
+
+`-session-admin` (`SAMEOLDCHAT_SESSION_ADMIN=1`) gives that static session
+workspace-administrator scopes. It exists so a deployment with no identity
+provider can reach its own administration, and so the ADMIN journeys can be
+qualified at all — the browser suite runs in exactly that mode. It is refused
+without `-session-token`, refused alongside any configured provider, and
+announced with a startup warning naming what it granted. It escalates only the
+browser session: the API token keeps member scopes, because nothing about
+administering a workspace through a page requires an integration credential to
+gain control-plane authority as a side effect. A workspace with real identities
+administers itself through them, never through a token every holder shares.
+
 The application credential key must decode to exactly 32 bytes. It encrypts
 developer-app signing secrets at rest and is required for durable local storage
 or the separate `sameoldchat-chatd` process; losing it prevents Events API,
