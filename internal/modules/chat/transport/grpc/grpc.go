@@ -1763,7 +1763,7 @@ func (r Remote) workspaceMembershipByScan(ctx context.Context, workspaceID domai
 				return entry.Membership, nil
 			}
 		}
-		if !page.HasMore || page.NextCursor == "" {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
 			return domain.WorkspaceMembership{}, storepkg.ErrNotFound
 		}
 		request.Cursor = page.NextCursor
@@ -2314,7 +2314,7 @@ func (r Remote) IsConversationMember(ctx context.Context, workspaceID domain.Wor
 				return true, nil
 			}
 		}
-		if !page.HasMore || page.NextCursor == "" {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
 			return false, nil
 		}
 		request.Cursor = page.NextCursor
@@ -2361,7 +2361,7 @@ func decodeProtoView(value *chatv1.View) (domain.View, error) {
 	if value == nil {
 		return domain.View{}, errors.New("view response is nil")
 	}
-	result := domain.View{ID: domain.ViewID(value.GetId()), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Type: value.GetType(), ExternalID: value.GetExternalId(), Payload: value.GetPayload(), State: value.GetStateJson(), Hash: value.GetHash(), RootViewID: domain.ViewID(value.GetRootViewId()), PreviousViewID: domain.ViewID(value.GetPreviousViewId()), CreatedAt: time.Unix(0, value.GetCreatedAtUnixNano()).UTC(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC()}
+	result := domain.View{ID: domain.ViewID(value.GetId()), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Type: value.GetType(), ExternalID: value.GetExternalId(), Payload: value.GetPayload(), State: value.GetStateJson(), Hash: value.GetHash(), RootViewID: domain.ViewID(value.GetRootViewId()), PreviousViewID: domain.ViewID(value.GetPreviousViewId()), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano())}
 	if raw := strings.TrimSpace(value.GetErrorsJson()); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &result.Errors); err != nil {
 			return domain.View{}, err
@@ -5450,7 +5450,7 @@ func (s *Server) RequestAppPermissions(ctx context.Context, input *chatv1.AppPer
 
 func encodeProtoView(value domain.View) *chatv1.View {
 	encodedErrors, _ := json.Marshal(value.Errors)
-	return &chatv1.View{Id: string(value.ID), AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Type: value.Type, ExternalId: value.ExternalID, Payload: value.Payload, StateJson: value.State, ErrorsJson: string(encodedErrors), Hash: value.Hash, RootViewId: string(value.RootViewID), PreviousViewId: string(value.PreviousViewID), CreatedAtUnixNano: value.CreatedAt.UnixNano(), UpdatedAtUnixNano: value.UpdatedAt.UnixNano()}
+	return &chatv1.View{Id: string(value.ID), AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Type: value.Type, ExternalId: value.ExternalID, Payload: value.Payload, StateJson: value.State, ErrorsJson: string(encodedErrors), Hash: value.Hash, RootViewId: string(value.RootViewID), PreviousViewId: string(value.PreviousViewID), CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt)}
 }
 
 func (s *Server) OpenView(ctx context.Context, input *chatv1.OpenViewRequest) (*chatv1.View, error) {
@@ -6683,7 +6683,7 @@ func encodeProtoFollowedThreadPage(page domain.FollowedThreadPage) *chatv1.Follo
 			Conversation: string(thread.Conversation), ConversationName: thread.ConversationName,
 			Root: string(thread.Root), RootText: thread.RootText, RootAuthorId: string(thread.RootAuthorID),
 			ReplyCount: int32(thread.ReplyCount), UnreadReplies: int32(thread.UnreadReplies),
-			LastReplyAtUnixNano: thread.LastReplyAt.UnixNano(),
+			LastReplyAtUnixNano: optionalUnixNano(thread.LastReplyAt),
 		})
 	}
 	return &chatv1.FollowedThreadPage{Threads: threads, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
@@ -6697,7 +6697,7 @@ func decodeProtoFollowedThreadPage(page *chatv1.FollowedThreadPage) (domain.Foll
 			Root: domain.MessageTimestamp(thread.GetRoot()), RootText: thread.GetRootText(),
 			RootAuthorID: domain.UserID(thread.GetRootAuthorId()),
 			ReplyCount:   int(thread.GetReplyCount()), UnreadReplies: int(thread.GetUnreadReplies()),
-			LastReplyAt: time.Unix(0, thread.GetLastReplyAtUnixNano()).UTC(),
+			LastReplyAt: optionalTimeFromUnixNano(thread.GetLastReplyAtUnixNano()),
 		})
 	}
 	return domain.FollowedThreadPage{Threads: threads, NextCursor: domain.Cursor(page.GetNextCursor()), HasMore: page.GetHasMore()}, nil
@@ -8862,11 +8862,11 @@ func decodeProtoThreadSummary(value *chatv1.ThreadSummary) (domain.ThreadSummary
 }
 
 func encodeProtoRTMConnection(value domain.RTMConnection) *chatv1.RTMConnection {
-	return &chatv1.RTMConnection{Id: value.ID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ExpiresAtUnixNano: value.ExpiresAt.UnixNano(), Cursor: value.Cursor}
+	return &chatv1.RTMConnection{Id: value.ID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ExpiresAtUnixNano: optionalUnixNano(value.ExpiresAt), Cursor: value.Cursor}
 }
 
 func decodeProtoRTMConnection(value *chatv1.RTMConnection) domain.RTMConnection {
-	return domain.RTMConnection{ID: value.GetId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), ExpiresAt: time.Unix(0, value.GetExpiresAtUnixNano()).UTC(), Cursor: value.GetCursor()}
+	return domain.RTMConnection{ID: value.GetId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), ExpiresAt: optionalTimeFromUnixNano(value.GetExpiresAtUnixNano()), Cursor: value.GetCursor()}
 }
 
 func encodeProtoEphemeralMessage(value domain.EphemeralMessage) *chatv1.EphemeralMessage {
@@ -9110,7 +9110,7 @@ func encodeProtoEventRecord(record events.Record) *chatv1.EventRecord {
 			IsBot: value.IsBot, IsEnterpriseInstall: value.IsEnterpriseInstall,
 		})
 	}
-	return &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), ActorId: string(record.Event.ActorID), Topic: record.Event.Topic, Payload: record.Event.Payload, PrivatePayload: record.Event.PrivatePayload, CreatedAtUnixNano: record.Event.CreatedAt.UnixNano(), Authorizations: authorizations}
+	return &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), ActorId: string(record.Event.ActorID), Topic: record.Event.Topic, Payload: record.Event.Payload, PrivatePayload: record.Event.PrivatePayload, CreatedAtUnixNano: optionalUnixNano(record.Event.CreatedAt), Authorizations: authorizations}
 }
 
 func decodeProtoEvents(value *chatv1.EventsResponse) ([]events.Record, error) {
@@ -9296,7 +9296,7 @@ func encodeProtoSavedItem(value domain.SavedItem) *chatv1.SavedItem {
 	item := &chatv1.SavedItem{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
 		MessageId: string(value.MessageID), ConversationId: string(value.Conversation), State: string(value.State),
-		CreatedAtUnixNano: value.CreatedAt.UTC().UnixNano(), UpdatedAtUnixNano: value.UpdatedAt.UTC().UnixNano(),
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
 		SourceAvailable: value.SourceAvailable,
 	}
 	if value.SourceAvailable {
@@ -9317,7 +9317,7 @@ func decodeProtoSavedItem(value *chatv1.SavedItem) (domain.SavedItem, error) {
 		ID: domain.SavedItemID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		UserID: domain.UserID(value.GetUserId()), MessageID: domain.MessageID(value.GetMessageId()),
 		Conversation: domain.ConversationID(value.GetConversationId()), State: state,
-		CreatedAt: time.Unix(0, value.GetCreatedAtUnixNano()).UTC(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
 		SourceAvailable: value.GetSourceAvailable(),
 	}
 	if item.SourceAvailable {

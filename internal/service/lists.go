@@ -225,7 +225,7 @@ func (m Messages) copyListRecords(ctx context.Context, workspaceID domain.Worksp
 			items = append(items, domain.ListItem{ID: itemID, ListID: into, WorkspaceID: workspaceID, Fields: source.Fields, CreatedBy: userID, UpdatedBy: userID, Version: 1, CreatedAt: now, UpdatedAt: now})
 			records = append(records, created)
 		}
-		if !page.HasMore {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
 			return items, records, nil
 		}
 		cursor = page.NextCursor

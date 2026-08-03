@@ -4751,7 +4751,7 @@ func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Pr
 		for _, user := range page.Users {
 			members[user.ID] = struct{}{}
 		}
-		if !page.HasMore {
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
 			break
 		}
 		request.Cursor = page.NextCursor
@@ -9848,7 +9848,10 @@ func (h Handler) downloadListCSV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writer.Flush()
-		if err := writer.Error(); err != nil || !page.HasMore {
+		// A cursor that does not advance ends the export. Without it a store
+		// that repeated a page would stream the same rows until the client
+		// gave up, and a CSV that never ends looks like a slow one.
+		if err := writer.Error(); err != nil || !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
 			return
 		}
 		cursor = page.NextCursor

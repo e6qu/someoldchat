@@ -49,7 +49,7 @@ type conversionCase struct {
 	// pointer to the same type, together with the proto message the encoder
 	// produced. The wire message is what lets a case assert that an omitted field
 	// did not cross the boundary, rather than asserting it in a comment.
-	through func(t *testing.T, filled any) (any, proto.Message)
+	through func(t *testing.T, filled any) (any, proto.Message, error)
 
 	// omitted names the fields that must not cross the boundary, with the reason.
 	// A field is listed here only when carrying it would be wrong, never because
@@ -90,10 +90,41 @@ func TestEveryConverterCarriesEveryField(t *testing.T) {
 				if testCase.prepare != nil {
 					testCase.prepare(filled.Interface())
 				}
-				result, _ := testCase.through(t, filled.Interface())
+				result, _, err := testCase.through(t, filled.Interface())
+				if err != nil {
+					t.Fatalf("decode: %v", err)
+				}
 				compareValues(t, name, filled.Elem(), reflect.ValueOf(result).Elem())
 			})
 		}
+		// A filled round trip cannot see how "unset" travels. time.Time{} is
+		// the case that matters: its UnixNano is -6795364578871345152, so an
+		// encoder that writes it raw and a decoder that reads any non-zero
+		// value give back an instant in 1754. domain.FollowedThread.LastReplyAt
+		// did exactly that — a followed thread with no replies came back from
+		// the remote composition as last replied to three centuries ago — and
+		// the filled pass was green the whole time because it never sends a
+		// zero.
+		t.Run(name+"/zero times stay zero", func(t *testing.T) {
+			empty := reflect.New(reflect.TypeOf(testCase.sample).Elem())
+			fillValue(t, empty.Elem(), name, &filler{})
+			for field := range testCase.omitted {
+				zeroField(t, empty.Elem(), field)
+			}
+			zeroEveryTime(t, empty.Elem())
+			if testCase.prepare != nil {
+				testCase.prepare(empty.Interface())
+			}
+			result, _, err := testCase.through(t, empty.Interface())
+			if err != nil {
+				// Refusing a value whose required timestamp is missing is a
+				// contract, and it is a stronger answer than fabricating an
+				// instant. What this pass forbids is the third outcome:
+				// accepting the value and inventing a time for it.
+				t.Skipf("the decoder refuses a value with no times, which is stronger than answering with a fabricated one: %v", err)
+			}
+			assertZeroTimesStayZero(t, name, reflect.ValueOf(result).Elem())
+		})
 		if len(testCase.omitted) == 0 {
 			continue
 		}
@@ -113,7 +144,10 @@ func TestEveryConverterCarriesEveryField(t *testing.T) {
 			if testCase.prepare != nil {
 				testCase.prepare(filled.Interface())
 			}
-			_, wire := testCase.through(t, filled.Interface())
+			_, wire, err := testCase.through(t, filled.Interface())
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
 			if wire == nil {
 				t.Fatal("the case does not expose the encoded message, so the omitted contract cannot be checked")
 			}
@@ -129,6 +163,77 @@ func TestEveryConverterCarriesEveryField(t *testing.T) {
 				t.Errorf("%s: the encoder put an omitted field on the wire; the case names %v", name, fields)
 			}
 		})
+	}
+}
+
+// zeroEveryTime sets every time.Time in a filled value back to zero. The value
+// is filled first so decoders that refuse an incomplete message still reach
+// their time fields: the question this pass asks is how "unset" travels, not
+// whether a decoder validates.
+func zeroEveryTime(t *testing.T, value reflect.Value) {
+	t.Helper()
+	switch value.Kind() {
+	case reflect.Struct:
+		if value.Type() == reflect.TypeOf(time.Time{}) {
+			if value.CanSet() {
+				value.Set(reflect.ValueOf(time.Time{}))
+			}
+			return
+		}
+		for index := 0; index < value.NumField(); index++ {
+			if value.Type().Field(index).PkgPath == "" {
+				zeroEveryTime(t, value.Field(index))
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for index := 0; index < value.Len(); index++ {
+			zeroEveryTime(t, value.Index(index))
+		}
+	case reflect.Pointer:
+		if !value.IsNil() {
+			zeroEveryTime(t, value.Elem())
+		}
+	case reflect.Map:
+		for _, key := range value.MapKeys() {
+			item := reflect.New(value.Type().Elem()).Elem()
+			item.Set(value.MapIndex(key))
+			zeroEveryTime(t, item)
+			value.SetMapIndex(key, item)
+		}
+	}
+}
+
+// assertZeroTimesStayZero walks the decoded value and reports any time that
+// came back set. It reports the path so a failure names the field rather than
+// the type.
+func assertZeroTimesStayZero(t *testing.T, path string, value reflect.Value) {
+	t.Helper()
+	switch value.Kind() {
+	case reflect.Struct:
+		if value.Type() == reflect.TypeOf(time.Time{}) {
+			if instant, ok := value.Interface().(time.Time); ok && !instant.IsZero() {
+				t.Errorf("%s: a zero time round-tripped to %s; encode it as zero rather than raw UnixNano", path, instant.UTC())
+			}
+			return
+		}
+		for index := 0; index < value.NumField(); index++ {
+			if value.Type().Field(index).PkgPath != "" {
+				continue
+			}
+			assertZeroTimesStayZero(t, path+"."+value.Type().Field(index).Name, value.Field(index))
+		}
+	case reflect.Slice, reflect.Array:
+		for index := 0; index < value.Len(); index++ {
+			assertZeroTimesStayZero(t, fmt.Sprintf("%s[%d]", path, index), value.Index(index))
+		}
+	case reflect.Pointer:
+		if !value.IsNil() {
+			assertZeroTimesStayZero(t, path, value.Elem())
+		}
+	case reflect.Map:
+		for _, key := range value.MapKeys() {
+			assertZeroTimesStayZero(t, fmt.Sprintf("%s[%v]", path, key.Interface()), value.MapIndex(key))
+		}
 	}
 }
 
@@ -319,10 +424,10 @@ func conversionCases() map[string]conversionCase {
 		"Draft":            {sample: &domain.Draft{}, through: through(encodeProtoDraft, decodeProtoDraft)},
 		"DraftAttachments": {
 			sample: &draftAttachmentsRoundTrip{},
-			through: func(t *testing.T, filled any) (any, proto.Message) {
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
 				value := filled.(*draftAttachmentsRoundTrip)
 				wire := &chatv1.Draft{Attachments: encodeProtoDraftAttachments(value.Attachments)}
-				return &draftAttachmentsRoundTrip{Attachments: decodeProtoDraftAttachments(wire.GetAttachments())}, wire
+				return &draftAttachmentsRoundTrip{Attachments: decodeProtoDraftAttachments(wire.GetAttachments())}, wire, nil
 			},
 		},
 		"AppDeliveryHealth": {
@@ -376,7 +481,7 @@ func conversionCases() map[string]conversionCase {
 			omitted: map[string]string{
 				"SecretHash": "the hash must never cross the boundary; only the one-time plaintext secret does, as a separate return value",
 			},
-			through: func(t *testing.T, filled any) (any, proto.Message) {
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
 				value := *filled.(*domain.IncomingWebhook)
 				wire := encodeProtoIncomingWebhook(value, "plaintext-secret")
 				decodedValue, secret, err := decodeProtoIncomingWebhook(wire)
@@ -386,7 +491,7 @@ func conversionCases() map[string]conversionCase {
 				if secret != "plaintext-secret" {
 					t.Fatalf("secret = %q, want the plaintext the encoder was given", secret)
 				}
-				return &decodedValue, wire
+				return &decodedValue, wire, nil
 			},
 		},
 		"WorkspaceMembership": {sample: &domain.WorkspaceMembership{}, through: through(encodeProtoWorkspaceMembership, decodeProtoWorkspaceMembership)},
@@ -396,51 +501,51 @@ func conversionCases() map[string]conversionCase {
 		// encodeProtoPinPage left all 271 tests in this package green, and
 		// pins.list would have lost pagination in the distributed composition
 		// while the monolith kept it.
-		"PinPage": {sample: &pinPage{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+		"PinPage": {sample: &pinPage{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*pinPage)
 			wire := encodeProtoPinPage(value.Pins, value.NextCursor, value.HasMore)
 			decoded, err := decodeProtoPinPage(wire)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			return &pinPage{Pins: decoded.Pins, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
+			return &pinPage{Pins: decoded.Pins, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire, nil
 		}},
-		"StarPage": {sample: &starPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: func(t *testing.T, filled any) (any, proto.Message) {
+		"StarPage": {sample: &starPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*starPage)
 			wire := encodeProtoStarPage(value.Stars, value.NextCursor, value.HasMore)
 			decoded, err := decodeProtoStarPage(wire)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			return &starPage{Stars: decoded.Stars, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
+			return &starPage{Stars: decoded.Stars, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire, nil
 		}},
-		"ReactionPage": {sample: &reactionPage{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+		"ReactionPage": {sample: &reactionPage{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*reactionPage)
 			wire := encodeProtoReactionPage(value.Reactions, value.NextCursor, value.HasMore)
 			decoded, err := decodeProtoReactionPage(wire)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			return &reactionPage{Reactions: decoded.Reactions, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
+			return &reactionPage{Reactions: decoded.Reactions, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire, nil
 		}},
-		"events.Record": {sample: &events.Record{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+		"events.Record": {sample: &events.Record{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			wire := encodeProtoEventRecord(*filled.(*events.Record))
 			record, err := decodeProtoEventRecord(wire)
 			if err != nil {
-				t.Fatalf("decode: %v", err)
+				return &events.Record{}, wire, err
 			}
-			return &record, wire
+			return &record, wire, nil
 		}},
-		"events.Record page": {sample: &events.Record{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+		"events.Record page": {sample: &events.Record{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			wire := encodeProtoEvents([]events.Record{*filled.(*events.Record)})
 			records, err := decodeProtoEvents(wire)
 			if err != nil {
-				t.Fatalf("decode: %v", err)
+				return &events.Record{}, wire, err
 			}
 			if len(records) != 1 {
 				t.Fatalf("decoded %d records, want 1", len(records))
 			}
-			return &records[0], wire
+			return &records[0], wire, nil
 		}},
 	}
 }
@@ -554,24 +659,21 @@ func convertersNamedByTheCaseList(t *testing.T) map[string]struct{} {
 // through builds the round trip for a symmetric converter pair. Naming the two
 // functions rather than writing the call out per case is what keeps a case a
 // single line, so adding a converter to this test costs nothing.
-func through[Value any, Proto proto.Message](encode func(Value) Proto, decode func(Proto) (Value, error)) func(*testing.T, any) (any, proto.Message) {
-	return func(t *testing.T, filled any) (any, proto.Message) {
+func through[Value any, Proto proto.Message](encode func(Value) Proto, decode func(Proto) (Value, error)) func(*testing.T, any) (any, proto.Message, error) {
+	return func(t *testing.T, filled any) (any, proto.Message, error) {
 		t.Helper()
 		wire := encode(*filled.(*Value))
 		result, err := decode(wire)
-		if err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		return &result, wire
+		return &result, wire, err
 	}
 }
 
 // throughInfallible is through for the three converters whose decoder cannot fail.
-func throughInfallible[Value any, Proto proto.Message](encode func(Value) Proto, decode func(Proto) Value) func(*testing.T, any) (any, proto.Message) {
-	return func(t *testing.T, filled any) (any, proto.Message) {
+func throughInfallible[Value any, Proto proto.Message](encode func(Value) Proto, decode func(Proto) Value) func(*testing.T, any) (any, proto.Message, error) {
+	return func(t *testing.T, filled any) (any, proto.Message, error) {
 		t.Helper()
 		wire := encode(*filled.(*Value))
-		return ptr(decode(wire)), wire
+		return ptr(decode(wire)), wire, nil
 	}
 }
 
