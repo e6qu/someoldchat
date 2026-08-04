@@ -165,7 +165,9 @@ func TestCanvasAndListJourneysUseDurableDocuments(t *testing.T) {
 	if canvasPage.Code != http.StatusOK {
 		t.Fatalf("open canvas = %d: %s", canvasPage.Code, canvasPage.Body)
 	}
-	requireContains(t, "canvas", canvasPage.Body.String(), "Release plan", "Ship the durable UI", "Save changes")
+	// Each section carries its own editor, so the control names the section it
+	// saves rather than the whole canvas.
+	requireContains(t, "canvas", canvasPage.Body.String(), "Release plan", "Ship the durable UI", "Save section 1")
 	sectionMatch := regexp.MustCompile(`name="section_id" value="([^"]+)"`).FindStringSubmatch(canvasPage.Body.String())
 	if len(sectionMatch) != 2 {
 		t.Fatalf("canvas editor section is missing: %s", canvasPage.Body)
@@ -242,8 +244,13 @@ func TestCanvasEditorRefusesToFlattenStructuredContent(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("open structured canvas = %d: %s", page.Code, page.Body)
 	}
-	requireContains(t, "structured canvas", page.Body.String(), "Keep this heading", "keeps it read-only")
-	requireMissing(t, "structured canvas", page.Body.String(), "Save changes")
+	// The section is shown as stored and carries no editor: this client has no
+	// heading editor, and a plain textarea for one would flatten it on save.
+	// That is narrower than the whole canvas being read-only, which is what
+	// this used to assert — a canvas with a heading and a paragraph left the
+	// paragraph uneditable too.
+	requireContains(t, "structured canvas", page.Body.String(), "Keep this heading", "editing it here would flatten it")
+	requireMissing(t, "structured canvas", page.Body.String(), "Save section")
 
 	response := postForm(t, mux, target+"/update", url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "title": {"Flattened"}, "body": {"Lost content"},

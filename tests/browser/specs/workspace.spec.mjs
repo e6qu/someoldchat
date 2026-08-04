@@ -1151,6 +1151,22 @@ test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer
   await threadComposer.fill(replyText);
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(thread.locator('.message-text').last()).toHaveText(replyText);
+
+  // A11Y-01, measured rather than inferred. The action toolbar used to be an
+  // absolutely positioned overlay whose children could shrink, so in a narrow
+  // container — the thread pane is the narrowest — a control could render nine
+  // pixels wide and fail WCAG 2.2 target-size. That only happened where the
+  // text was wide enough to force the squeeze, which meant it reproduced on
+  // CI's Linux font metrics and not on a developer's machine. Measuring the
+  // rendered boxes catches it wherever it happens instead of wherever axe
+  // happens to be looking.
+  const undersized = await page.evaluate(() => Array.from(
+    document.querySelectorAll('.message-actions a, .message-actions button, .message-actions summary'),
+  ).map((node) => {
+    const box = node.getBoundingClientRect();
+    return { label: node.textContent.trim().slice(0, 24), width: box.width, height: box.height };
+  }).filter((size) => size.width < 24 || size.height < 24));
+  expect(undersized, 'every message action must meet the 24px minimum target size').toEqual([]);
 });
 
 // The composer advertised "Enter to send · Shift+Enter for a new line" and no
@@ -1519,13 +1535,27 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
   // current view.
   await expect(page).toHaveURL(url);
 
-  await chip.first().click();
-  await expect(target.locator('.reactions .chip')).toHaveCount(0);
+  // The timeline replaces itself when a live event arrives, so a control can be
+  // swapped out between resolving it and dispatching the click — the click then
+  // lands on a detached node and nothing happens. The client now holds a
+  // refresh for a moment after a pointer goes down inside the region, which
+  // covers a person, whose pointerdown precedes their click; it cannot cover a
+  // synthetic click, which is atomic. Retrying the whole click-and-assert is
+  // what a person does when a button appears not to have taken, and it keeps
+  // the assertion exactly as strong.
+  await expect(async () => {
+    await chip.first().click();
+    await expect(target.locator('.reactions .chip')).toHaveCount(0, { timeout: 2000 });
+  }).toPass({ timeout: 20000 });
 
-  await target.getByRole('button', { name: 'Pin' }).click();
-  await expect(target.locator('.pinned')).toBeVisible();
-  await target.getByRole('button', { name: 'Unpin' }).click();
-  await expect(target.locator('.pinned')).toHaveCount(0);
+  await expect(async () => {
+    await target.getByRole('button', { name: 'Pin' }).click();
+    await expect(target.locator('.pinned')).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
+  await expect(async () => {
+    await target.getByRole('button', { name: 'Unpin' }).click();
+    await expect(target.locator('.pinned')).toHaveCount(0, { timeout: 2000 });
+  }).toPass({ timeout: 20000 });
 });
 
 test('[MSG-03 MSG-04] a member can edit and delete their own message in place', async ({ page, context }) => {
@@ -1866,8 +1896,10 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await page.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByRole('heading', { name: canvasName })).toBeVisible();
   await page.getByLabel('Title').fill(`${canvasName} revised`);
-  await page.getByLabel('Content').fill('One atomic revision');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  // Each section carries its own editor, so the control names the section it
+  // saves. A canvas created through the UI has exactly one.
+  await page.getByLabel('Section 1 content').fill('One atomic revision');
+  await page.getByRole('button', { name: 'Save section 1' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
   await page.getByRole('link', { name: 'Canvases' }).click();
   await expect(page.getByRole('heading', { name: `${canvasName} revised` })).toBeVisible();
@@ -2287,13 +2319,12 @@ test('[NAV-02 A11Y-01] the shortcuts dialog documents the keyboard layer and is 
   await help.getByRole('button', { name: 'Close keyboard shortcuts' }).click();
   await expect(help).toBeHidden();
 
-  // Scoped to the dialog. The timeline around it carries a WCAG 2.2
-  // target-size failure recorded in specs/product-gap-audit.md, and this change
-  // tried the obvious fix — moving the toolbar into its own message's top
-  // padding — which destabilised the message chrome enough to break three
-  // unrelated journeys. It is a layout decision about Slack's overlapping-
-  // toolbar idiom, and it is not this journey's to make.
-  await expectNoSeriousAccessibilityViolations(page, '#keyboard-help');
+  // Unscoped. The message action toolbar used to be permanently visible while
+  // absolutely positioned over the message above it, so axe reported its links
+  // as partially obscured under WCAG 2.2 target-size. It now appears on hover
+  // or focus, which is what Slack does and what the overlap was always
+  // predicated on.
+  await expectNoSeriousAccessibilityViolations(page);
 
   // And the chord itself opens it.
   await page.keyboard.press(`${primary}+Slash`);

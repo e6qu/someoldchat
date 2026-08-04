@@ -62,9 +62,16 @@ build-dqlite: internal/generated/bindings.go
 test-dqlite:
 	GOCACHE=$(GOCACHE) go test -p 1 -tags dqlite ./...
 
+# -p 1 for the same reason test-dqlite uses it: every package here points at the
+# one database SAMEOLDCHAT_POSTGRES_DSN names, and Go runs packages in parallel
+# by default. Concurrently, tests that migrate a schema, drop a column to prove
+# an upgrade path, and quarantine legacy rows are all rewriting the same
+# catalogue. That surfaced as three different failures on three different runs —
+# a deadlock during CREATE INDEX in CI, and schema assertions failing locally —
+# which read like flakiness rather than like one harness fault.
 test-postgres:
 	@test -n "$(SAMEOLDCHAT_POSTGRES_DSN)" || { echo 'SAMEOLDCHAT_POSTGRES_DSN is required' >&2; exit 1; }
-	GOCACHE=$(GOCACHE) go test -tags postgres ./tests/persistence-qualification ./internal/store/postgres ./internal/web
+	GOCACHE=$(GOCACHE) go test -p 1 -tags postgres ./tests/persistence-qualification ./internal/store/postgres ./internal/web
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...

@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/sameoldchat/sameoldchat/internal/store/sqlstore"
 )
@@ -19,6 +21,19 @@ var registerDriver sync.Once
 
 // Open opens PostgreSQL through pgx's database/sql compatibility layer and
 // applies the small SQL dialect translation required by the shared repository.
+// retryableMigration reports the two SQLSTATEs PostgreSQL uses to say "your
+// transaction lost a race, run it again": deadlock_detected and
+// serialization_failure. Both are transient by definition — the database has
+// already aborted one side to resolve the conflict — and both arrive during a
+// rollout, when several replicas migrate and backfill at once.
+func retryableMigration(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "40P01" || pgErr.Code == "40001"
+}
+
 func Open(ctx context.Context, dsn string) (*sqlstore.Store, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return nil, fmt.Errorf("PostgreSQL storage requires a DSN")
@@ -30,7 +45,7 @@ func Open(ctx context.Context, dsn string) (*sqlstore.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL: %w", err)
 	}
-	store, err := sqlstore.FromPostgresDB(ctx, db)
+	store, err := sqlstore.FromPostgresDB(ctx, db, retryableMigration)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
