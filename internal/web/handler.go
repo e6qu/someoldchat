@@ -2607,14 +2607,6 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 //     come from mutationURL/fragmentURL today, but nothing else in the document
 //     enforced it, and these fetches carry credentials.
 //
-// A live refresh is held while a pointer is down inside the region it would
-// replace. Without it a background refresh could swap the region between the
-// press and the release, so the click landed on a node that was no longer in
-// the document and the member's press did nothing. The hold lasts exactly as
-// long as the button is held: an interval-based hold starves the refresh
-// entirely for anyone clicking repeatedly, which is worse than the swallowed
-// click it was meant to prevent.
-//
 // Two behaviours in it are not obvious from the code. `refresh(force)` is
 // forced only for a change the reader themselves made: it then re-renders every
 // message region, including one that is not following the live conversation,
@@ -3064,16 +3056,6 @@ return Array.prototype.slice.call(nav.querySelectorAll('a[href],button:not([disa
 }
 function ownPath(value){return typeof value==='string'&&value.charAt(0)==='/'&&value.charAt(1)!=='/'}
 function shown(region){return !!(region.offsetParent||region.getClientRects().length)}
-var pointerHeldRegion=null;
-document.addEventListener('pointerdown',function(event){
-pointerHeldRegion=event.target&&event.target.closest?event.target.closest('[data-fragment]'):null;
-},true);
-['pointerup','pointercancel','blur'].forEach(function(name){
-document.addEventListener(name,function(){pointerHeldRegion=null},true);
-});
-function interactionGuard(region){
-return region===pointerHeldRegion;
-}
 function atBottom(region){return region.scrollHeight-region.scrollTop-region.clientHeight<48}
 function toBottom(region){if(region)region.scrollTop=region.scrollHeight}
 function messageItems(region){return region?Array.prototype.slice.call(region.querySelectorAll('.message')).filter(shown):[]}
@@ -3132,7 +3114,6 @@ var activeMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):
 pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){
 if(token!==generation)return;
 if(!force&&document.activeElement&&region.contains(document.activeElement))return;
-if(!force&&interactionGuard(region))return;
 region.innerHTML=html;
 localize(region);
 if(stick)toBottom(region);
