@@ -2141,6 +2141,53 @@ test('[WORKFLOW-04] a step with a condition only runs when the condition holds',
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+test('[WORKFLOW-02] a built-in message step posts and completes the run with no function and no person', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/workflow-message-callback';
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name: `Announcer tools ${Date.now()}` },
+    oauth_config: { redirect_urls: [redirectURI], scopes: { bot: ['chat:write'] } },
+    settings: { function_runtime: 'remote' },
+    functions: {
+      placeholder: {
+        title: 'Placeholder',
+        input_parameters: { properties: {}, required: [] },
+        output_parameters: { properties: {}, required: [] },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Workflows' }).click();
+  await page.getByText('Create a workflow').click();
+  await page.getByLabel('Name').fill(`Announcer ${Date.now()}`);
+  await page.getByLabel('Owning app').selectOption(installed.appID);
+  await page.getByLabel('First step').selectOption('placeholder');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+
+  // Slack's most-used Workflow Builder step sends a message. It is the first
+  // step kind that dispatches to no app and waits for no one, so the run has
+  // to carry itself past it — which is the whole of what this asserts.
+  await page.getByLabel('Step 1 type').selectOption('message');
+  await page.getByLabel('Step 1 message conversation').selectOption('Cdev');
+  const announcement = `deploy announced ${Date.now()}`;
+  await page.getByLabel('Step 1 message text').fill(announcement);
+  await page.getByRole('button', { name: 'Publish' }).click();
+
+  await page.getByLabel('Trigger name').fill('Announce');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await page.getByRole('button', { name: 'Run' }).click();
+
+  // The run is finished the moment it returns: nothing is coming to move it.
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page.getByText('completed', { exact: true })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // And the message it describes is really in the conversation.
+  await page.goto('/app');
+  await expect(page.locator('.message-text').filter({ hasText: announcement })).toHaveCount(1);
+});
+
 test('[WORKFLOW-05] a form step pauses for input and a button step confirms', async ({ page, context, request }) => {
   await signIn(context);
   const redirectURI = 'https://client.example/workflow-form-callback';
