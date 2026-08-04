@@ -1722,6 +1722,24 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A delay parks a run on the clock, and the sweep that resumes it
+			// is the only place a run advances without anyone asking. Both
+			// compositions have to agree on what is due and on the fact that a
+			// spent wait is not resumed twice.
+			name: "workflow delays resume once when due",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				before, err := chat.ResumeWorkflowDelays(ctx, "T1", time.Unix(1700000000, 0).UTC(), 10)
+				if err != nil {
+					return nil, err
+				}
+				again, err := chat.ResumeWorkflowDelays(ctx, "T1", time.Unix(1900000000, 0).UTC(), 10)
+				if err != nil {
+					return nil, err
+				}
+				return []any{before, again}, nil
+			},
+		},
+		{
 			// Automatic presence is derived, not stored: the two compositions
 			// have to agree that a member who has just been seen is active and
 			// that a heartbeat is idempotent.

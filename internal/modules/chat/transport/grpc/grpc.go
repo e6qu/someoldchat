@@ -3362,6 +3362,16 @@ func (r Remote) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoReadCursor(out)
 }
 
+func (r Remote) ResumeWorkflowDelays(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) (int, error) {
+	out, err := r.interactions.ResumeWorkflowDelays(ctx, &chatv1.ResumeWorkflowDelaysRequest{
+		WorkspaceId: string(workspaceID), NowUnixNano: unixNanoOrZero(now), Limit: int32(limit),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetResumed()), nil
+}
+
 func (r Remote) RecordActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
 	_, err := r.interactions.RecordActivity(ctx, &chatv1.RecordActivityRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	return err
@@ -6659,6 +6669,14 @@ func (s *Server) MarkAllRead(ctx context.Context, input *chatv1.MarkAllReadReque
 		return nil, mapError(err)
 	}
 	return &chatv1.MarkAllReadResponse{Conversations: int32(count)}, nil
+}
+
+func (s *Server) ResumeWorkflowDelays(ctx context.Context, input *chatv1.ResumeWorkflowDelaysRequest) (*chatv1.ResumeWorkflowDelaysResponse, error) {
+	resumed, err := s.implementation.ResumeWorkflowDelays(ctx, domain.WorkspaceID(input.GetWorkspaceId()), time.Unix(0, input.GetNowUnixNano()).UTC(), int(input.GetLimit()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ResumeWorkflowDelaysResponse{Resumed: int32(resumed)}, nil
 }
 
 func (s *Server) RecordActivity(ctx context.Context, input *chatv1.RecordActivityRequest) (*chatv1.RecordActivityResponse, error) {

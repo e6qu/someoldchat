@@ -32,6 +32,15 @@ type workflowFunctionDefinition struct {
 	Message      *workflowMessageStep   `json:"message,omitempty"`
 	AddPeople    *workflowAddPeopleStep `json:"add_people,omitempty"`
 	Canvas       *workflowCanvasStep    `json:"create_canvas,omitempty"`
+	Delay        *workflowDelayStep     `json:"delay,omitempty"`
+}
+
+// workflowDelayStep is Slack's "wait for a set time" step. It is the first step
+// kind that suspends a run on the clock rather than on a person, an app, or
+// nothing at all: the run parks with a durable wake time and a worker resumes
+// it, so the wait survives a restart instead of beginning again.
+type workflowDelayStep struct {
+	Seconds int `json:"seconds"`
 }
 
 // workflowMessageStep is Slack's most-used built-in step: send a message to a
@@ -96,7 +105,13 @@ const (
 	workflowStepTypeMessage   = "message"
 	workflowStepTypeAddPeople = "add_people"
 	workflowStepTypeCanvas    = "create_canvas"
+	workflowStepTypeDelay     = "delay"
 )
+
+// workflowDelayMaximum bounds how long a run may be suspended. Slack's builder
+// offers waits in minutes, hours and days; a bound keeps a mistyped value from
+// parking a run past any horizon an operator would think to look at.
+const workflowDelayMaximum = 30 * 24 * time.Hour
 
 // builtInWorkflowStep reports whether a step kind is one the run performs
 // itself. Every other kind ends when something external arrives — a function
@@ -217,6 +232,13 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 			}
 			values[index].AddPeople.Users = people
 			if values[index].AddPeople.Conversation == "" || len(people) == 0 {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+		case workflowStepTypeDelay:
+			if values[index].Delay == nil || values[index].FunctionID != "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+			if values[index].Delay.Seconds <= 0 || time.Duration(values[index].Delay.Seconds)*time.Second > workflowDelayMaximum {
 				return "", nil, ErrInvalidWorkflowStep
 			}
 		case workflowStepTypeCanvas:
@@ -1447,6 +1469,77 @@ func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.Ap
 	return nil
 }
 
+// newWorkflowDelayExecution parks a run on the clock. The step is waiting like
+// a form is, but with the instant it becomes due recorded rather than a person
+// expected — which is what makes the wait survive a restart. Storing the
+// instant, not the remaining duration, is the whole point: a duration would
+// start again from whenever the process did, so an hour's wait across a
+// deployment would become two.
+func (m Messages) newWorkflowDelayExecution(run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time) (domain.WorkflowStep, events.Event, error) {
+	executionID, err := domain.NewFunctionExecutionID()
+	if err != nil {
+		return domain.WorkflowStep{}, events.Event{}, err
+	}
+	resumeAt := now.Add(time.Duration(step.Delay.Seconds) * time.Second)
+	inputs, err := json.Marshal(map[string]any{"builtin": step.Type, "seconds": step.Delay.Seconds})
+	if err != nil {
+		return domain.WorkflowStep{}, events.Event{}, err
+	}
+	execution := domain.WorkflowStep{
+		ID: executionID, WorkflowRunID: run.ID, WorkspaceID: run.WorkspaceID, AppID: defaultApp, UserID: actor,
+		EditID: step.ID, Status: domain.WorkflowStepWaiting, Inputs: string(inputs), Outputs: "{}",
+		StepName: step.Title, ResumeAt: resumeAt, CreatedAt: now, UpdatedAt: now,
+	}
+	event, err := newEvent(run.WorkspaceID, actor, events.NewPayload("workflow.step_waiting",
+		events.String("workflow_run_id", string(run.ID)),
+		events.String("step_id", step.ID),
+		events.String("step_type", step.Type),
+		events.String("function_execution_id", string(execution.ID)),
+	), now)
+	if err != nil {
+		return domain.WorkflowStep{}, events.Event{}, err
+	}
+	return execution, event, nil
+}
+
+// ResumeWorkflowDelays advances every delay step whose wake time has passed and
+// reports how many moved. It is the service half of the delay worker; the
+// worker owns the loop and the schedule.
+//
+// A step is advanced through the ordinary path, so a run resumed by the clock
+// behaves exactly like one resumed by a person: conditions, branches and
+// variables are evaluated the same way, and a delay followed by a built-in step
+// still drains without anything else arriving.
+func (m Messages) ResumeWorkflowDelays(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) (int, error) {
+	due, err := m.Store.DueWorkflowDelays(ctx, workspaceID, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	resumed := 0
+	for _, execution := range due {
+		run, err := m.Store.GetWorkflowRun(ctx, execution.WorkspaceID, execution.WorkflowRunID)
+		if err != nil {
+			// A run that has gone is not an error worth stopping the sweep for;
+			// the step goes with it.
+			continue
+		}
+		if run.Status != domain.WorkflowRunRunning {
+			continue
+		}
+		if err := m.advanceStep(ctx, execution.WorkspaceID, run.ActorID, execution, "{}", ""); err != nil {
+			// Another worker may have advanced the same step first, which
+			// AdvanceWorkflowRun refuses with a conflict. That is the fence
+			// working, not a failure to report.
+			if errors.Is(err, store.ErrConflict) {
+				continue
+			}
+			return resumed, err
+		}
+		resumed++
+	}
+	return resumed, nil
+}
+
 // newWorkflowMessageExecution performs Slack's built-in "send a message" step.
 //
 // It is the first step kind that neither dispatches to an app nor waits for a
@@ -1656,6 +1749,9 @@ var workflowVariablePattern = regexp.MustCompile(`\{\{[^{}]+\}\}`)
 func (m Messages) newWorkflowStepExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time, stepOutputs map[string]map[string]any) (domain.WorkflowStep, events.Event, error) {
 	if builtInWorkflowStep(step.Type) {
 		return m.newBuiltInStepExecution(ctx, run, step, defaultApp, actor, now, stepOutputs)
+	}
+	if step.Type == workflowStepTypeDelay {
+		return m.newWorkflowDelayExecution(run, step, defaultApp, actor, now)
 	}
 	if step.Type == workflowStepTypeForm || step.Type == workflowStepTypeButton {
 		executionID, err := domain.NewFunctionExecutionID()

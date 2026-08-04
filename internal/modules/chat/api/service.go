@@ -283,6 +283,7 @@ type Service interface {
 	MarkRead(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.ReadCursor, error)
 	MarkAllRead(context.Context, domain.WorkspaceID, domain.UserID) (int, error)
 	FollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
+	ResumeWorkflowDelays(context.Context, domain.WorkspaceID, time.Time, int) (int, error)
 	RecordActivity(context.Context, domain.WorkspaceID, domain.UserID) error
 	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)

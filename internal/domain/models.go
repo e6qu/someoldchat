@@ -325,8 +325,14 @@ type WorkflowStep struct {
 	Error         string
 	StepName      string
 	ImageURL      string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// ResumeAt is when a delay step becomes due. It is zero for every other
+	// kind: a step that waits on a person or an app is woken by them arriving,
+	// and only a step that waits on the clock needs the clock recorded. Storing
+	// the instant rather than the duration is what makes a delay survive a
+	// restart — a duration would start again from whenever the process did.
+	ResumeAt  time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Dialog struct {
