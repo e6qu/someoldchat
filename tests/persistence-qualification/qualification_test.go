@@ -74,6 +74,7 @@ func runQualification(t *testing.T, open opener) {
 		{"batch read cursors agree with the newest message", batchReadCursorsAgreeWithTheNewestMessage},
 		{"followed threads agree across profiles", followedThreadsAgreeAcrossProfiles},
 		{"followed threads survive more roots than one chunk", followedThreadsSurviveMoreRootsThanOneChunk},
+		{"workflow delays wait on a durable instant", workflowDelaysWaitOnADurableInstant},
 		{"create message validates and is referential", createMessageValidatesAndIsReferential},
 		{"expired outbox lease is fenced", expiredOutboxLeaseIsFenced},
 		{"internal topics stay internal", internalTopicsStayInternal},

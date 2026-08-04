@@ -170,6 +170,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure scheduled status worker", "error", err)
 		return exitConfiguration
 	}
+	workflowDelayWorker, err := scheduler.NewWorkflowDelayWorker(runtime.Service, *limit)
+	if err != nil {
+		logger.Error("configure workflow delay worker", "error", err)
+		return exitConfiguration
+	}
 	retentionWorker, err := scheduler.NewRetentionWorker(runtime.Store, *limit)
 	if err != nil {
 		logger.Error("configure retention worker", "error", err)
@@ -234,6 +239,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if workflowScheduleErr != nil {
 				logger.Error("workflow schedule execution failed", "count", workflowScheduleCount, "error", workflowScheduleErr)
 			}
+			workflowDelayCount, workflowDelayErr := workflowDelayWorker.RunOnce(cycleContext, "")
+			if workflowDelayErr != nil {
+				logger.Error("workflow delay resume failed", "count", workflowDelayCount, "error", workflowDelayErr)
+			}
 			workflowEventCount, workflowEventErr := workflowEventWorker.RunOnce(cycleContext, "")
 			if workflowEventErr != nil {
 				logger.Error("workflow event dispatch failed", "count", workflowEventCount, "error", workflowEventErr)
@@ -279,6 +288,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		if workflowScheduleErr != nil {
 			failures = errors.Join(failures, workflowScheduleErr)
 			logger.Error("workflow schedule execution failed", "count", workflowScheduleCount, "error", workflowScheduleErr)
+		}
+		workflowDelayCount, workflowDelayErr := workflowDelayWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if workflowDelayErr != nil {
+			failures = errors.Join(failures, workflowDelayErr)
+			logger.Error("workflow delay resume failed", "count", workflowDelayCount, "error", workflowDelayErr)
 		}
 		workflowEventCount, workflowEventErr := workflowEventWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if workflowEventErr != nil {

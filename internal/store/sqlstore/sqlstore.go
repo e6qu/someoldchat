@@ -184,7 +184,8 @@ CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspa
 CREATE TABLE IF NOT EXISTS app_permission_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), requester_id TEXT NOT NULL REFERENCES users(id), target_user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, trigger_id TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, app_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT '', errors TEXT NOT NULL DEFAULT '{}', hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> '';
-CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workflow_run_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), function_id TEXT NOT NULL DEFAULT '', edit_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', step_name TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workflow_run_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), function_id TEXT NOT NULL DEFAULT '', edit_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', step_name TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', resume_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS workflow_steps_resume ON workflow_steps(status, resume_at);
 CREATE TABLE IF NOT EXISTS workflows (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
  owner_id TEXT NOT NULL REFERENCES users(id), callback_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
@@ -537,7 +538,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 135
+const schemaVersion = 136
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3116,6 +3117,20 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		if !columns["cursor"] {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE rtm_connections ADD COLUMN cursor INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return fmt.Errorf("migrate RTM connection cursor: %w", err)
+			}
+		}
+	}
+	if version < 136 {
+		// A delay step waits on the clock rather than on a person or an app, so
+		// the instant it becomes due has to be durable: a process that restarts
+		// must resume a wait it did not start.
+		columns, err := s.tableColumns(ctx, db, "workflow_steps")
+		if err != nil {
+			return err
+		}
+		if !columns["resume_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE workflow_steps ADD COLUMN resume_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate workflow step resume time: %w", err)
 			}
 		}
 	}
@@ -6286,18 +6301,63 @@ func (s *Store) DeleteView(ctx context.Context, workspace domain.WorkspaceID, us
 	return tx.Commit()
 }
 
+// unixNanoOrZeroTime keeps a zero instant zero on the wire. time.Time{} has a
+// large negative UnixNano, which would read back as a date in 1754 — the same
+// trap the seam converters hit.
+func unixNanoOrZeroTime(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UTC().UnixNano()
+}
+
 func scanWorkflowStep(row interface{ Scan(...any) error }) (domain.WorkflowStep, error) {
 	var value domain.WorkflowStep
 	var created, updated int64
-	if err := row.Scan(&value.ID, &value.WorkflowRunID, &value.WorkspaceID, &value.AppID, &value.UserID, &value.FunctionID, &value.EditID, &value.Status, &value.Inputs, &value.Outputs, &value.Error, &value.StepName, &value.ImageURL, &created, &updated); err != nil {
+	var resume int64
+	if err := row.Scan(&value.ID, &value.WorkflowRunID, &value.WorkspaceID, &value.AppID, &value.UserID, &value.FunctionID, &value.EditID, &value.Status, &value.Inputs, &value.Outputs, &value.Error, &value.StepName, &value.ImageURL, &resume, &created, &updated); err != nil {
 		return domain.WorkflowStep{}, err
+	}
+	if resume != 0 {
+		value.ResumeAt = time.Unix(0, resume).UTC()
 	}
 	value.CreatedAt = time.Unix(0, created).UTC()
 	value.UpdatedAt = time.Unix(0, updated).UTC()
 	return value, nil
 }
 
-const workflowStepColumns = `id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status, inputs, outputs, error, step_name, image_url, created_at, updated_at`
+const workflowStepColumns = `id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status, inputs, outputs, error, step_name, image_url, resume_at, created_at, updated_at`
+
+// DueWorkflowDelays lists the delay steps that are due. It reads only waiting
+// steps carrying a wake time, so a step waiting on a person — which has none —
+// is never mistaken for one waiting on the clock.
+func (s *Store) DueWorkflowDelays(ctx context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.WorkflowStep, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("workflow delay limit must be positive")
+	}
+	query := `SELECT ` + workflowStepColumns + ` FROM workflow_steps WHERE status = ? AND resume_at > 0 AND resume_at <= ?`
+	arguments := []any{string(domain.WorkflowStepWaiting), now.UTC().UnixNano()}
+	if workspace != "" {
+		query += ` AND workspace_id = ?`
+		arguments = append(arguments, workspace)
+	}
+	query += ` ORDER BY resume_at, id LIMIT ?`
+	arguments = append(arguments, limit)
+	rows, err := s.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowStep, 0, limit)
+	for rows.Next() {
+		value, err := scanWorkflowStep(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
 
 func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Status == "" || value.UpdatedAt.IsZero() {
@@ -6321,7 +6381,7 @@ func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, 
 	} else if value.CreatedAt.IsZero() {
 		value.CreatedAt = value.UpdatedAt
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status, inputs, outputs, error, step_name, image_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workflow_run_id = excluded.workflow_run_id, app_id = excluded.app_id, user_id = excluded.user_id, function_id = excluded.function_id, edit_id = excluded.edit_id, status = excluded.status, inputs = excluded.inputs, outputs = excluded.outputs, error = excluded.error, step_name = excluded.step_name, image_url = excluded.image_url, updated_at = excluded.updated_at`, value.ID, value.WorkflowRunID, value.WorkspaceID, value.AppID, value.UserID, value.FunctionID, value.EditID, value.Status, value.Inputs, value.Outputs, value.Error, value.StepName, value.ImageURL, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status, inputs, outputs, error, step_name, image_url, resume_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workflow_run_id = excluded.workflow_run_id, app_id = excluded.app_id, user_id = excluded.user_id, function_id = excluded.function_id, edit_id = excluded.edit_id, status = excluded.status, inputs = excluded.inputs, outputs = excluded.outputs, error = excluded.error, step_name = excluded.step_name, image_url = excluded.image_url, resume_at = excluded.resume_at, updated_at = excluded.updated_at`, value.ID, value.WorkflowRunID, value.WorkspaceID, value.AppID, value.UserID, value.FunctionID, value.EditID, value.Status, value.Inputs, value.Outputs, value.Error, value.StepName, value.ImageURL, unixNanoOrZeroTime(value.ResumeAt), value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
 	if err != nil {
 		return err
 	}

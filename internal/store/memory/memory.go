@@ -5122,6 +5122,36 @@ func (s *Store) TouchUserActivity(_ context.Context, workspace domain.WorkspaceI
 	return nil
 }
 
+// DueWorkflowDelays mirrors the SQL profile: only waiting steps that carry a
+// wake time are candidates.
+func (s *Store) DueWorkflowDelays(_ context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.WorkflowStep, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("workflow delay limit must be positive")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowStep, 0, limit)
+	for _, step := range s.workflowSteps {
+		if step.Status != domain.WorkflowStepWaiting || step.ResumeAt.IsZero() || step.ResumeAt.After(now) {
+			continue
+		}
+		if workspace != "" && step.WorkspaceID != workspace {
+			continue
+		}
+		values = append(values, step)
+	}
+	sort.Slice(values, func(left, right int) bool {
+		if !values[left].ResumeAt.Equal(values[right].ResumeAt) {
+			return values[left].ResumeAt.Before(values[right].ResumeAt)
+		}
+		return values[left].ID < values[right].ID
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return values, nil
+}
+
 func (s *Store) SetThreadFollowed(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, root domain.MessageTimestamp, followed bool, event events.Event) error {
 	if _, err := domain.ParseMessageTimestamp(root); err != nil {
 		return err

@@ -73,7 +73,17 @@ carries itself on. A built-in step that describes a desired end state MUST
 succeed when that state already holds — adding someone already in the channel
 is not a failure, or a workflow on a schedule fails forever on its second run.
 Every built-in step acts as the member who started the run, so a workflow can
-do nothing its owner could not and no change is attributed to nobody. A
+do nothing its owner could not and no change is attributed to nobody.
+
+Waiting for a set time is different in kind: the run is suspended on the clock
+rather than on a person or an app. The instant it becomes due MUST be durable,
+because a remaining duration would start again from whenever the process did
+and an hour's wait across a deployment would become two. A resumed run MUST
+behave exactly like one a person resumed — the same conditions, branches and
+variables — and a wait that has been spent MUST NOT be resumed a second time,
+however many replicas sweep for it. A wait MUST be positive and bounded, so a
+mistyped one is refused when it is written rather than parking a run past any
+horizon an operator would think to check. A
 workflow whose every step is built-in MUST therefore complete without anything
 external moving it. The message MAY quote the run's inputs and earlier steps'
 outputs with the same variable grammar the builder uses for input mapping; a

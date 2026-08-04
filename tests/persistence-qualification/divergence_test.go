@@ -340,6 +340,64 @@ func followedThreadsSurviveMoreRootsThanOneChunk(t *testing.T, open opener) {
 	}
 }
 
+// A delay step waits on the clock, so the instant it becomes due is the one
+// piece of workflow state that must outlive the process. A duration would start
+// again from whenever the process did, turning an hour's wait across a
+// deployment into two; both profiles have to store the instant and answer the
+// same question about what is due.
+func workflowDelaysWaitOnADurableInstant(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	due := time.Date(2024, 7, 1, 12, 0, 0, 0, time.UTC)
+	step := domain.WorkflowStep{
+		ID: domain.WorkflowStepID("Fx-delay-" + f.suffix), WorkflowRunID: domain.WorkflowRunID("Wx-" + f.suffix),
+		WorkspaceID: f.workspaceID, UserID: f.userID, EditID: "wait",
+		Status: domain.WorkflowStepWaiting, Inputs: `{"builtin":"delay"}`, Outputs: "{}",
+		ResumeAt: due, CreatedAt: due.Add(-time.Hour), UpdatedAt: due.Add(-time.Hour),
+	}
+	if err := f.repository.SetWorkflowStep(ctx, step, f.event("delay", "workflow.step_waiting", string(step.ID))); err != nil {
+		t.Fatal(err)
+	}
+	// A step waiting on a person carries no wake time and must never be
+	// mistaken for one waiting on the clock.
+	person := step
+	person.ID = domain.WorkflowStepID("Fx-form-" + f.suffix)
+	person.EditID = "form"
+	person.ResumeAt = time.Time{}
+	if err := f.repository.SetWorkflowStep(ctx, person, f.event("form", "workflow.step_waiting", string(person.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := f.repository.DueWorkflowDelays(ctx, f.workspaceID, due.Add(-time.Minute), 10)
+	if err != nil || len(before) != 0 {
+		t.Fatalf("due before the instant = %+v err = %v, want none", before, err)
+	}
+	after, err := f.repository.DueWorkflowDelays(ctx, f.workspaceID, due, 10)
+	if err != nil || len(after) != 1 || after[0].ID != step.ID {
+		t.Fatalf("due at the instant = %+v err = %v, want the delay and only the delay", after, err)
+	}
+	if !after[0].ResumeAt.Equal(due) {
+		t.Fatalf("resume time came back as %s, want %s — a wait that loses its instant restarts", after[0].ResumeAt, due)
+	}
+
+	// Every workspace, which is the shape the global worker queue asks for.
+	global, err := f.repository.DueWorkflowDelays(ctx, "", due, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, value := range global {
+		if value.ID == step.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the workspace-wide sweep missed the delay: %+v", global)
+	}
+}
+
 func createMessageValidatesAndIsReferential(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

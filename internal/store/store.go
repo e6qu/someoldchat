@@ -614,6 +614,10 @@ type Store interface {
 	// member has already dealt with. A followed thread whose root has been
 	// deleted is omitted rather than shown as an empty row.
 	ListFollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
+	// DueWorkflowDelays lists the delay steps whose wake time has passed. A
+	// workspace of "" asks across every workspace, which is what the global
+	// worker queue does.
+	DueWorkflowDelays(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.WorkflowStep, error)
 	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
 	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)

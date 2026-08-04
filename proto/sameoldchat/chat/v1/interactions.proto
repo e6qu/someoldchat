@@ -31,6 +31,16 @@ message MarkAllReadResponse {
   int32 conversations = 1;
 }
 
+message ResumeWorkflowDelaysRequest {
+  string workspace_id = 1;
+  int64 now_unix_nano = 2;
+  int32 limit = 3;
+}
+
+message ResumeWorkflowDelaysResponse {
+  int32 resumed = 1;
+}
+
 message RecordActivityRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -252,6 +262,7 @@ service InteractionsService {
   rpc MarkAllRead(MarkAllReadRequest) returns (MarkAllReadResponse);
   rpc ListFollowedThreads(FollowedThreadsRequest) returns (FollowedThreadPage);
   rpc RecordActivity(RecordActivityRequest) returns (RecordActivityResponse);
+  rpc ResumeWorkflowDelays(ResumeWorkflowDelaysRequest) returns (ResumeWorkflowDelaysResponse);
   // Named GetReadCursor because an rpc named ReadCursor would shadow the
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);

@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
@@ -142,6 +143,110 @@ func TestBuiltInStepDefinitionsAreValidated(t *testing.T) {
 		candidate.Steps = steps
 		if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", candidate, workflow.Version, true); err == nil {
 			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+// Slack's "wait for a set time" step. It is the first kind that suspends a run
+// on the clock rather than on a person, an app, or nothing at all, so the run
+// must stay parked until the wake time and then continue on its own.
+func TestDelayStepParksTheRunUntilItIsDue(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	run := publishAndRun(t, messages, workflow, `[
+		{"id":"wait","type":"delay","delay":{"seconds":3600}},
+		{"id":"say","type":"message","message":{"conversation":"C1","text":"after the wait"}}
+	]`, `{}`, "delayed")
+	if run.Status != domain.WorkflowRunRunning {
+		t.Fatalf("run status = %q, want it still running while parked", run.Status)
+	}
+
+	// Nothing is due yet, so a sweep moves nothing and the later step has not
+	// run: a delay that resumed early would be no delay at all.
+	resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", time.Now().UTC(), 10)
+	if err != nil || resumed != 0 {
+		t.Fatalf("resumed = %d err = %v, want nothing due yet", resumed, err)
+	}
+	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range page.Messages {
+		if message.Text == "after the wait" {
+			t.Fatal("the step after the delay ran before the delay was due")
+		}
+	}
+
+	// Once due, the run continues on its own and drains the built-in step
+	// behind it.
+	resumed, err = messages.ResumeWorkflowDelays(ctx, "T1", time.Now().UTC().Add(2*time.Hour), 10)
+	if err != nil || resumed != 1 {
+		t.Fatalf("resumed = %d err = %v, want the due delay to have moved", resumed, err)
+	}
+	after, err := messages.GetWorkflowRun(ctx, "T1", "U1", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("run status = %q, want completed once the wait finished", after.Status)
+	}
+	page, err = repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range page.Messages {
+		if message.Text == "after the wait" {
+			return
+		}
+	}
+	t.Fatalf("the step after the delay never ran: %+v", page.Messages)
+}
+
+// Two sweeps must not resume the same wait twice. Advancing is a compare-and-set
+// against the run's current position, so the second sweep finds nothing rather
+// than running the following step again.
+func TestDueDelayResumesExactlyOnce(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	publishAndRun(t, messages, workflow, `[
+		{"id":"wait","type":"delay","delay":{"seconds":60}},
+		{"id":"say","type":"message","message":{"conversation":"C1","text":"exactly once"}}
+	]`, `{}`, "once")
+
+	due := time.Now().UTC().Add(time.Hour)
+	if resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", due, 10); err != nil || resumed != 1 {
+		t.Fatalf("first sweep resumed = %d err = %v", resumed, err)
+	}
+	if resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", due, 10); err != nil || resumed != 0 {
+		t.Fatalf("second sweep resumed = %d err = %v, want the wait already spent", resumed, err)
+	}
+	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, message := range page.Messages {
+		if message.Text == "exactly once" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("the step after the delay ran %d times, want once", count)
+	}
+}
+
+// A delay is bounded and must be positive: a mistyped wait should be refused at
+// publish time rather than parking a run past any horizon anyone would check.
+func TestDelayStepDurationIsBounded(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	for name, steps := range map[string]string{
+		"zero":     `[{"id":"a","type":"delay","delay":{"seconds":0}}]`,
+		"negative": `[{"id":"a","type":"delay","delay":{"seconds":-60}}]`,
+		"too long": `[{"id":"a","type":"delay","delay":{"seconds":5184000}}]`,
+		"missing":  `[{"id":"a","type":"delay"}]`,
+	} {
+		candidate := workflow
+		candidate.Steps = steps
+		if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", candidate, workflow.Version, true); err == nil {
+			t.Errorf("a %s delay was accepted", name)
 		}
 	}
 }
