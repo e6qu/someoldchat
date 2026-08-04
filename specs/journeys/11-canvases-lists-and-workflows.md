@@ -67,8 +67,13 @@ builder with typed inputs/outputs, least-privilege token context, retries or
 backoff only where the contract permits, and durable activity records.
 
 Slack's built-in steps are not app functions and MUST not require one. Sending
-a message to a conversation is the commonest of them: it dispatches to no app
-and waits for no person, so the run performs it and carries itself on. A
+a message to a conversation, adding people to a channel, and creating a canvas
+each dispatch to no app and wait for no person, so the run performs them and
+carries itself on. A built-in step that describes a desired end state MUST
+succeed when that state already holds — adding someone already in the channel
+is not a failure, or a workflow on a schedule fails forever on its second run.
+Every built-in step acts as the member who started the run, so a workflow can
+do nothing its owner could not and no change is attributed to nobody. A
 workflow whose every step is built-in MUST therefore complete without anything
 external moving it. The message MAY quote the run's inputs and earlier steps'
 outputs with the same variable grammar the builder uses for input mapping; a

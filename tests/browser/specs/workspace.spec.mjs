@@ -2188,6 +2188,59 @@ test('[WORKFLOW-02] a built-in message step posts and completes the run with no 
   await expect(page.locator('.message-text').filter({ hasText: announcement })).toHaveCount(1);
 });
 
+test('[WORKFLOW-02] built-in steps add people and create a canvas, and chain into each other', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/workflow-builtin-callback';
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name: `Built-in tools ${Date.now()}` },
+    oauth_config: { redirect_urls: [redirectURI], scopes: { bot: ['chat:write'] } },
+    settings: { function_runtime: 'remote' },
+    functions: {
+      // A callback id of its own: the function picker lists every installed
+      // app's functions, so two apps that both declare `placeholder` make the
+      // selection ambiguous and the create is refused as a function that does
+      // not belong to the chosen app.
+      onboarding_start: {
+        title: 'Onboarding start',
+        input_parameters: { properties: {}, required: [] },
+        output_parameters: { properties: {}, required: [] },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Workflows' }).click();
+  await page.getByText('Create a workflow').click();
+  await page.getByLabel('Name').fill(`Onboarding ${Date.now()}`);
+  await page.getByLabel('Owning app').selectOption(installed.appID);
+  await page.getByLabel('First step').selectOption('onboarding_start');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+  // Wait for the builder itself rather than for a control on it: a create that
+  // did not navigate otherwise fails thirty seconds later on a missing field,
+  // which says nothing about what went wrong.
+  await expect(page).toHaveURL(/\/app\/workflows\/Wf[0-9a-zA-Z]+/);
+
+  // Two built-in steps in a row: the run has to carry itself through both,
+  // because neither dispatches to an app nor waits for a person.
+  const canvasTitle = `Onboarding notes ${Date.now()}`;
+  await page.getByLabel('Step 1 type').selectOption('create_canvas');
+  await page.getByLabel('Step 1 message text or canvas title').fill(canvasTitle);
+  await page.getByLabel('Step 2 type').selectOption('add_people');
+  await page.getByLabel('Step 2 message conversation').selectOption('Cdev');
+  await page.getByLabel('Step 2 people to add').fill('Udev');
+  await page.getByRole('button', { name: 'Publish' }).click();
+
+  await page.getByLabel('Trigger name').fill('Onboard');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page.getByText('completed', { exact: true })).toBeVisible();
+
+  // The canvas the step describes really exists, owned by the member who ran it.
+  await page.goto('/app/canvases');
+  await expect(page.getByText(canvasTitle)).toBeVisible();
+});
+
 test('[WORKFLOW-05] a form step pauses for input and a button step confirms', async ({ page, context, request }) => {
   await signIn(context);
   const redirectURI = 'https://client.example/workflow-form-callback';
