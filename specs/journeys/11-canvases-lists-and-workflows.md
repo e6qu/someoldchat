@@ -65,6 +65,16 @@ process restart.
 Slack, connector, and custom app functions run in the order shown in the
 builder with typed inputs/outputs, least-privilege token context, retries or
 backoff only where the contract permits, and durable activity records.
+
+Slack's built-in steps are not app functions and MUST not require one. Sending
+a message to a conversation is the commonest of them: it dispatches to no app
+and waits for no person, so the run performs it and carries itself on. A
+workflow whose every step is built-in MUST therefore complete without anything
+external moving it. The message MAY quote the run's inputs and earlier steps'
+outputs with the same variable grammar the builder uses for input mapping; a
+reference that resolves to nothing MUST be left visible rather than blanked, so
+the author can see which reference was wrong. A step that cannot deliver fails
+the run and records why, rather than failing the request that started it.
 Variables carry earlier output without stringly typed reinterpretation.
 Buttons can pause execution until an eligible person clicks, and branches
 route only through the selected condition. A failed, cancelled, or waiting

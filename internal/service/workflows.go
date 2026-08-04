@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,6 +29,19 @@ type workflowFunctionDefinition struct {
 	Condition    *workflowStepCondition `json:"condition,omitempty"`
 	Form         *workflowFormStep      `json:"form,omitempty"`
 	Button       *workflowButtonStep    `json:"button,omitempty"`
+	Message      *workflowMessageStep   `json:"message,omitempty"`
+}
+
+// workflowMessageStep is Slack's most-used built-in step: send a message to a
+// conversation. It is the first step kind that neither dispatches to an app nor
+// waits for a person — the run performs it and carries straight on, which is
+// why newWorkflowStepExecution grew a completion path.
+//
+// Text may reference earlier steps the same way input mapping does, so a form's
+// answer can be quoted in the message that announces it.
+type workflowMessageStep struct {
+	Conversation string `json:"conversation"`
+	Text         string `json:"text"`
 }
 
 // workflowFormStep describes a step that pauses the run until someone fills in
@@ -58,8 +72,9 @@ type workflowStepCondition struct {
 const workflowStepTypeFunction = "function"
 
 const (
-	workflowStepTypeForm   = "form"
-	workflowStepTypeButton = "button"
+	workflowStepTypeForm    = "form"
+	workflowStepTypeButton  = "button"
+	workflowStepTypeMessage = "message"
 )
 
 // workflowConditionOperators are the comparisons a step condition supports,
@@ -147,6 +162,15 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 				return "", nil, ErrInvalidWorkflowStep
 			}
 			values[index].Button.Label = strings.TrimSpace(values[index].Button.Label)
+		case workflowStepTypeMessage:
+			if values[index].Message == nil || values[index].FunctionID != "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+			values[index].Message.Conversation = strings.TrimSpace(values[index].Message.Conversation)
+			values[index].Message.Text = strings.TrimSpace(values[index].Message.Text)
+			if values[index].Message.Conversation == "" || values[index].Message.Text == "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
 		default:
 			return "", nil, ErrInvalidWorkflowStep
 		}
@@ -1365,12 +1389,118 @@ func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.Ap
 	return nil
 }
 
+// newWorkflowMessageExecution performs Slack's built-in "send a message" step.
+//
+// It is the first step kind that neither dispatches to an app nor waits for a
+// person, so it completes in the same call that creates it: the message is
+// posted, the execution is recorded as completed, and the run carries on. The
+// caller advances past it, which is what keeps a run of several message steps
+// from needing an app or a click to move.
+//
+// The message is posted as the member who started the run, not as the workflow,
+// because a workflow has no identity of its own here and posting as one would
+// invent an author. That also means conversation membership is enforced against
+// a real person: a workflow cannot post somewhere its owner could not.
+func (m Messages) newWorkflowMessageExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time, stepOutputs map[string]map[string]any) (domain.WorkflowStep, events.Event, error) {
+	executionID, err := domain.NewFunctionExecutionID()
+	if err != nil {
+		return domain.WorkflowStep{}, events.Event{}, err
+	}
+	text := interpolateWorkflowText(step.Message.Text, decodeWorkflowInputsMap(run.Inputs), stepOutputs)
+	conversation := domain.ConversationID(step.Message.Conversation)
+	inputs, err := json.Marshal(map[string]string{"conversation": string(conversation), "text": text})
+	if err != nil {
+		return domain.WorkflowStep{}, events.Event{}, err
+	}
+	// The step is recorded as executing and completed by the ordinary advance,
+	// because a run is created with a step that is in progress — the stores
+	// enforce that, and it is the honest description: the post has not happened
+	// when the record is written.
+	execution := domain.WorkflowStep{
+		ID: executionID, WorkflowRunID: run.ID, WorkspaceID: run.WorkspaceID, AppID: defaultApp, UserID: actor,
+		EditID: step.ID, Status: domain.WorkflowStepExecuting, Inputs: string(inputs), Outputs: "{}",
+		StepName: step.Title, CreatedAt: now, UpdatedAt: now,
+	}
+	event, err := newEvent(run.WorkspaceID, actor, events.NewPayload("workflow.step_configured",
+		events.String("workflow_run_id", string(run.ID)),
+		events.String("step_id", step.ID),
+		events.String("step_type", step.Type),
+		events.String("function_execution_id", string(execution.ID)),
+	), now)
+	if err != nil {
+		return domain.WorkflowStep{}, events.Event{}, err
+	}
+	return execution, event, nil
+}
+
+// performBuiltInStep does the work a built-in step describes and completes it.
+// It runs after the execution is durable, so a crash between the record and the
+// work leaves a step visibly executing rather than a run that silently skipped
+// one.
+func (m Messages) performBuiltInStep(ctx context.Context, run domain.WorkflowRun, execution domain.WorkflowStep) error {
+	var inputs struct {
+		Conversation string `json:"conversation"`
+		Text         string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(execution.Inputs), &inputs); err != nil {
+		return m.advanceStep(ctx, run.WorkspaceID, run.ActorID, execution, "{}", "the step inputs could not be read")
+	}
+	posted, err := m.Post(ctx, run.WorkspaceID, run.ActorID, domain.ConversationID(inputs.Conversation), inputs.Text, "", string(execution.ID))
+	if err != nil {
+		// A step that cannot post is a failed step, not a failed request: the
+		// run records why and stops, which is what an operator reads afterwards.
+		return m.advanceStep(ctx, run.WorkspaceID, run.ActorID, execution, "{}", err.Error())
+	}
+	outputs, err := json.Marshal(map[string]string{
+		"ts":           string(domain.NewMessageTimestamp(posted.CreatedAt)),
+		"conversation": inputs.Conversation,
+	})
+	if err != nil {
+		return err
+	}
+	return m.advanceStep(ctx, run.WorkspaceID, run.ActorID, execution, string(outputs), "")
+}
+
+// interpolateWorkflowText substitutes {{inputs.name}} and
+// {{steps.id.outputs.name}} references in a built-in step's text. It uses the
+// same source grammar as input mapping, so a member who has learned to
+// reference a form answer in one place references it the same way in the other.
+// An unresolvable reference is left as written rather than blanked: a message
+// that shows the reference it could not fill tells the author what is wrong,
+// and an empty gap does not.
+func interpolateWorkflowText(text string, inputs map[string]any, outputs map[string]map[string]any) string {
+	return workflowVariablePattern.ReplaceAllStringFunc(text, func(match string) string {
+		reference := strings.TrimSpace(match[2 : len(match)-2])
+		source, err := parseWorkflowVariableSource(reference)
+		if err != nil {
+			return match
+		}
+		value, found := resolveWorkflowVariable(source, inputs, outputs)
+		if !found {
+			return match
+		}
+		if text, ok := value.(string); ok {
+			return text
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return match
+		}
+		return string(encoded)
+	})
+}
+
+var workflowVariablePattern = regexp.MustCompile(`\{\{[^{}]+\}\}`)
+
 // newWorkflowStepExecution creates the execution record for the next step a run
 // reaches. A function step dispatches to its app and emits function_executed;
 // a form or button step parks the run waiting for a person to submit or click,
 // emitting workflow.step_waiting instead. The caller resolves stepOutputs once
 // and passes it in so both input mapping and the advance reuse it.
 func (m Messages) newWorkflowStepExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time, stepOutputs map[string]map[string]any) (domain.WorkflowStep, events.Event, error) {
+	if step.Type == workflowStepTypeMessage {
+		return m.newWorkflowMessageExecution(ctx, run, step, defaultApp, actor, now, stepOutputs)
+	}
 	if step.Type == workflowStepTypeForm || step.Type == workflowStepTypeButton {
 		executionID, err := domain.NewFunctionExecutionID()
 		if err != nil {
@@ -1560,7 +1690,14 @@ func (m Messages) runWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 		first = &execution
 		emitted = append(emitted, executionEvent)
 	}
-	if err := m.Store.CreateWorkflowRun(ctx, run, first, emitted); err != nil {
+	createErr := m.Store.CreateWorkflowRun(ctx, run, first, emitted)
+	if createErr == nil && first != nil && steps[run.CurrentStep].Type == workflowStepTypeMessage {
+		if err := m.performBuiltInStep(ctx, run, *first); err != nil {
+			return domain.WorkflowRun{}, err
+		}
+		return m.Store.GetWorkflowRun(ctx, workspaceID, run.ID)
+	}
+	if err := createErr; err != nil {
 		if idempotencyKey != "" && errors.Is(err, store.ErrAlreadyExists) {
 			existing, lookupErr := m.Store.GetWorkflowRunByIdempotency(ctx, workspaceID, idempotencyKey)
 			if lookupErr == nil && existing.ActorID == actor && existing.TriggerID == triggerID {
@@ -1838,7 +1975,17 @@ func (m Messages) advanceStep(ctx context.Context, workspaceID domain.WorkspaceI
 		return err
 	}
 	emitted = append([]events.Event{runEvent}, emitted...)
-	return m.Store.AdvanceWorkflowRun(ctx, execution, next, run, expectedStep, emitted)
+	if err := m.Store.AdvanceWorkflowRun(ctx, execution, next, run, expectedStep, emitted); err != nil {
+		return err
+	}
+	// A built-in step finishes in the same call that starts it, so the run has
+	// to be carried past it here. Without this a workflow whose second step
+	// sends a message would stop on that step forever, waiting for an app or a
+	// person that a built-in step never involves.
+	if next != nil && run.CurrentStep < len(steps) && steps[run.CurrentStep].Type == workflowStepTypeMessage {
+		return m.performBuiltInStep(ctx, run, *next)
+	}
+	return nil
 }
 
 func (m Messages) GetWorkflowRun(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, runID domain.WorkflowRunID) (domain.WorkflowRun, error) {
