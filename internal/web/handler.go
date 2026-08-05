@@ -1163,6 +1163,8 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.message.is-arrival{background:var(--mark-bg);border-radius:6px;transition:background 600ms ease-out}
+@media (prefers-reduced-motion:reduce){.message.is-arrival{transition:none}}
 .result mark,.message-text mark{background:var(--mark-bg);color:inherit;font-weight:700;border-radius:2px;padding:0 1px}
 .typing{margin:0;padding:0 16px;min-height:18px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
 .typing-dots{display:inline-flex;gap:3px}
@@ -2702,6 +2704,22 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // appear in the window on screen — which is how a sent message used to flash up
 // and then vanish.
 //
+// Arriving from a permalink lands on the message the link names, rather than at
+// the bottom of the conversation. The link already carried both halves — a
+// window cursor ending just after the message and a fragment naming it — but
+// the page finished loading by scrolling the timeline to its newest message,
+// which undid the browser's own jump to the fragment. So a search result opened
+// the right window and then looked at the wrong end of it.
+//
+// The message is focused rather than only scrolled to, because a fragment moves
+// the viewport and not the keyboard, and it is marked so the eye finds it
+// without comparing timestamps. The mark clears on the first interaction rather
+// than on a timer: a highlight that vanishes while the reader is still finding
+// their place is worse than one that waits, and "until you engage" is a state
+// the page can observe while "three seconds" is a guess.
+//
+// The composer keeps its focus only when the link named nothing.
+//
 // A refresh the reader caused is not cancelled by one nobody asked for. Every
 // refresh used to abort the fetches in flight and invalidate their generation,
 // including a forced refresh a mutation had just issued — the audit named this
@@ -3860,9 +3878,19 @@ window.setInterval(beat,300000);
 }
 var markRead=document.getElementById('mark-read');
 if(markRead)submitQuietly(markRead);
+var arrivedAt=null;
+try{arrivedAt=window.location.hash?document.getElementById(decodeURIComponent(window.location.hash.slice(1))):null}catch(error){arrivedAt=null}
+if(arrivedAt&&arrivedAt.classList&&arrivedAt.classList.contains('message')){
+arrivedAt.classList.add('is-arrival');
+focusMessage(arrivedAt);
+announce('Opened the message you selected.');
+var clearArrival=function(){arrivedAt.classList.remove('is-arrival');['pointerdown','keydown','wheel'].forEach(function(name){document.removeEventListener(name,clearArrival)})};
+['pointerdown','keydown','wheel'].forEach(function(name){document.addEventListener(name,clearArrival,{once:false,passive:true})});
+}else{
 toBottom(document.getElementById('timeline'));
+}
 var activeModal=document.querySelector('[aria-modal="true"]');
-if(activeModal){var modalFocus=activeModal.querySelector('input:not([type=hidden]),textarea,select,button');if(modalFocus)modalFocus.focus()}else if(text)text.focus();
+if(activeModal){var modalFocus=activeModal.querySelector('input:not([type=hidden]),textarea,select,button');if(modalFocus)modalFocus.focus()}else if(arrivedAt&&arrivedAt.classList&&arrivedAt.classList.contains('message')){}else if(text)text.focus();
 })();</script>`
 
 func liveEventTopicsLiteral() string {
