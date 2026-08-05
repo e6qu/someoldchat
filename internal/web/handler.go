@@ -2678,6 +2678,17 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // appear in the window on screen — which is how a sent message used to flash up
 // and then vanish.
 //
+// A region is not re-rendered when the server returns exactly the markup it was
+// last given. Replacing a region with identical HTML cannot add information and
+// can only destroy state the DOM was holding: the focused message, the caret,
+// the scroll anchor, an open details disclosure. CI caught a keyboard journey
+// losing message focus with a trace showing two timeline fetches 490 ms apart
+// returning the same 52922 bytes, the second unforced; the failure has not been
+// reproduced, so this is not offered as its diagnosis. It is worth doing on its
+// own terms, and it closes that whole class of loss rather than one instance.
+// The remembered markup is cleared wherever something other than refresh()
+// writes to a region, which is the composer appending its own sent message.
+//
 // The script carries no JavaScript comments on purpose: html/template elides
 // them when it renders a script context, so the bytes the browser receives
 // would no longer match the Content-Security-Policy hash computed from this
@@ -2759,6 +2770,7 @@ var narrow=window.matchMedia?window.matchMedia('(max-width:800px)'):null;
 var generation=0;
 var inFlight=null;
 var scheduled=null;
+var appliedHTML=new WeakMap();
 var draftTimer=null;
 var sending=false;
 var stagingFiles=false;
@@ -3175,6 +3187,8 @@ var activeMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):
 pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){
 if(token!==generation)return;
 if(!force&&document.activeElement&&region.contains(document.activeElement))return;
+if(appliedHTML.get(region)===html)return;
+appliedHTML.set(region,html);
 region.innerHTML=html;
 localize(region);
 if(stick)toBottom(region);
@@ -3474,6 +3488,7 @@ return null;
 var target=document.querySelector(form.getAttribute('hx-target'));
 if(!target)throw new Error('The page could not be updated. Reload to see the message.');
 target.insertAdjacentHTML('beforeend',html);
+appliedHTML.delete(target);
 localize(target);
 if(form===composer&&text){if(text.value===sent){text.value='';draftAttachments=[];syncDraftAttachments();persistDraft()}text.focus()}else{form.reset()}
 toBottom(target);
