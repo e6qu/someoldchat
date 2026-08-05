@@ -439,6 +439,14 @@ func conversionCases() map[string]conversionCase {
 				return &assistantPromptsRoundTrip{Prompts: decodeProtoAssistantPrompts(wire.GetPrompts())}, wire, nil
 			},
 		},
+		"TypingSignals": {
+			sample: &typingSignalsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				value := filled.(*typingSignalsRoundTrip)
+				wire := &chatv1.TypingSignalsResponse{Signals: encodeProtoTypingSignals(value.Signals)}
+				return &typingSignalsRoundTrip{Signals: decodeProtoTypingSignals(wire.GetSignals())}, wire, nil
+			},
+		},
 		"AppDeliveryHealth": {
 			sample: &domain.AppDeliveryHealth{},
 			prepare: func(filled any) {
@@ -585,6 +593,14 @@ type reactionPage struct {
 
 type assistantPromptsRoundTrip struct {
 	Prompts []domain.AssistantPrompt
+}
+
+// typingSignalsRoundTrip wraps the slice because a signal only ever crosses the
+// wire inside one. The zero-time pass matters more here than for most records:
+// an expiry is the whole of a signal's meaning, and a zero time that decoded to
+// the year 1754 would make an expired signal read as live for two centuries.
+type typingSignalsRoundTrip struct {
+	Signals []domain.TypingSignal
 }
 
 type draftAttachmentsRoundTrip struct {

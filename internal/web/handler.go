@@ -369,6 +369,11 @@ type pageData struct {
 	ChannelMeta          string
 	WorkspaceName        string
 	CSRFToken            string
+	// Typing is rendered empty on first paint and filled by the live stream.
+	// Reading it here instead would put a store query on every page render to
+	// answer a question that is almost always "nobody", and the stream reads it
+	// on its own first pass anyway.
+	Typing typingView
 	// Assistant is the state an assistant app has set on the open thread. It is
 	// empty for every thread no app has touched, which is almost all of them.
 	Assistant   assistantThreadView
@@ -1136,6 +1141,13 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.typing{margin:0;padding:0 16px;min-height:18px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.typing-dots{display:inline-flex;gap:3px}
+.typing-dots i{width:4px;height:4px;border-radius:50%;background:currentColor;animation:typing-pulse 1.2s infinite ease-in-out}
+.typing-dots i:nth-child(2){animation-delay:.2s}
+.typing-dots i:nth-child(3){animation-delay:.4s}
+@keyframes typing-pulse{0%,60%,100%{opacity:.25}30%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.typing-dots i{animation:none;opacity:.6}}
 .huddle-bar.active{background:var(--hover)}
 .huddle-state{display:grid;gap:2px;min-width:0}
 .huddle-people{color:var(--text)}
@@ -1670,6 +1682,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button type="submit">Add to draft</button>
           </form>
         </details>{{end}}
+        <div id="typing" data-typing="/app/typing?channel={{.Channel}}" data-channel="{{.Channel}}">{{template "typing" .Typing}}</div>
         <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.LatestURL}}" data-draft-url="{{.DraftURL}}">
           <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -1926,7 +1939,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 </div>
 {{end}}
 {{end}}
-` + messagesPartial + huddlePartial
+` + messagesPartial + huddlePartial + typingPartial
 
 var pageTemplate = mustPage(pageMarkup)
 
@@ -1959,6 +1972,16 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
 {{end}}
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 </div>{{end}}{{end}}`
+
+// typingPartial renders who is composing, above the composer where Slack puts
+// it. The region is a polite live region so a screen reader mentions it between
+// sentences rather than interrupting; an assertive one would talk over the
+// message a member is reading in order to say that someone else is writing.
+//
+// When nobody is typing the region is empty rather than absent, so the live
+// region the reader's assistive technology is already watching stays the same
+// element instead of being replaced each time.
+const typingPartial = `{{define "typing"}}<p class="typing" role="status" aria-live="polite">{{if .Text}}<span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{.Text}}{{end}}</p>{{end}}`
 
 const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -3731,6 +3754,42 @@ announce('Reconnecting to live updates…');
 };
 topics.forEach(function(topic){stream.addEventListener(topic,deliver)});
 }
+var typingRegion=document.getElementById('typing');
+if(typingRegion&&window.fetch&&typingRegion.getAttribute('data-channel')){
+var typingTiming=` + typingTimingLiteral() + `;
+var typingURL=typingRegion.getAttribute('data-typing')||'';
+var typingChannel=typingRegion.getAttribute('data-channel')||'';
+var typingCsrf=document.querySelector('#composer input[name=_csrf]');
+var typingSent=0;
+var typingClear=null;
+var typingPending=null;
+var renderTyping=function(){
+if(!ownPath(typingURL))return;
+fetch(typingURL,{headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('typing');return response.text()}).then(function(html){
+typingRegion.innerHTML=html;
+window.clearTimeout(typingClear);
+if(typingRegion.textContent.trim())typingClear=window.setTimeout(renderTyping,typingTiming.ttl);
+}).catch(function(){});
+};
+var scheduleTyping=function(){
+if(typingPending)return;
+typingPending=window.setTimeout(function(){typingPending=null;renderTyping()},200);
+};
+if(typeof stream!=='undefined'&&stream)stream.addEventListener('typing',function(event){
+var frame=null;
+try{frame=JSON.parse(event.data)}catch(error){return}
+if(!frame||frame.channel!==typingChannel)return;
+scheduleTyping();
+});
+if(text&&typingCsrf)text.addEventListener('input',function(){
+var now=Date.now();
+if(!text.value||now-typingSent<typingTiming.interval||!ownPath(typingURL))return;
+typingSent=now;
+var typingBody=new URLSearchParams();
+typingBody.set('_csrf',typingCsrf.value);
+fetch(typingURL,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:typingBody.toString()}).catch(function(){});
+});
+}
 var activityCsrf=document.querySelector('#composer input[name=_csrf],form input[name=_csrf]');
 if(activityCsrf&&window.fetch){
 var lastBeat=0;
@@ -3834,6 +3893,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("POST /app/read/all", h.markAllRead)
 	mux.HandleFunc("POST /app/active", h.recordActivity)
+	mux.HandleFunc("POST /app/typing", h.recordTyping)
+	mux.HandleFunc("GET /app/typing", h.typingFragment)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/search/suggestions", h.searchSuggestions)
 	mux.HandleFunc("GET /app/emoji/options", h.emojiOptions)

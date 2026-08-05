@@ -3399,6 +3399,34 @@ func (r Remote) AssistantThread(ctx context.Context, workspaceID domain.Workspac
 	return decodeProtoAssistantThread(out)
 }
 
+func (r Remote) SetTyping(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID) error {
+	_, err := r.interactions.SetTyping(ctx, &chatv1.SetTypingRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), Conversation: string(conversation),
+	})
+	return err
+}
+
+func (r Remote) TypingSignals(ctx context.Context, workspaceID domain.WorkspaceID, reader domain.UserID) ([]domain.TypingSignal, error) {
+	out, err := r.interactions.TypingSignals(ctx, &chatv1.TypingSignalsRequest{WorkspaceId: string(workspaceID), UserId: string(reader)})
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoTypingSignals(out.GetSignals()), nil
+}
+
+// TypingIn narrows the remote read with the same domain filter the local
+// service uses, rather than adding a per-conversation RPC. The set is bounded
+// by how many people are typing at this instant, so the saving a narrower call
+// would buy is a few strings, and the cost would be a second query shape whose
+// visibility rule could drift from the first one's.
+func (r Remote) TypingIn(ctx context.Context, workspaceID domain.WorkspaceID, reader domain.UserID, conversation domain.ConversationID) ([]domain.TypingSignal, error) {
+	signals, err := r.TypingSignals(ctx, workspaceID, reader)
+	if err != nil {
+		return nil, err
+	}
+	return domain.TypingSignalsIn(signals, conversation), nil
+}
+
 func (r Remote) ResumeWorkflowDelays(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) (int, error) {
 	out, err := r.interactions.ResumeWorkflowDelays(ctx, &chatv1.ResumeWorkflowDelaysRequest{
 		WorkspaceId: string(workspaceID), NowUnixNano: unixNanoOrZero(now), Limit: int32(limit),
@@ -6736,6 +6764,47 @@ func (s *Server) GetAssistantThread(ctx context.Context, input *chatv1.Assistant
 		return nil, mapError(err)
 	}
 	return encodeProtoAssistantThread(value), nil
+}
+
+func (s *Server) SetTyping(ctx context.Context, input *chatv1.SetTypingRequest) (*chatv1.SetTypingResponse, error) {
+	if err := s.implementation.SetTyping(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversation())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SetTypingResponse{Ok: true}, nil
+}
+
+func (s *Server) TypingSignals(ctx context.Context, input *chatv1.TypingSignalsRequest) (*chatv1.TypingSignalsResponse, error) {
+	signals, err := s.implementation.TypingSignals(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.TypingSignalsResponse{Signals: encodeProtoTypingSignals(signals)}, nil
+}
+
+func encodeProtoTypingSignals(values []domain.TypingSignal) []*chatv1.TypingSignal {
+	signals := make([]*chatv1.TypingSignal, 0, len(values))
+	for _, signal := range values {
+		signals = append(signals, &chatv1.TypingSignal{
+			WorkspaceId:       string(signal.WorkspaceID),
+			Conversation:      string(signal.Conversation),
+			UserId:            string(signal.UserID),
+			ExpiresAtUnixNano: unixNanoOrZero(signal.ExpiresAt),
+		})
+	}
+	return signals
+}
+
+func decodeProtoTypingSignals(values []*chatv1.TypingSignal) []domain.TypingSignal {
+	signals := make([]domain.TypingSignal, 0, len(values))
+	for _, signal := range values {
+		signals = append(signals, domain.TypingSignal{
+			WorkspaceID:  domain.WorkspaceID(signal.GetWorkspaceId()),
+			Conversation: domain.ConversationID(signal.GetConversation()),
+			UserID:       domain.UserID(signal.GetUserId()),
+			ExpiresAt:    optionalTimeFromUnixNano(signal.GetExpiresAtUnixNano()),
+		})
+	}
+	return signals
 }
 
 func encodeProtoAssistantPrompts(values []domain.AssistantPrompt) []*chatv1.AssistantPrompt {

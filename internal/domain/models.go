@@ -377,6 +377,70 @@ func (f AssistantThreadField) Valid() bool {
 // pane into an unbounded page.
 const AssistantPromptLimit = 8
 
+// TypingSignal is one member composing in one conversation, and it is the only
+// piece of workspace state in this product that is deliberately not journalled.
+// Every other mutation writes an outbox record because the fact it records is
+// worth replaying: a message posted an hour ago is still true. "Someone is
+// typing" is true for about as long as it takes to read, and a journal entry
+// for it would be replayed to a reconnecting client as news, delivered to apps
+// that have no use for it, and written twenty times a minute per composing
+// member for as long as the workspace exists.
+//
+// So a signal is state with an expiry rather than an event. It is written by
+// replacing the member's own row, read by asking who has not expired, and
+// stopped by the clock rather than by a second message — which also means a
+// client that closes its laptop mid-word stops appearing without having to
+// announce it, and a process that restarts finds every signal it left behind
+// already expired.
+type TypingSignal struct {
+	WorkspaceID  WorkspaceID
+	Conversation ConversationID
+	UserID       UserID
+	// ExpiresAt is when this signal stops being shown. Readers compare it
+	// against their own clock, so there is no "stopped typing" write to lose.
+	ExpiresAt time.Time
+}
+
+func (s TypingSignal) Valid() bool {
+	return s.WorkspaceID != "" && s.Conversation != "" && s.UserID != "" && !s.ExpiresAt.IsZero()
+}
+
+// Active reports whether this signal should still be shown at the given
+// instant. Expiry is exclusive so a signal written and read in the same
+// instant — which the tests do — is active.
+func (s TypingSignal) Active(now time.Time) bool {
+	return s.ExpiresAt.After(now)
+}
+
+// TypingSignalsIn narrows a reader's signals to one conversation. It lives
+// here rather than in either composition because both of them need it — the
+// local service filters what it read from the store, the gRPC client filters
+// what it read from the wire — and a filter implemented twice is a rule that
+// can disagree with itself.
+func TypingSignalsIn(signals []TypingSignal, conversation ConversationID) []TypingSignal {
+	filtered := make([]TypingSignal, 0, len(signals))
+	for _, signal := range signals {
+		if signal.Conversation == conversation {
+			filtered = append(filtered, signal)
+		}
+	}
+	return filtered
+}
+
+const (
+	// TypingSignalTTL is how long one signal lasts without being renewed.
+	// Slack's indicator clears a few seconds after the last keystroke rather
+	// than the moment a key is released, so a member who pauses to think keeps
+	// the indicator rather than making it flicker.
+	TypingSignalTTL = 6 * time.Second
+	// TypingSignalInterval is how often a composing client renews its signal.
+	// It has to be comfortably shorter than the TTL or a member typing steadily
+	// would blink out between renewals; it also bounds the write rate, because
+	// every keystroke past the first in each interval is discarded by the
+	// client rather than sent.
+	TypingSignalInterval = 3 * time.Second
+)
+
 type Dialog struct {
 	ID          DialogID
 	WorkspaceID WorkspaceID

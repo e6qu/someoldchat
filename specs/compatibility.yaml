@@ -1668,7 +1668,12 @@ decisions:
       its current-catalog user_profile_changed and user_status_changed
       companions, dnd_updated, presence_change (RTM only), team_rename and
       file_public, each from a producer-snapshotted payload pinned by builder
-      and producer-seam tests. app_mention is derived by the per-app message
+      and producer-seam tests. user_typing is delivered on RTM and on the
+      first-party SSE stream and is deliberately outside this translation
+      table: it is the one Slack event produced without a journal record, read
+      as expiring state rather than translated from the outbox, so it is never
+      replayed to a reconnecting client and never reaches a webhook or Socket
+      Mode. Its frames carry no event id for that reason. app_mention is derived by the per-app message
       projection for the app whose bot the text names, and app_installed is
       committed with the install's bot-token issuance, target-routed and
       automatic. Remaining recorded gaps: tokens_revoked (the revocation

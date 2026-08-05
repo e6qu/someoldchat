@@ -2502,3 +2502,77 @@ func activityFollowsTheReadCursorBothWays(t *testing.T, open opener) {
 		t.Fatalf("marking unread did not reopen the Activity item: the sidebar and Activity now disagree")
 	}
 }
+
+// Typing signals are the one piece of workspace state written without an
+// accompanying outbox record, which makes them the one place the two profiles
+// could disagree without any event-shaped test noticing. Three properties carry
+// the whole design and all three have to hold identically: a signal is replaced
+// rather than accumulated, it stops on the clock rather than on a retraction,
+// and it is visible only to a member of the conversation who is not its author.
+func typingSignalsExpireWithoutBeingRetracted(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	reader := domain.UserID("U-reader-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: reader, WorkspaceID: f.workspaceID, Email: "reader-" + f.suffix + "@example.com", Name: "reader"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SeedConversationMember(ctx, f.channelID, reader); err != nil {
+		t.Fatal(err)
+	}
+	outsider := domain.UserID("U-outsider-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: outsider, WorkspaceID: f.workspaceID, Email: "outsider-" + f.suffix + "@example.com", Name: "outsider"}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2024, 7, 1, 12, 0, 0, 0, time.UTC)
+	signal := domain.TypingSignal{WorkspaceID: f.workspaceID, Conversation: f.channelID, UserID: f.userID, ExpiresAt: now.Add(6 * time.Second)}
+	if err := f.repository.RecordTyping(ctx, signal); err != nil {
+		t.Fatal(err)
+	}
+	// Renewal is the common case: a composing client re-sends every few
+	// seconds. A second row for the same member would render one person as two.
+	renewed := signal
+	renewed.ExpiresAt = now.Add(9 * time.Second)
+	if err := f.repository.RecordTyping(ctx, renewed); err != nil {
+		t.Fatal(err)
+	}
+
+	live, err := f.repository.ListTypingSignals(ctx, f.workspaceID, reader, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 || live[0].UserID != f.userID {
+		t.Fatalf("live signals = %+v, want exactly one from %s", live, f.userID)
+	}
+	if !live[0].ExpiresAt.Equal(renewed.ExpiresAt) {
+		t.Fatalf("expiry came back as %s, want the renewed %s — a signal that loses its expiry never stops", live[0].ExpiresAt, renewed.ExpiresAt)
+	}
+
+	// Nobody retracts a signal. The reader's own clock passing the expiry is
+	// the whole of how it stops, which is what makes a client that disappears
+	// mid-word stop appearing.
+	expired, err := f.repository.ListTypingSignals(ctx, f.workspaceID, reader, renewed.ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expired) != 0 {
+		t.Fatalf("signals at the expiry instant = %+v, want none", expired)
+	}
+
+	own, err := f.repository.ListTypingSignals(ctx, f.workspaceID, f.userID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(own) != 0 {
+		t.Fatalf("the author was told about its own signal: %+v", own)
+	}
+	outside, err := f.repository.ListTypingSignals(ctx, f.workspaceID, outsider, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outside) != 0 {
+		t.Fatalf("a non-member saw %+v", outside)
+	}
+}
