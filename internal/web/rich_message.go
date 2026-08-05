@@ -103,6 +103,20 @@ func newRichMessageContent(message domain.Message, customEmoji ...map[string]str
 	if len(customEmoji) > 0 {
 		emojiImages = customEmoji[0]
 	}
+	return newRichMessageContentMarking(message, emojiImages, nil)
+}
+
+// newRichMessageContentMarking is the same rendering with search terms marked
+// inside the message body. It goes through the same three branches rather than
+// replacing them, because a search result is still a message: one carrying
+// blocks, or written with mrkdwn disabled, must render here exactly as it does
+// in its conversation.
+//
+// Only the Slack-markup branch marks. A markdown body and a parse=full body are
+// rendered by different paths, and threading terms into each would be three
+// places to get the escaping right instead of one; those results are correct
+// and unmarked, which the journey records.
+func newRichMessageContentMarking(message domain.Message, emojiImages map[string]string, terms []string) richMessageContent {
 	streamBlocks, hasStream := decodeMessageStream(message)
 	content := richMessageContent{
 		Blocks:      append(streamBlocks, decodeMessageBlocks(message.Blocks)...),
@@ -122,7 +136,7 @@ func newRichMessageContent(message domain.Message, customEmoji ...map[string]str
 		} else if state.MrkdwnDisabled || state.Parse == "full" {
 			content.Text = template.HTML(strings.ReplaceAll(template.HTMLEscapeString(message.Text), "\n", "<br>")) // #nosec G203 -- text is escaped before the only inserted tag.
 		} else {
-			content.Text = renderSlackMrkdwnWithEmoji(message.Text, emojiImages)
+			content.Text = renderSlackMrkdwnMarking(message.Text, emojiImages, terms)
 		}
 	}
 	return content

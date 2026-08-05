@@ -2996,7 +2996,7 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.Code, body)
 	}
 	requireContains(t, "search page", body,
-		"searchable hello",
+		"searchable <mark>hello</mark>",
 		"Search results",
 		`href="/app?channel=Cdev"`,
 		"Ada Developer",
@@ -3141,7 +3141,7 @@ func TestSearchHistoryFailureIsHandledWithoutDiscardingSearchResults(t *testing.
 		t.Fatalf("search status=%d body=%s", searched.Code, searched.Body)
 	}
 	requireContains(t, "search history write failure", searched.Body.String(),
-		"search result survives",
+		"search result <mark>survives</mark>",
 		"Search completed, but it could not be added to recent searches.",
 		`role="status"`,
 	)
@@ -3177,24 +3177,24 @@ func TestSearchPageSupportsTypedResultsFiltersAndConversationScope(t *testing.T)
 	if scoped.Code != http.StatusOK {
 		t.Fatalf("scoped status=%d body=%s", scoped.Code, scoped.Body)
 	}
-	requireContains(t, "scoped search", scoped.Body.String(), "needle in general", "Searching only this conversation", "Messages", "Files", "People", "Channels", `option value="U1" selected`)
-	requireMissing(t, "scoped search", scoped.Body.String(), "needle elsewhere")
+	requireContains(t, "scoped search", scoped.Body.String(), "<mark>needle</mark> in general", "Searching only this conversation", "Messages", "Files", "People", "Channels", `option value="U1" selected`)
+	requireMissing(t, "scoped search", scoped.Body.String(), "<mark>needle</mark> elsewhere")
 
 	files := get(t, mux, "/app/search?q=needle&type=files&has=text&channel=Cdev")
 	if files.Code != http.StatusOK {
 		t.Fatalf("files status=%d body=%s", files.Code, files.Body)
 	}
-	requireContains(t, "file search", files.Body.String(), "Needle notes", "Needle elsewhere", "text/plain", "/api/files/Fneedle", "2 results in files")
+	requireContains(t, "file search", files.Body.String(), "<mark>Needle</mark> notes", "<mark>Needle</mark> elsewhere", "text/plain", "/api/files/Fneedle", "2 results in files")
 	scopedFiles := get(t, mux, "/app/search?q=needle&type=files&scope=channel&channel=Cdev")
-	requireContains(t, "scoped file search", scopedFiles.Body.String(), "Needle notes", "1 results in files")
-	requireMissing(t, "scoped file search", scopedFiles.Body.String(), "Needle elsewhere")
+	requireContains(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> notes", "1 results in files")
+	requireMissing(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> elsewhere")
 
 	people := get(t, mux, "/app/search?q=Ada&type=people&channel=Cdev")
 	requireContains(t, "people search", people.Body.String(), "Ada Developer", `/app/members?user=U1`)
 	excludedPeople := get(t, mux, "/app/search?q=Ada+-Developer&type=people&channel=Cdev")
 	requireMissing(t, "excluded people search", excludedPeople.Body.String(), "Ada Developer")
 	channels := get(t, mux, "/app/search?q=general&type=channels&channel=Cdev")
-	requireContains(t, "channel search", channels.Body.String(), "# general", `/app?channel=Cdev`)
+	requireContains(t, "channel search", channels.Body.String(), "# <mark>general</mark>", `/app?channel=Cdev`)
 }
 
 func TestWorkspaceRendersStructuredMessagesWithoutDestructiveEditor(t *testing.T) {
@@ -3456,7 +3456,7 @@ func TestSearchNamesDirectMessagesAfterTheirParticipants(t *testing.T) {
 	}
 
 	body := get(t, mux, "/app/search?q=needle&channel=Cdm").Body.String()
-	requireContains(t, "direct-message search result", body, `<span class="channel">Bob Builder</span>`, "private needle")
+	requireContains(t, "direct-message search result", body, `<span class="channel">Bob Builder</span>`, "private <mark>needle</mark>")
 	requireMissing(t, "direct-message search result", body, "#direct")
 }
 
@@ -4478,10 +4478,10 @@ func TestCanvasSearchTabFindsProseAndNotStoredSyntax(t *testing.T) {
 	if byTitle.Code != http.StatusOK {
 		t.Fatalf("canvas search status=%d body=%s", byTitle.Code, byTitle.Body)
 	}
-	requireContains(t, "canvas search by title", byTitle.Body.String(), "Canvases", "Deployment runbook", string(canvas.ID))
+	requireContains(t, "canvas search by title", byTitle.Body.String(), "Canvases", "Deployment <mark>runbook</mark>", string(canvas.ID))
 
 	byBody := get(t, mux, "/app/search?q=roll+back&type=canvases&channel=Cdev")
-	requireContains(t, "canvas search by body", byBody.Body.String(), "Deployment runbook")
+	requireContains(t, "canvas search by body", byBody.Body.String(), "Deployment runbook", "<mark>roll</mark> <mark>back</mark>")
 
 	syntax := get(t, mux, "/app/search?q=sections&type=canvases&channel=Cdev")
 	requireContains(t, "canvas search for stored syntax", syntax.Body.String(), "No matching canvases.")

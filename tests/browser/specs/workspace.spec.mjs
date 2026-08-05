@@ -2987,6 +2987,37 @@ test('[SEARCH-01 SEARCH-02] channel search is paged and cannot reveal a private 
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// Slack emphasises the terms you searched for inside every result. This is the
+// one place in search where rendering meets the security boundary — a message
+// body is already HTML by the time a result is drawn — so the journey asserts
+// both halves: the emphasis is there, and a result carrying markup as literal
+// text still carries it as text.
+test('[SEARCH-01 SEARCH-02 A11Y-01] search results emphasise the terms that matched', async ({ page, context, request }) => {
+  await signIn(context);
+  const needle = `hitmark-${Date.now()}`;
+  await postThroughTheAPI(request, `${needle} deployment runbook`);
+  // Literal markup in a message. If marking were applied to rendered HTML this
+  // is where it would escape into live markup.
+  await postThroughTheAPI(request, `${needle} <script>alert(1)</script>`);
+
+  // One term, so both messages match: message search requires every term, and a
+  // two-term query here would quietly drop the one carrying the payload.
+  await page.goto(`/app/search?q=${encodeURIComponent(needle)}&channel=Cdev`);
+  await expect(page.locator('.result mark').filter({ hasText: needle })).toHaveCount(2);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // The script tag is still text. Playwright would find the element if the
+  // browser had parsed it as markup, and the payload is still readable as the
+  // characters it was written with.
+  await expect(page.locator('.result script')).toHaveCount(0);
+  await expect(page.locator('.result .text').filter({ hasText: 'alert(1)' }).first()).toBeVisible();
+
+  // A modifier is an instruction, not a word anybody searched for, so it is not
+  // emphasised anywhere in the results.
+  await page.goto(`/app/search?q=${encodeURIComponent(needle)}%20from%3A%40sameoldchat&channel=Cdev`);
+  await expect(page.locator('.result mark', { hasText: 'from' })).toHaveCount(0);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

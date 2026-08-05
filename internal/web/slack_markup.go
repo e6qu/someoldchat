@@ -213,8 +213,17 @@ func renderSlackMrkdwn(text string) template.HTML {
 }
 
 func renderSlackMrkdwnWithEmoji(text string, customEmoji map[string]string) template.HTML {
+	return renderSlackMrkdwnMarking(text, customEmoji, nil)
+}
+
+// renderSlackMrkdwnMarking renders a message body and marks the search terms
+// inside it. The <mark> elements come from the renderer's literal-prose branch,
+// so the guarantee in the #nosec note below is unchanged: every literal is
+// escaped and every URL validated, and marking adds one tag around a span of
+// already-escaped text.
+func renderSlackMrkdwnMarking(text string, customEmoji map[string]string, terms []string) template.HTML {
 	text = decodeSlackEntities(text)
-	return template.HTML(renderSlackInlineWithEmoji(text, customEmoji)) // #nosec G203 -- the renderer escapes every literal and validates every URL.
+	return template.HTML(renderSlackInlineMarking(text, customEmoji, terms)) // #nosec G203 -- the renderer escapes every literal and validates every URL.
 }
 
 func decodeSlackEntities(text string) string {
@@ -230,6 +239,14 @@ func renderSlackInline(text string) string {
 }
 
 func renderSlackInlineWithEmoji(text string, customEmoji map[string]string) string {
+	return renderSlackInlineMarking(text, customEmoji, nil)
+}
+
+// renderSlackInlineMarking is the renderer with search terms threaded through
+// it. The terms reach exactly one branch — the literal prose below — so marking
+// can never land inside a tag, an attribute, a URL or an entity, which is what
+// a string replace over the finished HTML would do.
+func renderSlackInlineMarking(text string, customEmoji map[string]string, terms []string) string {
 	var output strings.Builder
 	for offset := 0; offset < len(text); {
 		switch text[offset] {
@@ -275,7 +292,7 @@ func renderSlackInlineWithEmoji(text string, customEmoji map[string]string) stri
 				continue
 			}
 			raw := text[offset+1 : offset+1+end]
-			if rendered, ok := renderSlackReference(raw); ok {
+			if rendered, ok := renderSlackReferenceMarking(raw, terms); ok {
 				output.WriteString(rendered)
 			} else {
 				output.WriteString("&lt;")
@@ -337,7 +354,7 @@ func renderSlackInlineWithEmoji(text string, customEmoji map[string]string) stri
 			output.WriteByte('<')
 			output.WriteString(tag)
 			output.WriteByte('>')
-			output.WriteString(renderSlackInlineWithEmoji(text[offset+1:end], customEmoji))
+			output.WriteString(renderSlackInlineMarking(text[offset+1:end], customEmoji, terms))
 			output.WriteString("</")
 			output.WriteString(tag)
 			output.WriteByte('>')
@@ -347,7 +364,9 @@ func renderSlackInlineWithEmoji(text string, customEmoji map[string]string) stri
 			if next <= 0 {
 				next = len(text) - offset
 			}
-			output.WriteString(html.EscapeString(text[offset : offset+next]))
+			// The one place literal prose is emitted, and therefore the only
+			// place a search hit may be marked.
+			output.WriteString(markTerms(text[offset:offset+next], terms))
 			offset += next
 		}
 	}
@@ -371,6 +390,15 @@ func validEmojiCode(name string) bool {
 }
 
 func renderSlackReference(raw string) (string, bool) {
+	return renderSlackReferenceMarking(raw, nil)
+}
+
+// renderSlackReferenceMarking marks the visible label of a reference and never
+// its target. A member searching for a word they can see in a link should find
+// it emphasised; the href is machinery, and marking it would put a tag inside
+// an attribute — which is the whole reason marking is threaded through the
+// renderer rather than applied to its output.
+func renderSlackReferenceMarking(raw string, terms []string) (string, bool) {
 	target, label, _ := strings.Cut(raw, "|")
 	target = strings.TrimSpace(target)
 	label = strings.TrimSpace(label)
@@ -379,25 +407,25 @@ func renderSlackReference(raw string) (string, bool) {
 		if label == "" {
 			label = "@" + strings.TrimPrefix(target, "@")
 		}
-		return `<span class="slack-mention">` + html.EscapeString(label) + `</span>`, true
+		return `<span class="slack-mention">` + markTerms(label, terms) + `</span>`, true
 	case strings.HasPrefix(target, "#"):
 		if label == "" {
 			label = "#" + strings.TrimPrefix(target, "#")
 		} else if !strings.HasPrefix(label, "#") {
 			label = "#" + label
 		}
-		return `<span class="slack-mention">` + html.EscapeString(label) + `</span>`, true
+		return `<span class="slack-mention">` + markTerms(label, terms) + `</span>`, true
 	case strings.HasPrefix(target, "!"):
 		if label == "" {
 			label = slackSpecialReferenceLabel(target)
 		}
-		return `<span class="slack-mention">` + html.EscapeString(label) + `</span>`, true
+		return `<span class="slack-mention">` + markTerms(label, terms) + `</span>`, true
 	default:
 		if label == "" {
 			label = target
 		}
 		if href, ok := safeSlackLink(target); ok {
-			return `<a href="` + html.EscapeString(href) + `" rel="noreferrer noopener">` + html.EscapeString(label) + `</a>`, true
+			return `<a href="` + html.EscapeString(href) + `" rel="noreferrer noopener">` + markTerms(label, terms) + `</a>`, true
 		}
 		return "", false
 	}

@@ -282,8 +282,10 @@ type emojiOptionView struct {
 }
 
 type conversationView struct {
-	ID            string
-	Name          string
+	ID   string
+	Name string
+	// MarkedName is set only for a search result; see memberView.MarkedName.
+	MarkedName    template.HTML
 	Current       bool
 	UnreadCount   int
 	IsGroupDirect bool
@@ -434,8 +436,13 @@ type pageData struct {
 }
 
 type memberView struct {
-	ID            string
-	Name          string
+	ID   string
+	Name string
+	// MarkedName is Name with the search terms emphasised. It is a separate
+	// field rather than a marked Name because this view is also a picker option
+	// and a sidebar entry, where there is nothing to mark and an HTML-typed name
+	// would invite a caller to render it somewhere it does not belong.
+	MarkedName    template.HTML
 	RealName      string
 	Profile       domain.UserProfile
 	Presence      string
@@ -612,8 +619,8 @@ type searchHistoryView struct {
 // the canvas you meant.
 type searchCanvasView struct {
 	ID          string
-	Title       string
-	Snippet     string
+	Title       template.HTML
+	Snippet     template.HTML
 	Owner       string
 	DisplayTime string
 	MachineTime string
@@ -628,8 +635,8 @@ type searchTabView struct {
 
 type searchFileView struct {
 	ID          string
-	Name        string
-	Title       string
+	Name        template.HTML
+	Title       template.HTML
 	MIMEType    string
 	Size        string
 	Uploader    string
@@ -905,9 +912,9 @@ type oauthConsentData struct {
 //     --line is a decorative separator at 1.35:1 and cannot serve both.
 //   - --focus-chrome is the focus ring over the purple topbar and sidebar,
 //     where --focus measures 1.65:1 — and where every primary control lives.
-const lightTokens = `color-scheme:light;--bg:#fff;--panel:#f7f5f8;--panel-strong:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--field-line:#6b6570;--accent:#611f69;--on-accent:#fff;--on-strong:#fff;--action:#5c1a64;--hover:#f1edf2;--focus:#0b5cad;--focus-chrome:#fff;--danger:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--shadow:0 8px 24px #1d1c1d1f`
+const lightTokens = `color-scheme:light;--bg:#fff;--panel:#f7f5f8;--panel-strong:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--field-line:#6b6570;--accent:#611f69;--on-accent:#fff;--on-strong:#fff;--action:#5c1a64;--hover:#f1edf2;--focus:#0b5cad;--focus-chrome:#fff;--danger:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--mark-bg:#fbe9a8;--shadow:0 8px 24px #1d1c1d1f`
 
-const darkTokens = `color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--field-line:#8a8f96;--accent:#4a1750;--on-accent:#fff;--on-strong:#141719;--action:#8fd7f4;--hover:#2c3035;--focus:#7cc4ff;--focus-chrome:#fff;--danger:#ff9db4;--danger-bg:#3a1622;--ok:#3fbf95;--shadow:0 8px 24px #0006`
+const darkTokens = `color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--field-line:#8a8f96;--accent:#4a1750;--on-accent:#fff;--on-strong:#141719;--action:#8fd7f4;--hover:#2c3035;--focus:#7cc4ff;--focus-chrome:#fff;--danger:#ff9db4;--danger-bg:#3a1622;--ok:#3fbf95;--mark-bg:#5a4a12;--shadow:0 8px 24px #0006`
 
 const sharedStyle = `*{box-sizing:border-box}
 :root{` + lightTokens + `}
@@ -1156,6 +1163,7 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.result mark,.message-text mark{background:var(--mark-bg);color:inherit;font-weight:700;border-radius:2px;padding:0 1px}
 .typing{margin:0;padding:0 16px;min-height:18px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
 .typing-dots{display:inline-flex;gap:3px}
 .typing-dots i{width:4px;height:4px;border-radius:50%;background:currentColor;animation:typing-pulse 1.2s infinite ease-in-out}
@@ -2251,11 +2259,11 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 <label>Sort<select name="order"><option value="relevant"{{if eq .Sort "score"}} selected{{end}}>Most relevant</option><option value="newest"{{if and (eq .Sort "timestamp") (eq .Direction "desc")}} selected{{end}}>Newest</option><option value="oldest"{{if eq .Direction "asc"}} selected{{end}}>Oldest</option></select></label><button type="submit">Apply filters</button>
 {{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form>{{end}}{{end}}
 <section class="results" aria-label="{{.Type}} search results">
-{{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
+{{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.DisplayText}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
 {{else if eq .Type "files"}}{{range .Files}}<a class="result file-result" href="{{.DownloadURL}}"><span><span class="author">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</span><span class="result-kind">{{.MIMEType}} · {{.Size}}</span><p class="text">Uploaded by {{.Uploader}}</p></span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching files.</p>{{end}}
 {{else if eq .Type "canvases"}}{{range .Canvases}}<a class="result canvas-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">Canvas · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching canvases.</p>{{end}}
-{{else if eq .Type "people"}}{{range .People}}<a class="result" href="/app/members?user={{.ID}}"><span class="author">{{.Name}}</span>{{if .RealName}}<p class="text">{{.RealName}}</p>{{end}}</a>{{else}}<p class="empty">No matching people.</p>{{end}}
-{{else}}{{range .Conversations}}<a class="result" href="/app?channel={{.ID}}"><span class="author"># {{.Name}}</span></a>{{else}}<p class="empty">No matching channels.</p>{{end}}{{end}}
+{{else if eq .Type "people"}}{{range .People}}<a class="result" href="/app/members?user={{.ID}}"><span class="author">{{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span>{{if .RealName}}<p class="text">{{.RealName}}</p>{{end}}</a>{{else}}<p class="empty">No matching people.</p>{{end}}
+{{else}}{{range .Conversations}}<a class="result" href="/app?channel={{.ID}}"><span class="author"># {{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span></a>{{else}}<p class="empty">No matching channels.</p>{{end}}{{end}}
 </section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
 
 var searchTemplate = mustPage(searchMarkup)
@@ -6837,13 +6845,17 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		data.Tabs = append(data.Tabs, searchTabView{Label: tab.label, URL: "/app/search?" + values.Encode(), Current: resultType == tab.value})
 	}
 	effectiveQuery := searchQueryWithFilters(query, data)
-	// The tokens themselves are no longer used — every tab asks the store now —
-	// but an unterminated phrase is still a bad query, and refusing it here
-	// keeps that answer the same on every tab.
-	if _, tokenErr := domain.SearchQueryTokens(query); tokenErr != nil {
+	// The tokens are the terms a result marks. An unterminated phrase is still a
+	// bad query, and refusing it here keeps that answer the same on every tab.
+	textTokens, tokenErr := domain.SearchQueryTokens(query)
+	if tokenErr != nil {
 		h.writeSearchError(w, data, service.ErrInvalidSearch)
 		return
 	}
+	// A modifier is an instruction, not a word anybody is looking for: marking
+	// "from:" inside a message body would emphasise text the member never
+	// searched for.
+	terms := searchableTerms(textTokens)
 	switch resultType {
 	case "messages":
 		request := domain.MessageSearchRequest{
@@ -6858,7 +6870,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			h.writeSearchError(w, data, searchErr)
 			return
 		}
-		data.Messages = h.newResultViews(r.Context(), principal, results.Messages, h.newUserNames(r.Context(), principal))
+		data.Messages = h.newResultViews(r.Context(), principal, results.Messages, h.newUserNames(r.Context(), principal), terms...)
 		data.ResultCount = results.Total
 		if results.HasMore && results.NextCursor != "" {
 			values := cloneURLValues(r.URL.Query())
@@ -6888,7 +6900,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		names := h.newUserNames(r.Context(), principal)
 		for _, file := range results.Files {
 			data.Files = append(data.Files, searchFileView{
-				ID: string(file.ID), Name: file.Name, Title: file.Title, MIMEType: file.MIMEType,
+				ID: string(file.ID), Name: markedText(file.Name, terms), Title: markedText(file.Title, terms), MIMEType: file.MIMEType,
 				Size: formatFileSize(file.Size), Uploader: names.name(file.Uploader),
 				DisplayTime: formatTime(file.CreatedAt), MachineTime: file.CreatedAt.UTC().Format(time.RFC3339Nano),
 				DownloadURL: "/api/files/" + url.PathEscape(string(file.ID)),
@@ -6915,6 +6927,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			name := displayName(member)
 			data.People = append(data.People, memberView{
 				ID: string(member.ID), Name: name, RealName: member.RealName,
+				MarkedName:    markedText(name, terms),
 				AuthorInitial: initial(name), IsSelf: member.ID == principal.UserID,
 			})
 		}
@@ -6932,8 +6945,8 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		names := h.newUserNames(r.Context(), principal)
 		for _, canvas := range results.Canvases {
 			data.Canvases = append(data.Canvases, searchCanvasView{
-				ID: string(canvas.ID), Title: canvas.Title,
-				Snippet:     canvasSearchSnippet(canvas),
+				ID: string(canvas.ID), Title: markedText(canvas.Title, terms),
+				Snippet:     markedText(canvasSearchSnippet(canvas, terms), terms),
 				Owner:       names.name(canvas.OwnerID),
 				DisplayTime: canvas.UpdatedAt.Format("Jan 2, 15:04"),
 				MachineTime: canvas.UpdatedAt.UTC().Format(time.RFC3339),
@@ -6955,7 +6968,8 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, conversation := range page.Conversations {
-			data.Conversations = append(data.Conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation)})
+			name := conversationName(conversation)
+			data.Conversations = append(data.Conversations, conversationView{ID: string(conversation.ID), Name: name, MarkedName: markedText(name, terms)})
 		}
 		data.ResultCount = len(data.Conversations)
 		data.MoreURL = searchPageURL(r, page.HasMore, string(page.NextCursor))
@@ -6970,13 +6984,42 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 // highlighted match: Slack marks the matched span and this does not, which is
 // recorded as a deviation rather than faked with a substring search that would
 // mark the wrong span whenever a term matched the title instead of the body.
-func canvasSearchSnippet(canvas domain.Canvas) string {
+// canvasSearchSnippet is the window of the document a result shows. It used to
+// be the opening of the body, which is the wrong window when the term is on
+// page four: the result would show prose that does not contain what was
+// searched for and read as a mismatch. It now centres on the first match, and
+// falls back to the opening when the match is in the title.
+func canvasSearchSnippet(canvas domain.Canvas, terms []string) string {
 	text := strings.TrimSpace(strings.TrimPrefix(domain.CanvasSearchText(canvas.Title, canvas.DocumentContent), canvas.Title))
 	text = strings.Join(strings.Fields(text), " ")
-	if runes := []rune(text); len(runes) > canvasSnippetRunes {
-		return strings.TrimSpace(string(runes[:canvasSnippetRunes])) + "…"
+	runes := []rune(text)
+	if len(runes) <= canvasSnippetRunes {
+		return text
 	}
-	return text
+	start := 0
+	if spans := matchedSpans(strings.ToLower(text), terms); len(spans) > 0 && len(strings.ToLower(text)) == len(text) {
+		// Half the window before the match, so the hit sits in the middle
+		// rather than against an edge where it reads as truncated.
+		start = len([]rune(text[:spans[0].start])) - canvasSnippetRunes/2
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start+canvasSnippetRunes > len(runes) {
+		start = len(runes) - canvasSnippetRunes
+	}
+	snippet := strings.TrimSpace(string(runes[start : start+canvasSnippetRunes]))
+	if start > 0 {
+		snippet = "…" + snippet
+	}
+	return snippet + "…"
+}
+
+// markedText is the plain-field marker: escape, then emphasise what matched.
+// The result is HTML because it carries the <mark> elements, and nothing else:
+// every other byte went through html.EscapeString on the way out.
+func markedText(text string, terms []string) template.HTML {
+	return template.HTML(markTerms(text, terms)) // #nosec G203 -- markTerms escapes everything but the <mark> tags it emits.
 }
 
 // canvasSnippetRunes is counted in runes rather than bytes so a document in a
@@ -6991,6 +7034,22 @@ const canvasSnippetRunes = 160
 // how many members a workspace has; it is the point past which a select element
 // stops being usable and the typeahead is the answer.
 const searchFilterOptionLimit = 200
+
+// searchableTerms drops the modifiers and the negations. A modifier is an
+// instruction to the search rather than a word in the result, and a negated
+// term is by definition absent from anything that matched.
+func searchableTerms(tokens []string) []string {
+	terms := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if strings.HasPrefix(token, "-") || strings.Contains(token, ":") {
+			continue
+		}
+		if trimmed := strings.TrimSpace(token); trimmed != "" {
+			terms = append(terms, trimmed)
+		}
+	}
+	return terms
+}
 
 func searchPageURL(r *http.Request, hasMore bool, cursor string) string {
 	if !hasMore || cursor == "" {
@@ -7375,7 +7434,11 @@ func cloneURLValues(source url.Values) url.Values {
 	return values
 }
 
-func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, messages []domain.Message, names *userNames) []messageView {
+// newResultViews renders search results. terms are marked inside each body;
+// pass none for a list that is not answering a query — Activity uses the same
+// builder to show a message nobody searched for, and marking there would
+// emphasise words at random.
+func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, messages []domain.Message, names *userNames, terms ...string) []messageView {
 	views := make([]messageView, 0, len(messages))
 	for _, message := range messages {
 		author := names.name(message.AuthorID)
@@ -7410,7 +7473,7 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 			AuthorName:    author,
 			AuthorInitial: initial(author),
 			Text:          message.Text,
-			DisplayText:   newRichMessageContent(displayMessage).Text,
+			DisplayText:   newRichMessageContentMarking(displayMessage, nil, terms).Text,
 			MachineTime:   message.CreatedAt.UTC().Format(time.RFC3339Nano),
 			DisplayTime:   formatTime(message.CreatedAt),
 			Channel:       string(message.Conversation),
