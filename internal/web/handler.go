@@ -2694,6 +2694,16 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // appear in the window on screen — which is how a sent message used to flash up
 // and then vanish.
 //
+// A refresh the reader caused is not cancelled by one nobody asked for. Every
+// refresh used to abort the fetches in flight and invalidate their generation,
+// including a forced refresh a mutation had just issued — the audit named this
+// as a way a mutation's own refresh can be discarded, and a background refresh
+// twelve milliseconds behind one is exactly the shape CI keeps capturing. While
+// a forced refresh is in flight, a background refresh now yields instead of
+// superseding it: the reader is waiting for their own action, and the event
+// that provoked the background refresh will still be in the response the forced
+// one is already fetching.
+//
 // A region is not re-rendered when the server returns exactly the markup it was
 // last given. Replacing a region with identical HTML cannot add information and
 // can only destroy state the DOM was holding: the focused message, the caret,
@@ -2787,6 +2797,7 @@ var generation=0;
 var inFlight=null;
 var scheduled=null;
 var appliedHTML=new WeakMap();
+var forcing=0;
 var draftTimer=null;
 var sending=false;
 var stagingFiles=false;
@@ -3174,6 +3185,7 @@ try{new Notification(arrived===1?'1 new message in '+channel:arrived+' new messa
 function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
 function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}
 function refresh(force){
+if(!force&&forcing>0)return Promise.resolve([]);
 var candidates=[];
 var live=regions(force);
 for(var candidateIndex=0;candidateIndex<live.length;candidateIndex++){
@@ -3185,6 +3197,8 @@ if(candidateFocused&&!force)continue;
 candidates.push({region:candidate,target:candidateTarget,focused:candidateFocused});
 }
 if(!candidates.length)return Promise.resolve([]);
+if(force)forcing++;
+var settle=function(){if(force&&forcing>0)forcing--};
 generation++;
 var token=generation;
 if(inFlight){inFlight.abort();inFlight=null}
@@ -3212,7 +3226,7 @@ if(activeMessageID){var items=messageItems(region);var restored=items.find(funct
 if(focused&&region.hasAttribute('tabindex'))region.focus();
 }));
 })(candidates[index])}
-return Promise.all(pending).then(function(){if(inFlight===controller)inFlight=null});
+return Promise.all(pending).then(function(value){settle();if(inFlight===controller)inFlight=null;return value},function(error){settle();throw error});
 }
 function scheduleRefresh(){
 if(scheduled)return;
