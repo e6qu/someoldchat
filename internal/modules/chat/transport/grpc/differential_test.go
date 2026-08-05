@@ -141,6 +141,20 @@ func requireSeed(t *testing.T, err error) {
 	}
 }
 
+// seedFileParity puts an image row in place without blob storage. The parity
+// fixture has none, and a description is state on the row rather than anything
+// to do with the bytes.
+func seedFileParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	requireSeed(t, target.CreateFile(context.Background(), domain.File{
+		ID: "Fparity-description", WorkspaceID: "T1", Uploader: "U1", Name: "diagram.png",
+		Title: "Architecture", MIMEType: "image/png", BlobKey: "parity-description",
+		Size: 16, CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
+		SharedChannels: []domain.ConversationID{"C1"},
+	}, events.Event{ID: "EFparity", WorkspaceID: "T1", Topic: "file.created", CreatedAt: time.Unix(1_700_000_000, 0).UTC()}))
+}
+
 func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
@@ -1758,6 +1772,38 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A description is the uploader's account of their own file, so the
+			// permission is the interesting part: both compositions have to
+			// agree that someone else's attempt fails rather than silently
+			// writing nothing, and that clearing one is allowed because it is
+			// the only way to correct a description that was wrong.
+			name: "a file description is the uploader's to write and to clear",
+			seed: seedFileParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				const fileID = domain.FileID("Fparity-description")
+				if err := chat.SetFileDescription(ctx, "T1", "U1", fileID, "A box diagram of the seam"); err != nil {
+					return nil, err
+				}
+				described, err := chat.FileInfo(ctx, "T1", "U1", fileID)
+				if err != nil {
+					return nil, err
+				}
+				strangerErr := chat.SetFileDescription(ctx, "T1", "U2", fileID, "not mine to write")
+				unchanged, err := chat.FileInfo(ctx, "T1", "U1", fileID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetFileDescription(ctx, "T1", "U1", fileID, ""); err != nil {
+					return nil, err
+				}
+				cleared, err := chat.FileInfo(ctx, "T1", "U1", fileID)
+				if err != nil {
+					return nil, err
+				}
+				return []any{described.Description, strangerErr != nil, unchanged.Description, cleared.Description, described.IsImage()}, nil
+			},
+		},
+		{
 			// People and Channels used to be answered by filtering a directory
 			// the client had already loaded whole, so nothing crossed the seam
 			// and nothing could disagree. Now that both are store questions,
@@ -2934,7 +2980,6 @@ var parityGaps = map[string]struct{}{
 	"Emojis":                                  {},
 	"EndCall":                                 {},
 	"EndDND":                                  {},
-	"FileInfo":                                {},
 	"GetAuthMethod":                           {},
 	"GetCall":                                 {},
 	"GetListDownload":                         {},

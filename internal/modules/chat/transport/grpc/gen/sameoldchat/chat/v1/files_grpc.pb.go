@@ -28,6 +28,7 @@ const (
 	FilesService_DeleteFileComment_FullMethodName       = "/sameoldchat.chat.v1.FilesService/DeleteFileComment"
 	FilesService_Files_FullMethodName                   = "/sameoldchat.chat.v1.FilesService/Files"
 	FilesService_SearchFiles_FullMethodName             = "/sameoldchat.chat.v1.FilesService/SearchFiles"
+	FilesService_SetFileDescription_FullMethodName      = "/sameoldchat.chat.v1.FilesService/SetFileDescription"
 	FilesService_SharePublicURL_FullMethodName          = "/sameoldchat.chat.v1.FilesService/SharePublicURL"
 	FilesService_RevokePublicURL_FullMethodName         = "/sameoldchat.chat.v1.FilesService/RevokePublicURL"
 	FilesService_AddRemoteFile_FullMethodName           = "/sameoldchat.chat.v1.FilesService/AddRemoteFile"
@@ -51,6 +52,7 @@ type FilesServiceClient interface {
 	DeleteFileComment(ctx context.Context, in *FileCommentDeleteRequest, opts ...grpc.CallOption) (*DeleteFileResponse, error)
 	Files(ctx context.Context, in *FilesRequest, opts ...grpc.CallOption) (*FilePage, error)
 	SearchFiles(ctx context.Context, in *SearchFilesRequest, opts ...grpc.CallOption) (*FilePage, error)
+	SetFileDescription(ctx context.Context, in *SetFileDescriptionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SharePublicURL(ctx context.Context, in *PublicFileRequest, opts ...grpc.CallOption) (*File, error)
 	RevokePublicURL(ctx context.Context, in *PublicFileRequest, opts ...grpc.CallOption) (*File, error)
 	AddRemoteFile(ctx context.Context, in *AddRemoteFileRequest, opts ...grpc.CallOption) (*RemoteFile, error)
@@ -162,6 +164,16 @@ func (c *filesServiceClient) SearchFiles(ctx context.Context, in *SearchFilesReq
 	return out, nil
 }
 
+func (c *filesServiceClient) SetFileDescription(ctx context.Context, in *SetFileDescriptionRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, FilesService_SetFileDescription_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *filesServiceClient) SharePublicURL(ctx context.Context, in *PublicFileRequest, opts ...grpc.CallOption) (*File, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(File)
@@ -255,6 +267,7 @@ type FilesServiceServer interface {
 	DeleteFileComment(context.Context, *FileCommentDeleteRequest) (*DeleteFileResponse, error)
 	Files(context.Context, *FilesRequest) (*FilePage, error)
 	SearchFiles(context.Context, *SearchFilesRequest) (*FilePage, error)
+	SetFileDescription(context.Context, *SetFileDescriptionRequest) (*MutationResponse, error)
 	SharePublicURL(context.Context, *PublicFileRequest) (*File, error)
 	RevokePublicURL(context.Context, *PublicFileRequest) (*File, error)
 	AddRemoteFile(context.Context, *AddRemoteFileRequest) (*RemoteFile, error)
@@ -298,6 +311,9 @@ func (UnimplementedFilesServiceServer) Files(context.Context, *FilesRequest) (*F
 }
 func (UnimplementedFilesServiceServer) SearchFiles(context.Context, *SearchFilesRequest) (*FilePage, error) {
 	return nil, status.Error(codes.Unimplemented, "method SearchFiles not implemented")
+}
+func (UnimplementedFilesServiceServer) SetFileDescription(context.Context, *SetFileDescriptionRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetFileDescription not implemented")
 }
 func (UnimplementedFilesServiceServer) SharePublicURL(context.Context, *PublicFileRequest) (*File, error) {
 	return nil, status.Error(codes.Unimplemented, "method SharePublicURL not implemented")
@@ -494,6 +510,24 @@ func _FilesService_SearchFiles_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _FilesService_SetFileDescription_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetFileDescriptionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FilesServiceServer).SetFileDescription(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FilesService_SetFileDescription_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FilesServiceServer).SetFileDescription(ctx, req.(*SetFileDescriptionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _FilesService_SharePublicURL_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PublicFileRequest)
 	if err := dec(in); err != nil {
@@ -676,6 +710,10 @@ var FilesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SearchFiles",
 			Handler:    _FilesService_SearchFiles_Handler,
+		},
+		{
+			MethodName: "SetFileDescription",
+			Handler:    _FilesService_SetFileDescription_Handler,
 		},
 		{
 			MethodName: "SharePublicURL",

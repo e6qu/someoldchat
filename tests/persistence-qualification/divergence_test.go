@@ -2726,3 +2726,79 @@ func directorySearchFoldsNamesOnEveryProfile(t *testing.T, open opener) {
 		t.Fatalf("a non-member found the private channel: %+v", forStranger.Conversations)
 	}
 }
+
+// A description is durable state on the file row and the permission to write it
+// is part of the write. Both profiles have to agree on the second half, because
+// a profile that checked the uploader before the update rather than inside it
+// would pass every single-threaded test and still let a stale permission win.
+func fileDescriptionBelongsToItsUploader(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	stranger := domain.UserID("U-other-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: stranger, WorkspaceID: f.workspaceID, Email: "other-" + f.suffix + "@example.com", Name: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	file := domain.File{
+		ID: domain.FileID("F-" + f.suffix), WorkspaceID: f.workspaceID, Uploader: f.userID,
+		Name: "diagram.png", Title: "Architecture", MIMEType: "image/png",
+		BlobKey: "blob-" + f.suffix, Size: 12, CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
+		SharedChannels: []domain.ConversationID{f.channelID},
+	}
+	if err := f.repository.CreateFile(ctx, file, f.event("file", "file.created", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.repository.SetFileDescription(ctx, f.workspaceID, file.ID, f.userID, "A box diagram", f.event("describe", "file.description_changed", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.repository.GetFile(ctx, file.ID)
+	if err != nil || stored.Description != "A box diagram" {
+		t.Fatalf("description = %q err = %v, want the uploader's", stored.Description, err)
+	}
+
+	// Someone else's write is refused, and refused the same way a missing file
+	// is, so it cannot be used to learn that the file exists.
+	err = f.repository.SetFileDescription(ctx, f.workspaceID, file.ID, stranger, "not mine", f.event("describe-other", "file.description_changed", string(file.ID)))
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a stranger's write = %v, want ErrNotFound", err)
+	}
+	missing := f.repository.SetFileDescription(ctx, f.workspaceID, domain.FileID("F-absent-"+f.suffix), f.userID, "x", f.event("describe-absent", "file.description_changed", "absent"))
+	if !errors.Is(missing, store.ErrNotFound) {
+		t.Fatalf("a missing file = %v, want the same ErrNotFound", missing)
+	}
+	unchanged, err := f.repository.GetFile(ctx, file.ID)
+	if err != nil || unchanged.Description != "A box diagram" {
+		t.Fatalf("description = %q err = %v, want it unchanged", unchanged.Description, err)
+	}
+
+	// The description travels with the file wherever it is read, including the
+	// batched message projection the timeline uses.
+	message := domain.Message{
+		ID: domain.MessageID("M-file-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "here it is", Attachments: "[]", CreatedAt: domain.MessageInstant(time.Unix(1_700_000_100, 0).UTC()),
+		Files: []domain.File{file},
+	}
+	if err := f.repository.CreateMessage(ctx, message, f.event("file-message", "message.created", string(message.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, stored := range page.Messages {
+		for _, attached := range stored.Files {
+			if attached.ID == file.ID {
+				found = true
+				if attached.Description != "A box diagram" {
+					t.Fatalf("the timeline projection lost the description: %q", attached.Description)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the file did not reach the timeline projection: %+v", page.Messages)
+	}
+}

@@ -1205,6 +1205,19 @@ func (r Remote) GetListDownload(ctx context.Context, workspaceID domain.Workspac
 	return decodeProtoListDownload(out.GetDownload())
 }
 
+func (r Remote) SetFileDescription(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, description string) error {
+	out, err := r.files.SetFileDescription(ctx, &chatv1.SetFileDescriptionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), FileId: string(fileID), Description: description,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed set file description response was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID) error {
 	in := &chatv1.FileRequest{WorkspaceId: string(workspaceID), UserId: string(userID), FileId: string(fileID)}
 	out, err := r.files.DeleteFile(ctx, in)
@@ -6688,6 +6701,13 @@ func (s *Server) DeleteFile(ctx context.Context, input *chatv1.FileRequest) (*ch
 	return s.deleteFileProto(ctx, input)
 }
 
+func (s *Server) SetFileDescription(ctx context.Context, input *chatv1.SetFileDescriptionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SetFileDescription(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileID(input.GetFileId()), input.GetDescription()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) DeleteFileComment(ctx context.Context, input *chatv1.FileCommentDeleteRequest) (*chatv1.DeleteFileResponse, error) {
 	if err := s.implementation.DeleteFileComment(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileID(input.GetFileId()), domain.FileCommentID(input.GetCommentId())); err != nil {
 		return nil, mapError(err)
@@ -9204,7 +9224,7 @@ func encodeProtoFile(value domain.File) *chatv1.File {
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader),
 		Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size,
 		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, PublicToken: value.PublicToken,
-		SharedChannels: conversationStrings(value.SharedChannels),
+		SharedChannels: conversationStrings(value.SharedChannels), Description: value.Description,
 	}
 }
 
@@ -9222,7 +9242,7 @@ func decodeProtoFile(value *chatv1.File) (domain.File, error) {
 	if err != nil {
 		return domain.File{}, errors.New("typed file created_at is invalid")
 	}
-	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels())}, nil
+	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels()), Description: value.GetDescription()}, nil
 }
 
 func encodeProtoFilePage(page domain.FilePage) *chatv1.FilePage {

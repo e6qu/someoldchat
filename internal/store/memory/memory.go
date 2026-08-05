@@ -7999,6 +7999,21 @@ func (s *Store) GetFile(_ context.Context, id domain.FileID) (domain.File, error
 	return file, nil
 }
 
+// SetFileDescription mirrors the SQL profile, including the part that decides
+// who may write: the uploader, checked under the same lock as the write.
+func (s *Store) SetFileDescription(_ context.Context, workspace domain.WorkspaceID, id domain.FileID, uploader domain.UserID, description string, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := s.files[id]
+	if !ok || file.Deleted || file.WorkspaceID != workspace || file.Uploader != uploader {
+		return store.ErrNotFound
+	}
+	file.Description = description
+	s.files[id] = file
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) DeleteFile(_ context.Context, id domain.FileID, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

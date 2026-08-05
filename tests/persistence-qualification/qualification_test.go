@@ -121,6 +121,7 @@ func runQualification(t *testing.T, open opener) {
 		{"typing signals expire without being retracted", typingSignalsExpireWithoutBeingRetracted},
 		{"canvas search folds text and stops at the reader's access", canvasSearchFoldsTextAndStopsAtAccess},
 		{"directory search folds names on every profile", directorySearchFoldsNamesOnEveryProfile},
+		{"a file description survives and belongs to its uploader", fileDescriptionBelongsToItsUploader},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

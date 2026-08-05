@@ -840,6 +840,11 @@ type Store interface {
 	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
+	// SetFileDescription records what an image is, in words, for a reader who
+	// cannot see it. The uploader is part of the write rather than checked
+	// before it, so the permission cannot be lost between the check and the
+	// update.
+	SetFileDescription(context.Context, domain.WorkspaceID, domain.FileID, domain.UserID, string, events.Event) error
 	DeleteFileComment(context.Context, domain.WorkspaceID, domain.FileID, domain.FileCommentID, events.Event) error
 	ShareFilePublic(context.Context, domain.WorkspaceID, domain.FileID, string, events.Event) error
 	RevokeFilePublic(context.Context, domain.WorkspaceID, domain.FileID, events.Event) error

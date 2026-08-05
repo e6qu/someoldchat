@@ -1379,18 +1379,50 @@ type BookmarkUpdate struct {
 const MaxBookmarksPerConversation = 100
 
 type File struct {
-	ID             FileID
-	WorkspaceID    WorkspaceID
-	Uploader       UserID
-	Name           string
-	Title          string
-	MIMEType       string
-	BlobKey        string
-	PublicToken    string
-	Size           int64
+	ID          FileID
+	WorkspaceID WorkspaceID
+	Uploader    UserID
+	Name        string
+	Title       string
+	MIMEType    string
+	BlobKey     string
+	PublicToken string
+	Size        int64
+	// Description is what the file is, in words, for a reader who cannot see
+	// it. Slack calls it an image description and shows a control for it; the
+	// pinned Web API snapshot predates the alt_txt parameter that carries it,
+	// so this is first-party durable state rather than an invented API field —
+	// the same standing as recent searches and Later.
+	Description    string
 	CreatedAt      time.Time
 	Deleted        bool
 	SharedChannels []ConversationID
+}
+
+// imageMIMEPrefix is the whole test for whether a file is shown rather than
+// linked. Sniffing the bytes would be a second opinion about a fact the upload
+// already recorded, and a file whose declared type is wrong is wrong
+// everywhere else too.
+const imageMIMEPrefix = "image/"
+
+// IsImage reports whether this file is one a client should render in place. It
+// lives on the domain because the answer decides both what the timeline draws
+// and whether a description is worth asking for.
+func (f File) IsImage() bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(f.MIMEType)), imageMIMEPrefix)
+}
+
+// AccessibleName is what a screen reader announces for this file's image. The
+// description wins because it was written for this purpose; the title is a
+// reasonable second, because a member who titled an upload was describing it
+// too. The file name is deliberately not a third: "IMG_4032.png" tells a reader
+// nothing they did not already know, and an alt text that adds nothing is worse
+// than an empty one, which at least lets the image be skipped.
+func (f File) AccessibleName() string {
+	if description := strings.TrimSpace(f.Description); description != "" {
+		return description
+	}
+	return strings.TrimSpace(f.Title)
 }
 
 type Canvas struct {

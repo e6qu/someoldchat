@@ -3055,6 +3055,44 @@ test('[SEARCH-01 NAV-03 A11Y-01] opening a search result arrives at that message
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// An uploaded image is shown rather than linked, and the uploader can say what
+// it is for a reader who cannot see it. The alt text is the point: an image with
+// no description and no title carries an empty alt, so a screen reader skips it
+// instead of reading a file name back to someone who gains nothing from it.
+test('[FILE-01 A11Y-01 A11Y-02] an uploaded image is shown and its uploader can describe it', async ({ page, context }) => {
+  await signIn(context);
+  const title = `Diagram ${Date.now()}`;
+  await page.goto('/app');
+  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
+  await page.getByLabel('Title (optional)').fill(title);
+  await page.locator('#upload-file').setInputFiles({
+    name: 'diagram.png',
+    mimeType: 'image/png',
+    // A real one-pixel PNG, so the browser has something to decode rather than
+    // an <img> that would render broken however correct the markup is.
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
+  });
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page).toHaveURL(/\/app\?channel=Cdev/);
+
+  const card = page.locator('.message-file', { hasText: title });
+  const image = card.locator('img.message-image');
+  await expect(image).toBeVisible();
+  // Until it is described, the title stands in — a member who titled an upload
+  // was describing it too.
+  await expect(image).toHaveAttribute('alt', title);
+
+  await card.getByRole('group').filter({ hasText: 'Add a description' }).locator('summary').click();
+  await card.getByLabel('Describe this image for people who cannot see it').fill('A single dark pixel');
+  await card.getByRole('button', { name: 'Save description' }).click();
+  await expect(page.locator('#notice, .notice')).toContainText('Description saved');
+
+  const described = page.locator('.message-file', { hasText: title }).locator('img.message-image');
+  await expect(described).toHaveAttribute('alt', 'A single dark pixel');
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

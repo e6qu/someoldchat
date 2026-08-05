@@ -258,6 +258,17 @@ type fileView struct {
 	Size        string
 	DownloadURL string
 	Deleted     bool
+	// IsImage decides whether this file is shown or linked. Description is the
+	// uploader's account of it, and AccessibleName is what the alt attribute
+	// carries — empty when nobody has described the image and it has no title,
+	// because an alt text that repeats the file name tells a screen-reader user
+	// nothing while stopping them skipping the image.
+	IsImage        bool
+	Description    string
+	AccessibleName string
+	// DescribeURL is set only for an image this reader may describe, which is
+	// the uploader, matching deletion.
+	DescribeURL string
 	// DeleteURL is set only for a file this reader may actually delete. The
 	// service is uploader-only, so rendering the control for anyone else
 	// would be a button that always fails — the universal contract forbids a
@@ -1163,6 +1174,9 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.message-file.is-image{flex-wrap:wrap}
+.message-image{max-width:min(360px,100%);max-height:280px;height:auto;border-radius:8px;display:block}
+.message-file-meta.undescribed{color:var(--danger)}
 .message.is-arrival{background:var(--mark-bg);border-radius:6px;transition:background 600ms ease-out}
 @media (prefers-reduced-motion:reduce){.message.is-arrival{transition:none}}
 .result mark,.message-text mark{background:var(--mark-bg);color:inherit;font-weight:700;border-radius:2px;padding:0 1px}
@@ -1327,14 +1341,22 @@ const messagesPartial = `{{define "messages"}}
     </div>
     {{if $message.DisplayText}}<p class="message-text">{{$message.DisplayText}}</p>{{end}}
     {{if $message.Files}}<div class="message-files" aria-label="Shared files">{{range $file := $message.Files}}
-      <div class="message-file">
-        <span class="message-file-icon" aria-hidden="true">FILE</span>
-        <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span></span>
+      <div class="message-file{{if $file.IsImage}} is-image{{end}}">
+        {{if $file.IsImage}}<a class="message-image-link" href="{{$file.DownloadURL}}"><img class="message-image" src="{{$file.DownloadURL}}" alt="{{$file.AccessibleName}}" loading="lazy"></a>
+        {{else}}<span class="message-file-icon" aria-hidden="true">FILE</span>{{end}}
+        <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span>{{if and $file.IsImage (not $file.AccessibleName)}}<span class="message-file-meta undescribed">No description yet</span>{{end}}</span>
         {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{if $file.DeleteURL}}<details class="file-delete"><summary>Delete file</summary>
           <form method="post" action="{{$file.DeleteURL}}" hx-post="{{$file.DeleteURL}}">
             <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
             <p>Deleting {{$file.Title}} removes it from every message and search result in this workspace. This cannot be undone.</p>
             <button type="submit">Delete this file</button>
+          </form>
+        </details>{{end}}{{if $file.DescribeURL}}<details class="file-describe"><summary>{{if $file.Description}}Edit description{{else}}Add a description{{end}}</summary>
+          <form method="post" action="{{$file.DescribeURL}}" hx-post="{{$file.DescribeURL}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label for="describe-{{$file.ID}}">Describe this image for people who cannot see it</label>
+            <textarea id="describe-{{$file.ID}}" name="description" maxlength="1000" rows="2">{{$file.Description}}</textarea>
+            <button type="submit">Save description</button>
           </form>
         </details>{{end}}{{end}}
       </div>{{end}}</div>{{end}}
@@ -3951,6 +3973,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /archives/{channelID}/{timestamp}", h.archivePermalink)
 	mux.HandleFunc("POST /app/message/forward", h.forwardMessage)
 	mux.HandleFunc("POST /app/files/delete", h.deleteFile)
+	mux.HandleFunc("POST /app/files/describe", h.describeFile)
 	mux.HandleFunc("GET /app/remote-files", h.remoteFiles)
 	mux.HandleFunc("POST /app/workspace/switch", h.switchWorkspace)
 	mux.HandleFunc("POST /app/conversation/retention", h.conversationRetentionSet)
@@ -4202,6 +4225,38 @@ func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 	h.redirectMutation(w, r, appURL(channel, "", "", "", "")+"&notice="+url.QueryEscape("File deleted"))
+}
+
+// describeFile records what an image is, in words. It returns to the
+// conversation rather than answering a fragment, because a description changes
+// what every reader of that message hears and the timeline is where they see it.
+func (h Handler) describeFile(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	form, ok := h.decodeMutation(w, r, "Reload the conversation and try again.")
+	if !ok {
+		return
+	}
+	fileID := domain.FileID(strings.TrimSpace(r.URL.Query().Get("file")))
+	if fileID == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The description was not saved", "Reload the conversation and try again.")
+		return
+	}
+	if err := h.Messages.SetFileDescription(r.Context(), principal.WorkspaceID, principal.UserID, fileID, form["description"]); err != nil {
+		// Uploader-only, and a missing file and someone else's file answer
+		// identically, so this cannot be used to probe for files.
+		h.writeMessageMutationError(w, r, err, "described")
+		return
+	}
+	notice := "Description saved"
+	if strings.TrimSpace(form["description"]) == "" {
+		notice = "Description removed"
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	h.redirectMutation(w, r, appURL(channel, "", "", "", "")+"&notice="+url.QueryEscape(notice))
 }
 
 func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
@@ -5456,10 +5511,16 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			fileItem := fileView{
 				ID: string(file.ID), Name: file.Name, Title: title, MIMEType: file.MIMEType,
 				Size: formatFileSize(file.Size), Deleted: file.Deleted,
-				DownloadURL: "/app/files/" + url.PathEscape(string(file.ID)),
+				DownloadURL:    "/app/files/" + url.PathEscape(string(file.ID)),
+				IsImage:        file.IsImage() && !file.Deleted,
+				Description:    file.Description,
+				AccessibleName: file.AccessibleName(),
 			}
 			if !file.Deleted && file.Uploader == principal.UserID && principal.HasScope(auth.ScopeFilesWrite) {
 				fileItem.DeleteURL = mutationURL("/app/files/delete", channel, timestamp, threadTimestamp, before) + "&file=" + url.QueryEscape(string(file.ID))
+				if fileItem.IsImage {
+					fileItem.DescribeURL = mutationURL("/app/files/describe", channel, timestamp, threadTimestamp, before) + "&file=" + url.QueryEscape(string(file.ID))
+				}
 			}
 			view.Files = append(view.Files, fileItem)
 		}

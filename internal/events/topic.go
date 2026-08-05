@@ -292,6 +292,8 @@ var topicRules = []topicRule{
 		note: "pinned topic; like Slack's other file events the inner carries identifiers only ({file_id, user_id, file{id}}), and a consumer hydrates through files.info"},
 	{topic: "file.public_revoked",
 		note: "not pinned: file_unshared is a different fact"},
+	{topic: "file.description_changed",
+		note: "first-party: Slack shows an image-description control in its client and the pinned Web API snapshot predates the alt_txt parameter that would carry it, so this describes durable state of our own rather than a Slack event"},
 	{topic: "file.comment_deleted",
 		note: "the snapshot still lists file_comment_deleted, but Slack retired file-comment events and specs/api-compatibility.md ranks current official documentation above the archived AsyncAPI, so the pinned file alone is not authority to emit it"},
 	{topic: "remote_file.created",

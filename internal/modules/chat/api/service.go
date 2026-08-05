@@ -388,6 +388,7 @@ type Service interface {
 	OpenFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, io.ReadCloser, error)
 	FileInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) error
+	SetFileDescription(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, string) error
 	DeleteFileComment(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, domain.FileCommentID) error
 	ShareFilePublic(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, error)
 	RevokeFilePublic(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, error)
