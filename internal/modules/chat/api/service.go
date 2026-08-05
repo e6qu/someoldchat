@@ -284,6 +284,10 @@ type Service interface {
 	MarkAllRead(context.Context, domain.WorkspaceID, domain.UserID) (int, error)
 	FollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
 	ResumeWorkflowDelays(context.Context, domain.WorkspaceID, time.Time, int) (int, error)
+	SetAssistantThreadTitle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
+	SetAssistantThreadStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
+	SetAssistantThreadSuggestedPrompts(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, []domain.AssistantPrompt) error
+	AssistantThread(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.AssistantThread, error)
 	RecordActivity(context.Context, domain.WorkspaceID, domain.UserID) error
 	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)

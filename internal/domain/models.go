@@ -335,6 +335,48 @@ type WorkflowStep struct {
 	UpdatedAt time.Time
 }
 
+// AssistantThread is the state an assistant app may set on one thread: the
+// title it is given in the client, the transient status it shows while working,
+// and the prompts it offers before anyone has typed. All three are written by
+// the app through assistant.threads.*; none of them is content, so none is
+// authored by a member.
+type AssistantThread struct {
+	WorkspaceID     WorkspaceID
+	Conversation    ConversationID
+	ThreadTimestamp MessageTimestamp
+	Title           string
+	Status          string
+	PromptsTitle    string
+	Prompts         []AssistantPrompt
+	UpdatedAt       time.Time
+}
+
+type AssistantPrompt struct {
+	Title   string
+	Message string
+}
+
+// AssistantThreadField names which piece of assistant state a write sets. The
+// three API methods each set exactly one, and a store method that took the
+// whole record would silently clear the other two whenever a caller left them
+// empty — which is what an app setting only its status would do.
+type AssistantThreadField string
+
+const (
+	AssistantThreadTitle   AssistantThreadField = "title"
+	AssistantThreadStatus  AssistantThreadField = "status"
+	AssistantThreadPrompts AssistantThreadField = "prompts"
+)
+
+func (f AssistantThreadField) Valid() bool {
+	return f == AssistantThreadTitle || f == AssistantThreadStatus || f == AssistantThreadPrompts
+}
+
+// AssistantPromptLimit is how many prompts one thread may offer. Slack's own
+// assistant pane shows a short list; the bound exists so an app cannot turn the
+// pane into an unbounded page.
+const AssistantPromptLimit = 8
+
 type Dialog struct {
 	ID          DialogID
 	WorkspaceID WorkspaceID

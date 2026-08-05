@@ -41,6 +41,45 @@ message ResumeWorkflowDelaysResponse {
   int32 resumed = 1;
 }
 
+message AssistantPrompt {
+  string title = 1;
+  string message = 2;
+}
+
+message AssistantThread {
+  string workspace_id = 1;
+  string conversation = 2;
+  string thread_ts = 3;
+  string title = 4;
+  string status = 5;
+  string prompts_title = 6;
+  repeated AssistantPrompt prompts = 7;
+  int64 updated_at_unix_nano = 8;
+}
+
+message SetAssistantThreadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation = 3;
+  string thread_ts = 4;
+  string field = 5;
+  string title = 6;
+  string status = 7;
+  string prompts_title = 8;
+  repeated AssistantPrompt prompts = 9;
+}
+
+message SetAssistantThreadResponse {
+  bool ok = 1;
+}
+
+message AssistantThreadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation = 3;
+  string thread_ts = 4;
+}
+
 message RecordActivityRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -263,6 +302,8 @@ service InteractionsService {
   rpc ListFollowedThreads(FollowedThreadsRequest) returns (FollowedThreadPage);
   rpc RecordActivity(RecordActivityRequest) returns (RecordActivityResponse);
   rpc ResumeWorkflowDelays(ResumeWorkflowDelaysRequest) returns (ResumeWorkflowDelaysResponse);
+  rpc SetAssistantThread(SetAssistantThreadRequest) returns (SetAssistantThreadResponse);
+  rpc GetAssistantThread(AssistantThreadRequest) returns (AssistantThread);
   // Named GetReadCursor because an rpc named ReadCursor would shadow the
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);

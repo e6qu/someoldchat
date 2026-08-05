@@ -16,6 +16,7 @@ service.app_datastore_not_found
 service.app_home_not_enabled
 service.app_interaction_unavailable
 service.app_not_hosted
+service.assistant_thread_not_found
 service.automation_channel_not_found
 service.automation_entities_empty
 service.automation_org_not_found
@@ -35,6 +36,7 @@ service.invalid_access_log
 service.invalid_app_approval
 service.invalid_app_manifest
 service.invalid_app_response
+service.invalid_assistant_thread
 service.invalid_bookmark
 service.invalid_bot
 service.invalid_call

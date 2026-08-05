@@ -2783,6 +2783,53 @@ test('[CALL-01] an app-registered call renders as a joinable card and loses the 
   await expect(finished.getByRole('link', { name: 'Join call' })).toHaveCount(0);
 });
 
+test('[APP-07 A11Y-01] an assistant app names a thread, shows its status, and offers prompts', async ({ page, context, request }) => {
+  await signIn(context);
+
+  const question = `assistant question ${Date.now()}`;
+  const root = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, text: question },
+  });
+  const thread = (await root.json()).ts;
+
+  for (const [method, body] of [
+    ['assistant.threads.setTitle', { channel_id: CHANNEL, thread_ts: thread, title: 'Deploy help' }],
+    ['assistant.threads.setStatus', { channel_id: CHANNEL, thread_ts: thread, status: 'is thinking…' }],
+    ['assistant.threads.setSuggestedPrompts', {
+      channel_id: CHANNEL, thread_ts: thread, title: 'Try one',
+      prompts: JSON.stringify([{ title: 'Roll back', message: 'How do I roll back?' }]),
+    }],
+  ]) {
+    const response = await request.post(`/api/${method}`, {
+      headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
+      form: body,
+    });
+    expect((await response.json()).ok, method).toBe(true);
+  }
+
+  await page.goto(`/app?channel=${CHANNEL}&thread=${thread}`);
+  await expect(page.locator('.assistant-title')).toHaveText('Deploy help');
+  await expect(page.locator('.assistant-status')).toHaveText('is thinking…');
+  await expect(page.getByRole('button', { name: 'Roll back' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // A prompt is an opening, not a decoration: clicking it sends its message.
+  await page.getByRole('button', { name: 'Roll back' }).click();
+  await expect(page.locator('.message-text').filter({ hasText: 'How do I roll back?' }).first()).toBeVisible();
+
+  // Clearing the status removes it and leaves the title alone, which is how an
+  // assistant says it has stopped working.
+  const cleared = await request.post('/api/assistant.threads.setStatus', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: { channel_id: CHANNEL, thread_ts: thread, status: '' },
+  });
+  expect((await cleared.json()).ok).toBe(true);
+  await page.goto(`/app?channel=${CHANNEL}&thread=${thread}`);
+  await expect(page.locator('.assistant-status')).toHaveCount(0);
+  await expect(page.locator('.assistant-title')).toHaveText('Deploy help');
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

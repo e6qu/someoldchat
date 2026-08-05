@@ -121,6 +121,8 @@ var errorClasses = []errorClass{
 	{key: "service.retention_not_supported", code: codes.FailedPrecondition, sentinel: service.ErrRetentionNotSupported},
 	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppApproval},
 	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidView},
+	{key: "service.invalid_assistant_thread", code: codes.InvalidArgument, sentinel: service.ErrInvalidAssistantThread},
+	{key: "service.assistant_thread_not_found", code: codes.NotFound, sentinel: service.ErrAssistantThreadNotFound},
 	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkflowStep},
 	{key: "service.invalid_trigger_config", code: codes.InvalidArgument, sentinel: service.ErrInvalidTriggerConfig},
 	{key: "service.automation_entities_empty", code: codes.InvalidArgument, sentinel: service.ErrAutomationEntitiesEmpty},

@@ -369,7 +369,10 @@ type pageData struct {
 	ChannelMeta          string
 	WorkspaceName        string
 	CSRFToken            string
-	ShowProfile          bool
+	// Assistant is the state an assistant app has set on the open thread. It is
+	// empty for every thread no app has touched, which is almost all of them.
+	Assistant   assistantThreadView
+	ShowProfile bool
 	// ShowAdmin gates workspace administration; ShowAuthAdmin gates the
 	// identity-provider page, which needs a provider to have anything to say.
 	ShowAdmin     bool
@@ -494,6 +497,23 @@ type documentCardView struct {
 	Preview   string
 	URL       string
 	UpdatedAt string
+}
+
+// assistantThreadView is what a member sees of an assistant's own state: a
+// title for the thread, a transient status, and prompts they can send with one
+// click. Present distinguishes "no assistant has touched this thread" from
+// "an assistant set everything to empty", which render differently.
+type assistantThreadView struct {
+	Present      bool
+	Title        string
+	Status       string
+	PromptsTitle string
+	Prompts      []assistantPromptView
+}
+
+type assistantPromptView struct {
+	Title   string
+	Message string
 }
 
 type canvasData struct {
@@ -1090,6 +1110,13 @@ const workspaceRefinements = `<style>
 .call-participants{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none;color:var(--muted);font-size:12px}
 .call-join{justify-self:start;display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border-radius:6px;background:var(--action);color:var(--on-strong);font-weight:800;text-decoration:none}
 .call-unavailable{margin:0;color:var(--muted)}
+.assistant-state{display:grid;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+.assistant-title{margin:0;font-weight:800}
+.assistant-status{margin:0;color:var(--muted);font-size:13px;font-style:italic}
+.assistant-prompts{display:grid;gap:6px}.assistant-prompts-title{margin:0;color:var(--muted);font-size:12px;font-weight:700}
+.assistant-prompts form{margin:0}
+.assistant-prompt{display:block;width:100%;min-height:32px;padding:7px 10px;border:1px solid var(--field-line);border-radius:7px;background:var(--panel-strong);color:var(--text);text-align:left;font-weight:600}
+.assistant-prompt:hover{background:var(--hover)}
 .search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
 .top-profile{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:7px;background:#ffffff35;font-weight:800;text-transform:uppercase}
 .workspace{grid-template-columns:260px minmax(0,1fr)}
@@ -1613,6 +1640,17 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       {{if .ThreadTimestamp}}
       <aside class="thread" aria-labelledby="thread-heading">
         <div class="thread-heading"><h2 id="thread-heading">Thread</h2>{{if .ThreadFollowURL}}<form method="post" action="{{.ThreadFollowURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="followed" value="{{if .FollowingThread}}false{{else}}true{{end}}"><button type="submit" aria-pressed="{{if .FollowingThread}}true{{else}}false{{end}}">{{if .FollowingThread}}Following{{else}}Follow thread{{end}}</button></form>{{end}}</div>
+        {{if .Assistant.Present}}<div class="assistant-state">
+          {{if .Assistant.Title}}<p class="assistant-title">{{.Assistant.Title}}</p>{{end}}
+          {{if .Assistant.Status}}<p class="assistant-status" role="status">{{.Assistant.Status}}</p>{{end}}
+          {{if .Assistant.Prompts}}<div class="assistant-prompts">
+            {{if .Assistant.PromptsTitle}}<p class="assistant-prompts-title">{{.Assistant.PromptsTitle}}</p>{{end}}
+            {{range .Assistant.Prompts}}<form method="post" action="{{$.ComposeURL}}" hx-post="{{$.ComposeURL}}">
+              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="text" value="{{.Message}}">
+              <button class="assistant-prompt" type="submit" title="{{.Message}}">{{.Title}}</button>
+            </form>{{end}}
+          </div>{{end}}
+        </div>{{end}}
         <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div>
       </aside>
       {{end}}
@@ -4706,6 +4744,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		ShowAdmin:        h.canShowWorkspaceAdmin(r.Context(), principal),
 		ShowAuthAdmin:    h.Login != nil && h.canShowWorkspaceAdmin(r.Context(), principal),
 		Keyboard:         keyboardHelp(),
+		Assistant:        h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp)),
 		ReminderUnread:   reminderUnread,
 		IsMember:         isMember,
 		CanPost:          canPost,
@@ -5018,6 +5057,24 @@ func markDaysAndFirstUnread(views []messageView, messages []domain.Message, last
 // page carrying more than a handful is not a shape Slack produces; the bound
 // keeps a crafted message from turning one render into an unbounded number of
 // reads.
+// assistantThreadView reads what an assistant app has set on the open thread.
+// A thread nothing has touched is the overwhelmingly common case and answers an
+// empty view rather than an error, so a missing row is not a failed page.
+func (h Handler) assistantThreadView(ctx context.Context, principal auth.Principal, conversation domain.ConversationID, thread domain.MessageTimestamp) assistantThreadView {
+	if thread == "" {
+		return assistantThreadView{}
+	}
+	value, err := h.Messages.AssistantThread(ctx, principal.WorkspaceID, principal.UserID, conversation, thread)
+	if err != nil {
+		return assistantThreadView{}
+	}
+	view := assistantThreadView{Present: true, Title: value.Title, Status: value.Status, PromptsTitle: value.PromptsTitle}
+	for _, prompt := range value.Prompts {
+		view.Prompts = append(view.Prompts, assistantPromptView{Title: prompt.Title, Message: prompt.Message})
+	}
+	return view
+}
+
 func (h Handler) resolveCallBlocks(ctx context.Context, principal auth.Principal, messages []messageView) {
 	const maximumCallsPerPage = 20
 	resolved := map[string]*callBlockView{}

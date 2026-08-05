@@ -327,6 +327,7 @@ func conversionCases() map[string]conversionCase {
 		"RemoteFilePage":     {sample: &domain.RemoteFilePage{}, through: through(encodeProtoRemoteFilePage, decodeProtoRemoteFilePage)},
 		"ReadCursor":         {sample: &domain.ReadCursor{}, through: through(encodeProtoReadCursor, decodeProtoReadCursor)},
 		"ThreadSummary":      {sample: &domain.ThreadSummary{}, through: through(encodeProtoThreadSummary, decodeProtoThreadSummary)},
+		"AssistantThread":    {sample: &domain.AssistantThread{Prompts: []domain.AssistantPrompt{{}}}, through: through(encodeProtoAssistantThread, decodeProtoAssistantThread)},
 		"FollowedThreadPage": {sample: &domain.FollowedThreadPage{Threads: []domain.FollowedThread{{}}}, through: through(encodeProtoFollowedThreadPage, decodeProtoFollowedThreadPage)},
 		"WorkspaceNotificationPreferences": {
 			sample: &domain.WorkspaceNotificationPreferences{},
@@ -428,6 +429,14 @@ func conversionCases() map[string]conversionCase {
 				value := filled.(*draftAttachmentsRoundTrip)
 				wire := &chatv1.Draft{Attachments: encodeProtoDraftAttachments(value.Attachments)}
 				return &draftAttachmentsRoundTrip{Attachments: decodeProtoDraftAttachments(wire.GetAttachments())}, wire, nil
+			},
+		},
+		"AssistantPrompts": {
+			sample: &assistantPromptsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				value := filled.(*assistantPromptsRoundTrip)
+				wire := &chatv1.AssistantThread{Prompts: encodeProtoAssistantPrompts(value.Prompts)}
+				return &assistantPromptsRoundTrip{Prompts: decodeProtoAssistantPrompts(wire.GetPrompts())}, wire, nil
 			},
 		},
 		"AppDeliveryHealth": {
@@ -572,6 +581,10 @@ type reactionPage struct {
 	Reactions  []domain.Reaction
 	NextCursor domain.Cursor
 	HasMore    bool
+}
+
+type assistantPromptsRoundTrip struct {
+	Prompts []domain.AssistantPrompt
 }
 
 type draftAttachmentsRoundTrip struct {

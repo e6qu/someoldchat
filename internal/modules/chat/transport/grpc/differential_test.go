@@ -1722,6 +1722,42 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Assistant state is written a field at a time, which is the part
+			// the two compositions can disagree about: a whole-record write
+			// would clear the fields the caller left empty, and only setting
+			// one field then reading all three catches it.
+			name: "assistant thread state is written one field at a time",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				root, err := chat.Post(ctx, "T1", "U1", "C1", "assistant root", "", "")
+				if err != nil {
+					return nil, err
+				}
+				thread := timestampOf(root)
+				if err := chat.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", thread, "Deploy help"); err != nil {
+					return nil, err
+				}
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking..."); err != nil {
+					return nil, err
+				}
+				if err := chat.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "Try", []domain.AssistantPrompt{{Title: "Roll back", Message: "How do I roll back?"}}); err != nil {
+					return nil, err
+				}
+				value, err := chat.AssistantThread(ctx, "T1", "U1", "C1", thread)
+				if err != nil {
+					return nil, err
+				}
+				// Clearing the status must leave the title and prompts alone.
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, ""); err != nil {
+					return nil, err
+				}
+				after, err := chat.AssistantThread(ctx, "T1", "U1", "C1", thread)
+				if err != nil {
+					return nil, err
+				}
+				return []any{value.Title, value.Status, value.PromptsTitle, len(value.Prompts), after.Title, after.Status, len(after.Prompts)}, nil
+			},
+		},
+		{
 			// A delay parks a run on the clock, and the sweep that resumes it
 			// is the only place a run advances without anyone asking. Both
 			// compositions have to agree on what is due and on the fact that a

@@ -3362,6 +3362,43 @@ func (r Remote) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoReadCursor(out)
 }
 
+func (r Remote) SetAssistantThreadTitle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, title string) error {
+	return r.setAssistantThread(ctx, &chatv1.SetAssistantThreadRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), Conversation: string(conversation),
+		ThreadTs: string(thread), Field: string(domain.AssistantThreadTitle), Title: title,
+	})
+}
+
+func (r Remote) SetAssistantThreadStatus(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, status string) error {
+	return r.setAssistantThread(ctx, &chatv1.SetAssistantThreadRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), Conversation: string(conversation),
+		ThreadTs: string(thread), Field: string(domain.AssistantThreadStatus), Status: status,
+	})
+}
+
+func (r Remote) SetAssistantThreadSuggestedPrompts(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, title string, prompts []domain.AssistantPrompt) error {
+	return r.setAssistantThread(ctx, &chatv1.SetAssistantThreadRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), Conversation: string(conversation),
+		ThreadTs: string(thread), Field: string(domain.AssistantThreadPrompts), PromptsTitle: title,
+		Prompts: encodeProtoAssistantPrompts(prompts),
+	})
+}
+
+func (r Remote) setAssistantThread(ctx context.Context, in *chatv1.SetAssistantThreadRequest) error {
+	_, err := r.interactions.SetAssistantThread(ctx, in)
+	return err
+}
+
+func (r Remote) AssistantThread(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.AssistantThread, error) {
+	out, err := r.interactions.GetAssistantThread(ctx, &chatv1.AssistantThreadRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), Conversation: string(conversation), ThreadTs: string(thread),
+	})
+	if err != nil {
+		return domain.AssistantThread{}, err
+	}
+	return decodeProtoAssistantThread(out)
+}
+
 func (r Remote) ResumeWorkflowDelays(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) (int, error) {
 	out, err := r.interactions.ResumeWorkflowDelays(ctx, &chatv1.ResumeWorkflowDelaysRequest{
 		WorkspaceId: string(workspaceID), NowUnixNano: unixNanoOrZero(now), Limit: int32(limit),
@@ -6669,6 +6706,70 @@ func (s *Server) MarkAllRead(ctx context.Context, input *chatv1.MarkAllReadReque
 		return nil, mapError(err)
 	}
 	return &chatv1.MarkAllReadResponse{Conversations: int32(count)}, nil
+}
+
+func (s *Server) SetAssistantThread(ctx context.Context, input *chatv1.SetAssistantThreadRequest) (*chatv1.SetAssistantThreadResponse, error) {
+	workspace := domain.WorkspaceID(input.GetWorkspaceId())
+	actor := domain.UserID(input.GetUserId())
+	conversation := domain.ConversationID(input.GetConversation())
+	thread := domain.MessageTimestamp(input.GetThreadTs())
+	var err error
+	switch domain.AssistantThreadField(input.GetField()) {
+	case domain.AssistantThreadTitle:
+		err = s.implementation.SetAssistantThreadTitle(ctx, workspace, actor, conversation, thread, input.GetTitle())
+	case domain.AssistantThreadStatus:
+		err = s.implementation.SetAssistantThreadStatus(ctx, workspace, actor, conversation, thread, input.GetStatus())
+	case domain.AssistantThreadPrompts:
+		err = s.implementation.SetAssistantThreadSuggestedPrompts(ctx, workspace, actor, conversation, thread, input.GetPromptsTitle(), decodeProtoAssistantPrompts(input.GetPrompts()))
+	default:
+		return nil, mapError(errors.New("unknown assistant thread field"))
+	}
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SetAssistantThreadResponse{Ok: true}, nil
+}
+
+func (s *Server) GetAssistantThread(ctx context.Context, input *chatv1.AssistantThreadRequest) (*chatv1.AssistantThread, error) {
+	value, err := s.implementation.AssistantThread(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversation()), domain.MessageTimestamp(input.GetThreadTs()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAssistantThread(value), nil
+}
+
+func encodeProtoAssistantPrompts(values []domain.AssistantPrompt) []*chatv1.AssistantPrompt {
+	prompts := make([]*chatv1.AssistantPrompt, 0, len(values))
+	for _, prompt := range values {
+		prompts = append(prompts, &chatv1.AssistantPrompt{Title: prompt.Title, Message: prompt.Message})
+	}
+	return prompts
+}
+
+func decodeProtoAssistantPrompts(values []*chatv1.AssistantPrompt) []domain.AssistantPrompt {
+	prompts := make([]domain.AssistantPrompt, 0, len(values))
+	for _, prompt := range values {
+		prompts = append(prompts, domain.AssistantPrompt{Title: prompt.GetTitle(), Message: prompt.GetMessage()})
+	}
+	return prompts
+}
+
+func encodeProtoAssistantThread(value domain.AssistantThread) *chatv1.AssistantThread {
+	return &chatv1.AssistantThread{
+		WorkspaceId: string(value.WorkspaceID), Conversation: string(value.Conversation),
+		ThreadTs: string(value.ThreadTimestamp), Title: value.Title, Status: value.Status,
+		PromptsTitle: value.PromptsTitle, Prompts: encodeProtoAssistantPrompts(value.Prompts),
+		UpdatedAtUnixNano: unixNanoOrZero(value.UpdatedAt),
+	}
+}
+
+func decodeProtoAssistantThread(value *chatv1.AssistantThread) (domain.AssistantThread, error) {
+	return domain.AssistantThread{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversation()),
+		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), Title: value.GetTitle(), Status: value.GetStatus(),
+		PromptsTitle: value.GetPromptsTitle(), Prompts: decodeProtoAssistantPrompts(value.GetPrompts()),
+		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
+	}, nil
 }
 
 func (s *Server) ResumeWorkflowDelays(ctx context.Context, input *chatv1.ResumeWorkflowDelaysRequest) (*chatv1.ResumeWorkflowDelaysResponse, error) {

@@ -1300,15 +1300,33 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.search.info/
   - method: assistant.threads.setStatus
-    status: unimplemented
+    status: sdk-compatible
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - internal/service/assistant_test.go
+    deviations:
+      - The transient status an assistant shows while it works. Clearing it is an empty status, which is why an empty value is accepted here and refused for a title.
+      - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
   - method: assistant.threads.setSuggestedPrompts
-    status: unimplemented
+    status: sdk-compatible
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - internal/service/assistant_test.go
+    deviations:
+      - Prompts offered before anyone has typed. Bounded at eight, which Slack does not document; the pane is short and an unbounded list would be a different surface.
+      - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setSuggestedPrompts/
   - method: assistant.threads.setTitle
-    status: unimplemented
+    status: sdk-compatible
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - internal/service/assistant_test.go
+    deviations:
+      - The name a thread is given in the client.
+      - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setTitle/
   - method: auth.teams.list

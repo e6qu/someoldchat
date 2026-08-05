@@ -1192,6 +1192,23 @@ assert.equal(canonicalGroupDirect.channel.id, groupDirect.channel.id);
 const marked = await client.conversations.mark({ channel: "C1", ts: root.ts });
 assert.equal(marked.ok, true);
 
+// assistant.threads.*: the argument names come from this SDK's own types
+// (channel_id, thread_ts, and title/status/prompts), so a mismatch fails to
+// compile against them rather than being discovered by a reader.
+const assistantTitle = await client.assistant.threads.setTitle({
+  channel_id: "C1", thread_ts: root.ts, title: "Deploy help",
+});
+assert.equal(assistantTitle.ok, true);
+const assistantStatus = await client.assistant.threads.setStatus({
+  channel_id: "C1", thread_ts: root.ts, status: "is thinking...",
+});
+assert.equal(assistantStatus.ok, true);
+const assistantPrompts = await client.assistant.threads.setSuggestedPrompts({
+  channel_id: "C1", thread_ts: root.ts, title: "Try one",
+  prompts: [{ title: "Roll back", message: "How do I roll back?" }],
+});
+assert.equal(assistantPrompts.ok, true);
+
 const history = await client.conversations.history({ channel: "C1", limit: 10 });
 assert.equal(history.ok, true);
 assert.equal(history.messages.length >= 3, true);
