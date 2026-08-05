@@ -634,6 +634,11 @@ type Store interface {
 	// never a conversation they cannot see. Expired signals are omitted rather
 	// than returned for the caller to filter, so no caller can forget to.
 	ListTypingSignals(context.Context, domain.WorkspaceID, domain.UserID, time.Time) ([]domain.TypingSignal, error)
+	// RecordListAssignment tells a member that work is theirs. It is separate
+	// from the item write rather than folded into it because only some writes
+	// are assignments — a due date moved on an item someone already holds is
+	// not one — and the service knows which.
+	RecordListAssignment(context.Context, domain.ListItem, domain.UserID, time.Time) error
 	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
 	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)

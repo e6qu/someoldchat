@@ -28,6 +28,7 @@ const (
 	ListsService_GetListItem_FullMethodName       = "/sameoldchat.chat.v1.ListsService/GetListItem"
 	ListsService_ListItems_FullMethodName         = "/sameoldchat.chat.v1.ListsService/ListItems"
 	ListsService_UpdateListItem_FullMethodName    = "/sameoldchat.chat.v1.ListsService/UpdateListItem"
+	ListsService_AssignListItem_FullMethodName    = "/sameoldchat.chat.v1.ListsService/AssignListItem"
 	ListsService_UpdateListCells_FullMethodName   = "/sameoldchat.chat.v1.ListsService/UpdateListCells"
 	ListsService_DeleteListItems_FullMethodName   = "/sameoldchat.chat.v1.ListsService/DeleteListItems"
 	ListsService_SetListAccess_FullMethodName     = "/sameoldchat.chat.v1.ListsService/SetListAccess"
@@ -49,6 +50,7 @@ type ListsServiceClient interface {
 	GetListItem(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListItemResponse, error)
 	ListItems(ctx context.Context, in *ListItemsRequest, opts ...grpc.CallOption) (*ListItemsResponse, error)
 	UpdateListItem(ctx context.Context, in *UpdateListItemRequest, opts ...grpc.CallOption) (*ListItemResponse, error)
+	AssignListItem(ctx context.Context, in *AssignListItemRequest, opts ...grpc.CallOption) (*ListItem, error)
 	UpdateListCells(ctx context.Context, in *UpdateListItemRequest, opts ...grpc.CallOption) (*ListItemsResponse, error)
 	DeleteListItems(ctx context.Context, in *DeleteListItemsRequest, opts ...grpc.CallOption) (*ListOKResponse, error)
 	SetListAccess(ctx context.Context, in *ListAccessRequest, opts ...grpc.CallOption) (*ListOKResponse, error)
@@ -155,6 +157,16 @@ func (c *listsServiceClient) UpdateListItem(ctx context.Context, in *UpdateListI
 	return out, nil
 }
 
+func (c *listsServiceClient) AssignListItem(ctx context.Context, in *AssignListItemRequest, opts ...grpc.CallOption) (*ListItem, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListItem)
+	err := c.cc.Invoke(ctx, ListsService_AssignListItem_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *listsServiceClient) UpdateListCells(ctx context.Context, in *UpdateListItemRequest, opts ...grpc.CallOption) (*ListItemsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListItemsResponse)
@@ -228,6 +240,7 @@ type ListsServiceServer interface {
 	GetListItem(context.Context, *ListItemRequest) (*ListItemResponse, error)
 	ListItems(context.Context, *ListItemsRequest) (*ListItemsResponse, error)
 	UpdateListItem(context.Context, *UpdateListItemRequest) (*ListItemResponse, error)
+	AssignListItem(context.Context, *AssignListItemRequest) (*ListItem, error)
 	UpdateListCells(context.Context, *UpdateListItemRequest) (*ListItemsResponse, error)
 	DeleteListItems(context.Context, *DeleteListItemsRequest) (*ListOKResponse, error)
 	SetListAccess(context.Context, *ListAccessRequest) (*ListOKResponse, error)
@@ -269,6 +282,9 @@ func (UnimplementedListsServiceServer) ListItems(context.Context, *ListItemsRequ
 }
 func (UnimplementedListsServiceServer) UpdateListItem(context.Context, *UpdateListItemRequest) (*ListItemResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateListItem not implemented")
+}
+func (UnimplementedListsServiceServer) AssignListItem(context.Context, *AssignListItemRequest) (*ListItem, error) {
+	return nil, status.Error(codes.Unimplemented, "method AssignListItem not implemented")
 }
 func (UnimplementedListsServiceServer) UpdateListCells(context.Context, *UpdateListItemRequest) (*ListItemsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateListCells not implemented")
@@ -470,6 +486,24 @@ func _ListsService_UpdateListItem_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ListsService_AssignListItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssignListItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).AssignListItem(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_AssignListItem_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).AssignListItem(ctx, req.(*AssignListItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ListsService_UpdateListCells_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateListItemRequest)
 	if err := dec(in); err != nil {
@@ -620,6 +654,10 @@ var ListsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateListItem",
 			Handler:    _ListsService_UpdateListItem_Handler,
+		},
+		{
+			MethodName: "AssignListItem",
+			Handler:    _ListsService_AssignListItem_Handler,
 		},
 		{
 			MethodName: "UpdateListCells",

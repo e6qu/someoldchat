@@ -124,6 +124,7 @@ func runQualification(t *testing.T, open opener) {
 		{"a file description survives and belongs to its uploader", fileDescriptionBelongsToItsUploader},
 		{"a canvas share reaches Activity on every profile", canvasShareReachesActivity},
 		{"a notification schedule round-trips on every profile", notificationScheduleRoundTrips},
+		{"an assigned list item reaches Activity on every profile", listAssignmentReachesActivity},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

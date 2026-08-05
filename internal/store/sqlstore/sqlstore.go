@@ -376,7 +376,7 @@ CREATE INDEX IF NOT EXISTS thread_follows_conversation_root ON thread_follows(co
 CREATE TABLE IF NOT EXISTS activity_items (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '',
- reminder_id TEXT NOT NULL DEFAULT '', canvas_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
+ reminder_id TEXT NOT NULL DEFAULT '', canvas_id TEXT NOT NULL DEFAULT '', list_item_id TEXT NOT NULL DEFAULT '', list_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
  read_at INTEGER NOT NULL DEFAULT 0, cleared_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS activity_items_user_time ON activity_items(workspace_id, user_id, cleared_at, occurred_at DESC, id DESC);
@@ -509,7 +509,8 @@ CREATE TABLE IF NOT EXISTS lists (
 CREATE TABLE IF NOT EXISTS list_items (
  id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1,
+ assignee_id TEXT NOT NULL DEFAULT '', due_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS list_items_list_id ON list_items(list_id, id);
 CREATE TABLE IF NOT EXISTS list_access (
@@ -553,7 +554,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 143
+const schemaVersion = 145
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3146,6 +3147,45 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 145 {
+		// Work assigned to a member is Activity news, and the row has to name
+		// the item as well as the list it lives in — the list because that is
+		// what reachability is decided by, the item because that is what the
+		// row is about.
+		columns, err := s.tableColumns(ctx, db, "activity_items")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{"list_item_id", "list_id"} {
+			if columns[column] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE activity_items ADD COLUMN `+column+` TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate activity %s: %w", column, err)
+			}
+		}
+	}
+	if version < 144 {
+		// Who an item is for and when it is wanted. Columns rather than cells
+		// inside the free-form fields blob, because the product asks these two
+		// questions itself — who is this for, is it late — and a value buried
+		// in JSON cannot answer them without every reader parsing it.
+		columns, err := s.tableColumns(ctx, db, "list_items")
+		if err != nil {
+			return err
+		}
+		for column, definition := range map[string]string{
+			"assignee_id": "TEXT NOT NULL DEFAULT ''",
+			"due_at":      "INTEGER NOT NULL DEFAULT 0",
+		} {
+			if columns[column] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE list_items ADD COLUMN `+column+` `+definition); err != nil {
+				return fmt.Errorf("migrate list item %s: %w", column, err)
+			}
 		}
 	}
 	if version < 143 {
@@ -6469,6 +6509,17 @@ func unixNanoOrZeroTime(value time.Time) int64 {
 		return 0
 	}
 	return value.UTC().UnixNano()
+}
+
+// timeFromUnixNanoOrZero is its inverse. Zero has to map back to the zero time
+// rather than to 1754: time.Time{}.UnixNano() is a large negative number, and a
+// column defaulting to 0 that decoded as an instant would make every unset due
+// date look like an overdue one from the eighteenth century.
+func timeFromUnixNanoOrZero(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, value).UTC()
 }
 
 func scanWorkflowStep(row interface{ Scan(...any) error }) (domain.WorkflowStep, error) {
@@ -10807,7 +10858,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	if !request.Valid() {
 		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
 	}
-	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.canvas_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
+	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.canvas_id, a.list_item_id, a.list_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
 		FROM activity_items a WHERE a.workspace_id = ? AND a.user_id = ?`
 	args := []any{workspace, user}
 	if request.ClearedOnly {
@@ -10842,7 +10893,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	for rows.Next() {
 		var item domain.ActivityItem
 		var occurredAt, readAt, clearedAt int64
-		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.CanvasID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.CanvasID, &item.ListItemID, &item.ListID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
 			rows.Close()
 			return domain.ActivityPage{}, err
 		}
@@ -10908,6 +10959,28 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 				}
 			}
 		}
+		if item.ListItemID != "" {
+			// The row outlives the access that made it reachable, like the
+			// canvas share: it records that the work was assigned, which stays
+			// true, and the reader is told rather than offered a link that
+			// would refuse them.
+			stored, itemErr := s.GetListItem(ctx, workspace, item.ListID, item.ListItemID)
+			if itemErr == nil {
+				item.ListItem = stored.Summary()
+				if list, listErr := s.GetList(ctx, workspace, item.ListID); listErr == nil {
+					item.ListName = list.Name
+					visible, accessErr := s.listVisible(ctx, workspace, user, item.ListID)
+					if accessErr != nil {
+						return domain.ActivityPage{}, accessErr
+					}
+					item.SourceAvailable = visible
+				} else if !errors.Is(listErr, store.ErrNotFound) {
+					return domain.ActivityPage{}, listErr
+				}
+			} else if !errors.Is(itemErr, store.ErrNotFound) {
+				return domain.ActivityPage{}, itemErr
+			}
+		}
 		if item.CanvasID != "" {
 			// The row survives the grant being withdrawn, like every other item
 			// whose source became unreachable: it records that the share
@@ -10925,7 +10998,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 				return domain.ActivityPage{}, canvasErr
 			}
 		}
-		if item.CanvasID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+		if item.CanvasID == "" && item.ListItemID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
 			visible, visibilityErr := s.activitySourceVisible(ctx, workspace, user, item.Conversation)
 			if visibilityErr != nil {
 				return domain.ActivityPage{}, visibilityErr
@@ -10940,6 +11013,43 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 // predicate the listing and the search share, so an Activity row cannot offer a
 // link the directory would withhold — writing a third copy of that rule here is
 // exactly the drift the shared constant exists to prevent.
+// RecordListAssignment writes the news that work is someone's. The row is keyed
+// on the item, so re-assigning the same item to the same member replaces it
+// rather than stacking a second copy of the same news.
+func (s *Store) RecordListAssignment(ctx context.Context, item domain.ListItem, actor domain.UserID, occurredAt time.Time) error {
+	if item.AssigneeID == "" || item.ID == "" {
+		return store.InvalidArgument("a list assignment requires an item and an assignee")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	id := domain.ActivityIDFor(item.AssigneeID, "list_assignment:"+string(item.ID))
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, list_item_id, list_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET actor_id = excluded.actor_id, occurred_at = excluded.occurred_at, read_at = 0, cleared_at = 0`,
+		id, item.WorkspaceID, item.AssigneeID, actor, item.ID, item.ListID, occurredAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// listVisible asks the list directory's own rule about one list, for the same
+// reason canvasVisible does: a third copy of the access rule is how an Activity
+// row comes to offer a link the directory withholds.
+func (s *Store) listVisible(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ListID) (bool, error) {
+	var visible int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM lists d WHERE d.id = ? AND d.workspace_id = ? AND `+visibleListPredicate,
+		id, workspace, user, user, user, user).Scan(&visible)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return visible == 1, err
+}
+
 func (s *Store) canvasVisible(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID) (bool, error) {
 	var visible int
 	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM canvases d WHERE d.id = ? AND d.workspace_id = ? AND `+visibleCanvasPredicate,
@@ -16905,6 +17015,20 @@ func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id do
 	return value, nil
 }
 
+// visibleListPredicate is the one rule for whether a member may see a list, and
+// it is shared by the directory and by the Activity row that links to one — the
+// same reason visibleCanvasPredicate exists. It expects four bindings, all the
+// same reader.
+const visibleListPredicate = `EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
+		  AND (d.owner_id = ? OR EXISTS (
+		    SELECT 1 FROM list_access a WHERE a.list_id = d.id
+		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
+		        OR (a.entity_type = 'channel' AND EXISTS (
+		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
+		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))`
+
+const listColumns = `d.id, d.workspace_id, d.owner_id, d.name, d.description_blocks, d.schema_json, d.todo_mode, d.version, d.created_at, d.updated_at`
+
 func (s *Store) ListLists(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.ListPage{}, err
@@ -16913,16 +17037,9 @@ func (s *Store) ListLists(ctx context.Context, workspace domain.WorkspaceID, use
 	if err != nil {
 		return domain.ListPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT d.id, d.workspace_id, d.owner_id, d.name, d.description_blocks, d.schema_json, d.todo_mode, d.version, d.created_at, d.updated_at
+	rows, err := s.db.QueryContext(ctx, `SELECT `+listColumns+`
 		FROM lists d
-		WHERE d.workspace_id = ? AND d.id > ?
-		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
-		  AND (d.owner_id = ? OR EXISTS (
-		    SELECT 1 FROM list_access a WHERE a.list_id = d.id
-		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
-		        OR (a.entity_type = 'channel' AND EXISTS (
-		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
-		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))
+		WHERE d.workspace_id = ? AND d.id > ? AND `+visibleListPredicate+`
 		ORDER BY d.id LIMIT ?`, workspace, after, userID, userID, userID, userID, request.Limit+1)
 	if err != nil {
 		return domain.ListPage{}, err
@@ -17017,7 +17134,7 @@ func insertListItem(ctx context.Context, tx *sql.Tx, value domain.ListItem) erro
 	if value.Version == 0 {
 		value.Version = 1
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version, assignee_id, due_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version, value.AssigneeID, unixNanoOrZeroTime(value.DueAt)); err != nil {
 		return classify(err)
 	}
 	return nil
@@ -17027,9 +17144,11 @@ func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, err
 	var value domain.ListItem
 	var createdAt, updatedAt string
 	var archived int
-	if err := scanner.Scan(&value.ID, &value.ListID, &value.ParentItemID, &value.WorkspaceID, &value.Fields, &value.CreatedBy, &value.UpdatedBy, &createdAt, &updatedAt, &archived, &value.Version); err != nil {
+	var dueAt int64
+	if err := scanner.Scan(&value.ID, &value.ListID, &value.ParentItemID, &value.WorkspaceID, &value.Fields, &value.CreatedBy, &value.UpdatedBy, &createdAt, &updatedAt, &archived, &value.Version, &value.AssigneeID, &dueAt); err != nil {
 		return domain.ListItem{}, err
 	}
+	value.DueAt = timeFromUnixNanoOrZero(dueAt)
 	var err error
 	value.CreatedAt, err = domain.ParseStoredTime(createdAt)
 	if err != nil {
@@ -17044,7 +17163,7 @@ func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, err
 }
 
 func (s *Store) GetListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID) (domain.ListItem, error) {
-	value, err := scanListItem(s.db.QueryRowContext(ctx, `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace))
+	value, err := scanListItem(s.db.QueryRowContext(ctx, `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version, assignee_id, due_at FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace))
 	if err != nil {
 		return domain.ListItem{}, translateNotFound(err)
 	}
@@ -17059,7 +17178,7 @@ func (s *Store) ListItems(ctx context.Context, workspace domain.WorkspaceID, lis
 	if err != nil {
 		return domain.ListItemPage{}, err
 	}
-	query := `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version FROM list_items WHERE list_id = ? AND workspace_id = ? AND id > ?`
+	query := `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version, assignee_id, due_at FROM list_items WHERE list_id = ? AND workspace_id = ? AND id > ?`
 	args := []any{listID, workspace, after}
 	if !archived {
 		query += ` AND archived = 0`
@@ -17115,7 +17234,7 @@ func (s *Store) UpdateListItems(ctx context.Context, values []domain.ListItem, r
 			return store.ErrInvalidArgument
 		}
 		seen[value.ID] = struct{}{}
-		result, updateErr := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ?, version = ? WHERE id = ? AND list_id = ? AND workspace_id = ? AND version = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version, value.ID, value.ListID, value.WorkspaceID, value.Version-1)
+		result, updateErr := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ?, version = ?, assignee_id = ?, due_at = ? WHERE id = ? AND list_id = ? AND workspace_id = ? AND version = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version, value.AssigneeID, unixNanoOrZeroTime(value.DueAt), value.ID, value.ListID, value.WorkspaceID, value.Version-1)
 		if updateErr != nil {
 			return updateErr
 		}

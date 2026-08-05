@@ -26,6 +26,19 @@ message ActivityItem {
   bool source_available = 15;
   string canvas_id = 16;
   string canvas_title = 17;
+  string list_item_id = 18;
+  string list_id = 19;
+  string list_name = 20;
+  ListItemSummary list_item = 21;
+}
+
+// ListItemSummary is what an Activity row needs to name assigned work without
+// carrying the whole item across the seam.
+message ListItemSummary {
+  string id = 1;
+  string fields = 2;
+  bool archived = 3;
+  int64 due_at_unix_nano = 4;
 }
 
 message ActivityRequest {

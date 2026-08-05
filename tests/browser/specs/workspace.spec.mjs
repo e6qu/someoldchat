@@ -3175,6 +3175,43 @@ test('[NOTIFY-01 NOTIFY-03 A11Y-01] a notification schedule is saved and says wh
   await expect(page.getByText('Right now you are outside your schedule')).toBeVisible();
 });
 
+// A list stops being a document and becomes work when an item belongs to
+// someone with a date on it. This drives the first-party surface end to end.
+// The assignee is the session's own member because they are the only one who
+// can open a list they just created, and the picker deliberately offers nobody
+// else — assigning to someone who cannot open the list is refused by the
+// service, and a control that always fails is worse than no control. That the
+// assignee is told is asserted by the service and cross-profile tests, which
+// can arrange two members — and so is clearing, which needs a native date input
+// to be emptied and a select reset, and does not behave identically across the
+// three engines this suite runs.
+test('[LIST-01 A11Y-01] a list item can be assigned with a due date', async ({ page, context }) => {
+  await signIn(context);
+  const name = `Launch tasks ${Date.now()}`;
+  await page.goto('/app/lists');
+  await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  await page.getByPlaceholder('Add an item').fill('ship it');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByText('ship it')).toBeVisible();
+
+  await page.getByRole('group').filter({ hasText: 'Assign' }).first().locator('summary').click();
+  await page.getByLabel('Assign to').selectOption({ label: 'SameOldChat' });
+  await page.getByLabel('Due').fill('2026-09-01');
+  await page.getByRole('button', { name: 'Save assignment' }).click();
+
+  await expect(page.locator('.item-assignee')).toHaveText('SameOldChat');
+  await expect(page.locator('.item-due')).toContainText('Due 2026-09-01');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // The control now offers to change the assignment rather than to make one,
+  // which is the only state the row has that the summary can show.
+  await expect(page.getByRole('group').filter({ hasText: 'Reassign' })).toHaveCount(1);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
