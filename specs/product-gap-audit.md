@@ -188,9 +188,32 @@ Official SDK qualification now proves, method by method, that genuine clients
 issued a request and parsed SameOldChat's response; a large neighboring test
 can no longer lend SDK evidence to an uncalled method. It still does not prove
 live Slack equivalence. The compatibility report also exposes the distinction:
-only 41 of 234 current claims at `sdk-compatible` or above presently carry
+only 56 of 249 current claims at `sdk-compatible` or above presently carry
 method-level evidence in the ledger; the remaining 193 must not inherit that
-evidence from the aggregate green suite. The remaining evidence layers are:
+evidence from the aggregate green suite.
+
+Those 56 now mean something they did not before. An `evidence:` entry used to
+be any non-empty string, so the count measured how many rows had prose in a
+field: two vocabularies had grown side by side, and nothing would have noticed
+a named test being renamed or a cited file being moved. Every entry is now
+typed and resolved by `contractcheck` — a Go test or cross-profile contract
+function that exists, a journey ID the browser suite really cites, a file
+inside the tree its kind names, or an official Slack URL — and the gate fails
+when one does not. Typing them found seven claims that were not true: three
+retention methods cited a scheduler test that mentions them only in a comment,
+`conversations.canvases.create` cited a gRPC test containing nothing about
+canvases, and three Slack Connect methods cited a service test that does not
+exercise them. Those entries are gone rather than reworded.
+
+What the gate deliberately does not claim is that a target *proves* its method;
+no checker can read a test and decide that. It closes the mechanical half —
+deletions, renames, moves, mislabelled kinds — and leaves the judgement half
+with the reviewer. Implementation files are admissible only inside a downgrade
+audit, where "here is the code that shows the claim was overstated" is a real
+citation; as operation evidence a method would be proving itself with the thing
+being judged.
+
+The remaining evidence layers are:
 
 1. pin per-method current argument/response/error schemas, not only the current
    method index;

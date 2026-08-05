@@ -140,6 +140,10 @@ func verify() error {
 	if err != nil {
 		return fmt.Errorf("decode compatibility ledger: %w", err)
 	}
+	// Evidence targets are resolved against the repository root, which is the
+	// directory this command is run from — the same assumption every other
+	// path in this file already makes.
+	evidenceTargets := newEvidenceResolver(".")
 	seenMethods := make(map[string]struct{}, len(compatibility.Operations))
 	seenCurrentMethods := make(map[string]struct{}, len(compatibility.Operations))
 	implementedMethods := make(map[string]struct{}, len(compatibility.Operations))
@@ -166,11 +170,17 @@ func verify() error {
 				if strings.TrimSpace(evidence) == "" {
 					return fmt.Errorf("compatibility ledger operation %q has empty downgrade evidence", operation.Method)
 				}
+				if err := evidenceTargets.validate(operation.Method, evidence, true); err != nil {
+					return err
+				}
 			}
 		}
 		for _, evidence := range operation.Evidence {
 			if strings.TrimSpace(evidence) == "" {
 				return fmt.Errorf("compatibility ledger operation %q has empty evidence", operation.Method)
+			}
+			if err := evidenceTargets.validate(operation.Method, evidence, false); err != nil {
+				return err
 			}
 		}
 		for _, deviation := range operation.Deviations {

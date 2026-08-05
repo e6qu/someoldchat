@@ -4,6 +4,30 @@ project: sameoldchat
 # This ledger is intentionally fail-closed: no compatibility claim is valid
 # until the source has an immutable revision and independently recorded
 # integrity evidence.
+#
+# Every `evidence:` entry names a target that contractcheck resolves, and the
+# gate fails when one does not exist. The kinds are:
+#
+#   go-test:<package>:<FuncName>   a Go test, or a cross-profile contract
+#                                  function driven by a table-driven runner
+#   browser-journey:<JOURNEY-ID>   a journey the Playwright suite really cites
+#   official-sdk:<path>            a walk in a pinned official SDK, under
+#                                  tests/official-sdk-qualification/
+#   external-contract:<path>       the pinned third-party contract walk
+#   persistence:<path>             a cross-profile persistence contract file
+#   journey:<path>                 a document under specs/journeys/
+#   https://…                      an official Slack source (slack.com,
+#                                  api.slack.com or docs.slack.dev)
+#
+# `source:<path>` cites implementation and is admissible only inside a
+# downgrade audit, where the correction being recorded is a statement about the
+# code. As operation evidence it would let a method prove itself with the thing
+# being judged.
+#
+# Resolving a target is not the same as proving a claim: no gate can read a
+# test and decide whether it establishes a Slack contract. This closes the
+# mechanical half — deletions, renames, moves, mislabelled kinds — and leaves
+# the judgement to review.
 sources:
   - id: slack-api-specs-openapi
     kind: openapi
@@ -112,7 +136,7 @@ operations:
         local message tests had been promoted as full method behavior despite
         unsupported documented arguments and rate-limit behavior.
       evidence:
-        - internal/api/slack/handler.go
+        - source:internal/api/slack/handler.go
         - https://docs.slack.dev/reference/methods/chat.postMessage/
   - method: chat.meMessage
     status: behavior-compatible
@@ -182,10 +206,10 @@ operations:
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/search.messages/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-      - specs/journeys/05-search-and-activity.md
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - journey:specs/journeys/05-search-and-activity.md
     deviations:
       - Relevance scoring is deterministic but has not been compared with Slack's ranking model.
       - Highlight markers, every reaction-specific modifier, and live indexing-delay behavior remain unqualified.
@@ -194,7 +218,7 @@ operations:
       reason: The previous claim covered substring matching and response decoding, not Slack's current modifier, token-type, sorting, ranking, and highlighting behavior.
       evidence:
         - https://docs.slack.dev/reference/methods/search.messages/
-        - internal/api/slack/handler.go
+        - source:internal/api/slack/handler.go
   - method: users.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -221,12 +245,12 @@ operations:
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/emoji.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-      - tests/external-contract-qualification/qualify.sh
-      - specs/journeys/03-composer-drafts-and-scheduled.md
-      - specs/journeys/04-messages-threads-and-actions.md
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - external-contract:tests/external-contract-qualification/qualify.sh
+      - journey:specs/journeys/03-composer-drafts-and-scheduled.md
+      - journey:specs/journeys/04-messages-threads-and-actions.md
     deviations:
       - Live-Slack differential verification and recent/custom category ordering remain unqualified.
   - method: users.identity
@@ -246,12 +270,12 @@ operations:
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/conversations.invite/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-      - tests/external-contract-qualification/qualify.sh
-      - specs/journeys/02-conversations-and-direct-messages.md
-      - specs/journeys/05-search-and-activity.md
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - external-contract:tests/external-contract-qualification/qualify.sh
+      - journey:specs/journeys/02-conversations-and-direct-messages.md
+      - journey:specs/journeys/05-search-and-activity.md
     deviations:
       - Workspace guest/channel-limit and Slack Connect invitation policy errors remain unqualified.
     audit:
@@ -259,9 +283,9 @@ operations:
       reason: Public/private membership, current scope alternatives, atomic default invitation, force partial success, per-user errors, duplicate rejection, Activity projection, and current SDK response decoding are qualified. Guest limits and Slack Connect policy remain intentionally outside the claim.
       evidence:
         - https://docs.slack.dev/reference/methods/conversations.invite/
-        - internal/api/slack/handler.go
-        - internal/store/memory/memory.go
-        - internal/store/sqlstore/sqlstore.go
+        - source:internal/api/slack/handler.go
+        - source:internal/store/memory/memory.go
+        - source:internal/store/sqlstore/sqlstore.go
   - method: conversations.leave
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -316,8 +340,8 @@ operations:
         The 2026-07-29 current-reference audit found a deliberate partial
         implementation recorded as behavior-compatible.
       evidence:
-        - internal/api/slack/handler.go
-        - internal/api/slack/error_contract_test.go
+        - source:internal/api/slack/handler.go
+        - go-test:internal/api/slack:TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums
         - https://docs.slack.dev/reference/methods/files.upload/
   - method: files.getUploadURLExternal
     status: behavior-compatible
@@ -338,10 +362,10 @@ operations:
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/users.getPresence/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-      - specs/journeys/09-profile-presence-and-notifications.md
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Automatic presence is stored as a mode but is not yet derived from live client activity, Slack's ten-minute inactivity rule, or websocket connectivity.
       - The optional presence detail fields and current rate-limit behavior have not been qualified against Slack.
@@ -349,18 +373,18 @@ operations:
       downgraded_from: behavior-compatible
       reason: The previous claim proved response decoding but treated automatic mode as effective active presence without live activity evidence.
       evidence:
-        - internal/api/slack/handler.go
-        - internal/domain/models.go
+        - source:internal/api/slack/handler.go
+        - source:internal/domain/models.go
         - https://docs.slack.dev/apis/web-api/user-presence-and-status/
   - method: users.setPresence
     status: sdk-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/users.setPresence/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-      - specs/journeys/09-profile-presence-and-notifications.md
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - The documented `auto` and `away` values persist and round-trip, but automatic presence does not yet incorporate client activity or connection state.
       - Current Slack rate-limit and token-type behavior has not been differentially qualified.
@@ -368,18 +392,18 @@ operations:
       downgraded_from: behavior-compatible
       reason: Local mode persistence and official SDK calls do not establish Slack's effective-presence lifecycle.
       evidence:
-        - internal/api/slack/handler.go
-        - internal/service/messages.go
+        - source:internal/api/slack/handler.go
+        - source:internal/service/messages.go
         - https://docs.slack.dev/reference/methods/users.setPresence/
   - method: users.profile.get
     status: sdk-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/users.profile.get/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-      - specs/journeys/09-profile-presence-and-notifications.md
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Core identity, image, status, and expiration fields are returned, but custom profile fields, labels, and the full paid-plan profile schema are not implemented.
       - Current rate limits and every user-token/bot-token visibility variation have not been differentially qualified.
@@ -387,18 +411,18 @@ operations:
       downgraded_from: behavior-compatible
       reason: The previous claim covered a fixed profile subset and SDK decoding, not Slack's complete profile schema and visibility contract.
       evidence:
-        - internal/api/slack/handler.go
-        - internal/api/slack/handler_test.go
+        - source:internal/api/slack/handler.go
+        - go-test:internal/api/slack:TestOAuthV2UserAccessReturnsUserGrantOnly
         - https://docs.slack.dev/reference/methods/users.profile.get/
   - method: users.profile.set
     status: sdk-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/users.profile.set/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-      - specs/journeys/09-profile-presence-and-notifications.md
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Display name, status, expiration, and image URL fields are supported, but Slack's complete editable profile and custom-field surface is not.
       - Admin editing of another user, paid-plan restrictions, method-specific rate limits, and all token-type rules remain unqualified.
@@ -406,8 +430,8 @@ operations:
       downgraded_from: behavior-compatible
       reason: The previous claim promoted a durable profile subset and official SDK calls to full Slack behavioral compatibility.
       evidence:
-        - internal/api/slack/handler.go
-        - internal/service/messages.go
+        - source:internal/api/slack/handler.go
+        - source:internal/service/messages.go
         - https://docs.slack.dev/reference/methods/users.profile.set/
 
   - method: admin.apps.approve
@@ -707,15 +731,15 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.completeSuccess/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.completeError
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.completeError/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: files.remote.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -757,8 +781,8 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.exchange/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - internal/api/slack/handler_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
       - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack rotation outcomes remain unqualified.
   - method: oauth.v2.user.access
@@ -766,9 +790,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.user.access/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - internal/api/slack/handler_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestOAuthV2UserAccessReturnsUserGrantOnly
     deviations:
       - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack user-only grant outcomes remain unqualified.
   - method: reminders.add
@@ -776,9 +800,9 @@ operations:
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/reminders.add/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - Natural-language time descriptions and the recurrence object are not implemented.
       - Reminder delivery is not implemented, so creating a durable row does not yet produce Slack's notification.
@@ -787,73 +811,73 @@ operations:
       downgraded_from: behavior-compatible
       reason: The prior level inferred Slack behavior from local CRUD tests even though current documented parsing, recurrence, targeting, retirement, and delivery contracts were not implemented or observed.
       evidence:
-        - specs/journeys/06-later-and-reminders.md
-        - internal/api/slack/error_contract_test.go
-        - tests/official-sdk-qualification/node-web-api/qualification.mjs
+        - journey:specs/journeys/06-later-and-reminders.md
+        - go-test:internal/api/slack:TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums
+        - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: reminders.complete
     status: sdk-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/reminders.complete/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - The cannot_complete_recurring and cannot_complete_others behavioral paths are not implemented.
     audit:
       downgraded_from: behavior-compatible
       reason: Official SDK CRUD qualification does not exercise the method's current recurring and ownership error contract.
       evidence:
-        - specs/journeys/06-later-and-reminders.md
-        - internal/service/messages.go
+        - journey:specs/journeys/06-later-and-reminders.md
+        - source:internal/service/messages.go
   - method: reminders.delete
     status: sdk-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/reminders.delete/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - Retirement behavior and deletion racing reminder delivery have not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible
       reason: The local CRUD path has no delivery worker, so it cannot establish Slack's deletion outcome at the delivery boundary.
       evidence:
-        - specs/journeys/06-later-and-reminders.md
-        - internal/service/messages.go
+        - journey:specs/journeys/06-later-and-reminders.md
+        - source:internal/service/messages.go
   - method: reminders.info
     status: sdk-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/reminders.info/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - Recurring reminders and current retirement behavior are not represented.
     audit:
       downgraded_from: behavior-compatible
       reason: The response is SDK-decodable but the only locally creatable reminder shape is non-recurring and has not been compared with Slack.
       evidence:
-        - specs/journeys/06-later-and-reminders.md
-        - tests/official-sdk-qualification/node-web-api/qualification.mjs
+        - journey:specs/journeys/06-later-and-reminders.md
+        - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: reminders.list
     status: sdk-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/reminders.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - Recurring reminder projection, retirement behavior, and live list inclusion rules have not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible
       reason: Pagination and SDK decoding pass locally, but the returned set and recurring shape have not been established against current Slack behavior.
       evidence:
-        - specs/journeys/06-later-and-reminders.md
-        - tests/official-sdk-qualification/node-web-api/qualification.mjs
+        - journey:specs/journeys/06-later-and-reminders.md
+        - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: rtm.connect
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1092,10 +1116,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.getCustomRetention/
     evidence:
-      - internal/api/slack/retention_test.go
-      - internal/scheduler/retention_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestCustomRetentionOverridesAndRevertsToTheWorkspaceDefault
+      - go-test:tests/persistence-qualification:conversationRetentionOverridesTheWorkspaceDefault
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
       - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
@@ -1114,10 +1137,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.removeCustomRetention/
     evidence:
-      - internal/api/slack/retention_test.go
-      - internal/scheduler/retention_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestCustomRetentionOverridesAndRevertsToTheWorkspaceDefault
+      - go-test:tests/persistence-qualification:conversationRetentionOverridesTheWorkspaceDefault
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
       - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
@@ -1128,10 +1150,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.setCustomRetention/
     evidence:
-      - internal/api/slack/retention_test.go
-      - internal/scheduler/retention_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestCustomRetentionOverridesAndRevertsToTheWorkspaceDefault
+      - go-test:tests/persistence-qualification:retentionDeletesTheSameContentOnEveryProfile
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
       - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
@@ -1250,10 +1271,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.count/
     evidence:
-      - internal/api/slack/apps_datastore_test.go
-      - internal/service/app_datastores_test.go
-      - internal/modules/chat/transport/grpc/differential_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
+      - go-test:internal/service:TestHostedAppDatastoreCRUDValidatesManifestSchema
+      - go-test:internal/modules/chat/transport/grpc:TestEveryChatMethodHasAParityCaseOrADocumentedGap
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Rate limits, paid-plan enforcement, and controlled live-Slack outcomes remain unqualified.
   - method: apps.datastore.delete
@@ -1273,10 +1294,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.query/
     evidence:
-      - internal/api/slack/apps_datastore_test.go
-      - internal/service/app_datastores_test.go
-      - internal/modules/chat/transport/grpc/differential_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
+      - go-test:internal/service:TestHostedAppDatastoreCRUDValidatesManifestSchema
+      - go-test:internal/modules/chat/transport/grpc:TestEveryChatMethodHasAParityCaseOrADocumentedGap
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Rate limits, paid-plan enforcement, and controlled live-Slack outcomes remain unqualified.
   - method: apps.datastore.update
@@ -1302,8 +1323,8 @@ operations:
   - method: assistant.threads.setStatus
     status: sdk-compatible
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - internal/service/assistant_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
     deviations:
       - The transient status an assistant shows while it works. Clearing it is an empty status, which is why an empty value is accepted here and refused for a title.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
@@ -1312,8 +1333,8 @@ operations:
   - method: assistant.threads.setSuggestedPrompts
     status: sdk-compatible
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - internal/service/assistant_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
     deviations:
       - Prompts offered before anyone has typed. Bounded at eight, which Slack does not document; the pane is short and an unbounded list would be a different surface.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
@@ -1322,8 +1343,8 @@ operations:
   - method: assistant.threads.setTitle
     status: sdk-compatible
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - internal/service/assistant_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
     deviations:
       - The name a thread is given in the client.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
@@ -1334,8 +1355,8 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/auth.teams.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - internal/modules/chat/transport/grpc/differential_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/modules/chat/transport/grpc:TestEveryChatMethodHasAParityCaseOrADocumentedGap
     deviations:
       - Enabled per-app workspace installations, deterministic cursor paging, and optional persisted icons are supported, but SameOldChat does not yet model Slack Enterprise organization-ready approval policy; rate limiting is enforced at the uniform Tier 4 floor rather than this method's Tier 2.
   - method: blocks.validate
@@ -1343,8 +1364,8 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/blocks.validate/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - internal/api/slack/handler_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestBlocksValidateMatchesCurrentSlackResponseShapes
     deviations:
       - SameOldChat validates the current catalog it renders, but exact Slack validation messages, production rate limits, and controlled live-Slack outcomes remain unqualified.
   - method: chat.appendStream
@@ -1364,10 +1385,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.acceptSharedInvite/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSlackConnectInvitationWalksApprovalAndAcceptance
+      - go-test:internal/service:TestSlackConnectCapacityIsEnforcedAtAcceptance
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1376,10 +1397,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.approveSharedInvite/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSlackConnectInvitationWalksApprovalAndAcceptance
+      - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1388,10 +1409,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.canvases.create/
     evidence:
-      - internal/api/slack/handler_test.go
-      - internal/service/canvases_test.go
-      - internal/modules/chat/transport/grpc/grpc_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestConversationsCanvasesCreateMatchesSlackSingularChannelCanvas
+      - go-test:internal/service:TestConversationCanvasIsSingularAndInheritsChannelAccess
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: conversations.declineSharedInvite
@@ -1399,10 +1419,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.declineSharedInvite/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestDecliningAndDenyingAreDifferentOutcomes
+      - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1411,10 +1431,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.externalInvitePermissions.set/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestEveryScopedMethodRejectsATokenMissingItsScope
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1423,10 +1442,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.inviteShared/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSlackConnectInvitationWalksApprovalAndAcceptance
+      - go-test:internal/service:TestASecondOutstandingInvitationIsRefused
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1435,10 +1454,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.listConnectInvites/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestConnectListingsSeparateIssuedFromRequested
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1447,10 +1465,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.approve/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestEveryScopedMethodRejectsATokenMissingItsScope
+      - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1459,10 +1477,10 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.deny/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestDecliningAndDenyingAreDifferentOutcomes
+      - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1471,10 +1489,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.list/
     evidence:
-      - internal/api/slack/connect_test.go
-      - internal/service/connect_test.go
-      - tests/persistence-qualification/divergence_test.go
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestConnectListingsSeparateIssuedFromRequested
+      - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
@@ -1483,15 +1500,15 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.add/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.distributions.permissions.list
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Enterprise organization and multi-workspace permission resolution has not been live-Slack qualified.
   - method: functions.distributions.permissions.remove
@@ -1499,22 +1516,22 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.remove/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.distributions.permissions.set
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.set/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.workflows.steps.list
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
@@ -1527,7 +1544,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/rtm.start/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - SameOldChat follows Slack's post-2022 rtm.connect response contract; the retired pre-2022 bootstrap snapshot is intentionally not reproduced.
   - method: search.all
@@ -1535,9 +1552,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/search.all/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - Remote files and Slack's private relevance ranking are not yet represented.
       - Highlight-marker behavior has not been differentially qualified.
@@ -1546,9 +1563,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/search.files/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
-      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - Remote files and Slack's private relevance ranking are not yet represented.
       - Highlight-marker behavior has not been differentially qualified.
@@ -1569,7 +1586,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.preferences.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - SameOldChat returns its enforced workspace-wide product policies; it does not yet model administrator-configurable variants of those policies or Slack's Tier 3 rate limit.
   - method: tooling.tokens.rotate
@@ -1585,29 +1602,29 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.add/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.featured.list
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.featured.remove
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.remove/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.featured.set
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.set/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Workspace workflow-manager policy is currently represented by workflow ownership rather than Slack's multi-manager role.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
@@ -1616,29 +1633,29 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.add/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.triggers.permissions.list
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.list/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.triggers.permissions.remove
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.remove/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.triggers.permissions.set
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.set/
     evidence:
-      - tests/official-sdk-qualification/node-web-api/qualification.mjs
-      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Enterprise organization and multi-workspace named-entity resolution has not been live-Slack qualified.
 
