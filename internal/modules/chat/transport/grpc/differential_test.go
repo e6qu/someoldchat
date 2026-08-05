@@ -1758,6 +1758,43 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// People and Channels used to be answered by filtering a directory
+			// the client had already loaded whole, so nothing crossed the seam
+			// and nothing could disagree. Now that both are store questions,
+			// the compositions have to agree on the fold, on the page, and — for
+			// channels — on the visibility rule, which is the sidebar's: C2 is
+			// public, and U2 is not a member of it.
+			name: "people and channel search fold and respect visibility",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				page := domain.PageRequest{Limit: 10}
+				people, err := chat.SearchPeople(ctx, "T1", "U1", "BOB", page)
+				if err != nil {
+					return nil, err
+				}
+				names := make([]string, 0, len(people.Users))
+				for _, user := range people.Users {
+					names = append(names, string(user.ID))
+				}
+				missing, err := chat.SearchPeople(ctx, "T1", "U1", "nobody-by-that-name", page)
+				if err != nil {
+					return nil, err
+				}
+				channels, err := chat.SearchChannels(ctx, "T1", "U1", "SECOND", page)
+				if err != nil {
+					return nil, err
+				}
+				found := make([]string, 0, len(channels.Conversations))
+				for _, conversation := range channels.Conversations {
+					found = append(found, string(conversation.ID))
+				}
+				// A blank query is refused rather than treated as "everything":
+				// a search surface that answers an empty question with the whole
+				// directory is a directory, not a search.
+				_, blankErr := chat.SearchChannels(ctx, "T1", "U1", "  ", page)
+				return []any{names, len(missing.Users), found, blankErr != nil}, nil
+			},
+		},
+		{
 			// A search that matched more than the directory would disclose the
 			// title of a canvas the reader cannot open, so the two compositions
 			// have to agree on the visibility rule as well as on the matching.

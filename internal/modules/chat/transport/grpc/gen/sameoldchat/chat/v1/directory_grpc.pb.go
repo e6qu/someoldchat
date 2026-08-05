@@ -34,6 +34,8 @@ const (
 	DirectoryService_RemoveEmoji_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/RemoveEmoji"
 	DirectoryService_RenameEmoji_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/RenameEmoji"
 	DirectoryService_SearchConversations_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/SearchConversations"
+	DirectoryService_SearchPeople_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/SearchPeople"
+	DirectoryService_SearchChannels_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/SearchChannels"
 	DirectoryService_SetWorkspaceName_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceName"
 	DirectoryService_AdminCreateWorkspace_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/AdminCreateWorkspace"
 	DirectoryService_RequestAppPermissions_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/RequestAppPermissions"
@@ -81,6 +83,8 @@ type DirectoryServiceClient interface {
 	RemoveEmoji(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	RenameEmoji(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SearchConversations(ctx context.Context, in *SearchConversationsRequest, opts ...grpc.CallOption) (*ConversationPage, error)
+	SearchPeople(ctx context.Context, in *SearchPeopleRequest, opts ...grpc.CallOption) (*UserPage, error)
+	SearchChannels(ctx context.Context, in *SearchConversationsRequest, opts ...grpc.CallOption) (*ConversationPage, error)
 	SetWorkspaceName(ctx context.Context, in *SetWorkspaceNameRequest, opts ...grpc.CallOption) (*Workspace, error)
 	AdminCreateWorkspace(ctx context.Context, in *AdminCreateWorkspaceRequest, opts ...grpc.CallOption) (*Workspace, error)
 	RequestAppPermissions(ctx context.Context, in *AppPermissionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -261,6 +265,26 @@ func (c *directoryServiceClient) SearchConversations(ctx context.Context, in *Se
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ConversationPage)
 	err := c.cc.Invoke(ctx, DirectoryService_SearchConversations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) SearchPeople(ctx context.Context, in *SearchPeopleRequest, opts ...grpc.CallOption) (*UserPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserPage)
+	err := c.cc.Invoke(ctx, DirectoryService_SearchPeople_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) SearchChannels(ctx context.Context, in *SearchConversationsRequest, opts ...grpc.CallOption) (*ConversationPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConversationPage)
+	err := c.cc.Invoke(ctx, DirectoryService_SearchChannels_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -546,6 +570,8 @@ type DirectoryServiceServer interface {
 	RemoveEmoji(context.Context, *EmojiMutationRequest) (*MutationResponse, error)
 	RenameEmoji(context.Context, *EmojiMutationRequest) (*MutationResponse, error)
 	SearchConversations(context.Context, *SearchConversationsRequest) (*ConversationPage, error)
+	SearchPeople(context.Context, *SearchPeopleRequest) (*UserPage, error)
+	SearchChannels(context.Context, *SearchConversationsRequest) (*ConversationPage, error)
 	SetWorkspaceName(context.Context, *SetWorkspaceNameRequest) (*Workspace, error)
 	AdminCreateWorkspace(context.Context, *AdminCreateWorkspaceRequest) (*Workspace, error)
 	RequestAppPermissions(context.Context, *AppPermissionRequest) (*MutationResponse, error)
@@ -625,6 +651,12 @@ func (UnimplementedDirectoryServiceServer) RenameEmoji(context.Context, *EmojiMu
 }
 func (UnimplementedDirectoryServiceServer) SearchConversations(context.Context, *SearchConversationsRequest) (*ConversationPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method SearchConversations not implemented")
+}
+func (UnimplementedDirectoryServiceServer) SearchPeople(context.Context, *SearchPeopleRequest) (*UserPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchPeople not implemented")
+}
+func (UnimplementedDirectoryServiceServer) SearchChannels(context.Context, *SearchConversationsRequest) (*ConversationPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchChannels not implemented")
 }
 func (UnimplementedDirectoryServiceServer) SetWorkspaceName(context.Context, *SetWorkspaceNameRequest) (*Workspace, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetWorkspaceName not implemented")
@@ -990,6 +1022,42 @@ func _DirectoryService_SearchConversations_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).SearchConversations(ctx, req.(*SearchConversationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_SearchPeople_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchPeopleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).SearchPeople(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_SearchPeople_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).SearchPeople(ctx, req.(*SearchPeopleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_SearchChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchConversationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).SearchChannels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_SearchChannels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).SearchChannels(ctx, req.(*SearchConversationsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1528,6 +1596,14 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SearchConversations",
 			Handler:    _DirectoryService_SearchConversations_Handler,
+		},
+		{
+			MethodName: "SearchPeople",
+			Handler:    _DirectoryService_SearchPeople_Handler,
+		},
+		{
+			MethodName: "SearchChannels",
+			Handler:    _DirectoryService_SearchChannels_Handler,
 		},
 		{
 			MethodName: "SetWorkspaceName",

@@ -182,6 +182,16 @@ Implemented evidence:
   and legacy combined `search.all` require user tokens, enforce documented
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
+- People and Channels results come from the store with a query and a cursor.
+  They used to be produced by filtering a member directory and channel list the
+  handler paged into memory in full on every search request, including a
+  Messages search that read neither: correct on a small workspace, unbounded
+  work per request on any other, and unpageable by construction. Channel search
+  is the member conversation listing with a query, so its visibility rule is the
+  sidebar's rather than a second copy that could drift; a browser journey
+  creates a matching public and private channel from an installed app and
+  asserts the session finds one and not the other. The from:/in: pickers are now
+  bounded to one page, with the existing typeahead as the way to reach the rest.
 - Canvas search is answered from the prose inside the stored document rather
   than from the JSON it is stored as, so a term matching a structural key finds
   nothing and a heading a member can see is findable. The SQL profile keeps a
@@ -217,9 +227,8 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
   match, because a substring search for the term would mark the wrong span
   whenever the match was in the title — every `to:`/link/specific emoji/`hasmy:` modifier,
   prefix `*`, section-valued `in:`, Slack's natural month/year date forms,
-  participant-accurate `with:` thread semantics, complete People/Channels
-  pagination, thread-specific entry scope, or a highlighted exact-hit return
-  from the result;
+  participant-accurate `with:` thread semantics, thread-specific entry scope, or
+  a highlighted exact-hit return from the result;
 - the Slack APIs retain documented compatibility deviations for relevance
   scoring, highlight markers, cursor pagination on file/combined legacy
   results, match projection detail, and full tier rate limiting;

@@ -639,6 +639,11 @@ type Store interface {
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)
 	SetActivityPreferences(context.Context, domain.ActivityPreferences) error
 	ListUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.UserPage, error)
+	// SearchUsers is the same directory listing narrowed by a folded name. The
+	// workspace directory has no per-reader visibility rule, so this shares the
+	// listing's scan rather than introducing a second one that could page
+	// differently or handle deleted members differently.
+	SearchUsers(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.UserPage, error)
 	ListAdminUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.AdminUserPage, error)
 	ListUsersByRole(context.Context, domain.WorkspaceID, domain.WorkspaceRole, domain.PageRequest) (domain.UserPage, error)
 	ListConversationMembers(context.Context, domain.ConversationID, domain.PageRequest) (domain.UserPage, error)
