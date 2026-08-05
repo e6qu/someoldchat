@@ -94,10 +94,17 @@ type MessageSearch struct {
 	HasFiles             bool
 	HasPins              bool
 	HasReactions         bool
-	SavedBy              UserID
-	Sort                 SearchSort
-	Direction            SearchDirection
-	Page                 PageRequest
+	// ReactionName narrows HasReactions to one emoji. Slack's `has::eyes:`
+	// means that reaction and not merely some reaction, and answering it with
+	// "any reaction" returns messages the member can see are wrong — a worse
+	// failure than returning nothing, because it looks like an answer.
+	ReactionName string
+	// HasLink matches messages carrying a URL, which is Slack's `has:link`.
+	HasLink   bool
+	SavedBy   UserID
+	Sort      SearchSort
+	Direction SearchDirection
+	Page      PageRequest
 }
 
 type MessageSearchRequest struct {
@@ -160,4 +167,14 @@ type CanvasSearchRequest struct {
 	Sort      SearchSort
 	Direction SearchDirection
 	Page      PageRequest
+}
+
+// TextCarriesLink reports whether a message body contains a URL, which is what
+// Slack's `has:link` asks. It looks for a scheme rather than parsing: Slack
+// wraps links in angle brackets on the way in, so the stored text carries the
+// scheme whether the member typed one or pasted one, and a second parser here
+// could disagree with the renderer about what is a link.
+func TextCarriesLink(text string) bool {
+	lowered := strings.ToLower(text)
+	return strings.Contains(lowered, "http://") || strings.Contains(lowered, "https://")
 }

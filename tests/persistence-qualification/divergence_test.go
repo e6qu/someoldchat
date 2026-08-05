@@ -3021,3 +3021,64 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 		}
 	}
 }
+
+// A named emoji and a link are predicates the two profiles express differently
+// — one as SQL against the reactions table and the message text, the other as a
+// walk over maps — so the contract drives both. The named-emoji case is the one
+// that mattered: answering `has::eyes:` with "any reaction" returns messages a
+// member can see are wrong, which is worse than returning nothing.
+func searchModifiersMeanTheSame(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	watched := f.message(t, ctx, "watched", time.Unix(1_700_000_100, 0).UTC())
+	other := f.message(t, ctx, "other", time.Unix(1_700_000_200, 0).UTC())
+	linked := domain.Message{
+		ID: domain.MessageID("M-link-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "the report is at https://example.test/report", Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Unix(1_700_000_300, 0).UTC()),
+	}
+	if err := f.repository.CreateMessage(ctx, linked, f.event("link", "message.created", string(linked.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, reaction := range []struct {
+		message domain.MessageID
+		name    string
+	}{{watched.ID, "eyes"}, {other.ID, "tada"}} {
+		if err := f.repository.AddReaction(ctx, domain.Reaction{
+			Message: reaction.message, UserID: f.userID,
+			Name: reaction.name, CreatedAt: time.Unix(1_700_000_400, 0).UTC(),
+		}, f.event("reaction-"+reaction.name, "reaction.added", string(reaction.message))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page := domain.PageRequest{Limit: 20}
+	named, err := f.repository.SearchMessages(ctx, f.workspaceID, f.userID, domain.MessageSearch{
+		HasReactions: true, ReactionName: "eyes", Page: page,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named.Messages) != 1 || named.Messages[0].ID != watched.ID {
+		t.Fatalf("has::eyes: = %+v, want only the watched message", named.Messages)
+	}
+	any, err := f.repository.SearchMessages(ctx, f.workspaceID, f.userID, domain.MessageSearch{HasReactions: true, Page: page})
+	if err != nil || len(any.Messages) != 2 {
+		t.Fatalf("has:reaction = %+v err = %v, want both reacted messages", any.Messages, err)
+	}
+	absent, err := f.repository.SearchMessages(ctx, f.workspaceID, f.userID, domain.MessageSearch{
+		HasReactions: true, ReactionName: "rocket", Page: page,
+	})
+	if err != nil || len(absent.Messages) != 0 {
+		t.Fatalf("an unused emoji = %+v err = %v, want nothing", absent.Messages, err)
+	}
+	links, err := f.repository.SearchMessages(ctx, f.workspaceID, f.userID, domain.MessageSearch{HasLink: true, Page: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links.Messages) != 1 || links.Messages[0].ID != linked.ID {
+		t.Fatalf("has:link = %+v, want only the message carrying a URL", links.Messages)
+	}
+}

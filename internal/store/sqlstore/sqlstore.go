@@ -16838,7 +16838,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	if err := store.CheckPage(search.Page); err != nil {
 		return domain.MessagePage{}, err
 	}
-	if len(search.Terms) == 0 && search.Conversation == "" && search.Author == "" && search.WithUser == "" && search.After.IsZero() && search.Before.IsZero() && !search.ThreadOnly && !search.HasFiles && !search.HasPins && !search.HasReactions && search.SavedBy == "" {
+	if len(search.Terms) == 0 && search.Conversation == "" && search.Author == "" && search.WithUser == "" && search.After.IsZero() && search.Before.IsZero() && !search.ThreadOnly && !search.HasFiles && !search.HasPins && !search.HasReactions && !search.HasLink && search.SavedBy == "" {
 		return domain.MessagePage{}, store.InvalidArgument("search query must not be empty")
 	}
 	querySQL := `SELECT ` + qualifiedMessageSelectColumns + ` FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
@@ -16889,7 +16889,21 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		querySQL += ` AND EXISTS (SELECT 1 FROM pins p_search WHERE p_search.message_id = m.id)`
 	}
 	if search.HasReactions {
-		querySQL += ` AND EXISTS (SELECT 1 FROM reactions r_search WHERE r_search.message_id = m.id)`
+		if search.ReactionName != "" {
+			querySQL += ` AND EXISTS (SELECT 1 FROM reactions r_search WHERE r_search.message_id = m.id AND r_search.name = ?)`
+			args = append(args, search.ReactionName)
+		} else {
+			querySQL += ` AND EXISTS (SELECT 1 FROM reactions r_search WHERE r_search.message_id = m.id)`
+		}
+	}
+	if search.HasLink {
+		// A link is a scheme in the text rather than a parsed URL: Slack wraps
+		// links in angle brackets on the way in, so the stored text carries the
+		// scheme whether the member typed it or pasted it, and matching the
+		// scheme finds both without a second parser to disagree with the
+		// renderer.
+		querySQL += ` AND (m.text LIKE ? ESCAPE '\' OR m.text LIKE ? ESCAPE '\')`
+		args = append(args, "%http://%", "%https://%")
 	}
 	if search.SavedBy != "" {
 		querySQL += ` AND EXISTS (SELECT 1 FROM saved_items si_search WHERE si_search.message_id = m.id AND si_search.user_id = ?)`

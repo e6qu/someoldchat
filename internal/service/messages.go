@@ -960,7 +960,7 @@ func (m Messages) SearchMessages(ctx context.Context, workspaceID domain.Workspa
 		Terms: parsed.terms, ExcludedTerms: parsed.excludedTerms,
 		After: parsed.after, Before: parsed.before,
 		ThreadOnly: parsed.threadOnly, HasFiles: parsed.hasFiles,
-		HasPins: parsed.hasPins, HasReactions: parsed.hasReactions,
+		HasPins: parsed.hasPins, HasReactions: parsed.hasReactions, ReactionName: parsed.reactionName, HasLink: parsed.hasLink,
 		Sort: sortOrder, Direction: direction, Page: request.Page,
 	}
 	search.Page.Descending = direction == domain.SearchDirectionDescending
@@ -1067,6 +1067,40 @@ type parsedSearchQuery struct {
 	after, before                        time.Time
 	threadOnly, hasFiles, hasPins, saved bool
 	hasReactions                         bool
+	reactionName                         string
+	hasLink                              bool
+}
+
+// parseSearchPeriod accepts the forms Slack's search help shows for during:.
+// A month alone means that month of the current year, which is what a member
+// typing "during:July" in July means; a year alone means the whole year. The
+// numeric form is kept because it is unambiguous and was already accepted.
+func parseSearchPeriod(value string) (time.Time, time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, time.Time{}, false
+	}
+	if month, err := time.Parse("2006-01", value); err == nil {
+		return month, month.AddDate(0, 1, 0), true
+	}
+	for _, layout := range []string{"January 2006", "Jan 2006"} {
+		if month, err := time.Parse(layout, value); err == nil {
+			return month, month.AddDate(0, 1, 0), true
+		}
+	}
+	if year, err := time.Parse("2006", value); err == nil {
+		return year, year.AddDate(1, 0, 0), true
+	}
+	for _, layout := range []string{"January", "Jan"} {
+		if month, err := time.Parse(layout, value); err == nil {
+			// A bare month means this year. Reading it as year zero would
+			// return nothing and look like "no results" rather than a
+			// misunderstanding.
+			dated := time.Date(time.Now().UTC().Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+			return dated, dated.AddDate(0, 1, 0), true
+		}
+	}
+	return time.Time{}, time.Time{}, false
 }
 
 func parseSearchQuery(raw string) (parsedSearchQuery, error) {
@@ -1124,11 +1158,11 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 				if excluded {
 					break
 				}
-				month, parseErr := time.Parse("2006-01", value)
-				if parseErr != nil {
-					return parsedSearchQuery{}, parseErr
+				after, before, parsed := parseSearchPeriod(value)
+				if !parsed {
+					return parsedSearchQuery{}, errors.New("invalid during: period")
 				}
-				result.after, result.before = month, month.AddDate(0, 1, 0)
+				result.after, result.before = after, before
 				continue
 			case "is":
 				if excluded {
@@ -1157,8 +1191,17 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 					result.hasReactions = true
 					continue
 				}
-				if strings.HasPrefix(value, ":") && strings.HasSuffix(value, ":") {
+				if strings.EqualFold(value, "link") {
+					result.hasLink = true
+					continue
+				}
+				if len(value) > 2 && strings.HasPrefix(value, ":") && strings.HasSuffix(value, ":") {
+					// The emoji is the question. Treating `has::eyes:` as "has
+					// some reaction" returns messages a member can see are
+					// wrong, which is worse than returning nothing because it
+					// looks like an answer.
 					result.hasReactions = true
+					result.reactionName = strings.Trim(value, ":")
 					continue
 				}
 			case "type":
@@ -1174,7 +1217,7 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 			result.terms = append(result.terms, domain.FoldSearchText(token))
 		}
 	}
-	if len(result.terms) == 0 && result.conversation == "" && result.author == "" && result.withUser == "" && result.after.IsZero() && result.before.IsZero() && !result.threadOnly && !result.hasFiles && !result.hasPins && !result.hasReactions && !result.saved && result.fileType == "" {
+	if len(result.terms) == 0 && result.conversation == "" && result.author == "" && result.withUser == "" && result.after.IsZero() && result.before.IsZero() && !result.threadOnly && !result.hasFiles && !result.hasPins && !result.hasReactions && !result.hasLink && !result.saved && result.fileType == "" {
 		return parsedSearchQuery{}, ErrInvalidSearch
 	}
 	return result, nil

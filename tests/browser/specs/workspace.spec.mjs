@@ -3212,6 +3212,34 @@ test('[LIST-01 A11Y-01] a list item can be assigned with a due date', async ({ p
   await expect(page.getByRole('group').filter({ hasText: 'Reassign' })).toHaveCount(1);
 });
 
+// `has::emoji:` asks for that reaction. It used to mean "has some reaction",
+// which returned messages a member can see are wrong — worse than returning
+// nothing, because it looks like an answer.
+test('[SEARCH-02] a named emoji search matches that reaction and not any reaction', async ({ page, context, request }) => {
+  await signIn(context);
+  const needle = `emoji-search-${Date.now()}`;
+  const watched = await postThroughTheAPI(request, `${needle} watched thing`);
+  await postThroughTheAPI(request, `${needle} other thing`);
+  const reacted = await request.post('/api/reactions.add', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, timestamp: watched.ts, name: 'eyes' },
+  });
+  expect((await reacted.json()).ok, 'reaction').toBe(true);
+
+  await page.goto(`/app/search?q=${encodeURIComponent(needle + ' has::eyes:')}&channel=Cdev`);
+  await expect(page.locator('.result')).toHaveCount(1);
+  await expect(page.locator('.result').first()).toContainText('watched thing');
+
+  // An emoji nobody used finds nothing, where "any reaction" would have found
+  // the watched message.
+  await page.goto(`/app/search?q=${encodeURIComponent(needle + ' has::rocket:')}&channel=Cdev`);
+  await expect(page.locator('.result')).toHaveCount(0);
+
+  // The unnamed form still means any reaction.
+  await page.goto(`/app/search?q=${encodeURIComponent(needle + ' has:reaction')}&channel=Cdev`);
+  await expect(page.locator('.result')).toHaveCount(1);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

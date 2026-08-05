@@ -190,6 +190,15 @@ Implemented evidence:
   and reports the source as unreachable rather than offering a link that would
   refuse the reader. Reachability is answered by the canvas directory's own
   visibility predicate rather than a third copy of it.
+- `has::emoji:` matches the reaction it names. It used to set "has some
+  reaction", which returned messages a member could see were wrong — worse than
+  returning nothing, because it looked like an answer. `has:link` matches a
+  scheme in the stored text rather than parsing a URL, because Slack wraps links
+  on the way in and a second parser here could disagree with the renderer about
+  what a link is. `during:` accepts a month name, a year, and a month with a
+  year; a bare month means the current year, because that is what a member
+  typing it means and reading it as year zero would look like "no results"
+  rather than a misunderstanding.
 - Following a result arrives at the message it names. Two mechanisms carry it
   and neither is obvious: the permalink's window cursor ends just after the hit,
   so the hit is the last message in the window, and the fragment focuses it
@@ -251,7 +260,8 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
   match, because a substring search for the term would mark the wrong span
   whenever the match was in the title — every `to:`/link/specific emoji/`hasmy:` modifier,
   prefix `*`, section-valued `in:`, Slack's natural month/year date forms,
-  participant-accurate `with:` thread semantics, or history on both sides of an
+  participant-accurate `with:` thread semantics, `to:`, `hasmy:`, prefix `*`,
+  or history on both sides of an
   opened hit — the result window ends at the message it names, so a reader
   cannot scroll forward into newer messages without navigating again;
 - the Slack APIs retain documented compatibility deviations for relevance
