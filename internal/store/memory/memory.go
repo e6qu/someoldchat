@@ -88,6 +88,7 @@ type Store struct {
 	conversationNotificationPrefs map[string]domain.ConversationNotificationPreferences
 	threadFollows                 map[string]bool
 	assistantThreads              map[string]domain.AssistantThread
+	typing                        map[string]domain.TypingSignal
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
 	searchHistory                 map[string]domain.SearchHistoryEntry
@@ -192,7 +193,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), sharedInvites: make(map[domain.SharedInviteID]domain.SharedInvite), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), retentionPolicies: make(map[domain.WorkspaceID]domain.RetentionPolicy), conversationRetention: make(map[domain.ConversationID]domain.ConversationRetention), retentionSweptAt: make(map[domain.ConversationID]time.Time), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), assistantThreads: make(map[string]domain.AssistantThread), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), sharedInvites: make(map[domain.SharedInviteID]domain.SharedInvite), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), retentionPolicies: make(map[domain.WorkspaceID]domain.RetentionPolicy), conversationRetention: make(map[domain.ConversationID]domain.ConversationRetention), retentionSweptAt: make(map[domain.ConversationID]time.Time), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), assistantThreads: make(map[string]domain.AssistantThread), typing: make(map[string]domain.TypingSignal), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -5166,6 +5167,64 @@ func (s *Store) GetAssistantThread(_ context.Context, workspace domain.Workspace
 
 func assistantThreadKey(workspace domain.WorkspaceID, conversation domain.ConversationID, thread domain.MessageTimestamp) string {
 	return string(workspace) + "\x00" + string(conversation) + "\x00" + string(thread)
+}
+
+// RecordTyping mirrors the SQL profile: one row per member per conversation,
+// replaced rather than appended, and no outbox record. Renewing a signal that
+// is already live is the common case — a member typing steadily renews every
+// few seconds — so the write is a replacement rather than an insert that would
+// have to be de-duplicated on read.
+func (s *Store) RecordTyping(_ context.Context, signal domain.TypingSignal) error {
+	if !signal.Valid() {
+		return store.InvalidArgument("a typing signal requires a workspace, conversation, member and expiry")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Expired rows are dropped on write rather than by a worker. There is no
+	// cadence to schedule and nothing to recover: a signal nobody renews is
+	// already invisible to readers, and this only stops the map from holding
+	// every member who has ever typed.
+	for key, existing := range s.typing {
+		if !existing.Active(signal.ExpiresAt) {
+			delete(s.typing, key)
+		}
+	}
+	s.typing[typingKey(signal.WorkspaceID, signal.Conversation, signal.UserID)] = signal
+	return nil
+}
+
+func (s *Store) ListTypingSignals(_ context.Context, workspace domain.WorkspaceID, reader domain.UserID, now time.Time) ([]domain.TypingSignal, error) {
+	if workspace == "" || reader == "" {
+		return nil, store.InvalidArgument("typing signals require a workspace and a reader")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	signals := make([]domain.TypingSignal, 0, len(s.typing))
+	for _, signal := range s.typing {
+		if signal.WorkspaceID != workspace || signal.UserID == reader || !signal.Active(now) {
+			continue
+		}
+		// Membership is the authority here exactly as it is for reading the
+		// messages themselves. Without this check a signal would report that
+		// someone is composing in a private conversation to a reader who
+		// cannot see the conversation, let alone what is being composed.
+		if members, ok := s.memberships[signal.Conversation]; ok {
+			if _, member := members[reader]; member {
+				signals = append(signals, signal)
+			}
+		}
+	}
+	sort.Slice(signals, func(i, j int) bool {
+		if signals[i].Conversation != signals[j].Conversation {
+			return signals[i].Conversation < signals[j].Conversation
+		}
+		return signals[i].UserID < signals[j].UserID
+	})
+	return signals, nil
+}
+
+func typingKey(workspace domain.WorkspaceID, conversation domain.ConversationID, user domain.UserID) string {
+	return string(workspace) + "\x00" + string(conversation) + "\x00" + string(user)
 }
 
 func (s *Store) DueWorkflowDelays(_ context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.WorkflowStep, error) {

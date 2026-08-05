@@ -192,6 +192,12 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
  prompts_title TEXT NOT NULL DEFAULT '', prompts TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL,
  PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 );
+CREATE TABLE IF NOT EXISTS conversation_typing (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+ user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
+ PRIMARY KEY (workspace_id, conversation_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS conversation_typing_expiry ON conversation_typing(expires_at);
 CREATE TABLE IF NOT EXISTS workflows (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
  owner_id TEXT NOT NULL REFERENCES users(id), callback_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
@@ -544,7 +550,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 137
+const schemaVersion = 138
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3137,6 +3143,23 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 138 {
+		// Who is composing right now. This is the one table in the schema that
+		// no outbox record accompanies: a typing signal is state with an
+		// expiry, not an event worth replaying. It is also the reason there is
+		// no bus in this product — the streams already poll the store, so the
+		// store is the shared medium a second replica reads too.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS conversation_typing (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+			user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, conversation_id, user_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate typing signals: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS conversation_typing_expiry ON conversation_typing(expires_at)`); err != nil {
+			return fmt.Errorf("index typing signals by expiry: %w", err)
 		}
 	}
 	if version < 136 {
@@ -6399,6 +6422,60 @@ func (s *Store) GetAssistantThread(ctx context.Context, workspace domain.Workspa
 	}
 	value.UpdatedAt = time.Unix(0, updated).UTC()
 	return value, nil
+}
+
+// RecordTyping replaces one member's signal in one conversation. There is no
+// transaction and no outbox insert, which is the point: every other mutation in
+// this file commits its event alongside its row, and a typing signal
+// deliberately has none. See domain.TypingSignal for why.
+func (s *Store) RecordTyping(ctx context.Context, signal domain.TypingSignal) error {
+	if !signal.Valid() {
+		return store.InvalidArgument("a typing signal requires a workspace, conversation, member and expiry")
+	}
+	// Expired rows are cleared on write rather than by a worker: a signal
+	// nobody renews is already invisible to every reader, so collecting it is
+	// housekeeping rather than correctness, and the write that would have
+	// created a new row is the natural moment to do it. The index on
+	// expires_at makes this the cheap half of the statement pair.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM conversation_typing WHERE expires_at <= ?`, signal.ExpiresAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO conversation_typing(workspace_id, conversation_id, user_id, expires_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(workspace_id, conversation_id, user_id) DO UPDATE SET expires_at = excluded.expires_at`,
+		signal.WorkspaceID, signal.Conversation, signal.UserID, signal.ExpiresAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	return nil
+}
+
+func (s *Store) ListTypingSignals(ctx context.Context, workspace domain.WorkspaceID, reader domain.UserID, now time.Time) ([]domain.TypingSignal, error) {
+	if workspace == "" || reader == "" {
+		return nil, store.InvalidArgument("typing signals require a workspace and a reader")
+	}
+	// The join on conversation_members is the visibility rule, and it is the
+	// reader's own membership being joined, not the typist's: a signal must
+	// not tell anyone that composition is happening somewhere they cannot see.
+	rows, err := s.db.QueryContext(ctx, `SELECT t.conversation_id, t.user_id, t.expires_at
+		FROM conversation_typing t
+		JOIN conversation_members m ON m.conversation_id = t.conversation_id AND m.user_id = ?
+		WHERE t.workspace_id = ? AND t.user_id <> ? AND t.expires_at > ?
+		ORDER BY t.conversation_id, t.user_id`, reader, workspace, reader, now.UTC().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	signals := make([]domain.TypingSignal, 0, 8)
+	for rows.Next() {
+		signal := domain.TypingSignal{WorkspaceID: workspace}
+		var expires int64
+		if err := rows.Scan(&signal.Conversation, &signal.UserID, &expires); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		signal.ExpiresAt = time.Unix(0, expires).UTC()
+		signals = append(signals, signal)
+	}
+	return signals, closeRows(rows)
 }
 
 func (s *Store) DueWorkflowDelays(ctx context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.WorkflowStep, error) {

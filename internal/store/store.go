@@ -623,6 +623,17 @@ type Store interface {
 	// whole-record write would clear whatever the caller left empty.
 	SetAssistantThread(context.Context, domain.AssistantThread, domain.AssistantThreadField, events.Event) error
 	GetAssistantThread(context.Context, domain.WorkspaceID, domain.ConversationID, domain.MessageTimestamp) (domain.AssistantThread, error)
+	// RecordTyping replaces one member's typing signal in one conversation.
+	// It takes no events.Event, and that absence is the design rather than an
+	// omission: a typing signal must not enter the outbox, because the outbox
+	// is durable, replayed to reconnecting clients and delivered to apps, and
+	// none of those is true of "someone is typing". See domain.TypingSignal.
+	RecordTyping(context.Context, domain.TypingSignal) error
+	// ListTypingSignals reports who is composing, at the given instant, in the
+	// conversations this reader belongs to — never the reader themselves, and
+	// never a conversation they cannot see. Expired signals are omitted rather
+	// than returned for the caller to filter, so no caller can forget to.
+	ListTypingSignals(context.Context, domain.WorkspaceID, domain.UserID, time.Time) ([]domain.TypingSignal, error)
 	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
 	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)

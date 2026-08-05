@@ -288,6 +288,9 @@ type Service interface {
 	SetAssistantThreadStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
 	SetAssistantThreadSuggestedPrompts(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, []domain.AssistantPrompt) error
 	AssistantThread(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.AssistantThread, error)
+	SetTyping(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
+	TypingSignals(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.TypingSignal, error)
+	TypingIn(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.TypingSignal, error)
 	RecordActivity(context.Context, domain.WorkspaceID, domain.UserID) error
 	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)

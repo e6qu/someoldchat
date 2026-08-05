@@ -118,6 +118,7 @@ func runQualification(t *testing.T, open opener) {
 		{"retention deletes the same content on every profile", retentionDeletesTheSameContentOnEveryProfile},
 		{"retention sweeps are claimed exactly once", retentionSweepsAreClaimedExactlyOnce},
 		{"conversation retention overrides the workspace default", conversationRetentionOverridesTheWorkspaceDefault},
+		{"typing signals expire without being retracted", typingSignalsExpireWithoutBeingRetracted},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

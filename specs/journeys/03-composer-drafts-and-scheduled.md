@@ -88,6 +88,21 @@ remain differential requirements until captured against a dedicated Slack
 workspace. They MUST NOT be inferred from the alphabetical or upstream dataset
 order.
 
+## COMP-04 — See who is composing
+
+1. While a member composes in a conversation, the other members of that
+   conversation are shown that someone is typing. The indicator names the person
+   where there is room to name them and becomes a count when there is not.
+2. The signal is ephemeral. It is not a message, does not enter conversation
+   history, search, or unread counts, and no Events API subscription delivers
+   it. Slack publishes it as the RTM `user_typing` event only.
+3. There is no retraction. The indicator stops because the signal it was drawn
+   from expired, so a client that disconnects mid-word stops appearing without
+   having to announce it.
+4. Visibility follows conversation membership. A member who cannot read a
+   conversation MUST NOT learn that composition is happening in it, and a member
+   is never shown their own signal.
+
 ## DRAFT-01 — Preserve a conversation or thread draft
 
 Leaving a non-empty composer preserves text, formatting, and staged attachments
@@ -187,6 +202,12 @@ outcomes are not HTTP 500 responses.
 
 ## Evidence
 
+- Typing: a real RTM client announces composition and the browser client shows
+  it, which is both halves of the journey over the transport Slack uses. The
+  signal is stored as a short-lived row rather than journalled, and a service
+  test asserts the outbox does not grow; cross-profile qualification asserts
+  memory and SQL agree on expiry, on renewal replacing rather than accumulating,
+  and on a non-member seeing nothing.
 - Browser: rich/plain composition, all suggestion types, keyboard formatting,
   pasted/dropped/selected file staging, permission-denied/cancelled/completed
   audio and video clip recording, draft switching/reload, all Drafts & sent
@@ -241,6 +262,7 @@ outcomes are not HTTP 500 responses.
 | COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips; recordings are at most five minutes and may carry an optional message. |
 | COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
 | COMP-03 | [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups) | A user group's unique handle notifies its members; the emoji and developer transport sources checked below establish the other completion representations. |
+| COMP-04 | [user_typing](https://docs.slack.dev/reference/events/user_typing/) | Slack publishes composition as an ephemeral RTM event addressed to channel members, with no Events API delivery and no retraction. |
 | DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack automatically saves unfinished composer work and the same composer accepts attachments; the separately checked file journey establishes the ten-file staging limit. Exact cross-client retention remains a controlled live-workspace differential even though local reload/restart persistence is executable. |
 | DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
 | SCHED-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages-in-Slack-Send-and-read-messages-in-Slack) | Slack's current first-party sequence says to add attachments, emoji, mentions, or formatting and then choose the send-arrow schedule action; the separately checked dedicated schedule guide establishes suggested/custom local times. |

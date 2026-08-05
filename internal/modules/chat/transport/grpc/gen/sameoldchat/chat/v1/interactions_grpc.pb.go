@@ -26,6 +26,8 @@ const (
 	InteractionsService_ResumeWorkflowDelays_FullMethodName         = "/sameoldchat.chat.v1.InteractionsService/ResumeWorkflowDelays"
 	InteractionsService_SetAssistantThread_FullMethodName           = "/sameoldchat.chat.v1.InteractionsService/SetAssistantThread"
 	InteractionsService_GetAssistantThread_FullMethodName           = "/sameoldchat.chat.v1.InteractionsService/GetAssistantThread"
+	InteractionsService_SetTyping_FullMethodName                    = "/sameoldchat.chat.v1.InteractionsService/SetTyping"
+	InteractionsService_TypingSignals_FullMethodName                = "/sameoldchat.chat.v1.InteractionsService/TypingSignals"
 	InteractionsService_GetReadCursor_FullMethodName                = "/sameoldchat.chat.v1.InteractionsService/GetReadCursor"
 	InteractionsService_ThreadSummaries_FullMethodName              = "/sameoldchat.chat.v1.InteractionsService/ThreadSummaries"
 	InteractionsService_MessageAt_FullMethodName                    = "/sameoldchat.chat.v1.InteractionsService/MessageAt"
@@ -53,6 +55,8 @@ type InteractionsServiceClient interface {
 	ResumeWorkflowDelays(ctx context.Context, in *ResumeWorkflowDelaysRequest, opts ...grpc.CallOption) (*ResumeWorkflowDelaysResponse, error)
 	SetAssistantThread(ctx context.Context, in *SetAssistantThreadRequest, opts ...grpc.CallOption) (*SetAssistantThreadResponse, error)
 	GetAssistantThread(ctx context.Context, in *AssistantThreadRequest, opts ...grpc.CallOption) (*AssistantThread, error)
+	SetTyping(ctx context.Context, in *SetTypingRequest, opts ...grpc.CallOption) (*SetTypingResponse, error)
+	TypingSignals(ctx context.Context, in *TypingSignalsRequest, opts ...grpc.CallOption) (*TypingSignalsResponse, error)
 	// Named GetReadCursor because an rpc named ReadCursor would shadow the
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(ctx context.Context, in *ReadCursorRequest, opts ...grpc.CallOption) (*ReadCursor, error)
@@ -143,6 +147,26 @@ func (c *interactionsServiceClient) GetAssistantThread(ctx context.Context, in *
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AssistantThread)
 	err := c.cc.Invoke(ctx, InteractionsService_GetAssistantThread_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) SetTyping(ctx context.Context, in *SetTypingRequest, opts ...grpc.CallOption) (*SetTypingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTypingResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_SetTyping_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) TypingSignals(ctx context.Context, in *TypingSignalsRequest, opts ...grpc.CallOption) (*TypingSignalsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TypingSignalsResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_TypingSignals_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +324,8 @@ type InteractionsServiceServer interface {
 	ResumeWorkflowDelays(context.Context, *ResumeWorkflowDelaysRequest) (*ResumeWorkflowDelaysResponse, error)
 	SetAssistantThread(context.Context, *SetAssistantThreadRequest) (*SetAssistantThreadResponse, error)
 	GetAssistantThread(context.Context, *AssistantThreadRequest) (*AssistantThread, error)
+	SetTyping(context.Context, *SetTypingRequest) (*SetTypingResponse, error)
+	TypingSignals(context.Context, *TypingSignalsRequest) (*TypingSignalsResponse, error)
 	// Named GetReadCursor because an rpc named ReadCursor would shadow the
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error)
@@ -345,6 +371,12 @@ func (UnimplementedInteractionsServiceServer) SetAssistantThread(context.Context
 }
 func (UnimplementedInteractionsServiceServer) GetAssistantThread(context.Context, *AssistantThreadRequest) (*AssistantThread, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAssistantThread not implemented")
+}
+func (UnimplementedInteractionsServiceServer) SetTyping(context.Context, *SetTypingRequest) (*SetTypingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetTyping not implemented")
+}
+func (UnimplementedInteractionsServiceServer) TypingSignals(context.Context, *TypingSignalsRequest) (*TypingSignalsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TypingSignals not implemented")
 }
 func (UnimplementedInteractionsServiceServer) GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetReadCursor not implemented")
@@ -530,6 +562,42 @@ func _InteractionsService_GetAssistantThread_Handler(srv interface{}, ctx contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(InteractionsServiceServer).GetAssistantThread(ctx, req.(*AssistantThreadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_SetTyping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTypingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).SetTyping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_SetTyping_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).SetTyping(ctx, req.(*SetTypingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_TypingSignals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TypingSignalsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).TypingSignals(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_TypingSignals_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).TypingSignals(ctx, req.(*TypingSignalsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -820,6 +888,14 @@ var InteractionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAssistantThread",
 			Handler:    _InteractionsService_GetAssistantThread_Handler,
+		},
+		{
+			MethodName: "SetTyping",
+			Handler:    _InteractionsService_SetTyping_Handler,
+		},
+		{
+			MethodName: "TypingSignals",
+			Handler:    _InteractionsService_TypingSignals_Handler,
 		},
 		{
 			MethodName: "GetReadCursor",

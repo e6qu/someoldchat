@@ -24,6 +24,9 @@ type Handler struct {
 	Authenticator  auth.Authenticator
 	RTMConnections RTMConnectionSource
 	Messages       RTMMessageService
+	// Typing reports who is composing. It is read on its own timer rather than
+	// from the journal, because a typing signal is never journalled.
+	Typing TypingSource
 	// Logger records why a stream ended and which records were skipped.
 	// Without it a store outage is indistinguishable from a client disconnect.
 	Logger *slog.Logger
@@ -115,17 +118,23 @@ var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
 // reader may switch into. A construction-time workspace both decided nothing
 // once the streams followed their credentials and, while it did decide, made a
 // switch unserviceable from the same process.
-func NewHandler(source events.Source, authenticator auth.Authenticator) (Handler, error) {
+func NewHandler(source events.Source, authenticator auth.Authenticator, typing TypingSource) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("SSE requires an event source")
 	}
 	if authenticator == nil {
 		return Handler{}, errors.New("SSE requires an authenticator")
 	}
-	return Handler{Source: source, Authenticator: authenticator}, nil
+	// Typing is required rather than optional. An optional live surface is one
+	// a deployment can be missing without anyone noticing, and "the indicator
+	// never appears" is indistinguishable from "nobody is typing".
+	if typing == nil {
+		return Handler{}, errors.New("SSE requires a typing source")
+	}
+	return Handler{Source: source, Authenticator: authenticator, Typing: typing}, nil
 }
 
-func NewRTMHandler(source events.Source, connections RTMConnectionSource, messages RTMMessageService) (Handler, error) {
+func NewRTMHandler(source events.Source, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("RTM requires an event source")
 	}
@@ -135,7 +144,10 @@ func NewRTMHandler(source events.Source, connections RTMConnectionSource, messag
 	if messages == nil {
 		return Handler{}, errors.New("RTM requires a message service")
 	}
-	return Handler{Source: source, RTMConnections: connections, Messages: messages}, nil
+	if typing == nil {
+		return Handler{}, errors.New("RTM requires a typing source")
+	}
+	return Handler{Source: source, RTMConnections: connections, Messages: messages, Typing: typing}, nil
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
@@ -209,6 +221,10 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	}()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	announcer := newTypingAnnouncer()
+	// Zero rather than now, so a client that connects mid-sentence sees the
+	// signal on its first pass instead of waiting out a poll interval.
+	var lastTypingPoll time.Time
 	// goodbye is Slack's RTM farewell frame: the server announces an
 	// intentional end of the stream so an official client reconnects instead
 	// of treating the close as a failure. Best effort by design — the peer
@@ -264,6 +280,29 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 				}
 			}
 		}
+		// Typing rides this loop but not this cursor. It is read as state on a
+		// slower timer, and a failure to read it must not end a stream that is
+		// delivering messages correctly: an indicator that does not appear is a
+		// smaller loss than a disconnection.
+		if time.Since(lastTypingPoll) >= typingPollInterval {
+			lastTypingPoll = time.Now()
+			signals, typingErr := h.Typing.TypingSignals(request.Context(), workspace, connection.UserID)
+			if typingErr != nil {
+				if request.Context().Err() == nil {
+					h.logger().Warn("RTM could not read typing signals", "workspace", workspace, "user", connection.UserID, "error", typingErr)
+				}
+			} else {
+				for _, signal := range announcer.due(signals) {
+					frame, frameErr := typingFrame(signal)
+					if frameErr != nil {
+						continue
+					}
+					if websocket.Message.Send(conn, string(frame)) != nil {
+						return
+					}
+				}
+			}
+		}
 		select {
 		case <-request.Context().Done():
 			sayGoodbye()
@@ -272,7 +311,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			sayGoodbye()
 			return
 		case message := <-commands:
-			if err := handleRTMCommand(request.Context(), conn, connection, h.Messages, message); err != nil {
+			if err := handleRTMCommand(request.Context(), conn, connection, h.Messages, h.Typing, message); err != nil {
 				return
 			}
 		case <-ticker.C:
@@ -280,7 +319,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	}
 }
 
-func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection domain.RTMConnection, messages RTMMessageService, raw string) error {
+func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection domain.RTMConnection, messages RTMMessageService, typing TypingSource, raw string) error {
 	var command struct {
 		Type string `json:"type"`
 	}
@@ -288,6 +327,24 @@ func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection doma
 		return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
 	}
 	switch command.Type {
+	case "typing":
+		// The one command Slack answers with nothing at all. A malformed
+		// typing command is also answered with nothing rather than an error
+		// frame: the client that sent it is not waiting for a reply, and an
+		// unsolicited error would arrive at an official client with no
+		// reply_to to match it against.
+		channel, ok := typingCommand(raw)
+		if !ok {
+			return nil
+		}
+		if err := typing.SetTyping(ctx, connection.WorkspaceID, connection.UserID, channel); err != nil {
+			// A refused signal is not a stream failure. The commonest cause is
+			// a client typing in a conversation it has just been removed from,
+			// and disconnecting it over that would be a worse answer than
+			// showing no indicator.
+			return nil
+		}
+		return nil
 	case "ping":
 		payload, err := encodeRTMPong(raw)
 		if err != nil {
@@ -463,6 +520,11 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	defer ticker.Stop()
 	lastWrite := time.Now()
 	lastAuthorized := time.Now()
+	// Deliberately the zero time rather than now, so the first pass reads
+	// typing immediately: someone who is already composing when a reader opens
+	// the page should be visible at once rather than up to a poll later.
+	var lastTypingPoll time.Time
+	announcer := newTypingAnnouncer()
 	unresolved := 0
 	for {
 		records, err := h.Source.ListEventsAfter(r.Context(), workspace, after, 100)
@@ -505,6 +567,34 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 				return
 			}
 			wrote = true
+		}
+		// Typing is read as state on its own timer and written without a
+		// sequence, so it neither advances nor disturbs the cursor this stream
+		// resumes from. A read failure is logged and skipped rather than
+		// ending a stream that is delivering messages correctly.
+		if time.Since(lastTypingPoll) >= typingPollInterval {
+			lastTypingPoll = time.Now()
+			signals, typingErr := h.Typing.TypingSignals(r.Context(), workspace, principal.UserID)
+			if typingErr != nil {
+				if r.Context().Err() == nil {
+					h.logger().Warn("event stream could not read typing signals", "workspace", workspace, "user", principal.UserID, "error", typingErr)
+				}
+			} else {
+				for _, signal := range announcer.due(signals) {
+					frame, frameErr := typingFrame(signal)
+					if frameErr != nil {
+						continue
+					}
+					if err := h.armWrite(control); err != nil {
+						return
+					}
+					if err := writeUnsequencedEvent(w, "typing", string(frame)); err != nil {
+						h.reportWriteFailure(r, workspace, principal.UserID, err)
+						return
+					}
+					wrote = true
+				}
+			}
 		}
 		if wrote {
 			flusher.Flush()
@@ -560,6 +650,28 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 		case <-ticker.C:
 		}
 	}
+}
+
+// writeUnsequencedEvent writes a frame that is not a journal record, so it
+// carries no id line at all.
+//
+// The omission is the point. An SSE client remembers the last id it saw and
+// resumes from it, and this product's client persists that id across reloads.
+// A typing frame stamped "id: 0" — the sequence a record without one would
+// have — would rewind every reader that saw one to the start of the journal and
+// replay the workspace to them as live events. Writing no id leaves the
+// client's cursor exactly where the last real record left it.
+func writeUnsequencedEvent(w io.Writer, topic, encoded string) error {
+	if _, err := fmt.Fprintf(w, "event: %s\n", topic); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(encoded, "\n") {
+		if _, err := fmt.Fprintf(w, "data: %s\n", line); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, "\n")
+	return err
 }
 
 func lastEventID(r *http.Request) (uint64, error) {

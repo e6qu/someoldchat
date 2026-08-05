@@ -80,6 +80,32 @@ message AssistantThreadRequest {
   string thread_ts = 4;
 }
 
+message TypingSignal {
+  string workspace_id = 1;
+  string conversation = 2;
+  string user_id = 3;
+  int64 expires_at_unix_nano = 4;
+}
+
+message SetTypingRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation = 3;
+}
+
+message SetTypingResponse {
+  bool ok = 1;
+}
+
+message TypingSignalsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message TypingSignalsResponse {
+  repeated TypingSignal signals = 1;
+}
+
 message RecordActivityRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -304,6 +330,8 @@ service InteractionsService {
   rpc ResumeWorkflowDelays(ResumeWorkflowDelaysRequest) returns (ResumeWorkflowDelaysResponse);
   rpc SetAssistantThread(SetAssistantThreadRequest) returns (SetAssistantThreadResponse);
   rpc GetAssistantThread(AssistantThreadRequest) returns (AssistantThread);
+  rpc SetTyping(SetTypingRequest) returns (SetTypingResponse);
+  rpc TypingSignals(TypingSignalsRequest) returns (TypingSignalsResponse);
   // Named GetReadCursor because an rpc named ReadCursor would shadow the
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);

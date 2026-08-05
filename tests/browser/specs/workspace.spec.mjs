@@ -58,14 +58,18 @@ async function postPayloadWithToken(request, token, body) {
   return payload;
 }
 
-async function installActivityBot(page, request) {
+// extraScopes exists because a journey that needs a bot to do something beyond
+// posting — hold an RTM stream, for one — must ask for that scope at install
+// time. Granting every scope to every fixture bot would make the scope
+// enforcement these journeys rely on untestable.
+async function installActivityBot(page, request, extraScopes = []) {
   const redirectURI = 'https://client.example/browser-oauth-callback';
   const name = `Activity bot ${Date.now()}`;
   const installed = await createAndInstallApp(page, request, {
     display_information: { name },
     oauth_config: {
       redirect_urls: [redirectURI],
-      scopes: { bot: ['channels:join', 'channels:manage', 'groups:write', 'chat:write'] },
+      scopes: { bot: ['channels:join', 'channels:manage', 'groups:write', 'chat:write', ...extraScopes] },
     },
   }, redirectURI);
 
@@ -2828,6 +2832,67 @@ test('[APP-07 A11Y-01] an assistant app names a thread, shows its status, and of
   await page.goto(`/app?channel=${CHANNEL}&thread=${thread}`);
   await expect(page.locator('.assistant-status')).toHaveCount(0);
   await expect(page.locator('.assistant-title')).toHaveText('Deploy help');
+});
+
+// Both halves of the journey over the transport Slack actually uses: a real RTM
+// client announces composition and the browser client renders it. There is no
+// Web API method for typing — Slack publishes it as an RTM event only — so a
+// second person typing cannot be faked with a POST, and driving the socket is
+// what makes this test evidence rather than decoration.
+test('[COMP-04 A11Y-01] a member composing is shown to the conversation and stops without being retracted', async ({ page, context, request }) => {
+  await signIn(context);
+  const bot = await installActivityBot(page, request, ['rtm:stream']);
+  // The workspace token reads the directory; the app was installed with the
+  // scopes it needs to type, not to browse people.
+  const identity = await request.post('/api/users.info', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { user: bot.botUserID },
+  });
+  const identified = await identity.json();
+  expect(identified.ok, JSON.stringify(identified)).toBe(true);
+  const botName = identified.user.profile?.display_name || identified.user.real_name || identified.user.name;
+  expect(botName).toBeTruthy();
+
+  const connect = await request.post('/api/rtm.connect', {
+    headers: { authorization: `Bearer ${bot.token}`, 'content-type': 'application/json' },
+    data: {},
+  });
+  const connected = await connect.json();
+  expect(connected.ok, JSON.stringify(connected)).toBe(true);
+
+  await page.goto(`/app?channel=${CHANNEL}`);
+  // The region exists before anyone types, so the live region a screen reader is
+  // already watching stays the same element rather than appearing and vanishing.
+  await expect(page.locator('#typing')).toHaveCount(1);
+  await expect(page.locator('.typing')).toHaveText('');
+
+  const socket = new WebSocket(connected.url);
+  const opened = new Promise((resolve, reject) => {
+    socket.addEventListener('message', (event) => {
+      if (JSON.parse(event.data).type === 'hello') resolve();
+    });
+    socket.addEventListener('error', reject);
+  });
+  let renew = null;
+  try {
+    await opened;
+    // A signal expires rather than being retracted, so a client that keeps
+    // typing keeps re-sending. Renewing here is what a composing client does,
+    // not a workaround for a flaky assertion.
+    const announce = () => socket.send(JSON.stringify({ type: 'typing', channel: CHANNEL }));
+    announce();
+    renew = setInterval(announce, 2000);
+    await expect(page.locator('.typing')).toHaveText(`${botName} is typing…`, { timeout: 15000 });
+    await expectNoSeriousAccessibilityViolations(page);
+  } finally {
+    if (renew) clearInterval(renew);
+    socket.close();
+  }
+
+  // Nobody sends a "stopped typing" frame. The line clears because the signal
+  // it was drawn from expired, which is also why a client that disappears
+  // mid-word stops appearing.
+  await expect(page.locator('.typing')).toHaveText('', { timeout: 20000 });
 });
 
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {

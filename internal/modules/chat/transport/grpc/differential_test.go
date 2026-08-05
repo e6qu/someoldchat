@@ -1758,6 +1758,55 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Typing signals are the one piece of state that crosses the seam
+			// without an event behind it, so nothing else in this suite would
+			// notice if one composition quietly journalled them. What the two
+			// have to agree on is who may see a signal: never its own author,
+			// and never a reader who is not in the conversation. U1 and U2 are
+			// both in C1; only U1 is in C2, which is what makes the second
+			// half of this case a visibility check rather than a repeat.
+			name: "typing signals reach members and no one else",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.SetTyping(ctx, "T1", "U2", "C1"); err != nil {
+					return nil, err
+				}
+				if err := chat.SetTyping(ctx, "T1", "U1", "C2"); err != nil {
+					return nil, err
+				}
+				// Renewal replaces rather than accumulates: a client re-sends
+				// every few seconds, so a second signal must not produce a
+				// second row and make one person read as two typists.
+				if err := chat.SetTyping(ctx, "T1", "U2", "C1"); err != nil {
+					return nil, err
+				}
+				readerOne, err := chat.TypingSignals(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				readerTwo, err := chat.TypingSignals(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				inChannel, err := chat.TypingIn(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				// A member who is not in C2 must not learn that anyone is
+				// composing there, and a member must never be told about
+				// themselves.
+				authors := make([]string, 0, len(readerOne))
+				for _, signal := range readerOne {
+					authors = append(authors, string(signal.Conversation)+"/"+string(signal.UserID))
+				}
+				// The expiry itself is deliberately not compared: it is wall
+				// clock, so the two compositions produce different instants
+				// for the same correct behavior. That it is in the future is
+				// the part that carries meaning.
+				live := len(inChannel) == 1 && inChannel[0].Active(time.Now().UTC())
+				return []any{authors, len(readerTwo), len(inChannel), live}, nil
+			},
+		},
+		{
 			// A delay parks a run on the clock, and the sweep that resumes it
 			// is the only place a run advances without anyone asking. Both
 			// compositions have to agree on what is due and on the fact that a
