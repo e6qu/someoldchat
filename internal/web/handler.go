@@ -582,6 +582,7 @@ type searchData struct {
 	Messages             []messageView
 	Files                []searchFileView
 	People               []memberView
+	Canvases             []searchCanvasView
 	Conversations        []conversationView
 	Tabs                 []searchTabView
 	ConversationOptions  []conversationView
@@ -603,6 +604,20 @@ type searchData struct {
 type searchHistoryView struct {
 	Query string
 	URL   string
+}
+
+// searchCanvasView carries a snippet rather than the document. A canvas can be
+// long, and a result list that rendered whole documents would bury the other
+// results; a snippet around nothing in particular is still enough to recognise
+// the canvas you meant.
+type searchCanvasView struct {
+	ID          string
+	Title       string
+	Snippet     string
+	Owner       string
+	DisplayTime string
+	MachineTime string
+	URL         string
 }
 
 type searchTabView struct {
@@ -2238,6 +2253,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 <section class="results" aria-label="{{.Type}} search results">
 {{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
 {{else if eq .Type "files"}}{{range .Files}}<a class="result file-result" href="{{.DownloadURL}}"><span><span class="author">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</span><span class="result-kind">{{.MIMEType}} · {{.Size}}</span><p class="text">Uploaded by {{.Uploader}}</p></span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching files.</p>{{end}}
+{{else if eq .Type "canvases"}}{{range .Canvases}}<a class="result canvas-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">Canvas · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching canvases.</p>{{end}}
 {{else if eq .Type "people"}}{{range .People}}<a class="result" href="/app/members?user={{.ID}}"><span class="author">{{.Name}}</span>{{if .RealName}}<p class="text">{{.RealName}}</p>{{end}}</a>{{else}}<p class="empty">No matching people.</p>{{end}}
 {{else}}{{range .Conversations}}<a class="result" href="/app?channel={{.ID}}"><span class="author"># {{.Name}}</span></a>{{else}}<p class="empty">No matching channels.</p>{{end}}{{end}}
 </section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
@@ -6763,7 +6779,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	switch resultType {
 	case "", "messages":
 		resultType = "messages"
-	case "files", "people", "channels":
+	case "files", "canvases", "people", "channels":
 	default:
 		resultType = "messages"
 	}
@@ -6799,7 +6815,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "Search filters are temporarily unavailable.")
 		return
 	}
-	for _, tab := range []struct{ value, label string }{{"messages", "Messages"}, {"files", "Files"}, {"people", "People"}, {"channels", "Channels"}} {
+	for _, tab := range []struct{ value, label string }{{"messages", "Messages"}, {"files", "Files"}, {"canvases", "Canvases"}, {"people", "People"}, {"channels", "Channels"}} {
 		values := cloneURLValues(r.URL.Query())
 		values.Set("type", tab.value)
 		values.Del("cursor")
@@ -6875,6 +6891,32 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		data.ResultCount = len(data.People)
+	case "canvases":
+		results, searchErr := h.Messages.SearchCanvases(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasSearchRequest{
+			Query: effectiveQuery, Sort: sortOrder, Direction: direction,
+			Page: domain.PageRequest{Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))},
+		})
+		if searchErr != nil {
+			h.writeSearchError(w, data, searchErr)
+			return
+		}
+		names := h.newUserNames(r.Context(), principal)
+		for _, canvas := range results.Canvases {
+			data.Canvases = append(data.Canvases, searchCanvasView{
+				ID: string(canvas.ID), Title: canvas.Title,
+				Snippet:     canvasSearchSnippet(canvas),
+				Owner:       names.name(canvas.OwnerID),
+				DisplayTime: canvas.UpdatedAt.Format("Jan 2, 15:04"),
+				MachineTime: canvas.UpdatedAt.UTC().Format(time.RFC3339),
+				URL:         "/app/canvases/" + url.PathEscape(string(canvas.ID)),
+			})
+		}
+		data.ResultCount = len(data.Canvases)
+		if results.HasMore && results.NextCursor != "" {
+			values := cloneURLValues(r.URL.Query())
+			values.Set("cursor", string(results.NextCursor))
+			data.MoreURL = "/app/search?" + values.Encode()
+		}
 	case "channels":
 		for _, conversation := range data.ConversationOptions {
 			if searchTextContainsTerms(conversation.Name, textTokens) {
@@ -6888,6 +6930,23 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 }
+
+// canvasSearchSnippet is the first prose in the document, bounded. It is not a
+// highlighted match: Slack marks the matched span and this does not, which is
+// recorded as a deviation rather than faked with a substring search that would
+// mark the wrong span whenever a term matched the title instead of the body.
+func canvasSearchSnippet(canvas domain.Canvas) string {
+	text := strings.TrimSpace(strings.TrimPrefix(domain.CanvasSearchText(canvas.Title, canvas.DocumentContent), canvas.Title))
+	text = strings.Join(strings.Fields(text), " ")
+	if runes := []rune(text); len(runes) > canvasSnippetRunes {
+		return strings.TrimSpace(string(runes[:canvasSnippetRunes])) + "…"
+	}
+	return text
+}
+
+// canvasSnippetRunes is counted in runes rather than bytes so a document in a
+// non-Latin script is not cut to a quarter of the length a Latin one gets.
+const canvasSnippetRunes = 160
 
 func searchHistoryViews(values []domain.SearchHistoryEntry, channel string) []searchHistoryView {
 	views := make([]searchHistoryView, 0, len(values))

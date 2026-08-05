@@ -10,6 +10,18 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+// canvasWorld gives an owner and a second member with no grant, because most of
+// what a canvas search has to get right is who may see a result.
+func canvasWorld(t *testing.T) (context.Context, *memory.Store, Messages) {
+	t.Helper()
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Workspace"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	return ctx, repository, Messages{Store: repository}
+}
+
 func TestCanvasLifecycleAndSectionLookup(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
@@ -148,5 +160,62 @@ func TestAnotherMemberWithoutAGrantCannotReachAList(t *testing.T) {
 
 	if _, err := messages.ListItems(ctx, "T1", "U1", list.ID, domain.PageRequest{Limit: 10}, false); err != nil {
 		t.Fatalf("the list owner was refused: %v", err)
+	}
+}
+
+// Search finds a canvas by its prose, and stops exactly where the directory
+// stops. The second half is the part worth a test: a search that matched more
+// than the listing would disclose the title of a canvas the reader cannot open,
+// which is a smaller leak than the document and the same kind.
+func TestCanvasSearchMatchesProseAndRespectsAccess(t *testing.T) {
+	ctx, _, messages := canvasWorld(t)
+	canvas, err := messages.CreateCanvas(ctx, "T1", "U1", "Deployment runbook", `{"type":"markdown","markdown":"roll back with the previous revision"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := domain.PageRequest{Limit: 10}
+	found, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "runbook", Page: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Canvases) != 1 || found.Canvases[0].ID != canvas.ID {
+		t.Fatalf("search by title = %+v, want the canvas", found.Canvases)
+	}
+
+	// The body is searchable, and the one fold the product uses applies.
+	body, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "ROLL BACK", Page: page})
+	if err != nil || len(body.Canvases) != 1 {
+		t.Fatalf("search by body = %+v err = %v, want the canvas", body.Canvases, err)
+	}
+
+	// The document is stored as JSON. If the index were the stored bytes, a
+	// member searching for "sections" would match every canvas in the
+	// workspace, and one searching for a heading would miss it whenever the
+	// text carried an escape.
+	syntax, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "sections", Page: page})
+	if err != nil || len(syntax.Canvases) != 0 {
+		t.Fatalf("search for JSON syntax = %+v err = %v, want nothing", syntax.Canvases, err)
+	}
+
+	stranger, err := messages.SearchCanvases(ctx, "T1", "U2", domain.CanvasSearchRequest{Query: "runbook", Page: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stranger.Canvases) != 0 {
+		t.Fatalf("a member with no grant found %+v", stranger.Canvases)
+	}
+}
+
+// A canvas is not in a conversation, so a conversation modifier has no meaning
+// here. Refusing it is the honest answer; dropping it would return results that
+// look like an answer to the question that was asked.
+func TestCanvasSearchRefusesAModifierItCannotHonour(t *testing.T) {
+	ctx, _, messages := canvasWorld(t)
+	page := domain.PageRequest{Limit: 10}
+	if _, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "runbook in:#general", Page: page}); !errors.Is(err, ErrInvalidSearch) {
+		t.Fatalf("scoped canvas search = %v, want ErrInvalidSearch", err)
+	}
+	if _, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "   ", Page: page}); !errors.Is(err, ErrInvalidSearch) {
+		t.Fatalf("empty canvas search = %v, want ErrInvalidSearch", err)
 	}
 }

@@ -842,6 +842,10 @@ type Store interface {
 	ListFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.FilePage, error)
 	ListVisibleFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
+	// SearchCanvases answers Slack's Canvases search tab. It applies exactly
+	// the visibility rule ListCanvases applies, because a search that matched
+	// more would disclose the title of a canvas the reader cannot open.
+	SearchCanvases(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasSearch) (domain.CanvasPage, error)
 	RecordSearchHistory(context.Context, domain.SearchHistoryEntry) error
 	ListSearchHistory(context.Context, domain.WorkspaceID, domain.UserID, int) ([]domain.SearchHistoryEntry, error)
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error

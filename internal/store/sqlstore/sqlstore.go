@@ -550,7 +550,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 138
+const schemaVersion = 139
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2033,7 +2033,7 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 66 {
-		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvases (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, document_content TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvases (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, document_content TEXT NOT NULL, search_folded TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
 			return fmt.Errorf("migrate canvases: %w", err)
 		}
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvas_access (canvas_id TEXT NOT NULL REFERENCES canvases(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL, PRIMARY KEY (canvas_id, entity_type, entity_id))`); err != nil {
@@ -3143,6 +3143,26 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 139 {
+		// A canvas is findable by its prose. The folded text is stored rather
+		// than computed per query because the alternative is decoding every
+		// canvas document in the workspace on every keystroke of a search.
+		columns, err := s.tableColumns(ctx, db, "canvases")
+		if err != nil {
+			return err
+		}
+		if !columns["search_folded"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE canvases ADD COLUMN search_folded TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate canvas search text: %w", err)
+			}
+			// Backfill in Go rather than SQL: the searchable text is the prose
+			// inside a JSON document, and extracting it is the same function
+			// the write path uses. Doing it in SQL would be a second decoder.
+			if err := backfillCanvasSearchText(ctx, db); err != nil {
+				return fmt.Errorf("backfill canvas search text: %w", err)
+			}
 		}
 	}
 	if version < 138 {
@@ -12549,7 +12569,7 @@ func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 	if canvas.Version == 0 {
 		canvas.Version = 1
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
+	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
 	if err != nil {
 		return classify(err)
 	}
@@ -12571,7 +12591,7 @@ func (s *Store) CreateCanvasWithAccess(ctx context.Context, canvas domain.Canvas
 	if canvas.Version == 0 {
 		canvas.Version = 1
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?)`, access.CanvasID, access.EntityType, access.EntityID, access.Access); err != nil {
@@ -12612,7 +12632,7 @@ func (s *Store) CreateChannelCanvas(ctx context.Context, canvas domain.Canvas, e
 	if canvas.Version == 0 {
 		canvas.Version = 1
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, 'channel_canvas', ?, ?)`, canvas.ID, channel, store.AccessWrite); err != nil {
@@ -12655,6 +12675,136 @@ func (s *Store) GetCanvas(ctx context.Context, workspace domain.WorkspaceID, id 
 	return canvas, nil
 }
 
+// visibleCanvasPredicate is the one rule for whether a member may see a canvas,
+// and it is shared by the directory and by search so the two cannot drift. A
+// search that answered a wider question than the listing would be a disclosure
+// rather than a feature: it would tell a member the title of a canvas they
+// cannot open.
+//
+// It expects four bindings, all the same reader: the workspace-membership
+// check, the owner comparison, the direct grant, and the channel grant.
+const visibleCanvasPredicate = `EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
+		  AND (d.owner_id = ? OR EXISTS (
+		    SELECT 1 FROM canvas_access a WHERE a.canvas_id = d.id
+		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
+		        OR (a.entity_type IN ('channel', 'channel_canvas') AND EXISTS (
+		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
+		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))`
+
+const canvasColumns = `d.id, d.workspace_id, d.owner_id, d.title, d.document_content, d.version, d.created_at, d.updated_at`
+
+// SearchCanvases finds canvases by their prose. Slack's search has a Canvases
+// tab beside Messages and Files, and this answers it from the same folded-text
+// index the file search uses rather than from a second mechanism.
+func (s *Store) SearchCanvases(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, search domain.CanvasSearch) (domain.CanvasPage, error) {
+	if err := store.CheckAscendingPage(search.Page); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	after, err := domain.DecodeListCursor(search.Page.Cursor)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	where := `d.workspace_id = ? AND d.id > ? AND ` + visibleCanvasPredicate
+	args := []any{workspace, after, userID, userID, userID, userID}
+	for _, term := range search.Terms {
+		where += ` AND d.search_folded LIKE ? ESCAPE '\'`
+		args = append(args, "%"+escapeLikeTerm(domain.FoldSearchText(term))+"%")
+	}
+	for _, term := range search.ExcludedTerms {
+		where += ` AND d.search_folded NOT LIKE ? ESCAPE '\'`
+		args = append(args, "%"+escapeLikeTerm(domain.FoldSearchText(term))+"%")
+	}
+	if search.Owner != "" {
+		where += ` AND d.owner_id = ?`
+		args = append(args, search.Owner)
+	}
+	if search.ExcludedOwner != "" {
+		where += ` AND d.owner_id <> ?`
+		args = append(args, search.ExcludedOwner)
+	}
+	if !search.After.IsZero() {
+		where += ` AND d.updated_at >= ?`
+		args = append(args, search.After.UTC().Unix())
+	}
+	if !search.Before.IsZero() {
+		where += ` AND d.updated_at < ?`
+		args = append(args, search.Before.UTC().Unix())
+	}
+	args = append(args, search.Page.Limit+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+canvasColumns+` FROM canvases d WHERE `+where+` ORDER BY d.id LIMIT ?`, args...)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	values := make([]domain.Canvas, 0, search.Page.Limit+1)
+	for rows.Next() {
+		value, err := scanCanvasRow(rows)
+		if err != nil {
+			rows.Close()
+			return domain.CanvasPage{}, err
+		}
+		values = append(values, value)
+	}
+	if err := closeRows(rows); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	hasMore := len(values) > search.Page.Limit
+	if hasMore {
+		values = values[:search.Page.Limit]
+	}
+	page := domain.CanvasPage{Canvases: values, HasMore: hasMore}
+	if hasMore && len(values) > 0 {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		if err != nil {
+			return domain.CanvasPage{}, err
+		}
+	}
+	return page, nil
+}
+
+// canvasSearchFolded is the only place the stored index is built, so a write
+// path that forgot it would have to forget to call this rather than forget a
+// column, which is the difference between a compile error and a canvas that
+// silently cannot be found.
+func canvasSearchFolded(canvas domain.Canvas) string {
+	return domain.FoldSearchText(domain.CanvasSearchText(canvas.Title, canvas.DocumentContent))
+}
+
+func backfillCanvasSearchText(ctx context.Context, db queryExecutor) error {
+	rows, err := db.QueryContext(ctx, `SELECT id, title, document_content FROM canvases`)
+	if err != nil {
+		return err
+	}
+	type row struct{ id, folded string }
+	updates := make([]row, 0, 64)
+	for rows.Next() {
+		var id, title, content string
+		if err := rows.Scan(&id, &title, &content); err != nil {
+			rows.Close()
+			return err
+		}
+		updates = append(updates, row{id: id, folded: domain.FoldSearchText(domain.CanvasSearchText(title, content))})
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if _, err := db.ExecContext(ctx, `UPDATE canvases SET search_folded = ? WHERE id = ?`, update.folded, update.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func scanCanvasRow(rows *sql.Rows) (domain.Canvas, error) {
+	var value domain.Canvas
+	var created, updated int64
+	if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Title, &value.DocumentContent, &value.Version, &created, &updated); err != nil {
+		return domain.Canvas{}, err
+	}
+	value.CreatedAt, value.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+	return value, nil
+}
+
 func (s *Store) ListCanvases(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.CanvasPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.CanvasPage{}, err
@@ -12663,16 +12813,9 @@ func (s *Store) ListCanvases(ctx context.Context, workspace domain.WorkspaceID, 
 	if err != nil {
 		return domain.CanvasPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT d.id, d.workspace_id, d.owner_id, d.title, d.document_content, d.version, d.created_at, d.updated_at
+	rows, err := s.db.QueryContext(ctx, `SELECT `+canvasColumns+`
 		FROM canvases d
-		WHERE d.workspace_id = ? AND d.id > ?
-		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
-		  AND (d.owner_id = ? OR EXISTS (
-		    SELECT 1 FROM canvas_access a WHERE a.canvas_id = d.id
-		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
-		        OR (a.entity_type IN ('channel', 'channel_canvas') AND EXISTS (
-		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
-		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))
+		WHERE d.workspace_id = ? AND d.id > ? AND `+visibleCanvasPredicate+`
 		ORDER BY d.id LIMIT ?`, workspace, after, userID, userID, userID, userID, request.Limit+1)
 	if err != nil {
 		return domain.CanvasPage{}, err
@@ -12708,7 +12851,7 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID, canvas.Version-1)
+	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, search_folded = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID, canvas.Version-1)
 	if err != nil {
 		return err
 	}
