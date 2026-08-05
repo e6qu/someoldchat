@@ -80,6 +80,17 @@ and message projections.
 
 ## Evidence
 
+- Images are rendered in the timeline rather than linked, and the uploader may
+  describe one. The description is the alt text, the title is the fallback, and
+  the file name is deliberately not a second fallback: an alt text repeating
+  "IMG_4032.png" adds nothing and prevents a screen reader skipping the image,
+  so an undescribed and untitled image carries an empty alt. Writing a
+  description is the uploader's alone, matching deletion, and the permission is
+  part of the storage write rather than a check before it. Slack exposes this
+  control in its client and the pinned Web API snapshot predates the `alt_txt`
+  parameter that would carry it, so the field is first-party durable state.
+
+
 - Real browser uploads cover chooser, drag/drop, paste, multiple files,
   progress/cancel/retry, preview, description, download, share, delete, and
   narrow layout.

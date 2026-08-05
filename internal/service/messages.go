@@ -642,6 +642,36 @@ func (m Messages) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID
 	return nil
 }
 
+// FileDescriptionLimit bounds a description. It is generous enough for the
+// sentence or two a useful alt text is and short enough that the field cannot
+// become a second message body, which is the failure mode of an unbounded
+// description: readers start putting content there that only some of them see.
+const FileDescriptionLimit = 1000
+
+// SetFileDescription records what an image is, in words. Only the uploader may
+// write it, matching deletion: the description is presented as the uploader's
+// account of their own file, and a description anyone could rewrite would be a
+// caption instead.
+//
+// An empty description is accepted, because removing one is the only way to
+// correct a description that was wrong.
+func (m Messages) SetFileDescription(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, description string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	description = strings.TrimSpace(description)
+	if fileID == "" || utf8.RuneCountInString(description) > FileDescriptionLimit {
+		return ErrInvalidFile
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload("file.description_changed",
+		events.String("file_id", string(fileID)),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetFileDescription(ctx, workspaceID, fileID, userID, description, event)
+}
+
 func (m Messages) DeleteFileComment(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, commentID domain.FileCommentID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err

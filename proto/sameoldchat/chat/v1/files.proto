@@ -19,6 +19,7 @@ message File {
   bool deleted = 9;
   string public_token = 10;
   repeated string shared_channels = 11;
+  string description = 12;
 }
 
 message FilePage {
@@ -150,6 +151,13 @@ message UpdateRemoteFileRequest {
   string preview_image = 8;
   string indexable_contents = 9;
   repeated string update_fields = 10;
+}
+
+message SetFileDescriptionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+  string description = 4;
 }
 
 message FileRequest {
@@ -289,6 +297,7 @@ service FilesService {
   rpc DeleteFileComment(FileCommentDeleteRequest) returns (DeleteFileResponse);
   rpc Files(FilesRequest) returns (FilePage);
   rpc SearchFiles(SearchFilesRequest) returns (FilePage);
+  rpc SetFileDescription(SetFileDescriptionRequest) returns (MutationResponse);
   rpc SharePublicURL(PublicFileRequest) returns (File);
   rpc RevokePublicURL(PublicFileRequest) returns (File);
   rpc AddRemoteFile(AddRemoteFileRequest) returns (RemoteFile);
