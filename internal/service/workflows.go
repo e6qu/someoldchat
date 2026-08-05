@@ -33,6 +33,7 @@ type workflowFunctionDefinition struct {
 	AddPeople    *workflowAddPeopleStep `json:"add_people,omitempty"`
 	Canvas       *workflowCanvasStep    `json:"create_canvas,omitempty"`
 	Delay        *workflowDelayStep     `json:"delay,omitempty"`
+	WaitUntil    *workflowWaitUntilStep `json:"wait_until,omitempty"`
 }
 
 // workflowDelayStep is Slack's "wait for a set time" step. It is the first step
@@ -41,6 +42,19 @@ type workflowFunctionDefinition struct {
 // it, so the wait survives a restart instead of beginning again.
 type workflowDelayStep struct {
 	Seconds int `json:"seconds"`
+}
+
+// workflowWaitUntilStep is Slack's "wait until a date" step. It suspends a run
+// on the same durable wake instant a delay uses; the difference is only how the
+// instant is arrived at — a fixed moment rather than one measured from when the
+// run reached the step.
+//
+// The instant is absolute. A workflow author picks a wall-clock time in a named
+// zone and the builder resolves it once, when the step is written, because
+// resolving it per run would move the moment whenever the zone's offset changed
+// between writing and running.
+type workflowWaitUntilStep struct {
+	UnixSeconds int64 `json:"unix_seconds"`
 }
 
 // workflowMessageStep is Slack's most-used built-in step: send a message to a
@@ -106,6 +120,7 @@ const (
 	workflowStepTypeAddPeople = "add_people"
 	workflowStepTypeCanvas    = "create_canvas"
 	workflowStepTypeDelay     = "delay"
+	workflowStepTypeWaitUntil = "wait_until"
 )
 
 // workflowDelayMaximum bounds how long a run may be suspended. Slack's builder
@@ -232,6 +247,13 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 			}
 			values[index].AddPeople.Users = people
 			if values[index].AddPeople.Conversation == "" || len(people) == 0 {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+		case workflowStepTypeWaitUntil:
+			if values[index].WaitUntil == nil || values[index].FunctionID != "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+			if values[index].WaitUntil.UnixSeconds <= 0 {
 				return "", nil, ErrInvalidWorkflowStep
 			}
 		case workflowStepTypeDelay:
@@ -1480,8 +1502,20 @@ func (m Messages) newWorkflowDelayExecution(run domain.WorkflowRun, step workflo
 	if err != nil {
 		return domain.WorkflowStep{}, events.Event{}, err
 	}
-	resumeAt := now.Add(time.Duration(step.Delay.Seconds) * time.Second)
-	inputs, err := json.Marshal(map[string]any{"builtin": step.Type, "seconds": step.Delay.Seconds})
+	// A relative wait is measured from the moment the run reaches the step; a
+	// fixed one is the moment itself. A fixed moment already past is not an
+	// error and does not park the run indefinitely: it is simply due, and the
+	// next sweep resumes it — the wait it describes has been satisfied.
+	var resumeAt time.Time
+	payload := map[string]any{"builtin": step.Type}
+	if step.Type == workflowStepTypeWaitUntil {
+		resumeAt = time.Unix(step.WaitUntil.UnixSeconds, 0).UTC()
+		payload["unix_seconds"] = step.WaitUntil.UnixSeconds
+	} else {
+		resumeAt = now.Add(time.Duration(step.Delay.Seconds) * time.Second)
+		payload["seconds"] = step.Delay.Seconds
+	}
+	inputs, err := json.Marshal(payload)
 	if err != nil {
 		return domain.WorkflowStep{}, events.Event{}, err
 	}
@@ -1750,7 +1784,7 @@ func (m Messages) newWorkflowStepExecution(ctx context.Context, run domain.Workf
 	if builtInWorkflowStep(step.Type) {
 		return m.newBuiltInStepExecution(ctx, run, step, defaultApp, actor, now, stepOutputs)
 	}
-	if step.Type == workflowStepTypeDelay {
+	if step.Type == workflowStepTypeDelay || step.Type == workflowStepTypeWaitUntil {
 		return m.newWorkflowDelayExecution(run, step, defaultApp, actor, now)
 	}
 	if step.Type == workflowStepTypeForm || step.Type == workflowStepTypeButton {

@@ -83,7 +83,15 @@ behave exactly like one a person resumed — the same conditions, branches and
 variables — and a wait that has been spent MUST NOT be resumed a second time,
 however many replicas sweep for it. A wait MUST be positive and bounded, so a
 mistyped one is refused when it is written rather than parking a run past any
-horizon an operator would think to check. A
+horizon an operator would think to check.
+
+Waiting until a named date is the same suspension arrived at differently: the
+instant is fixed rather than measured from when the run reached the step. It
+MUST be resolved once, when the step is written, from the wall-clock time and
+zone the author chose — resolving it per run would move the moment whenever
+that zone's offset changed in between. A named instant already past MUST be
+treated as due rather than as an error, because the wait it describes has
+already been satisfied. A
 workflow whose every step is built-in MUST therefore complete without anything
 external moving it. The message MAY quote the run's inputs and earlier steps'
 outputs with the same variable grammar the builder uses for input mapping; a

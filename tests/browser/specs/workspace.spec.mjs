@@ -2249,6 +2249,48 @@ test('[WORKFLOW-02] built-in steps add people and create a canvas, and chain int
   await expect(page.getByText(canvasTitle)).toBeVisible();
 });
 
+test('[WORKFLOW-02] a wait step can be authored and published from the builder', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/workflow-wait-callback';
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name: `Wait tools ${Date.now()}` },
+    oauth_config: { redirect_urls: [redirectURI], scopes: { bot: ['chat:write'] } },
+    settings: { function_runtime: 'remote' },
+    functions: {
+      wait_start: {
+        title: 'Wait start',
+        input_parameters: { properties: {}, required: [] },
+        output_parameters: { properties: {}, required: [] },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Workflows' }).click();
+  await page.getByText('Create a workflow').click();
+  await page.getByLabel('Name').fill(`Scheduled announcement ${Date.now()}`);
+  await page.getByLabel('Owning app').selectOption(installed.appID);
+  await page.getByLabel('First step').selectOption('wait_start');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/Wf[0-9a-zA-Z]+/);
+
+  // Both wait kinds are authorable: a relative one and a fixed instant. Their
+  // resumption needs a worker, which this deployment does not run, so what this
+  // asserts is that the builder writes and reads them back — the resumption
+  // itself is covered by the service tests.
+  await page.getByLabel('Step 1 type').selectOption('delay');
+  await page.getByLabel('Step 1 wait in minutes').fill('45');
+  await page.getByLabel('Step 2 type').selectOption('wait_until');
+  await page.getByLabel('Step 2 wait until').fill('2030-01-15T09:30');
+  await page.getByRole('button', { name: 'Publish' }).click();
+
+  await page.reload();
+  await expect(page.getByLabel('Step 1 type')).toHaveValue('delay');
+  await expect(page.getByLabel('Step 1 wait in minutes')).toHaveValue('45');
+  await expect(page.getByLabel('Step 2 type')).toHaveValue('wait_until');
+  await expect(page.getByLabel('Step 2 wait until')).toHaveValue('2030-01-15T09:30');
+});
+
 test('[WORKFLOW-05] a form step pauses for input and a button step confirms', async ({ page, context, request }) => {
   await signIn(context);
   const redirectURI = 'https://client.example/workflow-form-callback';
