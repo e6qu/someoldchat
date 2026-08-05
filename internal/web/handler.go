@@ -565,10 +565,14 @@ type canvasSectionView struct {
 }
 
 type listData struct {
-	ID        string
-	Name      string
-	TodoMode  bool
-	Items     []listItemView
+	ID       string
+	Name     string
+	TodoMode bool
+	Items    []listItemView
+	// Members are who an item may be assigned to: the people who can already
+	// open this list. Offering anyone else would build a control that produces
+	// a refusal, which the universal contract forbids.
+	Members   []memberView
 	MoreURL   string
 	CSRFToken string
 	CanWrite  bool
@@ -579,6 +583,12 @@ type listItemView struct {
 	ID       string
 	Title    string
 	Archived bool
+	// AssigneeName is who the item is for, resolved for display. AssigneeID is
+	// what the form posts back, because a name is not an identity.
+	AssigneeID   string
+	AssigneeName string
+	DueDate      string
+	Overdue      bool
 }
 
 type directExpansionReviewData struct {
@@ -2636,7 +2646,11 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 .layout{width:min(940px,calc(100% - 28px));margin:26px auto 56px}.heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.heading h2{margin:0}.new-item{display:flex;gap:8px;margin:18px 0}.new-item input{flex:1;min-width:0;padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:0;border-radius:7px;padding:9px 13px;background:var(--action);color:var(--on-strong);font-weight:800}
 .items{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item.archived .title{text-decoration:line-through;color:var(--muted)}.item form{margin:0}.item button{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}.empty{padding:30px;text-align:center;color:var(--muted)}.mode{color:var(--muted);font-size:13px}
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}<ul class="items">{{range .Items}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span><span class="title">{{.Title}}</span>{{if $.CanWrite}}<form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}</main>{{end}}`
+{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}<ul class="items">{{range $item := .Items}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span><span class="title">{{.Title}}</span>{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}{{if $.CanWrite}}<form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
+<details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+<label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $.Members}}<option value="{{.ID}}"{{if eq .ID $item.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+<label for="due-{{.ID}}">Due</label><input id="due-{{.ID}}" type="date" name="due" value="{{.DueDate}}">
+<button type="submit">Save assignment</button></form></details>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}</main>{{end}}`
 
 var listTemplate = mustPage(listMarkup)
 
@@ -4088,6 +4102,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
 	mux.HandleFunc("POST /app/lists/{listID}/items/create", h.createListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/toggle", h.toggleListItem)
+	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/assign", h.assignListItem)
 	mux.HandleFunc("GET /app/workflows", h.workflows)
 	mux.HandleFunc("POST /app/workflows/create", h.createWorkflow)
 	mux.HandleFunc("GET /app/workflows/{workflowID}", h.workflow)
@@ -6544,6 +6559,22 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if item.ListItemID != "" && item.SourceAvailable {
+			name := strings.TrimSpace(item.ListName)
+			if name == "" {
+				name = "a list"
+			}
+			text := "Assigned you an item in " + name + "."
+			if !item.ListItem.DueAt.IsZero() {
+				text = "Assigned you an item in " + name + ", due " + formatTime(item.ListItem.DueAt) + "."
+			}
+			if item.ListItem.Overdue(time.Now()) {
+				text += " It is overdue."
+			}
+			view.Text = template.HTML(template.HTMLEscapeString(text))
+			view.SourceURL = "/app/lists/" + url.PathEscape(string(item.ListID))
+			view.ChannelName = name
+		}
 		if item.CanvasID != "" && item.SourceAvailable {
 			// A canvas share is an invitation from a different object, so it
 			// shares the kind and differs only in what it names and where it
@@ -6558,7 +6589,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			view.SourceURL = "/app/canvases/" + url.PathEscape(string(item.CanvasID))
 			view.ChannelName = title
 		}
-		if item.CanvasID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) && item.SourceAvailable {
+		if item.CanvasID == "" && item.ListItemID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) && item.SourceAvailable {
 			conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation)
 			if conversationErr == nil {
 				name := conversationName(conversation)
@@ -8016,16 +8047,40 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
+	names := h.newUserNames(r.Context(), principal)
+	// The picker offers only members who can open this list, because assigning
+	// to anyone else is refused by the service — a control that always fails is
+	// worse than no control.
+	assignable := make([]memberView, 0, 8)
+	if directory, dirErr := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: searchFilterOptionLimit}); dirErr == nil {
+		for _, candidate := range directory.Users {
+			if candidate.Deleted {
+				continue
+			}
+			if err := h.Messages.ListAccessFor(r.Context(), principal.WorkspaceID, candidate.ID, id); err != nil {
+				continue
+			}
+			assignable = append(assignable, memberView{ID: string(candidate.ID), Name: displayName(candidate)})
+		}
+	}
 	items := make([]listItemView, 0, len(page.Items))
 	for _, item := range page.Items {
-		items = append(items, listItemView{ID: string(item.ID), Title: listItemTitle(item.Fields), Archived: item.Archived})
+		view := listItemView{ID: string(item.ID), Title: listItemTitle(item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID)}
+		if item.AssigneeID != "" {
+			view.AssigneeName = names.name(item.AssigneeID)
+		}
+		if !item.DueAt.IsZero() {
+			view.DueDate = item.DueAt.UTC().Format("2006-01-02")
+			view.Overdue = item.Overdue(time.Now())
+		}
+		items = append(items, view)
 	}
 	more := ""
 	if page.HasMore {
 		more = "/app/lists/" + url.PathEscape(string(id)) + "?cursor=" + url.QueryEscape(string(page.NextCursor))
 	}
 	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
-	h.writeHTML(w, listTemplate, listData{ID: string(id), Name: value.Name, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+	h.writeHTML(w, listTemplate, listData{ID: string(id), Name: value.Name, Members: assignable, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
 }
 
 func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
@@ -8062,6 +8117,38 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
+}
+
+// assignListItem records who an item is for and when it is wanted. A due date
+// is a date rather than an instant, because "due Tuesday" is what a member
+// means; it is read as the end of that day in UTC so an item is not late the
+// moment the day begins somewhere.
+func (h Handler) assignListItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
+		return
+	}
+	listID := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	itemID := domain.ListItemID(strings.TrimSpace(r.PathValue("itemID")))
+	var due time.Time
+	if raw := strings.TrimSpace(fields["due"]); raw != "" {
+		parsed, parseErr := time.Parse("2006-01-02", raw)
+		if parseErr != nil {
+			h.writeMutationError(w, r, http.StatusBadRequest, "The assignment was not saved", "Enter a due date as a calendar date, or leave it empty.")
+			return
+		}
+		due = parsed.UTC().Add(24*time.Hour - time.Nanosecond)
+	}
+	if _, err := h.Messages.AssignListItem(r.Context(), principal.WorkspaceID, principal.UserID, listID, itemID, domain.UserID(strings.TrimSpace(fields["assignee"])), due); err != nil {
+		h.writeMutationError(w, r, http.StatusConflict, "The assignment was not saved", "The item changed elsewhere, or the person cannot open this list. Reload the list and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(listID)))
 }
 
 func (h Handler) toggleListItem(w http.ResponseWriter, r *http.Request) {

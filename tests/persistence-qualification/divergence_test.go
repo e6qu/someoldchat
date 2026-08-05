@@ -2927,3 +2927,97 @@ func notificationScheduleRoundTrips(t *testing.T, open opener) {
 		t.Fatal("a schedule that is off suppressed a notification")
 	}
 }
+
+// Assignment is state on the item and news in Activity, and the two profiles
+// resolve reachability differently — one joins the shared list predicate, the
+// other walks grants under a lock. The contract drives both, including the due
+// date surviving a round trip: a due date lost in storage turns work that is
+// wanted on a date into work nobody is waiting for.
+func listAssignmentReachesActivity(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	assignee := domain.UserID("U-assignee-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: assignee, WorkspaceID: f.workspaceID, Email: "assignee-" + f.suffix + "@example.com", Name: "assignee"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	list := domain.List{ID: domain.ListID("L-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID, Name: "Launch tasks", Schema: "[]", Version: 1, CreatedAt: now, UpdatedAt: now}
+	if err := f.repository.CreateList(ctx, list, f.event("list", "list.created", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: string(assignee), Access: "read"}, f.event("list-access", "list.access_changed", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	due := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	item := domain.ListItem{
+		ID: domain.ListItemID("Li-" + f.suffix), ListID: list.ID, WorkspaceID: f.workspaceID,
+		Fields: `[{"column_id":"title","value":"ship it"}]`, CreatedBy: f.userID, UpdatedBy: f.userID,
+		CreatedAt: now, UpdatedAt: now, Version: 1, AssigneeID: assignee, DueAt: due,
+	}
+	if err := f.repository.CreateListItem(ctx, item, f.event("list-item", "list.item.created", string(item.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := f.repository.GetListItem(ctx, f.workspaceID, list.ID, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AssigneeID != assignee || !stored.DueAt.Equal(due) {
+		t.Fatalf("stored item = %+v, want the assignee and the due date", stored)
+	}
+	// An item nobody has dated must come back with the zero time rather than an
+	// instant in 1754, which is what a nanosecond column defaulting to 0 gives
+	// if its zero is not handled.
+	undated := item
+	undated.ID = domain.ListItemID("Li-undated-" + f.suffix)
+	undated.AssigneeID = ""
+	undated.DueAt = time.Time{}
+	if err := f.repository.CreateListItem(ctx, undated, f.event("list-item-undated", "list.item.created", string(undated.ID))); err != nil {
+		t.Fatal(err)
+	}
+	blank, err := f.repository.GetListItem(ctx, f.workspaceID, list.ID, undated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blank.DueAt.IsZero() {
+		t.Fatalf("an undated item came back due at %s", blank.DueAt)
+	}
+
+	if err := f.repository.RecordListAssignment(ctx, stored, f.userID, now); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.repository.ListActivity(ctx, f.workspaceID, assignee, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ListItemID != item.ID {
+		t.Fatalf("assignee activity = %+v, want one assignment", page.Items)
+	}
+	if !page.Items[0].SourceAvailable || page.Items[0].ListName != "Launch tasks" || !page.Items[0].ListItem.DueAt.Equal(due) {
+		t.Fatalf("row = %+v, want it reachable, named and dated", page.Items[0])
+	}
+
+	// Recording the same assignment again replaces the row rather than stacking
+	// a second copy of the same news.
+	if err := f.repository.RecordListAssignment(ctx, stored, f.userID, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.repository.ListActivity(ctx, f.workspaceID, assignee, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil || len(again.Items) != 1 {
+		t.Fatalf("activity after re-recording = %+v err = %v, want still one", again.Items, err)
+	}
+
+	// A member with no grant on the list is told nothing and, were they told,
+	// would be told the source is unreachable.
+	blindPage, err := f.repository.ListActivity(ctx, f.workspaceID, f.userID, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, activity := range blindPage.Items {
+		if activity.ListItemID == item.ID {
+			t.Fatalf("the assigner was told about their own assignment: %+v", activity)
+		}
+	}
+}

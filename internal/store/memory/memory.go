@@ -463,6 +463,24 @@ func (s *Store) DeleteCanvas(_ context.Context, workspace domain.WorkspaceID, id
 	return nil
 }
 
+// RecordListAssignment mirrors the SQL profile: one item per assignment, keyed
+// so re-assigning the same item to the same member replaces the row rather than
+// stacking a second copy of the same news.
+func (s *Store) RecordListAssignment(_ context.Context, item domain.ListItem, actor domain.UserID, occurredAt time.Time) error {
+	if item.AssigneeID == "" || item.ID == "" {
+		return store.InvalidArgument("a list assignment requires an item and an assignee")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := domain.ActivityIDFor(item.AssigneeID, "list_assignment:"+string(item.ID))
+	s.activityItems[id] = domain.ActivityItem{
+		ID: id, WorkspaceID: item.WorkspaceID, UserID: item.AssigneeID,
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, ActorID: actor,
+		ListItemID: item.ID, ListID: item.ListID, OccurredAt: occurredAt.UTC(),
+	}
+	return nil
+}
+
 func (s *Store) SetCanvasAccess(_ context.Context, access domain.CanvasAccess, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -5603,6 +5621,26 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = true
 			}
 		}
+		if item.ListItemID != "" {
+			// Like the canvas share, the row outlives the access that made it
+			// reachable: it records that the work was assigned, and the reader
+			// is told they can no longer open it rather than being offered a
+			// link that would refuse them.
+			if stored, ok := s.listItems[item.ListID][item.ListItemID]; ok {
+				item.ListItem = stored.Summary()
+				if list, listOK := s.lists[item.ListID]; listOK && list.WorkspaceID == workspace {
+					item.ListName = list.Name
+					_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, user, func(visit func(string, string, string)) {
+						for _, grant := range s.listAccess {
+							if grant.ListID == list.ID {
+								visit(grant.EntityType, grant.EntityID, grant.Access)
+							}
+						}
+					})
+					item.SourceAvailable = allowed
+				}
+			}
+		}
 		if item.CanvasID != "" {
 			// A share stays in Activity after the grant is withdrawn, like every
 			// other item whose source became unreachable: the row records that
@@ -5620,7 +5658,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = allowed
 			}
 		}
-		if item.CanvasID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+		if item.CanvasID == "" && item.ListItemID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
 			if conversation, ok := s.conversations[item.Conversation]; ok && s.canViewActivitySourceLocked(workspace, user, conversation) {
 				item.SourceAvailable = true
 			}

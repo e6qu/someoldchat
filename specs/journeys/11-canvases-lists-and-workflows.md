@@ -154,6 +154,17 @@ for later steps and conditions to read.
 
 ## Evidence
 
+- A list item carries an assignee and a due date as columns of their own rather
+  than cells inside the free-form fields, because the product asks both
+  questions itself — who is this for, is it late — and a value buried in JSON
+  cannot answer them without every reader parsing it. The assignee is told in
+  Activity by the same machinery a canvas share uses, and only when it is news:
+  a due date moved on work someone already holds is not an assignment, and
+  nobody is told about their own. Assigning to a member who cannot open the list
+  is refused, so the picker offers only members who can — a control that always
+  fails is worse than no control. An archived item is never overdue.
+
+
 - The first-party HTTP journey creates a durable canvas, reloads it, atomically
   changes its title and body, creates a durable to-do list and item, completes
   and restores that item, and then reopens both directory views. It does not

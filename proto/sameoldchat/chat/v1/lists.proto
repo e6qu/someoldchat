@@ -29,6 +29,17 @@ message ListItem {
   string updated_at = 9;
   bool archived = 10;
   int64 version = 11;
+  string assignee_id = 12;
+  int64 due_at_unix_nano = 13;
+}
+
+message AssignListItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+  string assignee_id = 5;
+  int64 due_at_unix_nano = 6;
 }
 
 message ListItemPage {
@@ -180,6 +191,7 @@ service ListsService {
   rpc GetListItem(ListItemRequest) returns (ListItemResponse);
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
   rpc UpdateListItem(UpdateListItemRequest) returns (ListItemResponse);
+  rpc AssignListItem(AssignListItemRequest) returns (ListItem);
   rpc UpdateListCells(UpdateListItemRequest) returns (ListItemsResponse);
   rpc DeleteListItems(DeleteListItemsRequest) returns (ListOKResponse);
   rpc SetListAccess(ListAccessRequest) returns (ListOKResponse);

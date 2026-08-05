@@ -1343,7 +1343,14 @@ type ActivityItem struct {
 	// invitation to a channel and a share of a canvas are the same news — you
 	// have been given access to something — arriving from different objects,
 	// and Slack files both under invitations.
-	CanvasID     CanvasID
+	CanvasID CanvasID
+	// ListItemID is set when the item is work someone assigned to this member.
+	// It joins the conversation and the canvas as a third kind of "you have
+	// been given something". The growth is deliberate and bounded: each names a
+	// different object, and one column holding any of them would make every
+	// reader guess which it was holding.
+	ListItemID   ListItemID
+	ListID       ListID
 	MessageID    MessageID
 	ReminderID   LaterReminderID
 	ReactionName string
@@ -1354,7 +1361,14 @@ type ActivityItem struct {
 	Reminder     LaterReminder
 	// CanvasTitle is resolved when the item is read, like Message and Reminder,
 	// so a row can name what was shared without the reader following the link.
-	CanvasTitle     string
+	CanvasTitle string
+	// ListItem is what an Activity row needs to describe assigned work: enough
+	// to name it and say whether it is late, and no more. It is a type of its
+	// own rather than a whole ListItem so the conversion is complete rather
+	// than lossy — a row carrying a half-filled item would be a second,
+	// differently-shaped copy of the record that nothing else could trust.
+	ListItem        ListItemSummary
+	ListName        string
 	SourceAvailable bool
 }
 
@@ -2243,10 +2257,43 @@ type ListItem struct {
 	Fields       string
 	CreatedBy    UserID
 	UpdatedBy    UserID
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Archived     bool
-	Version      int64
+	// AssigneeID is who the item belongs to, and DueAt is when it is wanted.
+	// Both are columns of their own rather than cells inside Fields: the cells
+	// are free-form values a list's own schema names, and these two are asked
+	// about by the product itself — who is this for, and is it late — which a
+	// value buried in JSON cannot answer without every reader parsing it.
+	AssigneeID UserID
+	DueAt      time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	Archived   bool
+	Version    int64
+}
+
+// ListItemSummary is the part of an item an Activity row draws.
+type ListItemSummary struct {
+	ID       ListItemID
+	Fields   string
+	Archived bool
+	DueAt    time.Time
+}
+
+// Overdue reports whether this summary is late at the given instant, by the
+// same rule the item itself uses.
+func (i ListItemSummary) Overdue(now time.Time) bool {
+	return !i.Archived && !i.DueAt.IsZero() && i.DueAt.Before(now)
+}
+
+// Summary reduces an item to what a row needs.
+func (i ListItem) Summary() ListItemSummary {
+	return ListItemSummary{ID: i.ID, Fields: i.Fields, Archived: i.Archived, DueAt: i.DueAt}
+}
+
+// Overdue reports whether this item is late at the given instant. An archived
+// item is never overdue: it has been dealt with, and telling someone that
+// finished work is late is noise dressed as urgency.
+func (i ListItem) Overdue(now time.Time) bool {
+	return !i.Archived && !i.DueAt.IsZero() && i.DueAt.Before(now)
 }
 
 type ListItemPage struct {

@@ -1149,6 +1149,26 @@ func (r Remote) UpdateListItem(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoListItem(out.GetItem())
 }
 
+// ListAccessFor asks the server whether a member may open a list. It reuses the
+// read RPC rather than adding one: "can they open it" is exactly "does GetList
+// succeed for them", and a second question could answer differently from the
+// one the write enforces.
+func (r Remote) ListAccessFor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID) error {
+	_, err := r.lists.GetList(ctx, &chatv1.ListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID)})
+	return err
+}
+
+func (r Remote) AssignListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, assignee domain.UserID, dueAt time.Time) (domain.ListItem, error) {
+	out, err := r.lists.AssignListItem(ctx, &chatv1.AssignListItemRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID),
+		AssigneeId: string(assignee), DueAtUnixNano: unixNanoOrZero(dueAt),
+	})
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	return decodeProtoListItem(out)
+}
+
 func (r Remote) UpdateListCells(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, cells string) ([]domain.ListItem, error) {
 	out, err := r.lists.UpdateListCells(ctx, &chatv1.UpdateListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), Fields: cells})
 	if err != nil {
@@ -6638,6 +6658,14 @@ func (s *Server) UpdateListItem(ctx context.Context, input *chatv1.UpdateListIte
 	return &chatv1.ListItemResponse{Ok: true, Item: encodeProtoListItem(value)}, nil
 }
 
+func (s *Server) AssignListItem(ctx context.Context, input *chatv1.AssignListItemRequest) (*chatv1.ListItem, error) {
+	value, err := s.implementation.AssignListItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()), domain.UserID(input.GetAssigneeId()), optionalTimeFromUnixNano(input.GetDueAtUnixNano()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoListItem(value), nil
+}
+
 func (s *Server) UpdateListCells(ctx context.Context, input *chatv1.UpdateListItemRequest) (*chatv1.ListItemsResponse, error) {
 	values, err := s.implementation.UpdateListCells(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetFields())
 	if err != nil {
@@ -8959,7 +8987,7 @@ func decodeProtoListPage(value *chatv1.ListPage) (domain.ListPage, error) {
 }
 
 func encodeProtoListItem(value domain.ListItem) *chatv1.ListItem {
-	return &chatv1.ListItem{Id: string(value.ID), ListId: string(value.ListID), ParentItemId: string(value.ParentItemID), WorkspaceId: string(value.WorkspaceID), Fields: value.Fields, CreatedBy: string(value.CreatedBy), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Archived: value.Archived, Version: value.Version}
+	return &chatv1.ListItem{Id: string(value.ID), ListId: string(value.ListID), ParentItemId: string(value.ParentItemID), WorkspaceId: string(value.WorkspaceID), Fields: value.Fields, CreatedBy: string(value.CreatedBy), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Archived: value.Archived, Version: value.Version, AssigneeId: string(value.AssigneeID), DueAtUnixNano: unixNanoOrZero(value.DueAt)}
 }
 
 func decodeProtoListItem(value *chatv1.ListItem) (domain.ListItem, error) {
@@ -8974,7 +9002,31 @@ func decodeProtoListItem(value *chatv1.ListItem) (domain.ListItem, error) {
 	if err != nil {
 		return domain.ListItem{}, err
 	}
-	return domain.ListItem{ID: domain.ListItemID(value.GetId()), ListID: domain.ListID(value.GetListId()), ParentItemID: domain.ListItemID(value.GetParentItemId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Fields: value.GetFields(), CreatedBy: domain.UserID(value.GetCreatedBy()), UpdatedBy: domain.UserID(value.GetUpdatedBy()), CreatedAt: createdAt, UpdatedAt: updatedAt, Archived: value.GetArchived(), Version: value.GetVersion()}, nil
+	return domain.ListItem{ID: domain.ListItemID(value.GetId()), ListID: domain.ListID(value.GetListId()), ParentItemID: domain.ListItemID(value.GetParentItemId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Fields: value.GetFields(), CreatedBy: domain.UserID(value.GetCreatedBy()), UpdatedBy: domain.UserID(value.GetUpdatedBy()), CreatedAt: createdAt, UpdatedAt: updatedAt, Archived: value.GetArchived(), Version: value.GetVersion(), AssigneeID: domain.UserID(value.GetAssigneeId()), DueAt: optionalTimeFromUnixNano(value.GetDueAtUnixNano())}, nil
+}
+
+// encodeProtoListItemSummary carries only what an Activity row draws. Sending
+// the whole item would mean a second, differently-shaped copy of the list item
+// on the wire, and a row that showed fields the reader may not have access to
+// through the list itself.
+func encodeProtoListItemSummary(value domain.ListItemSummary) *chatv1.ListItemSummary {
+	if value.ID == "" {
+		return nil
+	}
+	return &chatv1.ListItemSummary{
+		Id: string(value.ID), Fields: value.Fields, Archived: value.Archived,
+		DueAtUnixNano: unixNanoOrZero(value.DueAt),
+	}
+}
+
+func decodeProtoListItemSummary(value *chatv1.ListItemSummary) domain.ListItemSummary {
+	if value == nil {
+		return domain.ListItemSummary{}
+	}
+	return domain.ListItemSummary{
+		ID: domain.ListItemID(value.GetId()), Fields: value.GetFields(), Archived: value.GetArchived(),
+		DueAt: optionalTimeFromUnixNano(value.GetDueAtUnixNano()),
+	}
 }
 
 func encodeProtoListItemPage(value domain.ListItemPage) *chatv1.ListItemPage {
@@ -9765,6 +9817,8 @@ func encodeProtoActivityItem(value domain.ActivityItem) *chatv1.ActivityItem {
 		ReactionName: value.ReactionName, OccurredAt: value.OccurredAt.UTC().UnixNano(),
 		SourceAvailable: value.SourceAvailable,
 		CanvasId:        string(value.CanvasID), CanvasTitle: value.CanvasTitle,
+		ListItemId: string(value.ListItemID), ListId: string(value.ListID), ListName: value.ListName,
+		ListItem: encodeProtoListItemSummary(value.ListItem),
 	}
 	if !value.ReadAt.IsZero() {
 		result.ReadAt = value.ReadAt.UTC().UnixNano()
@@ -9792,6 +9846,8 @@ func decodeProtoActivityItem(value *chatv1.ActivityItem) (domain.ActivityItem, e
 		ReminderID: domain.LaterReminderID(value.GetReminderId()), ReactionName: value.GetReactionName(),
 		OccurredAt: time.Unix(0, value.GetOccurredAt()).UTC(), SourceAvailable: value.GetSourceAvailable(),
 		CanvasID: domain.CanvasID(value.GetCanvasId()), CanvasTitle: value.GetCanvasTitle(),
+		ListItemID: domain.ListItemID(value.GetListItemId()), ListID: domain.ListID(value.GetListId()), ListName: value.GetListName(),
+		ListItem: decodeProtoListItemSummary(value.GetListItem()),
 	}
 	for _, encoded := range value.GetKinds() {
 		kind := domain.ActivityKind(encoded)

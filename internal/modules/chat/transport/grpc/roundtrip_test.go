@@ -348,6 +348,10 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
 		},
+		"ListItemSummary": {
+			sample:  &domain.ListItemSummary{},
+			through: throughInfallible(encodeProtoListItemSummary, decodeProtoListItemSummary),
+		},
 		"NotificationSchedule": {
 			sample: &domain.NotificationSchedule{},
 			prepare: func(filled any) {

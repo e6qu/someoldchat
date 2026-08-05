@@ -331,6 +331,63 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 	return value, nil
 }
 
+// ListAccessFor reports whether a member may open a list, which is the question
+// an assignment picker has to answer before offering someone. It is the same
+// check AssignListItem enforces, so the control cannot offer a choice the write
+// would refuse.
+func (m Messages) ListAccessFor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID) error {
+	return m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessRead)
+}
+
+// AssignListItem records who an item is for and when it is wanted, and tells
+// them. An assignment nobody is told about is the same defect as a canvas
+// shared in silence: the work exists and the person it belongs to has no way to
+// find out.
+//
+// The assignee must be able to open the list. Assigning work to someone who
+// cannot see where it lives produces an item they are told about and cannot
+// reach, which is worse than not being assigned it — so the check is the list's
+// own read access rather than mere workspace membership.
+//
+// Clearing is accepted: an empty assignee and a zero due date are how a
+// mistaken assignment is undone.
+func (m Messages) AssignListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, assignee domain.UserID, dueAt time.Time) (domain.ListItem, error) {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
+		return domain.ListItem{}, err
+	}
+	if assignee != "" {
+		if err := m.requireListAccess(ctx, workspaceID, assignee, listID, documentAccessRead); err != nil {
+			return domain.ListItem{}, ErrInvalidList
+		}
+	}
+	value, err := m.Store.GetListItem(ctx, workspaceID, listID, itemID)
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	previous := value.AssigneeID
+	value.AssigneeID = assignee
+	value.DueAt = dueAt.UTC()
+	value.UpdatedBy = userID
+	value.Version++
+	value.UpdatedAt = time.Now().UTC()
+	event, err := listEvent(workspaceID, userID, "list.item.assigned", events.String("list_item_id", string(itemID)), events.String("list_id", string(listID)), events.String("assignee_id", string(assignee)))
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	if err := m.Store.UpdateListItem(ctx, value, event); err != nil {
+		return domain.ListItem{}, err
+	}
+	// Only a change of hands is news, and only to the person receiving them.
+	// Re-saving a due date on an item someone already holds is not an
+	// assignment, and assigning something to yourself is not being told.
+	if assignee != "" && assignee != previous && assignee != userID {
+		if err := m.Store.RecordListAssignment(ctx, value, userID, event.CreatedAt); err != nil {
+			return domain.ListItem{}, err
+		}
+	}
+	return value, nil
+}
+
 func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, cells string) ([]domain.ListItem, error) {
 	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return nil, err

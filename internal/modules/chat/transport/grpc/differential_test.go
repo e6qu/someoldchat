@@ -69,6 +69,17 @@ type chatCaller struct {
 	Tokens auth.TokenStore
 }
 
+// assignExpectingFailure reduces a refusal to a string both compositions can
+// agree on. The error values differ by transport — one is a sentinel, the other
+// its mapped status — so comparing them directly would report a difference that
+// is not one.
+func (c chatCaller) assignExpectingFailure(ctx context.Context, listID domain.ListID, itemID domain.ListItemID) string {
+	if _, err := c.AssignListItem(ctx, "T1", "U1", listID, itemID, "U3", time.Time{}); err != nil {
+		return "refused"
+	}
+	return "accepted"
+}
+
 // chatWorld is one composition of the chat module.
 type chatWorld struct {
 	name    string
@@ -144,6 +155,26 @@ func requireSeed(t *testing.T, err error) {
 // seedFileParity puts an image row in place without blob storage. The parity
 // fixture has none, and a description is state on the row rather than anything
 // to do with the bytes.
+// seedListAssignmentParity gives a list its owner can write, a member who can
+// read it, and a member who cannot.
+func seedListAssignmentParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	ctx := context.Background()
+	requireSeed(t, target.CreateList(ctx, domain.List{
+		ID: "Lx-assign", WorkspaceID: "T1", OwnerID: "U1", Name: "Launch tasks",
+		Schema: "[]", Version: 1, CreatedAt: now, UpdatedAt: now,
+	}, events.Event{ID: "ELx", WorkspaceID: "T1", Topic: "list.created", CreatedAt: now}))
+	requireSeed(t, target.SetListAccess(ctx, domain.ListAccess{
+		ListID: "Lx-assign", EntityType: "user", EntityID: "U2", Access: "read",
+	}, events.Event{ID: "ELa", WorkspaceID: "T1", Topic: "list.access_changed", CreatedAt: now}))
+	requireSeed(t, target.CreateListItem(ctx, domain.ListItem{
+		ID: "Li-assign", ListID: "Lx-assign", WorkspaceID: "T1", Fields: `[{"column_id":"title","value":"ship it"}]`,
+		CreatedBy: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now, Version: 1,
+	}, events.Event{ID: "ELi", WorkspaceID: "T1", Topic: "list.item.created", CreatedAt: now}))
+}
+
 func seedFileParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
@@ -1769,6 +1800,49 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{value.Title, value.Status, value.PromptsTitle, len(value.Prompts), after.Title, after.Status, len(after.Prompts)}, nil
+			},
+		},
+		{
+			// Assignment is where a list stops being a document and becomes
+			// work, so the compositions have to agree on who may receive it and
+			// on the news reaching them. U2 can read the list; U3 cannot, and
+			// assigning to someone who cannot open where the work lives would
+			// produce an item they are told about and cannot reach.
+			name: "a list item is assigned, told, and refused to someone who cannot see the list",
+			seed: seedListAssignmentParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				const listID = domain.ListID("Lx-assign")
+				const itemID = domain.ListItemID("Li-assign")
+				due := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+				assigned, err := chat.AssignListItem(ctx, "T1", "U1", listID, itemID, "U2", due)
+				if err != nil {
+					return nil, err
+				}
+				told, err := chat.Activity(ctx, "T1", "U2", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+				if err != nil {
+					return nil, err
+				}
+				strangerErr := chat.assignExpectingFailure(ctx, listID, itemID)
+				// The picker asks the same question the write enforces, so the
+				// two compositions must agree about who may be offered.
+				readerAccess := chat.ListAccessFor(ctx, "T1", "U2", listID) == nil
+				strangerAccess := chat.ListAccessFor(ctx, "T1", "U3", listID) == nil
+				// Clearing is how a mistaken assignment is undone, and it must
+				// not manufacture a second piece of news.
+				cleared, err := chat.AssignListItem(ctx, "T1", "U1", listID, itemID, "", time.Time{})
+				if err != nil {
+					return nil, err
+				}
+				after, err := chat.Activity(ctx, "T1", "U2", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					string(assigned.AssigneeID), assigned.DueAt.UTC().Format(time.RFC3339), len(told.Items),
+					told.Items[0].ListItemID, told.Items[0].SourceAvailable, told.Items[0].ListName,
+					strangerErr, string(cleared.AssigneeID), cleared.DueAt.IsZero(), len(after.Items),
+					readerAccess, strangerAccess,
+				}, nil
 			},
 		},
 		{

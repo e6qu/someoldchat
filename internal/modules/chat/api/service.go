@@ -424,6 +424,8 @@ type Service interface {
 	GetListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID) (domain.ListItem, error)
 	ListItems(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.PageRequest, bool) (domain.ListItemPage, error)
 	UpdateListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string, bool) (domain.ListItem, error)
+	AssignListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, domain.UserID, time.Time) (domain.ListItem, error)
+	ListAccessFor(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) error
 	UpdateListCells(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string) ([]domain.ListItem, error)
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, []domain.ListItemID) error
 	SetListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string, []domain.ConversationID, []domain.UserID) error
