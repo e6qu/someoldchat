@@ -9036,7 +9036,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 	if err := store.CheckPage(search.Page); err != nil {
 		return domain.MessagePage{}, err
 	}
-	if len(search.Terms) == 0 && search.Conversation == "" && search.Author == "" && search.WithUser == "" && search.After.IsZero() && search.Before.IsZero() && !search.ThreadOnly && !search.HasFiles && !search.HasPins && !search.HasReactions && search.SavedBy == "" {
+	if len(search.Terms) == 0 && search.Conversation == "" && search.Author == "" && search.WithUser == "" && search.After.IsZero() && search.Before.IsZero() && !search.ThreadOnly && !search.HasFiles && !search.HasPins && !search.HasReactions && !search.HasLink && search.SavedBy == "" {
 		return domain.MessagePage{}, store.InvalidArgument("search query must not be empty")
 	}
 	startTime, startID, err := domain.DecodeMessageCursor(search.Page.Cursor)
@@ -9078,7 +9078,8 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 				(search.ThreadOnly && message.ThreadTimestamp == "") ||
 				(search.HasFiles && len(message.Files) == 0) ||
 				(search.HasPins && len(s.pins[message.ID]) == 0) ||
-				(search.HasReactions && len(s.reactions[message.ID]) == 0) ||
+				(search.HasReactions && !s.messageCarriesReaction(message.ID, search.ReactionName)) ||
+				(search.HasLink && !domain.TextCarriesLink(message.Text)) ||
 				(search.SavedBy != "" && !s.messageSavedBy(message.ID, search.SavedBy)) {
 				continue
 			}
@@ -9122,6 +9123,26 @@ func searchTextMatches(text string, terms, excluded []string) bool {
 		}
 	}
 	return true
+}
+
+// messageCarriesReaction answers both shapes of the question with one rule: an
+// empty name asks whether the message carries any reaction, a named one asks
+// whether it carries that reaction. Two predicates would be two chances to
+// answer "some reaction" where "this reaction" was asked.
+func (s *Store) messageCarriesReaction(id domain.MessageID, name string) bool {
+	reactions := s.reactions[id]
+	if name == "" {
+		return len(reactions) > 0
+	}
+	// The map is keyed by name and reactor, because one emoji from two people
+	// is two reactions. The question here is about the emoji, so the values are
+	// what to look at rather than the keys.
+	for _, reaction := range reactions {
+		if reaction.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) messageSavedBy(message domain.MessageID, user domain.UserID) bool {
