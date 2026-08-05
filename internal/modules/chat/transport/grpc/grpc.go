@@ -1624,6 +1624,22 @@ func (r Remote) AdminSetConversationTeams(ctx context.Context, workspaceID domai
 	return nil
 }
 
+func (r Remote) SearchPeople(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.UserPage, error) {
+	out, err := r.directory.SearchPeople(ctx, &chatv1.SearchPeopleRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: query, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.UserPage{}, err
+	}
+	return decodeProtoUserPage(out)
+}
+
+func (r Remote) SearchChannels(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
+	out, err := r.directory.SearchChannels(ctx, &chatv1.SearchConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: query, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.ConversationPage{}, err
+	}
+	return decodeProtoConversationPage(out)
+}
+
 func (r Remote) AdminSearchConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
 	out, err := r.directory.SearchConversations(ctx, &chatv1.SearchConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: query, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
 	if err != nil {
@@ -4969,6 +4985,22 @@ func (s *Server) RenameEmoji(ctx context.Context, input *chatv1.EmojiMutationReq
 func (s *Server) SearchConversations(ctx context.Context, input *chatv1.SearchConversationsRequest) (*chatv1.ConversationPage, error) {
 	request := protoPageRequest(input.GetLimit(), input.GetCursor())
 	value, err := s.implementation.AdminSearchConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversationPage(value), nil
+}
+
+func (s *Server) SearchPeople(ctx context.Context, input *chatv1.SearchPeopleRequest) (*chatv1.UserPage, error) {
+	value, err := s.implementation.SearchPeople(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoUserPage(value), nil
+}
+
+func (s *Server) SearchChannels(ctx context.Context, input *chatv1.SearchConversationsRequest) (*chatv1.ConversationPage, error) {
+	value, err := s.implementation.SearchChannels(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), protoPageRequest(input.GetLimit(), input.GetCursor()))
 	if err != nil {
 		return nil, mapError(err)
 	}

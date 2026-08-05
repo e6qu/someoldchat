@@ -3260,6 +3260,36 @@ func (m Messages) Users(ctx context.Context, workspaceID domain.WorkspaceID, use
 	return m.Store.ListUsers(ctx, workspaceID, request)
 }
 
+// SearchPeople answers the People search tab. The client used to load every
+// member of the workspace and filter them in the browser, which is correct on a
+// small workspace and unbounded work per request on any other; this asks the
+// store the question instead, and returns a page rather than everything.
+func (m Messages) SearchPeople(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.UserPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.UserPage{}, err
+	}
+	if strings.TrimSpace(query) == "" {
+		return domain.UserPage{}, ErrInvalidSearch
+	}
+	return m.Store.SearchUsers(ctx, workspaceID, query, request)
+}
+
+// SearchChannels answers the Channels search tab. It is the member conversation
+// listing with a query, so the visibility rule is the one the sidebar uses and a
+// search cannot surface a private channel the reader is not in.
+func (m Messages) SearchChannels(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ConversationPage{}, err
+	}
+	if strings.TrimSpace(query) == "" {
+		return domain.ConversationPage{}, ErrInvalidSearch
+	}
+	return m.Store.ListConversations(ctx, workspaceID, userID, domain.ConversationListRequest{
+		Limit: request.Limit, Cursor: request.Cursor, Query: query,
+		Types: []domain.ConversationType{domain.ConversationTypePublic, domain.ConversationTypePrivate},
+	})
+}
+
 func (m Messages) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, request domain.PageRequest) (domain.AdminUserPage, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.AdminUserPage{}, err

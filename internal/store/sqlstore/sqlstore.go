@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, domain TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  email TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, real_name TEXT NOT NULL DEFAULT '', display_name TEXT NOT NULL DEFAULT '',
+ name_folded TEXT NOT NULL DEFAULT '', real_name_folded TEXT NOT NULL DEFAULT '', display_name_folded TEXT NOT NULL DEFAULT '',
  status_text TEXT NOT NULL DEFAULT '', status_emoji TEXT NOT NULL DEFAULT '', status_expiration INTEGER NOT NULL DEFAULT 0, active_scheduled_status_id TEXT NOT NULL DEFAULT '',
  image_24 TEXT NOT NULL DEFAULT '', image_32 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '',
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
@@ -550,7 +551,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 139
+const schemaVersion = 140
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1267,7 +1268,7 @@ func (s *Store) seedUser(ctx context.Context, value domain.User, initialRole dom
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, value.Profile.StatusText, value.Profile.StatusEmoji, unixSeconds(value.Profile.StatusExpiration), value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, name_folded, real_name_folded, display_name_folded, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, domain.FoldSearchText(value.Name), domain.FoldSearchText(value.RealName), domain.FoldSearchText(value.Profile.DisplayName), value.Profile.StatusText, value.Profile.StatusEmoji, unixSeconds(value.Profile.StatusExpiration), value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, ?, 1) ON CONFLICT(workspace_id, user_id) DO NOTHING`, value.WorkspaceID, value.ID, initialRole); err != nil {
@@ -3145,6 +3146,30 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 140 {
+		// Directory search matches a folded name. The fold is done in Go and
+		// stored, not computed with SQL LOWER(), because LOWER() is ASCII-only
+		// on SQLite and locale-aware on PostgreSQL — one query would return two
+		// different result sets, which is the divergence this schema keeps
+		// folded columns to avoid. One column per field so every write updates
+		// exactly what it sets: the profile mutation knows the display name and
+		// nothing else.
+		columns, err := s.tableColumns(ctx, db, "users")
+		if err != nil {
+			return err
+		}
+		for column, source := range map[string]string{"name_folded": "name", "real_name_folded": "real_name", "display_name_folded": "display_name"} {
+			if columns[column] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN `+column+` TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate user %s: %w", column, err)
+			}
+			if err := backfillFoldedColumn(ctx, db, "users", column, source); err != nil {
+				return fmt.Errorf("backfill user %s: %w", column, err)
+			}
+		}
+	}
 	if version < 139 {
 		// A canvas is findable by its prose. The folded text is stored rather
 		// than computed per query because the alternative is decoding every
@@ -3934,7 +3959,7 @@ func createUserTx(ctx context.Context, tx *sql.Tx, user domain.User, membership 
 	if user.Presence == "" {
 		user.Presence = domain.PresenceAuto
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name, real_name, presence) VALUES (?, ?, ?, ?, ?, ?)`, user.ID, user.WorkspaceID, user.Email, user.Name, user.RealName, user.Presence); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name, real_name, name_folded, real_name_folded, presence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, user.ID, user.WorkspaceID, user.Email, user.Name, user.RealName, domain.FoldSearchText(user.Name), domain.FoldSearchText(user.RealName), user.Presence); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, active, restricted, ultra_restricted) VALUES (?, ?, ?, 1, ?, ?)`, membership.WorkspaceID, membership.UserID, membership.Role, boolInt(membership.Restricted), boolInt(membership.UltraRestricted)); err != nil {
@@ -4016,7 +4041,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, active_scheduled_status_id = CASE WHEN status_text = ? AND status_emoji = ? AND status_expiration = ? THEN active_scheduled_status_id ELSE '' END, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, userID, workspaceID, workspaceID, userID)
+	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, display_name_folded = ?, active_scheduled_status_id = CASE WHEN status_text = ? AND status_emoji = ? AND status_expiration = ? THEN active_scheduled_status_id ELSE '' END, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, domain.FoldSearchText(profile.DisplayName), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, userID, workspaceID, workspaceID, userID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -4601,6 +4626,18 @@ func fromUnixSeconds(value int64) time.Time {
 }
 
 func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.UserPage, error) {
+	return s.listUsers(ctx, workspace, "", request)
+}
+
+// SearchUsers is the directory listing narrowed by a folded name. It is the same
+// query rather than a second one: the directory has no per-reader visibility
+// rule to duplicate, and sharing the scan keeps the page shape, the cursor and
+// the deleted-member handling identical between browsing and searching.
+func (s *Store) SearchUsers(ctx context.Context, workspace domain.WorkspaceID, query string, request domain.PageRequest) (domain.UserPage, error) {
+	return s.listUsers(ctx, workspace, query, request)
+}
+
+func (s *Store) listUsers(ctx context.Context, workspace domain.WorkspaceID, search string, request domain.PageRequest) (domain.UserPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.UserPage{}, err
 	}
@@ -4610,6 +4647,11 @@ func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, req
 	}
 	query := `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at FROM users WHERE workspace_id = ?`
 	args := []any{workspace}
+	if folded := domain.FoldSearchText(strings.TrimSpace(search)); folded != "" {
+		query += ` AND (name_folded LIKE ? ESCAPE '\' OR real_name_folded LIKE ? ESCAPE '\' OR display_name_folded LIKE ? ESCAPE '\')`
+		pattern := "%" + escapeLikeTerm(folded) + "%"
+		args = append(args, pattern, pattern, pattern)
+	}
 	if after != "" {
 		query += ` AND id > ?`
 		args = append(args, after)
@@ -10922,6 +10964,15 @@ func (s *Store) ListConversations(ctx context.Context, workspace domain.Workspac
 		query += ` AND ((c.is_direct = 0 AND c.is_group_direct = 0) OR NOT EXISTS (SELECT 1 FROM closed_direct_conversations closed WHERE closed.workspace_id = c.workspace_id AND closed.user_id = ? AND closed.conversation_id = c.id))`
 		args = append(args, user)
 	}
+	if folded := domain.FoldSearchText(strings.TrimSpace(request.Query)); folded != "" {
+		// escapeLikeTerm plus an explicit ESCAPE clause, for the reason the
+		// administrative search records: without them "%" matched every
+		// conversation, "_" matched any character, and a backslash was literal
+		// on SQLite but the default escape on PostgreSQL.
+		query += ` AND (c.name_folded LIKE ? ESCAPE '\' OR c.topic_folded LIKE ? ESCAPE '\' OR c.purpose_folded LIKE ? ESCAPE '\')`
+		pattern := "%" + escapeLikeTerm(folded) + "%"
+		args = append(args, pattern, pattern, pattern)
+	}
 	if request.ExcludeArchived {
 		query += ` AND c.archived = 0`
 	}
@@ -12767,6 +12818,35 @@ func (s *Store) SearchCanvases(ctx context.Context, workspace domain.WorkspaceID
 // silently cannot be found.
 func canvasSearchFolded(canvas domain.Canvas) string {
 	return domain.FoldSearchText(domain.CanvasSearchText(canvas.Title, canvas.DocumentContent))
+}
+
+// backfillFoldedColumn folds an existing text column into its companion. The
+// fold runs in Go for the same reason the column exists at all: SQL LOWER()
+// does not mean the same thing on both engines.
+func backfillFoldedColumn(ctx context.Context, db queryExecutor, table, folded, source string) error {
+	rows, err := db.QueryContext(ctx, `SELECT id, `+source+` FROM `+table)
+	if err != nil {
+		return err
+	}
+	type row struct{ id, value string }
+	updates := make([]row, 0, 64)
+	for rows.Next() {
+		var id, value string
+		if err := rows.Scan(&id, &value); err != nil {
+			rows.Close()
+			return err
+		}
+		updates = append(updates, row{id: id, value: domain.FoldSearchText(value)})
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if _, err := db.ExecContext(ctx, `UPDATE `+table+` SET `+folded+` = ? WHERE id = ?`, update.value, update.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func backfillCanvasSearchText(ctx context.Context, db queryExecutor) error {

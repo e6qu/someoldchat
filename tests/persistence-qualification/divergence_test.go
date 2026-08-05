@@ -2654,3 +2654,75 @@ func canvasSearchFoldsTextAndStopsAtAccess(t *testing.T, open opener) {
 		t.Fatalf("search and directory disagree for a stranger: %d listed, %d found", len(listed.Canvases), len(blind.Canvases))
 	}
 }
+
+// Directory search folds in Go and stores the result, because SQL LOWER() is
+// ASCII-only on SQLite and locale-aware on PostgreSQL — one query would return
+// two different result sets, which is precisely the divergence this suite
+// exists to catch. The contract drives both profiles through a fold that only a
+// stored column can make identical, and through the channel visibility rule.
+func directorySearchFoldsNamesOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	member := domain.UserID("U-hopper-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{
+		ID: member, WorkspaceID: f.workspaceID, Email: "hopper-" + f.suffix + "@example.com",
+		Name: "GRACE", RealName: "Grace Hopper",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	private := domain.ConversationID("C-private-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: f.workspaceID, Name: "divergence-leadership", IsPrivate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SeedConversationMember(ctx, private, member); err != nil {
+		t.Fatal(err)
+	}
+
+	page := domain.PageRequest{Limit: 20}
+	// The stored name is upper case and the query is lower: only a fold applied
+	// on both sides matches, and only a fold done in Go matches identically on
+	// both engines.
+	for name, query := range map[string]string{
+		"handle folded both ways": "grace",
+		"real name":               "HOPPER",
+	} {
+		found, err := f.repository.SearchUsers(ctx, f.workspaceID, query, page)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		matched := false
+		for _, user := range found.Users {
+			if user.ID == member {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Fatalf("%s found %+v, want the seeded member", name, found.Users)
+		}
+	}
+	absent, err := f.repository.SearchUsers(ctx, f.workspaceID, "nobody-by-that-name-"+f.suffix, page)
+	if err != nil || len(absent.Users) != 0 {
+		t.Fatalf("absent member search = %+v err = %v, want nothing", absent.Users, err)
+	}
+
+	// Channel search is the member listing with a query, so the visibility rule
+	// is the listing's. The private channel matches the term for its member and
+	// must not match for anyone else.
+	query := domain.ConversationListRequest{Limit: 20, Query: "divergence-leadership"}
+	forMember, err := f.repository.ListConversations(ctx, f.workspaceID, member, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forMember.Conversations) != 1 || forMember.Conversations[0].ID != private {
+		t.Fatalf("the private channel's member found %+v, want it", forMember.Conversations)
+	}
+	forStranger, err := f.repository.ListConversations(ctx, f.workspaceID, f.userID, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forStranger.Conversations) != 0 {
+		t.Fatalf("a non-member found the private channel: %+v", forStranger.Conversations)
+	}
+}

@@ -178,6 +178,14 @@ message SearchConversationsRequest {
   string cursor = 5;
 }
 
+message SearchPeopleRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
 message SetWorkspaceNameRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -416,6 +424,8 @@ service DirectoryService {
   rpc RemoveEmoji(EmojiMutationRequest) returns (MutationResponse);
   rpc RenameEmoji(EmojiMutationRequest) returns (MutationResponse);
   rpc SearchConversations(SearchConversationsRequest) returns (ConversationPage);
+  rpc SearchPeople(SearchPeopleRequest) returns (UserPage);
+  rpc SearchChannels(SearchConversationsRequest) returns (ConversationPage);
   rpc SetWorkspaceName(SetWorkspaceNameRequest) returns (Workspace);
   rpc AdminCreateWorkspace(AdminCreateWorkspaceRequest) returns (Workspace);
   rpc RequestAppPermissions(AppPermissionRequest) returns (MutationResponse);

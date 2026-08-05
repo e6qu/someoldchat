@@ -1576,7 +1576,18 @@ func messageBefore(left, right domain.Message) bool {
 	return left.CreatedAt.Before(right.CreatedAt)
 }
 
-func (s *Store) ListUsers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.UserPage, error) {
+func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.UserPage, error) {
+	return s.listUsers(ctx, workspace, "", request)
+}
+
+// SearchUsers mirrors the SQL profile: the directory listing narrowed by a
+// folded name, sharing the scan so browsing and searching cannot disagree about
+// the page shape or the cursor.
+func (s *Store) SearchUsers(ctx context.Context, workspace domain.WorkspaceID, query string, request domain.PageRequest) (domain.UserPage, error) {
+	return s.listUsers(ctx, workspace, query, request)
+}
+
+func (s *Store) listUsers(_ context.Context, workspace domain.WorkspaceID, search string, request domain.PageRequest) (domain.UserPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.UserPage{}, err
 	}
@@ -1584,12 +1595,17 @@ func (s *Store) ListUsers(_ context.Context, workspace domain.WorkspaceID, reque
 	if err != nil {
 		return domain.UserPage{}, err
 	}
+	folded := domain.FoldSearchText(strings.TrimSpace(search))
 	s.mu.RLock()
 	values := make([]domain.User, 0, request.Limit+1)
 	for _, user := range s.users {
-		if user.WorkspaceID == workspace && (after == "" || string(user.ID) > after) {
-			values = appendSorted(values, user, request.Limit+1, func(left, right domain.User) bool { return left.ID < right.ID })
+		if user.WorkspaceID != workspace || (after != "" && string(user.ID) <= after) {
+			continue
 		}
+		if folded != "" && !strings.Contains(domain.FoldSearchText(user.Name+"\n"+user.RealName+"\n"+user.Profile.DisplayName), folded) {
+			continue
+		}
+		values = appendSorted(values, user, request.Limit+1, func(left, right domain.User) bool { return left.ID < right.ID })
 	}
 	s.mu.RUnlock()
 	hasMore := len(values) > request.Limit
@@ -5662,6 +5678,12 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 		}
 		if request.ExcludeArchived && conversation.Archived {
 			continue
+		}
+		if folded := domain.FoldSearchText(strings.TrimSpace(request.Query)); folded != "" {
+			haystack := domain.FoldSearchText(conversation.Name + "\n" + conversation.Topic + "\n" + conversation.Purpose)
+			if !strings.Contains(haystack, folded) {
+				continue
+			}
 		}
 		if len(request.Types) > 0 {
 			matches := false

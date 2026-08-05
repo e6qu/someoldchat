@@ -6837,8 +6837,10 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		data.Tabs = append(data.Tabs, searchTabView{Label: tab.label, URL: "/app/search?" + values.Encode(), Current: resultType == tab.value})
 	}
 	effectiveQuery := searchQueryWithFilters(query, data)
-	textTokens, tokenErr := domain.SearchQueryTokens(query)
-	if tokenErr != nil {
+	// The tokens themselves are no longer used — every tab asks the store now —
+	// but an unterminated phrase is still a bad query, and refusing it here
+	// keeps that answer the same on every tab.
+	if _, tokenErr := domain.SearchQueryTokens(query); tokenErr != nil {
 		h.writeSearchError(w, data, service.ErrInvalidSearch)
 		return
 	}
@@ -6899,12 +6901,25 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			data.MoreURL = "/app/search?" + values.Encode()
 		}
 	case "people":
-		for _, member := range data.MemberOptions {
-			if searchTextContainsTerms(member.Name+" "+member.RealName, textTokens) {
-				data.People = append(data.People, member)
+		page, searchErr := h.Messages.SearchPeople(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{
+			Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor"))),
+		})
+		if searchErr != nil {
+			h.writeSearchError(w, data, searchErr)
+			return
+		}
+		for _, member := range page.Users {
+			if member.Deleted {
+				continue
 			}
+			name := displayName(member)
+			data.People = append(data.People, memberView{
+				ID: string(member.ID), Name: name, RealName: member.RealName,
+				AuthorInitial: initial(name), IsSelf: member.ID == principal.UserID,
+			})
 		}
 		data.ResultCount = len(data.People)
+		data.MoreURL = searchPageURL(r, page.HasMore, string(page.NextCursor))
 	case "canvases":
 		results, searchErr := h.Messages.SearchCanvases(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasSearchRequest{
 			Query: effectiveQuery, Sort: sortOrder, Direction: direction,
@@ -6932,12 +6947,18 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			data.MoreURL = "/app/search?" + values.Encode()
 		}
 	case "channels":
-		for _, conversation := range data.ConversationOptions {
-			if searchTextContainsTerms(conversation.Name, textTokens) {
-				data.Conversations = append(data.Conversations, conversation)
-			}
+		page, searchErr := h.Messages.SearchChannels(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{
+			Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor"))),
+		})
+		if searchErr != nil {
+			h.writeSearchError(w, data, searchErr)
+			return
+		}
+		for _, conversation := range page.Conversations {
+			data.Conversations = append(data.Conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation)})
 		}
 		data.ResultCount = len(data.Conversations)
+		data.MoreURL = searchPageURL(r, page.HasMore, string(page.NextCursor))
 	}
 	if err := h.Messages.RecordSearch(r.Context(), principal.WorkspaceID, principal.UserID, query); err != nil {
 		data.Warning = "Search completed, but it could not be added to recent searches."
@@ -6961,6 +6982,24 @@ func canvasSearchSnippet(canvas domain.Canvas) string {
 // canvasSnippetRunes is counted in runes rather than bytes so a document in a
 // non-Latin script is not cut to a quarter of the length a Latin one gets.
 const canvasSnippetRunes = 160
+
+// searchPageURL builds the next-page link for a cursor-paged tab. People and
+// Channels used to render every match at once because they filtered a directory
+// the handler had already loaded whole; now that they ask the store a question,
+// they get a page and have to offer the next one like every other tab.
+// searchFilterOptionLimit bounds the from:/in: pickers. It is not a claim about
+// how many members a workspace has; it is the point past which a select element
+// stops being usable and the typeahead is the answer.
+const searchFilterOptionLimit = 200
+
+func searchPageURL(r *http.Request, hasMore bool, cursor string) string {
+	if !hasMore || cursor == "" {
+		return ""
+	}
+	values := cloneURLValues(r.URL.Query())
+	values.Set("cursor", cursor)
+	return "/app/search?" + values.Encode()
+}
 
 func searchHistoryViews(values []domain.SearchHistoryEntry, channel string) []searchHistoryView {
 	views := make([]searchHistoryView, 0, len(values))
@@ -7093,25 +7132,26 @@ func (h Handler) writeSearchError(w http.ResponseWriter, data searchData, err er
 	h.writeHTML(w, searchTemplate, data, http.StatusBadRequest, "search rendering unavailable")
 }
 
+// searchFilterOptions fills the from:/in: pickers, and only those. It used to
+// page the entire member directory and the entire channel list into memory on
+// every search request — including a Messages search that never reads either —
+// because the People and Channels tabs were answered by filtering those lists
+// in the handler. Those tabs ask the store now, so the exhaustive walk bought
+// nothing and cost an unbounded amount of work per request on a large
+// workspace. One page is what a picker can usefully show; the typeahead at
+// /app/search/suggestions is how a member reaches the rest, and it always was.
 func (h Handler) searchFilterOptions(ctx context.Context, principal auth.Principal) ([]memberView, []conversationView, error) {
 	members := make([]memberView, 0)
-	userRequest := domain.PageRequest{Limit: 200}
-	for {
-		page, err := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, userRequest)
-		if err != nil {
-			return nil, nil, err
+	page, err := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: searchFilterOptionLimit})
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, user := range page.Users {
+		if user.Deleted {
+			continue
 		}
-		for _, user := range page.Users {
-			if user.Deleted {
-				continue
-			}
-			name := displayName(user)
-			members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
-		}
-		if !page.HasMore || page.NextCursor == "" || page.NextCursor == userRequest.Cursor {
-			break
-		}
-		userRequest.Cursor = page.NextCursor
+		name := displayName(user)
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
 	}
 	sort.Slice(members, func(left, right int) bool { return members[left].Name < members[right].Name })
 	conversations, err := h.visibleChannelOptions(ctx, principal)
@@ -7123,22 +7163,15 @@ func (h Handler) searchFilterOptions(ctx context.Context, principal auth.Princip
 
 func (h Handler) visibleChannelOptions(ctx context.Context, principal auth.Principal) ([]conversationView, error) {
 	conversations := make([]conversationView, 0)
-	conversationRequest := domain.ConversationListRequest{Limit: 200, IncludeClosedDirects: true}
-	for {
-		page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, conversationRequest)
-		if err != nil {
-			return nil, err
-		}
-		for _, conversation := range page.Conversations {
-			if conversation.IsDirect || conversation.IsGroupDirect {
-				continue
-			}
-			conversations = append(conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation)})
-		}
-		if !page.HasMore || page.NextCursor == "" || page.NextCursor == conversationRequest.Cursor {
-			break
-		}
-		conversationRequest.Cursor = page.NextCursor
+	page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
+		Limit: searchFilterOptionLimit, IncludeClosedDirects: true,
+		Types: []domain.ConversationType{domain.ConversationTypePublic, domain.ConversationTypePrivate},
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, conversation := range page.Conversations {
+		conversations = append(conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation)})
 	}
 	sort.Slice(conversations, func(left, right int) bool { return conversations[left].Name < conversations[right].Name })
 	return conversations, nil
@@ -7332,29 +7365,6 @@ func searchQueryWithFilters(query string, data searchData) string {
 		}
 	}
 	return strings.Join(values, " ")
-}
-
-func searchTextContainsTerms(text string, tokens []string) bool {
-	text = domain.FoldSearchText(text)
-	for _, raw := range tokens {
-		excluded := strings.HasPrefix(raw, "-") && len(raw) > 1
-		if excluded {
-			raw = strings.TrimPrefix(raw, "-")
-		}
-		name, _, modifier := strings.Cut(raw, ":")
-		if modifier && slices.Contains([]string{"after", "before", "creator", "during", "from", "has", "hasmy", "in", "is", "on", "to", "type", "with"}, strings.ToLower(name)) {
-			continue
-		}
-		term := domain.FoldSearchText(raw)
-		if term == "" {
-			continue
-		}
-		contains := strings.Contains(text, term)
-		if (excluded && contains) || (!excluded && !contains) {
-			return false
-		}
-	}
-	return true
 }
 
 func cloneURLValues(source url.Values) url.Values {

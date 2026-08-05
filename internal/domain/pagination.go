@@ -70,6 +70,13 @@ type ConversationListRequest struct {
 	Types                []ConversationType
 	MemberUserID         UserID
 	IncludeClosedDirects bool
+	// Query narrows the listing to conversations whose name, topic or purpose
+	// contains it, folded. It lives on the listing rather than in a separate
+	// search method on purpose: the visibility rule is the hard part and it is
+	// already here, and a second method would be a second copy of it — which is
+	// exactly how a search comes to reveal a private channel the directory
+	// withholds.
+	Query string
 }
 
 func NormalizeConversationTypes(values []string) ([]ConversationType, error) {

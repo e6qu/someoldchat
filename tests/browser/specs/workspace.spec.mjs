@@ -2951,6 +2951,42 @@ test('[SEARCH-01 SEARCH-02 A11Y-01] canvases are searchable by their title and t
   await expect(page.getByText('No matching canvases.')).toBeVisible();
 });
 
+// People and Channels used to be answered by filtering a directory the handler
+// had already paged into memory in full. They are store questions now, which is
+// the only way they can be paged — and the only way the visibility rule can be
+// the sidebar's rather than a second copy of it. The private channel here is
+// created by an installed app, because the development API token and the browser
+// session are the same member: a channel this session created would correctly be
+// visible to it, and would prove nothing.
+test('[SEARCH-01 SEARCH-02] channel search is paged and cannot reveal a private channel', async ({ page, context, request }) => {
+  await signIn(context);
+  const bot = await installActivityBot(page, request);
+  // Two channels from the same app sharing a term, one public and one private.
+  // The pair is what makes the assertion mean something: the public one proves
+  // the query matches and that this session sees channels it did not create,
+  // and the private one is then filtered by membership rather than by the term.
+  const term = `leadership-${Date.now()}`;
+  const names = { public: `${term}-open`, private: `${term}-closed` };
+  for (const [kind, name] of Object.entries(names)) {
+    const created = await request.post('/api/conversations.create', {
+      headers: { authorization: `Bearer ${bot.token}`, 'content-type': 'application/json' },
+      data: { name, is_private: kind === 'private' },
+    });
+    const channel = await created.json();
+    expect(channel.ok, `${kind}: ${JSON.stringify(channel)}`).toBe(true);
+  }
+
+  await page.goto(`/app/search?q=${encodeURIComponent(term)}&type=channels&channel=Cdev`);
+  await expect(page.getByRole('link', { name: `# ${names.public}` })).toHaveCount(1);
+  await expect(page.getByRole('link', { name: `# ${names.private}` })).toHaveCount(0);
+
+  // People search answers from the store too, and finds a member by the name
+  // the directory shows rather than by whatever the picker happened to load.
+  await page.goto('/app/search?q=sameoldchat&type=people&channel=Cdev');
+  await expect(page.locator('.result', { hasText: 'SameOldChat' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
