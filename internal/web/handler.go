@@ -619,6 +619,48 @@ type searchData struct {
 	Searched             bool
 }
 
+// scheduleDayView is one weekday checkbox. The label is the English name and
+// the value is Go's own weekday number, which is what the row stores — a form
+// that posted names would have to agree with the store about spelling.
+type scheduleDayView struct {
+	Number   int
+	Label    string
+	Selected bool
+}
+
+func scheduleDayViews(selected []time.Weekday) []scheduleDayView {
+	chosen := make(map[time.Weekday]struct{}, len(selected))
+	for _, day := range selected {
+		chosen[day] = struct{}{}
+	}
+	views := make([]scheduleDayView, 0, 7)
+	for day := time.Sunday; day <= time.Saturday; day++ {
+		_, ok := chosen[day]
+		views = append(views, scheduleDayView{Number: int(day), Label: day.String(), Selected: ok})
+	}
+	return views
+}
+
+// minutesAsClock renders a minute-of-day for an <input type="time">, which is
+// the control that already knows how to enter one.
+func minutesAsClock(minute int) string {
+	if minute < 0 || minute >= domain.NotificationScheduleDayMinutes {
+		return "00:00"
+	}
+	return fmt.Sprintf("%02d:%02d", minute/60, minute%60)
+}
+
+// clockAsMinutes reads one back. A value the browser did not produce is
+// refused rather than coerced: a schedule silently starting at midnight
+// because the field was malformed is worse than a form that says no.
+func clockAsMinutes(value string) (int, bool) {
+	parsed, err := time.Parse("15:04", strings.TrimSpace(value))
+	if err != nil {
+		return 0, false
+	}
+	return parsed.Hour()*60 + parsed.Minute(), true
+}
+
 type searchHistoryView struct {
 	Query string
 	URL   string
@@ -727,6 +769,12 @@ type notificationsData struct {
 	BrowserNotifications     bool
 	BrowserNotificationState string
 	Snoozed                  bool
+	ScheduleEnabled          bool
+	ScheduleSuppressing      bool
+	ScheduleStart            string
+	ScheduleEnd              string
+	ScheduleZone             string
+	ScheduleDays             []scheduleDayView
 	SnoozeUntil              string
 	Exceptions               []notificationExceptionView
 	Notice                   string
@@ -2394,6 +2442,19 @@ const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end
 <p class="muted" id="browser-notification-state" aria-live="polite">{{.BrowserNotificationState}}</p>
 <button type="submit">Save workspace defaults</button></form></section>
 <section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds and notification schedules.</strong> Pausing above is the only schedule.</li></ul></section>
+<section class="card" aria-labelledby="schedule-heading"><h3 id="schedule-heading">Notification schedule</h3>
+<p>Choose the days and hours you allow notifications. Outside them nothing is delivered; Activity and messages are unaffected.</p>
+{{if .ScheduleSuppressing}}<p class="notice" role="status">Right now you are outside your schedule, so notifications are not being delivered.</p>{{end}}
+<form method="post" action="/app/notifications/schedule?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<input type="hidden" name="timezone" data-browser-timezone value="UTC">
+<label><span><input type="checkbox" name="enabled" value="true"{{if .ScheduleEnabled}} checked{{end}}> Only notify me during these hours</span></label>
+<fieldset class="schedule-days"><legend>Days</legend>{{range .ScheduleDays}}<label><span><input type="checkbox" name="day" value="{{.Number}}"{{if .Selected}} checked{{end}}> {{.Label}}</span></label>{{end}}</fieldset>
+<label for="schedule-start">From<input id="schedule-start" type="time" name="start" value="{{.ScheduleStart}}" required></label>
+<label for="schedule-end">To<input id="schedule-end" type="time" name="end" value="{{.ScheduleEnd}}" required></label>
+{{if .ScheduleZone}}<p class="muted">Times are read in {{.ScheduleZone}}.</p>{{end}}
+<button type="submit">Save schedule</button></form>
+<p class="read-only">A window ending before it starts runs overnight, and belongs to the day it began on.</p>
+</section>
 <section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time>. Messages and Activity remain available.</p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="resume" type="submit">Resume notifications</button></form>{{else}}<p>Pause banners and sounds for a preset or custom duration.</p><form class="actions" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><label for="dnd-minutes">Preset<select id="dnd-minutes" name="minutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="480">8 hours</option><option value="1440">24 hours</option></select></label><label for="dnd-custom-minutes">Custom minutes (optional)<input id="dnd-custom-minutes" type="number" name="custom_minutes" min="1" max="1440"></label><button type="submit">Pause notifications</button></form>{{end}}</section>
 <section class="card" aria-labelledby="notification-exceptions-heading"><h3 id="notification-exceptions-heading">Exceptions to defaults</h3>{{if .Exceptions}}<ul class="exceptions">{{range .Exceptions}}<li><a href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span>{{.Level}}{{if .FollowEveryThread}} · following every thread{{end}}</span></a></li>{{end}}</ul>{{else}}<p>No conversation-specific exceptions.</p>{{end}}</section>
 </div></main>{{end}}`
@@ -4009,6 +4070,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/notifications", h.notifications)
 	mux.HandleFunc("POST /app/notifications/preferences", h.setWorkspaceNotifications)
 	mux.HandleFunc("POST /app/notifications/dnd", h.setNotificationSnooze)
+	mux.HandleFunc("POST /app/notifications/schedule", h.setNotificationSchedule)
 	mux.HandleFunc("GET /app/later", h.later)
 	mux.HandleFunc("GET /app/threads", h.threadsPage)
 	mux.HandleFunc("GET /app/unreads", h.unreadsPage)
@@ -4985,9 +5047,15 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	// something that interrupts a person is not to.
 	if preferences, prefErr := h.Messages.WorkspaceNotificationPreferences(r.Context(), principal.WorkspaceID, principal.UserID); prefErr == nil {
 		data.BrowserNotifications = preferences.BrowserNotifications
+		// Outside the member's window is a fourth reason nothing arrives, and
+		// it reaches the client through the same attribute the other reasons
+		// do — one gate rather than a second one the client could forget.
+		if !preferences.Schedule.AllowsAt(time.Now()) {
+			data.NotificationsPaused = true
+		}
 	}
-	if dnd, dndErr := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); dndErr == nil {
-		data.NotificationsPaused = dnd.SnoozeUntil.After(time.Now())
+	if dnd, dndErr := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); dndErr == nil && dnd.SnoozeUntil.After(time.Now()) {
+		data.NotificationsPaused = true
 	}
 	data.HuddleURL = "/app/huddle?channel=" + url.QueryEscape(string(channel))
 	data.Huddle = h.huddleFor(r.Context(), principal, conversation, data.CSRFToken, "", names)
@@ -6726,6 +6794,15 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 		BrowserNotificationState: "Your browser also has to allow notifications. This page will say which of the two is missing.",
 		Snoozed:                  dnd.SnoozeUntil.After(time.Now()),
 		SnoozeUntil:              dnd.SnoozeUntil.UTC().Format(time.RFC3339),
+		ScheduleEnabled:          preferences.Schedule.Enabled,
+		ScheduleStart:            minutesAsClock(preferences.Schedule.StartMinute),
+		ScheduleEnd:              minutesAsClock(preferences.Schedule.EndMinute),
+		ScheduleZone:             preferences.Schedule.TimeZone,
+		ScheduleDays:             scheduleDayViews(preferences.Schedule.Days),
+		// Saying only that a schedule exists would leave a member wondering why
+		// nothing arrives at four in the afternoon. The page says which side of
+		// the window it is on, now, in their own zone.
+		ScheduleSuppressing: preferences.Schedule.Enabled && !preferences.Schedule.AllowsAt(time.Now()),
 	}
 	switch r.URL.Query().Get("status") {
 	case "saved":
@@ -6828,6 +6905,57 @@ func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.redirectMutation(w, r, "/app/notifications?channel="+url.QueryEscape(string(h.requestChannel(r)))+"&status=saved")
+}
+
+// setNotificationSchedule writes the window a member allows notifications in.
+// The browser supplies its own zone, as it already does for a scheduled message
+// and a reminder: a schedule is a statement about the member's day, and the
+// server's clock is not their day.
+func (h Handler) setNotificationSchedule(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	// day repeats: the form offers one checkbox per weekday, and choosing
+	// several is the ordinary case. decodeMutation's single-occurrence rule
+	// would reject the whole request, which is how the first version of this
+	// handler silently refused every schedule covering more than one day.
+	fields, dayValues, err := decodeFormValues(w, r, "day")
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That form could not be read", "Reload Notifications and try again.")
+		return
+	}
+	if !h.requireCSRF(w, r) {
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	schedule := domain.NotificationSchedule{Enabled: fields["enabled"] == "true", TimeZone: strings.TrimSpace(fields["timezone"])}
+	if schedule.Enabled {
+		start, startOK := clockAsMinutes(fields["start"])
+		end, endOK := clockAsMinutes(fields["end"])
+		if !startOK || !endOK {
+			h.writeMutationError(w, r, http.StatusBadRequest, "The schedule was not saved", "Enter a start and end time.")
+			return
+		}
+		schedule.StartMinute, schedule.EndMinute = start, end
+		for _, raw := range dayValues {
+			number, convErr := strconv.Atoi(strings.TrimSpace(raw))
+			if convErr != nil {
+				h.writeMutationError(w, r, http.StatusBadRequest, "The schedule was not saved", "Choose the days the schedule applies on.")
+				return
+			}
+			schedule.Days = append(schedule.Days, time.Weekday(number))
+		}
+	}
+	if _, err := h.Messages.SetNotificationSchedule(r.Context(), principal.WorkspaceID, principal.UserID, schedule); err != nil {
+		// A schedule that allows nothing, or a window of zero length, is a
+		// refusal rather than a silent save: the member would otherwise stop
+		// hearing anything and have no way to see why.
+		h.writeMutationError(w, r, http.StatusBadRequest, "The schedule was not saved", "Choose at least one day and a start time different from the end time.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/notifications?channel="+url.QueryEscape(channel)+"&status=saved")
 }
 
 func (h Handler) setNotificationSnooze(w http.ResponseWriter, r *http.Request) {

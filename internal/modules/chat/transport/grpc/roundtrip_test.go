@@ -332,9 +332,33 @@ func conversionCases() map[string]conversionCase {
 		"WorkspaceNotificationPreferences": {
 			sample: &domain.WorkspaceNotificationPreferences{},
 			prepare: func(filled any) {
-				filled.(*domain.WorkspaceNotificationPreferences).Level = domain.NotificationAll
+				preferences := filled.(*domain.WorkspaceNotificationPreferences)
+				preferences.Level = domain.NotificationAll
+				// The property fills every field with an arbitrary value, and a
+				// schedule is the one field here whose values constrain each
+				// other: an arbitrary day list, minute pair and zone name is
+				// almost never a schedule anyone could have set. Making it a
+				// real one keeps the property testing the conversion rather
+				// than the validator, and every field of it is still non-zero
+				// so a converter that dropped one would still be caught.
+				preferences.Schedule = domain.NotificationSchedule{
+					Enabled: true, Days: []time.Weekday{time.Monday, time.Saturday},
+					StartMinute: 9*60 + 30, EndMinute: 18*60 + 45, TimeZone: "Europe/Berlin",
+				}
 			},
 			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
+		},
+		"NotificationSchedule": {
+			sample: &domain.NotificationSchedule{},
+			prepare: func(filled any) {
+				schedule := filled.(*domain.NotificationSchedule)
+				schedule.Enabled = true
+				schedule.Days = []time.Weekday{time.Monday, time.Saturday}
+				schedule.StartMinute = 9*60 + 30
+				schedule.EndMinute = 18*60 + 45
+				schedule.TimeZone = "Europe/Berlin"
+			},
+			through: throughInfallible(encodeProtoNotificationSchedule, decodeProtoNotificationSchedule),
 		},
 		"ConversationNotificationPreferences": {
 			sample: &domain.ConversationNotificationPreferences{},

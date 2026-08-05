@@ -356,6 +356,8 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
  level TEXT NOT NULL, keywords TEXT NOT NULL DEFAULT '[]',
  activity_channels INTEGER NOT NULL DEFAULT 1, activity_reminders INTEGER NOT NULL DEFAULT 1,
  browser_notifications INTEGER NOT NULL DEFAULT 0,
+ schedule_enabled INTEGER NOT NULL DEFAULT 0, schedule_days TEXT NOT NULL DEFAULT '[]',
+ schedule_start INTEGER NOT NULL DEFAULT 0, schedule_end INTEGER NOT NULL DEFAULT 0, schedule_zone TEXT NOT NULL DEFAULT '',
  PRIMARY KEY (workspace_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS conversation_notification_preferences (
@@ -551,7 +553,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 142
+const schemaVersion = 143
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3144,6 +3146,29 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 143 {
+		// The window a member allows notifications in. Days are stored as JSON
+		// rather than a bitmask so a row is readable by a person debugging a
+		// silent workspace, which is the situation this feature creates.
+		columns, err := s.tableColumns(ctx, db, "notification_preferences")
+		if err != nil {
+			return err
+		}
+		for column, definition := range map[string]string{
+			"schedule_enabled": "INTEGER NOT NULL DEFAULT 0",
+			"schedule_days":    "TEXT NOT NULL DEFAULT '[]'",
+			"schedule_start":   "INTEGER NOT NULL DEFAULT 0",
+			"schedule_end":     "INTEGER NOT NULL DEFAULT 0",
+			"schedule_zone":    "TEXT NOT NULL DEFAULT ''",
+		} {
+			if columns[column] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE notification_preferences ADD COLUMN `+column+` `+definition); err != nil {
+				return fmt.Errorf("migrate notification %s: %w", column, err)
+			}
 		}
 	}
 	if version < 142 {
@@ -10451,9 +10476,10 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, user)
 	var keywords string
-	var activityChannels, activityReminders, browserNotifications int
-	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders, browser_notifications FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
-		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders, &browserNotifications)
+	var activityChannels, activityReminders, browserNotifications, scheduleEnabled int
+	var scheduleDays string
+	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders, browser_notifications, schedule_enabled, schedule_days, schedule_start, schedule_end, schedule_zone FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
+		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders, &browserNotifications, &scheduleEnabled, &scheduleDays, &preferences.Schedule.StartMinute, &preferences.Schedule.EndMinute, &preferences.Schedule.TimeZone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return preferences, nil
 	}
@@ -10467,10 +10493,40 @@ func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspa
 	preferences.ActivityChannels = activityChannels != 0
 	preferences.ActivityReminders = activityReminders != 0
 	preferences.BrowserNotifications = browserNotifications != 0
+	preferences.Schedule.Enabled = scheduleEnabled != 0
+	var days []int
+	if err := json.Unmarshal([]byte(scheduleDays), &days); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	preferences.Schedule.Days = weekdaysFromNumbers(days)
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, errors.New("stored workspace notification preferences are invalid")
 	}
 	return preferences, nil
+}
+
+// weekdayNumbers and weekdaysFromNumbers store the day set as Go's own weekday
+// numbering. Storing the names would tie the row to this build's spelling of
+// them; storing a bitmask would be smaller and unreadable to whoever is looking
+// at the row because a member reports hearing nothing — which is the situation
+// this feature creates.
+func weekdayNumbers(days []time.Weekday) []int {
+	numbers := make([]int, 0, len(days))
+	for _, day := range days {
+		numbers = append(numbers, int(day))
+	}
+	return numbers
+}
+
+func weekdaysFromNumbers(numbers []int) []time.Weekday {
+	if len(numbers) == 0 {
+		return nil
+	}
+	days := make([]time.Weekday, 0, len(numbers))
+	for _, number := range numbers {
+		days = append(days, time.Weekday(number))
+	}
+	return days
 }
 
 func (s *Store) SetWorkspaceNotificationPreferences(ctx context.Context, preferences domain.WorkspaceNotificationPreferences, event events.Event) error {
@@ -10487,9 +10543,14 @@ func (s *Store) SetWorkspaceNotificationPreferences(ctx context.Context, prefere
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders, browser_notifications)
-		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders, browser_notifications = excluded.browser_notifications`,
-		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders), boolInt(preferences.BrowserNotifications)); err != nil {
+	days, err := json.Marshal(weekdayNumbers(preferences.Schedule.Days))
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders, browser_notifications, schedule_enabled, schedule_days, schedule_start, schedule_end, schedule_zone)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders, browser_notifications = excluded.browser_notifications, schedule_enabled = excluded.schedule_enabled, schedule_days = excluded.schedule_days, schedule_start = excluded.schedule_start, schedule_end = excluded.schedule_end, schedule_zone = excluded.schedule_zone`,
+		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders), boolInt(preferences.BrowserNotifications),
+		boolInt(preferences.Schedule.Enabled), string(days), preferences.Schedule.StartMinute, preferences.Schedule.EndMinute, preferences.Schedule.TimeZone); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {

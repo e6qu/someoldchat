@@ -646,6 +646,7 @@ type WorkspaceNotificationPreferences struct {
 	ActivityChannels     bool                   `protobuf:"varint,5,opt,name=activity_channels,json=activityChannels,proto3" json:"activity_channels,omitempty"`
 	ActivityReminders    bool                   `protobuf:"varint,6,opt,name=activity_reminders,json=activityReminders,proto3" json:"activity_reminders,omitempty"`
 	BrowserNotifications bool                   `protobuf:"varint,7,opt,name=browser_notifications,json=browserNotifications,proto3" json:"browser_notifications,omitempty"`
+	Schedule             *NotificationSchedule  `protobuf:"bytes,8,opt,name=schedule,proto3" json:"schedule,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -729,6 +730,149 @@ func (x *WorkspaceNotificationPreferences) GetBrowserNotifications() bool {
 	return false
 }
 
+func (x *WorkspaceNotificationPreferences) GetSchedule() *NotificationSchedule {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
+type NotificationSchedule struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Days          []int32                `protobuf:"varint,2,rep,packed,name=days,proto3" json:"days,omitempty"`
+	StartMinute   int32                  `protobuf:"varint,3,opt,name=start_minute,json=startMinute,proto3" json:"start_minute,omitempty"`
+	EndMinute     int32                  `protobuf:"varint,4,opt,name=end_minute,json=endMinute,proto3" json:"end_minute,omitempty"`
+	TimeZone      string                 `protobuf:"bytes,5,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotificationSchedule) Reset() {
+	*x = NotificationSchedule{}
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotificationSchedule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotificationSchedule) ProtoMessage() {}
+
+func (x *NotificationSchedule) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotificationSchedule.ProtoReflect.Descriptor instead.
+func (*NotificationSchedule) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *NotificationSchedule) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *NotificationSchedule) GetDays() []int32 {
+	if x != nil {
+		return x.Days
+	}
+	return nil
+}
+
+func (x *NotificationSchedule) GetStartMinute() int32 {
+	if x != nil {
+		return x.StartMinute
+	}
+	return 0
+}
+
+func (x *NotificationSchedule) GetEndMinute() int32 {
+	if x != nil {
+		return x.EndMinute
+	}
+	return 0
+}
+
+func (x *NotificationSchedule) GetTimeZone() string {
+	if x != nil {
+		return x.TimeZone
+	}
+	return ""
+}
+
+type SetNotificationScheduleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Schedule      *NotificationSchedule  `protobuf:"bytes,3,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetNotificationScheduleRequest) Reset() {
+	*x = SetNotificationScheduleRequest{}
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetNotificationScheduleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetNotificationScheduleRequest) ProtoMessage() {}
+
+func (x *SetNotificationScheduleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetNotificationScheduleRequest.ProtoReflect.Descriptor instead.
+func (*SetNotificationScheduleRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SetNotificationScheduleRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetNotificationScheduleRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SetNotificationScheduleRequest) GetSchedule() *NotificationSchedule {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
 type SetWorkspaceNotificationPreferencesRequest struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId          string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -744,7 +888,7 @@ type SetWorkspaceNotificationPreferencesRequest struct {
 
 func (x *SetWorkspaceNotificationPreferencesRequest) Reset() {
 	*x = SetWorkspaceNotificationPreferencesRequest{}
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -756,7 +900,7 @@ func (x *SetWorkspaceNotificationPreferencesRequest) String() string {
 func (*SetWorkspaceNotificationPreferencesRequest) ProtoMessage() {}
 
 func (x *SetWorkspaceNotificationPreferencesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -769,7 +913,7 @@ func (x *SetWorkspaceNotificationPreferencesRequest) ProtoReflect() protoreflect
 
 // Deprecated: Use SetWorkspaceNotificationPreferencesRequest.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNotificationPreferencesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SetWorkspaceNotificationPreferencesRequest) GetWorkspaceId() string {
@@ -832,7 +976,7 @@ type ConversationNotificationPreferencesRequest struct {
 
 func (x *ConversationNotificationPreferencesRequest) Reset() {
 	*x = ConversationNotificationPreferencesRequest{}
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -844,7 +988,7 @@ func (x *ConversationNotificationPreferencesRequest) String() string {
 func (*ConversationNotificationPreferencesRequest) ProtoMessage() {}
 
 func (x *ConversationNotificationPreferencesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -857,7 +1001,7 @@ func (x *ConversationNotificationPreferencesRequest) ProtoReflect() protoreflect
 
 // Deprecated: Use ConversationNotificationPreferencesRequest.ProtoReflect.Descriptor instead.
 func (*ConversationNotificationPreferencesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ConversationNotificationPreferencesRequest) GetWorkspaceId() string {
@@ -894,7 +1038,7 @@ type ConversationNotificationPreferences struct {
 
 func (x *ConversationNotificationPreferences) Reset() {
 	*x = ConversationNotificationPreferences{}
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -906,7 +1050,7 @@ func (x *ConversationNotificationPreferences) String() string {
 func (*ConversationNotificationPreferences) ProtoMessage() {}
 
 func (x *ConversationNotificationPreferences) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -919,7 +1063,7 @@ func (x *ConversationNotificationPreferences) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ConversationNotificationPreferences.ProtoReflect.Descriptor instead.
 func (*ConversationNotificationPreferences) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{11}
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ConversationNotificationPreferences) GetWorkspaceId() string {
@@ -970,7 +1114,7 @@ type SetConversationNotificationPreferencesRequest struct {
 
 func (x *SetConversationNotificationPreferencesRequest) Reset() {
 	*x = SetConversationNotificationPreferencesRequest{}
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -982,7 +1126,7 @@ func (x *SetConversationNotificationPreferencesRequest) String() string {
 func (*SetConversationNotificationPreferencesRequest) ProtoMessage() {}
 
 func (x *SetConversationNotificationPreferencesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -995,7 +1139,7 @@ func (x *SetConversationNotificationPreferencesRequest) ProtoReflect() protorefl
 
 // Deprecated: Use SetConversationNotificationPreferencesRequest.ProtoReflect.Descriptor instead.
 func (*SetConversationNotificationPreferencesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SetConversationNotificationPreferencesRequest) GetWorkspaceId() string {
@@ -1045,7 +1189,7 @@ type ThreadFollowRequest struct {
 
 func (x *ThreadFollowRequest) Reset() {
 	*x = ThreadFollowRequest{}
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1057,7 +1201,7 @@ func (x *ThreadFollowRequest) String() string {
 func (*ThreadFollowRequest) ProtoMessage() {}
 
 func (x *ThreadFollowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1070,7 +1214,7 @@ func (x *ThreadFollowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThreadFollowRequest.ProtoReflect.Descriptor instead.
 func (*ThreadFollowRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ThreadFollowRequest) GetWorkspaceId() string {
@@ -1114,7 +1258,7 @@ type SetThreadFollowRequest struct {
 
 func (x *SetThreadFollowRequest) Reset() {
 	*x = SetThreadFollowRequest{}
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1126,7 +1270,7 @@ func (x *SetThreadFollowRequest) String() string {
 func (*SetThreadFollowRequest) ProtoMessage() {}
 
 func (x *SetThreadFollowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1139,7 +1283,7 @@ func (x *SetThreadFollowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetThreadFollowRequest.ProtoReflect.Descriptor instead.
 func (*SetThreadFollowRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{14}
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SetThreadFollowRequest) GetWorkspaceId() string {
@@ -1186,7 +1330,7 @@ type ThreadFollow struct {
 
 func (x *ThreadFollow) Reset() {
 	*x = ThreadFollow{}
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1198,7 +1342,7 @@ func (x *ThreadFollow) String() string {
 func (*ThreadFollow) ProtoMessage() {}
 
 func (x *ThreadFollow) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_activity_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1211,7 +1355,7 @@ func (x *ThreadFollow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThreadFollow.ProtoReflect.Descriptor instead.
 func (*ThreadFollow) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{15}
+	return file_sameoldchat_chat_v1_activity_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ThreadFollow) GetFollowed() bool {
@@ -1281,7 +1425,7 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\x06layout\x18\x03 \x01(\tR\x06layout\"\\\n" +
 	"\x1eNotificationPreferencesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xa1\x02\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xe8\x02\n" +
 	" WorkspaceNotificationPreferences\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -1289,7 +1433,19 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\bkeywords\x18\x04 \x03(\tR\bkeywords\x12+\n" +
 	"\x11activity_channels\x18\x05 \x01(\bR\x10activityChannels\x12-\n" +
 	"\x12activity_reminders\x18\x06 \x01(\bR\x11activityReminders\x123\n" +
-	"\x15browser_notifications\x18\a \x01(\bR\x14browserNotifications\"\xab\x02\n" +
+	"\x15browser_notifications\x18\a \x01(\bR\x14browserNotifications\x12E\n" +
+	"\bschedule\x18\b \x01(\v2).sameoldchat.chat.v1.NotificationScheduleR\bschedule\"\xa3\x01\n" +
+	"\x14NotificationSchedule\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
+	"\x04days\x18\x02 \x03(\x05R\x04days\x12!\n" +
+	"\fstart_minute\x18\x03 \x01(\x05R\vstartMinute\x12\x1d\n" +
+	"\n" +
+	"end_minute\x18\x04 \x01(\x05R\tendMinute\x12\x1b\n" +
+	"\ttime_zone\x18\x05 \x01(\tR\btimeZone\"\xa3\x01\n" +
+	"\x1eSetNotificationScheduleRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12E\n" +
+	"\bschedule\x18\x03 \x01(\v2).sameoldchat.chat.v1.NotificationScheduleR\bschedule\"\xab\x02\n" +
 	"*SetWorkspaceNotificationPreferencesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -1326,15 +1482,15 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\x10thread_timestamp\x18\x04 \x01(\tR\x0fthreadTimestamp\x12\x1a\n" +
 	"\bfollowed\x18\x05 \x01(\bR\bfollowed\"*\n" +
 	"\fThreadFollow\x12\x1a\n" +
-	"\bfollowed\x18\x01 \x01(\bR\bfollowed2\x82\n" +
-	"\n" +
+	"\bfollowed\x18\x01 \x01(\bR\bfollowed2\x8a\v\n" +
 	"\x0fActivityService\x12W\n" +
 	"\fListActivity\x12$.sameoldchat.chat.v1.ActivityRequest\x1a!.sameoldchat.chat.v1.ActivityPage\x12c\n" +
 	"\x0eMutateActivity\x12*.sameoldchat.chat.v1.MutateActivityRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12s\n" +
 	"\x16GetActivityPreferences\x12/.sameoldchat.chat.v1.ActivityPreferencesRequest\x1a(.sameoldchat.chat.v1.ActivityPreferences\x12v\n" +
 	"\x16SetActivityPreferences\x122.sameoldchat.chat.v1.SetActivityPreferencesRequest\x1a(.sameoldchat.chat.v1.ActivityPreferences\x12\x91\x01\n" +
 	"#GetWorkspaceNotificationPreferences\x123.sameoldchat.chat.v1.NotificationPreferencesRequest\x1a5.sameoldchat.chat.v1.WorkspaceNotificationPreferences\x12\x9d\x01\n" +
-	"#SetWorkspaceNotificationPreferences\x12?.sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest\x1a5.sameoldchat.chat.v1.WorkspaceNotificationPreferences\x12\xa3\x01\n" +
+	"#SetWorkspaceNotificationPreferences\x12?.sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest\x1a5.sameoldchat.chat.v1.WorkspaceNotificationPreferences\x12\x85\x01\n" +
+	"\x17SetNotificationSchedule\x123.sameoldchat.chat.v1.SetNotificationScheduleRequest\x1a5.sameoldchat.chat.v1.WorkspaceNotificationPreferences\x12\xa3\x01\n" +
 	"&GetConversationNotificationPreferences\x12?.sameoldchat.chat.v1.ConversationNotificationPreferencesRequest\x1a8.sameoldchat.chat.v1.ConversationNotificationPreferences\x12\xa6\x01\n" +
 	"&SetConversationNotificationPreferences\x12B.sameoldchat.chat.v1.SetConversationNotificationPreferencesRequest\x1a8.sameoldchat.chat.v1.ConversationNotificationPreferences\x12^\n" +
 	"\x0fGetThreadFollow\x12(.sameoldchat.chat.v1.ThreadFollowRequest\x1a!.sameoldchat.chat.v1.ThreadFollow\x12a\n" +
@@ -1352,7 +1508,7 @@ func file_sameoldchat_chat_v1_activity_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_activity_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_activity_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_sameoldchat_chat_v1_activity_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_sameoldchat_chat_v1_activity_proto_goTypes = []any{
 	(*ActivityItem)(nil),                                  // 0: sameoldchat.chat.v1.ActivityItem
 	(*ActivityRequest)(nil),                               // 1: sameoldchat.chat.v1.ActivityRequest
@@ -1363,46 +1519,52 @@ var file_sameoldchat_chat_v1_activity_proto_goTypes = []any{
 	(*ActivityPreferences)(nil),                           // 6: sameoldchat.chat.v1.ActivityPreferences
 	(*NotificationPreferencesRequest)(nil),                // 7: sameoldchat.chat.v1.NotificationPreferencesRequest
 	(*WorkspaceNotificationPreferences)(nil),              // 8: sameoldchat.chat.v1.WorkspaceNotificationPreferences
-	(*SetWorkspaceNotificationPreferencesRequest)(nil),    // 9: sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest
-	(*ConversationNotificationPreferencesRequest)(nil),    // 10: sameoldchat.chat.v1.ConversationNotificationPreferencesRequest
-	(*ConversationNotificationPreferences)(nil),           // 11: sameoldchat.chat.v1.ConversationNotificationPreferences
-	(*SetConversationNotificationPreferencesRequest)(nil), // 12: sameoldchat.chat.v1.SetConversationNotificationPreferencesRequest
-	(*ThreadFollowRequest)(nil),                           // 13: sameoldchat.chat.v1.ThreadFollowRequest
-	(*SetThreadFollowRequest)(nil),                        // 14: sameoldchat.chat.v1.SetThreadFollowRequest
-	(*ThreadFollow)(nil),                                  // 15: sameoldchat.chat.v1.ThreadFollow
-	(*Message)(nil),                                       // 16: sameoldchat.chat.v1.Message
-	(*LaterReminder)(nil),                                 // 17: sameoldchat.chat.v1.LaterReminder
-	(*MutationResponse)(nil),                              // 18: sameoldchat.chat.v1.MutationResponse
+	(*NotificationSchedule)(nil),                          // 9: sameoldchat.chat.v1.NotificationSchedule
+	(*SetNotificationScheduleRequest)(nil),                // 10: sameoldchat.chat.v1.SetNotificationScheduleRequest
+	(*SetWorkspaceNotificationPreferencesRequest)(nil),    // 11: sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest
+	(*ConversationNotificationPreferencesRequest)(nil),    // 12: sameoldchat.chat.v1.ConversationNotificationPreferencesRequest
+	(*ConversationNotificationPreferences)(nil),           // 13: sameoldchat.chat.v1.ConversationNotificationPreferences
+	(*SetConversationNotificationPreferencesRequest)(nil), // 14: sameoldchat.chat.v1.SetConversationNotificationPreferencesRequest
+	(*ThreadFollowRequest)(nil),                           // 15: sameoldchat.chat.v1.ThreadFollowRequest
+	(*SetThreadFollowRequest)(nil),                        // 16: sameoldchat.chat.v1.SetThreadFollowRequest
+	(*ThreadFollow)(nil),                                  // 17: sameoldchat.chat.v1.ThreadFollow
+	(*Message)(nil),                                       // 18: sameoldchat.chat.v1.Message
+	(*LaterReminder)(nil),                                 // 19: sameoldchat.chat.v1.LaterReminder
+	(*MutationResponse)(nil),                              // 20: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_activity_proto_depIdxs = []int32{
-	16, // 0: sameoldchat.chat.v1.ActivityItem.message:type_name -> sameoldchat.chat.v1.Message
-	17, // 1: sameoldchat.chat.v1.ActivityItem.reminder:type_name -> sameoldchat.chat.v1.LaterReminder
+	18, // 0: sameoldchat.chat.v1.ActivityItem.message:type_name -> sameoldchat.chat.v1.Message
+	19, // 1: sameoldchat.chat.v1.ActivityItem.reminder:type_name -> sameoldchat.chat.v1.LaterReminder
 	0,  // 2: sameoldchat.chat.v1.ActivityPage.items:type_name -> sameoldchat.chat.v1.ActivityItem
-	1,  // 3: sameoldchat.chat.v1.ActivityService.ListActivity:input_type -> sameoldchat.chat.v1.ActivityRequest
-	3,  // 4: sameoldchat.chat.v1.ActivityService.MutateActivity:input_type -> sameoldchat.chat.v1.MutateActivityRequest
-	4,  // 5: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:input_type -> sameoldchat.chat.v1.ActivityPreferencesRequest
-	5,  // 6: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:input_type -> sameoldchat.chat.v1.SetActivityPreferencesRequest
-	7,  // 7: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.NotificationPreferencesRequest
-	9,  // 8: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest
-	10, // 9: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.ConversationNotificationPreferencesRequest
-	12, // 10: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.SetConversationNotificationPreferencesRequest
-	13, // 11: sameoldchat.chat.v1.ActivityService.GetThreadFollow:input_type -> sameoldchat.chat.v1.ThreadFollowRequest
-	14, // 12: sameoldchat.chat.v1.ActivityService.SetThreadFollow:input_type -> sameoldchat.chat.v1.SetThreadFollowRequest
-	2,  // 13: sameoldchat.chat.v1.ActivityService.ListActivity:output_type -> sameoldchat.chat.v1.ActivityPage
-	18, // 14: sameoldchat.chat.v1.ActivityService.MutateActivity:output_type -> sameoldchat.chat.v1.MutationResponse
-	6,  // 15: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
-	6,  // 16: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
-	8,  // 17: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
-	8,  // 18: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
-	11, // 19: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
-	11, // 20: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
-	15, // 21: sameoldchat.chat.v1.ActivityService.GetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
-	15, // 22: sameoldchat.chat.v1.ActivityService.SetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
-	13, // [13:23] is the sub-list for method output_type
-	3,  // [3:13] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	9,  // 3: sameoldchat.chat.v1.WorkspaceNotificationPreferences.schedule:type_name -> sameoldchat.chat.v1.NotificationSchedule
+	9,  // 4: sameoldchat.chat.v1.SetNotificationScheduleRequest.schedule:type_name -> sameoldchat.chat.v1.NotificationSchedule
+	1,  // 5: sameoldchat.chat.v1.ActivityService.ListActivity:input_type -> sameoldchat.chat.v1.ActivityRequest
+	3,  // 6: sameoldchat.chat.v1.ActivityService.MutateActivity:input_type -> sameoldchat.chat.v1.MutateActivityRequest
+	4,  // 7: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:input_type -> sameoldchat.chat.v1.ActivityPreferencesRequest
+	5,  // 8: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:input_type -> sameoldchat.chat.v1.SetActivityPreferencesRequest
+	7,  // 9: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.NotificationPreferencesRequest
+	11, // 10: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest
+	10, // 11: sameoldchat.chat.v1.ActivityService.SetNotificationSchedule:input_type -> sameoldchat.chat.v1.SetNotificationScheduleRequest
+	12, // 12: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.ConversationNotificationPreferencesRequest
+	14, // 13: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.SetConversationNotificationPreferencesRequest
+	15, // 14: sameoldchat.chat.v1.ActivityService.GetThreadFollow:input_type -> sameoldchat.chat.v1.ThreadFollowRequest
+	16, // 15: sameoldchat.chat.v1.ActivityService.SetThreadFollow:input_type -> sameoldchat.chat.v1.SetThreadFollowRequest
+	2,  // 16: sameoldchat.chat.v1.ActivityService.ListActivity:output_type -> sameoldchat.chat.v1.ActivityPage
+	20, // 17: sameoldchat.chat.v1.ActivityService.MutateActivity:output_type -> sameoldchat.chat.v1.MutationResponse
+	6,  // 18: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
+	6,  // 19: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
+	8,  // 20: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
+	8,  // 21: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
+	8,  // 22: sameoldchat.chat.v1.ActivityService.SetNotificationSchedule:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
+	13, // 23: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
+	13, // 24: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
+	17, // 25: sameoldchat.chat.v1.ActivityService.GetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
+	17, // 26: sameoldchat.chat.v1.ActivityService.SetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
+	16, // [16:27] is the sub-list for method output_type
+	5,  // [5:16] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_activity_proto_init() }
@@ -1419,7 +1581,7 @@ func file_sameoldchat_chat_v1_activity_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_activity_proto_rawDesc), len(file_sameoldchat_chat_v1_activity_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

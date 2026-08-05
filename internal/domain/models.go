@@ -979,6 +979,106 @@ type WorkspaceNotificationPreferences struct {
 	// permission — and the two are deliberately separate: a preference this
 	// product stores cannot grant a permission only the browser can.
 	BrowserNotifications bool
+	// Schedule is the window a member allows notifications in. Outside it,
+	// nothing is delivered — which makes it a fourth reason a notification does
+	// not arrive, beside the stored preference, the browser's own grant and Do
+	// Not Disturb. The page names which one is missing, because a surface that
+	// says notifications are on while none arrive is worse than one that admits
+	// it is off.
+	Schedule NotificationSchedule
+}
+
+// NotificationSchedule is Slack's "allow notifications" window: some days, and
+// a start and end time on those days.
+//
+// The time zone is carried rather than inferred. A schedule is a statement
+// about the member's day, and the server's clock is not their day; the browser
+// supplies its own zone the same way a scheduled message and a reminder already
+// do, so the same instant means the same thing to all three.
+type NotificationSchedule struct {
+	Enabled bool
+	// Days are the weekdays the window applies on. Empty with Enabled true is
+	// refused rather than read as "every day": a schedule that allows nothing
+	// is almost certainly a mistake, and one that allows everything is what
+	// turning the schedule off already means.
+	Days []time.Weekday
+	// StartMinute and EndMinute are minutes from midnight in TimeZone. Start
+	// equal to end is refused for the same reason an empty day set is.
+	StartMinute int
+	EndMinute   int
+	TimeZone    string
+}
+
+// NotificationScheduleDayMinutes is the number of minutes in a day, and the
+// exclusive upper bound of both ends of the window.
+const NotificationScheduleDayMinutes = 24 * 60
+
+func (s NotificationSchedule) Valid() bool {
+	if !s.Enabled {
+		return true
+	}
+	if len(s.Days) == 0 || s.StartMinute == s.EndMinute {
+		return false
+	}
+	if s.StartMinute < 0 || s.StartMinute >= NotificationScheduleDayMinutes || s.EndMinute < 0 || s.EndMinute >= NotificationScheduleDayMinutes {
+		return false
+	}
+	seen := make(map[time.Weekday]struct{}, len(s.Days))
+	for _, day := range s.Days {
+		if day < time.Sunday || day > time.Saturday {
+			return false
+		}
+		if _, repeated := seen[day]; repeated {
+			return false
+		}
+		seen[day] = struct{}{}
+	}
+	if _, err := time.LoadLocation(s.TimeZone); err != nil {
+		return false
+	}
+	return true
+}
+
+// AllowsAt reports whether notifications may be delivered at this instant. A
+// schedule that is off allows everything, which is what off means.
+//
+// A window whose end is before its start runs overnight — 22:00 to 07:00 is a
+// real answer to "when may I be interrupted", and reading it as an empty window
+// would silence a member who asked to be reachable at night. The day a
+// wrapped window belongs to is the day it started on, so a Friday-night window
+// keeps notifying into Saturday morning without Saturday being selected.
+func (s NotificationSchedule) AllowsAt(instant time.Time) bool {
+	if !s.Enabled {
+		return true
+	}
+	location, err := time.LoadLocation(s.TimeZone)
+	if err != nil {
+		// A zone this build cannot resolve must not silence a member. Failing
+		// open is the only safe direction: the cost is a notification that
+		// should have waited, and the alternative is one that never arrives.
+		return true
+	}
+	local := instant.In(location)
+	minute := local.Hour()*60 + local.Minute()
+	if s.StartMinute < s.EndMinute {
+		return s.allowsDay(local.Weekday()) && minute >= s.StartMinute && minute < s.EndMinute
+	}
+	if minute >= s.StartMinute {
+		return s.allowsDay(local.Weekday())
+	}
+	if minute < s.EndMinute {
+		return s.allowsDay(local.AddDate(0, 0, -1).Weekday())
+	}
+	return false
+}
+
+func (s NotificationSchedule) allowsDay(day time.Weekday) bool {
+	for _, allowed := range s.Days {
+		if allowed == day {
+			return true
+		}
+	}
+	return false
 }
 
 func DefaultWorkspaceNotificationPreferences(workspace WorkspaceID, user UserID) WorkspaceNotificationPreferences {
@@ -996,6 +1096,9 @@ func (preferences WorkspaceNotificationPreferences) Valid() bool {
 		if keyword == "" || len(keyword) > 100 || keyword != strings.TrimSpace(keyword) {
 			return false
 		}
+	}
+	if !preferences.Schedule.Valid() {
+		return false
 	}
 	return true
 }

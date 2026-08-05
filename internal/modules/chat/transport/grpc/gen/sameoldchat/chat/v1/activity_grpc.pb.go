@@ -25,6 +25,7 @@ const (
 	ActivityService_SetActivityPreferences_FullMethodName                 = "/sameoldchat.chat.v1.ActivityService/SetActivityPreferences"
 	ActivityService_GetWorkspaceNotificationPreferences_FullMethodName    = "/sameoldchat.chat.v1.ActivityService/GetWorkspaceNotificationPreferences"
 	ActivityService_SetWorkspaceNotificationPreferences_FullMethodName    = "/sameoldchat.chat.v1.ActivityService/SetWorkspaceNotificationPreferences"
+	ActivityService_SetNotificationSchedule_FullMethodName                = "/sameoldchat.chat.v1.ActivityService/SetNotificationSchedule"
 	ActivityService_GetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/GetConversationNotificationPreferences"
 	ActivityService_SetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/SetConversationNotificationPreferences"
 	ActivityService_GetThreadFollow_FullMethodName                        = "/sameoldchat.chat.v1.ActivityService/GetThreadFollow"
@@ -41,6 +42,7 @@ type ActivityServiceClient interface {
 	SetActivityPreferences(ctx context.Context, in *SetActivityPreferencesRequest, opts ...grpc.CallOption) (*ActivityPreferences, error)
 	GetWorkspaceNotificationPreferences(ctx context.Context, in *NotificationPreferencesRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(ctx context.Context, in *SetWorkspaceNotificationPreferencesRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
+	SetNotificationSchedule(ctx context.Context, in *SetNotificationScheduleRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	GetConversationNotificationPreferences(ctx context.Context, in *ConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(ctx context.Context, in *SetConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
 	GetThreadFollow(ctx context.Context, in *ThreadFollowRequest, opts ...grpc.CallOption) (*ThreadFollow, error)
@@ -115,6 +117,16 @@ func (c *activityServiceClient) SetWorkspaceNotificationPreferences(ctx context.
 	return out, nil
 }
 
+func (c *activityServiceClient) SetNotificationSchedule(ctx context.Context, in *SetNotificationScheduleRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspaceNotificationPreferences)
+	err := c.cc.Invoke(ctx, ActivityService_SetNotificationSchedule_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *activityServiceClient) GetConversationNotificationPreferences(ctx context.Context, in *ConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ConversationNotificationPreferences)
@@ -165,6 +177,7 @@ type ActivityServiceServer interface {
 	SetActivityPreferences(context.Context, *SetActivityPreferencesRequest) (*ActivityPreferences, error)
 	GetWorkspaceNotificationPreferences(context.Context, *NotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, *SetWorkspaceNotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error)
+	SetNotificationSchedule(context.Context, *SetNotificationScheduleRequest) (*WorkspaceNotificationPreferences, error)
 	GetConversationNotificationPreferences(context.Context, *ConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, *SetConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
 	GetThreadFollow(context.Context, *ThreadFollowRequest) (*ThreadFollow, error)
@@ -195,6 +208,9 @@ func (UnimplementedActivityServiceServer) GetWorkspaceNotificationPreferences(co
 }
 func (UnimplementedActivityServiceServer) SetWorkspaceNotificationPreferences(context.Context, *SetWorkspaceNotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetWorkspaceNotificationPreferences not implemented")
+}
+func (UnimplementedActivityServiceServer) SetNotificationSchedule(context.Context, *SetNotificationScheduleRequest) (*WorkspaceNotificationPreferences, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetNotificationSchedule not implemented")
 }
 func (UnimplementedActivityServiceServer) GetConversationNotificationPreferences(context.Context, *ConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversationNotificationPreferences not implemented")
@@ -336,6 +352,24 @@ func _ActivityService_SetWorkspaceNotificationPreferences_Handler(srv interface{
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ActivityService_SetNotificationSchedule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetNotificationScheduleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).SetNotificationSchedule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_SetNotificationSchedule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).SetNotificationSchedule(ctx, req.(*SetNotificationScheduleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ActivityService_GetConversationNotificationPreferences_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ConversationNotificationPreferencesRequest)
 	if err := dec(in); err != nil {
@@ -438,6 +472,10 @@ var ActivityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetWorkspaceNotificationPreferences",
 			Handler:    _ActivityService_SetWorkspaceNotificationPreferences_Handler,
+		},
+		{
+			MethodName: "SetNotificationSchedule",
+			Handler:    _ActivityService_SetNotificationSchedule_Handler,
 		},
 		{
 			MethodName: "GetConversationNotificationPreferences",

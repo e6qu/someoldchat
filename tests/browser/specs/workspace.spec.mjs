@@ -3126,6 +3126,55 @@ test('[ACTIVITY-01 CANVAS-01 A11Y-01] a canvas shared with you appears in Activi
   await expect(page.getByRole('heading', { name: title })).toBeVisible();
 });
 
+// A notification schedule is the fourth reason a notification does not arrive,
+// beside the stored preference, the browser's own grant and Do Not Disturb. The
+// journey asserts the page says which one is in force, because a surface
+// claiming notifications are on while none arrive is worse than one that admits
+// they are off.
+test('[NOTIFY-01 NOTIFY-03 A11Y-01] a notification schedule is saved and says when it is suppressing', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/notifications?channel=Cdev');
+  await expect(page.getByRole('heading', { name: 'Notification schedule' })).toBeVisible();
+
+  // A window that cannot mean anything is refused rather than saved: a start
+  // equal to its end would silence the member with nothing to see.
+  await page.getByLabel('Only notify me during these hours').check();
+  await page.getByRole('checkbox', { name: 'Monday' }).check();
+  await page.locator('#schedule-start').fill('09:00');
+  await page.locator('#schedule-end').fill('09:00');
+  await page.getByRole('button', { name: 'Save schedule' }).click();
+  await expect(page.getByText('The schedule was not saved')).toBeVisible();
+
+  // A window covering no day is refused for the same reason.
+  await page.goto('/app/notifications?channel=Cdev');
+  await page.getByLabel('Only notify me during these hours').check();
+  await page.locator('#schedule-start').fill('09:00');
+  await page.locator('#schedule-end').fill('18:00');
+  await page.getByRole('button', { name: 'Save schedule' }).click();
+  await expect(page.getByText('The schedule was not saved')).toBeVisible();
+
+  // A real one is saved and survives a reload.
+  await page.goto('/app/notifications?channel=Cdev');
+  await page.getByLabel('Only notify me during these hours').check();
+  for (const day of ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']) {
+    await page.getByRole('checkbox', { name: day }).check();
+  }
+  await page.locator('#schedule-start').fill('09:00');
+  await page.locator('#schedule-end').fill('18:00');
+  await page.getByRole('button', { name: 'Save schedule' }).click();
+  await expect(page.getByText('Notification preferences saved.')).toBeVisible();
+  await expect(page.getByLabel('Only notify me during these hours')).toBeChecked();
+  await expect(page.locator('#schedule-start')).toHaveValue('09:00');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // A one-minute window that has already passed today is a schedule this
+  // session is certainly outside of, whatever hour the run happens at.
+  await page.locator('#schedule-start').fill('00:00');
+  await page.locator('#schedule-end').fill('00:01');
+  await page.getByRole('button', { name: 'Save schedule' }).click();
+  await expect(page.getByText('Right now you are outside your schedule')).toBeVisible();
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

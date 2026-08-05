@@ -101,7 +101,13 @@ leave, hide, or deny the conversation.
 
 ## NOTIFY-03 — Snooze with Do Not Disturb
 
-The member selects a preset/custom DND duration or notification schedule. The
+The member selects a preset/custom DND duration or notification schedule. A
+schedule names the days and the hours notifications are allowed, is read in the
+member's own time zone rather than the server's, and suppresses delivery outside
+its window; a window whose end precedes its start runs overnight and belongs to
+the day it began on. A schedule covering no day, or a window of zero length, is
+refused rather than saved, because either would silence the member with nothing
+on the page to explain it. The
 UI shows the exact end time and active state, supports early resume, and
 projects through Slack's DND API. Urgent sender overrides, where Slack offers
 them, identify consequence and authorization. DND suppresses delivery—not
@@ -133,7 +139,8 @@ that does nothing:
   service.
 - **E-mail.** This deployment sends no mail at all, which is also why an
   invitation link has to be handed over by an administrator.
-- **Sounds, and notification schedules.** Pausing is the only schedule.
+- **Sounds.** Pausing and the notification schedule are the only delivery
+  controls; there is no sound to configure because none is played.
 
 ## Evidence
 
