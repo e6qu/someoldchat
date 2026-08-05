@@ -182,6 +182,16 @@ Implemented evidence:
   and legacy combined `search.all` require user tokens, enforce documented
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
+- Results mark the terms that matched. Marking is threaded into the one branch
+  of the Slack-markup renderer that emits literal prose rather than applied to
+  its output, because a substitution over finished HTML would put tags inside
+  attributes, split entities, and mark the `a` in an anchor. A reference's
+  visible label is marked and its target never is. Two consequences are
+  asserted rather than hidden: a term split by a formatting boundary is left
+  unmarked, and a term whose fold changes byte length is left unmarked because
+  the span could no longer be mapped back without corrupting a character.
+  Message results also render their body rather than their raw source, so
+  mentions, emoji and formatting read as they do in the conversation.
 - People and Channels results come from the store with a query and a cursor.
   They used to be produced by filtering a member directory and channel list the
   handler paged into memory in full on every search request, including a
@@ -228,7 +238,7 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
   whenever the match was in the title — every `to:`/link/specific emoji/`hasmy:` modifier,
   prefix `*`, section-valued `in:`, Slack's natural month/year date forms,
   participant-accurate `with:` thread semantics, thread-specific entry scope, or
-  a highlighted exact-hit return from the result;
+  a return to the exact hit inside the opened conversation;
 - the Slack APIs retain documented compatibility deviations for relevance
   scoring, highlight markers, cursor pagination on file/combined legacy
   results, match projection detail, and full tier rate limiting;
