@@ -2802,3 +2802,69 @@ func fileDescriptionBelongsToItsUploader(t *testing.T, open opener) {
 		t.Fatalf("the file did not reach the timeline projection: %+v", page.Messages)
 	}
 }
+
+// A canvas share is written into Activity by the same transaction that grants
+// the access, so a member cannot be given a canvas without the row that tells
+// them. The two profiles reach the reachability answer differently — one joins
+// the shared visibility predicate, the other walks the grants under a lock — so
+// the contract drives both, including the state after the grant is withdrawn.
+func canvasShareReachesActivity(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	recipient := domain.UserID("U-shared-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: recipient, WorkspaceID: f.workspaceID, Email: "shared-" + f.suffix + "@example.com", Name: "recipient"}); err != nil {
+		t.Fatal(err)
+	}
+	canvas := domain.Canvas{
+		ID: domain.CanvasID("Cv-share-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Title: "Runbook", DocumentContent: `{"sections":[]}`, Version: 1,
+		CreatedAt: time.Unix(1_700_000_000, 0).UTC(), UpdatedAt: time.Unix(1_700_000_000, 0).UTC(),
+	}
+	if err := f.repository.CreateCanvas(ctx, canvas, f.event("canvas", "canvas.created", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	grant := domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(recipient), Access: "read"}
+	shareEvent := f.event("share", "canvas.access_changed", string(canvas.ID))
+	shareEvent.ActorID = f.userID
+	if err := f.repository.SetCanvasAccess(ctx, grant, shareEvent); err != nil {
+		t.Fatal(err)
+	}
+
+	query := domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}}
+	page, err := f.repository.ListActivity(ctx, f.workspaceID, recipient, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].CanvasID != canvas.ID {
+		t.Fatalf("recipient activity = %+v, want one canvas share", page.Items)
+	}
+	if !page.Items[0].SourceAvailable || page.Items[0].CanvasTitle != "Runbook" {
+		t.Fatalf("item = %+v, want it reachable and named", page.Items[0])
+	}
+
+	// The sharer is told nothing about their own share.
+	own, err := f.repository.ListActivity(ctx, f.workspaceID, f.userID, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range own.Items {
+		if item.CanvasID == canvas.ID {
+			t.Fatalf("the sharer was told about their own share: %+v", item)
+		}
+	}
+
+	// Withdrawing the grant leaves the row and removes the link: it records
+	// that the share happened, which remains true.
+	if err := f.repository.DeleteCanvasAccess(ctx, grant, f.event("unshare", "canvas.access_changed", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.repository.ListActivity(ctx, f.workspaceID, recipient, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Items) != 1 || after.Items[0].SourceAvailable {
+		t.Fatalf("activity after withdrawal = %+v, want the row kept and marked unreachable", after.Items)
+	}
+}

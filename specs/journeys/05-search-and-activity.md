@@ -182,6 +182,14 @@ Implemented evidence:
   and legacy combined `search.all` require user tokens, enforce documented
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
+- A canvas shared with a member reaches their Activity. The item is written by
+  the transaction that grants the access, so access and the news of it cannot
+  come apart, and it is written only when it is news: re-granting access someone
+  already holds says nothing, and nobody is told about their own share. The row
+  outlives the grant — it records that the share happened, which stays true —
+  and reports the source as unreachable rather than offering a link that would
+  refuse the reader. Reachability is answered by the canvas directory's own
+  visibility predicate rather than a third copy of it.
 - Following a result arrives at the message it names. Two mechanisms carry it
   and neither is obvious: the permalink's window cursor ends just after the hit,
   so the hit is the last message in the window, and the fragment focuses it

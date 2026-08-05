@@ -466,10 +466,25 @@ func (s *Store) DeleteCanvas(_ context.Context, workspace domain.WorkspaceID, id
 func (s *Store) SetCanvasAccess(_ context.Context, access domain.CanvasAccess, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.canvases[access.CanvasID]; !ok {
+	canvas, ok := s.canvases[access.CanvasID]
+	if !ok {
 		return store.ErrNotFound
 	}
-	s.canvasAccess[canvasAccessKey(access)] = access
+	key := canvasAccessKey(access)
+	_, existed := s.canvasAccess[key]
+	s.canvasAccess[key] = access
+	// A share reaches Activity only when it is news: re-granting access
+	// someone already has is a no-op to them, and an actor sharing with
+	// themselves has not been told anything. Both are the same rules the
+	// conversation-invitation item follows.
+	if !existed && access.EntityType == "user" && domain.UserID(access.EntityID) != event.ActorID {
+		id := domain.ActivityIDFor(domain.UserID(access.EntityID), "canvas_share:"+string(access.CanvasID)+":"+string(event.ID))
+		s.activityItems[id] = domain.ActivityItem{
+			ID: id, WorkspaceID: canvas.WorkspaceID, UserID: domain.UserID(access.EntityID),
+			Kinds: []domain.ActivityKind{domain.ActivityInvitation}, ActorID: event.ActorID,
+			CanvasID: access.CanvasID, OccurredAt: event.CreatedAt.UTC(),
+		}
+	}
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -5588,7 +5603,24 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = true
 			}
 		}
-		if item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+		if item.CanvasID != "" {
+			// A share stays in Activity after the grant is withdrawn, like every
+			// other item whose source became unreachable: the row records that
+			// it happened, and the reader is told they can no longer open it
+			// rather than being shown a link that would refuse them.
+			if canvas, ok := s.canvases[item.CanvasID]; ok && canvas.WorkspaceID == workspace {
+				item.CanvasTitle = canvas.Title
+				_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, user, func(visit func(string, string, string)) {
+					for _, grant := range s.canvasAccess {
+						if grant.CanvasID == canvas.ID {
+							visit(grant.EntityType, grant.EntityID, grant.Access)
+						}
+					}
+				})
+				item.SourceAvailable = allowed
+			}
+		}
+		if item.CanvasID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
 			if conversation, ok := s.conversations[item.Conversation]; ok && s.canViewActivitySourceLocked(workspace, user, conversation) {
 				item.SourceAvailable = true
 			}

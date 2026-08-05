@@ -374,7 +374,7 @@ CREATE INDEX IF NOT EXISTS thread_follows_conversation_root ON thread_follows(co
 CREATE TABLE IF NOT EXISTS activity_items (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '',
- reminder_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
+ reminder_id TEXT NOT NULL DEFAULT '', canvas_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
  read_at INTEGER NOT NULL DEFAULT 0, cleared_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS activity_items_user_time ON activity_items(workspace_id, user_id, cleared_at, occurred_at DESC, id DESC);
@@ -551,7 +551,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 141
+const schemaVersion = 142
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3146,6 +3146,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 142 {
+		// A canvas someone shared with you is Activity news, and the row has to
+		// name the canvas. It sits beside conversation_id rather than reusing
+		// it: an invitation to a channel and a share of a canvas are the same
+		// news from different objects, and one column holding either would make
+		// every reader guess which it was holding.
+		columns, err := s.tableColumns(ctx, db, "activity_items")
+		if err != nil {
+			return err
+		}
+		if !columns["canvas_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE activity_items ADD COLUMN canvas_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate activity canvas: %w", err)
+			}
+		}
+	}
 	if version < 141 {
 		// What an image is, in words. The column is nullable-free with an empty
 		// default because "nobody has described this yet" and "described as
@@ -3656,6 +3672,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 // an information_schema query; an unlisted name is a programming error, not a
 // caller's input.
 var migratableTables = []string{
+	"activity_items",
 	"calls",
 	"canvases",
 	"conversations",
@@ -10729,7 +10746,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	if !request.Valid() {
 		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
 	}
-	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
+	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.canvas_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
 		FROM activity_items a WHERE a.workspace_id = ? AND a.user_id = ?`
 	args := []any{workspace, user}
 	if request.ClearedOnly {
@@ -10764,7 +10781,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	for rows.Next() {
 		var item domain.ActivityItem
 		var occurredAt, readAt, clearedAt int64
-		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.CanvasID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
 			rows.Close()
 			return domain.ActivityPage{}, err
 		}
@@ -10830,7 +10847,24 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 				}
 			}
 		}
-		if item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+		if item.CanvasID != "" {
+			// The row survives the grant being withdrawn, like every other item
+			// whose source became unreachable: it records that the share
+			// happened, and the reader is told they can no longer open it
+			// rather than being offered a link that would refuse them.
+			canvas, canvasErr := s.GetCanvas(ctx, workspace, item.CanvasID)
+			if canvasErr == nil {
+				item.CanvasTitle = canvas.Title
+				visible, accessErr := s.canvasVisible(ctx, workspace, user, item.CanvasID)
+				if accessErr != nil {
+					return domain.ActivityPage{}, accessErr
+				}
+				item.SourceAvailable = visible
+			} else if !errors.Is(canvasErr, store.ErrNotFound) {
+				return domain.ActivityPage{}, canvasErr
+			}
+		}
+		if item.CanvasID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
 			visible, visibilityErr := s.activitySourceVisible(ctx, workspace, user, item.Conversation)
 			if visibilityErr != nil {
 				return domain.ActivityPage{}, visibilityErr
@@ -10839,6 +10873,20 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 		}
 	}
 	return page, nil
+}
+
+// canvasVisible asks the directory's own rule about one canvas. It is the same
+// predicate the listing and the search share, so an Activity row cannot offer a
+// link the directory would withhold — writing a third copy of that rule here is
+// exactly the drift the shared constant exists to prevent.
+func (s *Store) canvasVisible(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID) (bool, error) {
+	var visible int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM canvases d WHERE d.id = ? AND d.workspace_id = ? AND `+visibleCanvasPredicate,
+		id, workspace, user, user, user, user).Scan(&visible)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return visible == 1, err
 }
 
 func (s *Store) activitySourceVisible(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (bool, error) {
@@ -13001,9 +13049,35 @@ func (s *Store) SetCanvasAccess(ctx context.Context, access domain.CanvasAccess,
 		return err
 	}
 	defer tx.Rollback()
+	var workspace string
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM canvases WHERE id = ?`, access.CanvasID).Scan(&workspace); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM canvas_access WHERE canvas_id = ? AND entity_type = ? AND entity_id = ?`, access.CanvasID, access.EntityType, access.EntityID).Scan(&existing); err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO canvas_access (canvas_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?) ON CONFLICT(canvas_id, entity_type, entity_id) DO UPDATE SET access_level = excluded.access_level`, access.CanvasID, access.EntityType, access.EntityID, access.Access)
 	if err != nil {
 		return classify(err)
+	}
+	// A share reaches Activity only when it is news: re-granting access someone
+	// already has tells them nothing, and an actor sharing with themselves has
+	// not been told anything either. The same two rules the conversation
+	// invitation follows, in the same transaction as the grant so a member
+	// cannot be given access without the row that says so.
+	if existing == 0 && access.EntityType == "user" && domain.UserID(access.EntityID) != event.ActorID {
+		id := domain.ActivityIDFor(domain.UserID(access.EntityID), "canvas_share:"+string(access.CanvasID)+":"+string(event.ID))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, canvas_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			id, workspace, access.EntityID, event.ActorID, access.CanvasID, event.CreatedAt.UTC().UnixNano()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {
+			return err
+		}
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err

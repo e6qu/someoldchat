@@ -24,6 +24,8 @@ message ActivityItem {
   Message message = 13;
   LaterReminder reminder = 14;
   bool source_available = 15;
+  string canvas_id = 16;
+  string canvas_title = 17;
 }
 
 message ActivityRequest {

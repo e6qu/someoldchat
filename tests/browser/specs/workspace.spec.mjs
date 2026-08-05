@@ -3093,6 +3093,39 @@ test('[FILE-01 A11Y-01 A11Y-02] an uploaded image is shown and its uploader can 
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// Sharing a canvas is news, and Activity is where a member finds out. The share
+// is made by an installed app rather than by this session, because the
+// development API token and the browser session are the same member and nobody
+// is told about their own share — a self-share would produce nothing and prove
+// nothing.
+test('[ACTIVITY-01 CANVAS-01 A11Y-01] a canvas shared with you appears in Activity', async ({ page, context, request }) => {
+  await signIn(context);
+  const bot = await installActivityBot(page, request, ['canvases:write']);
+  const title = `Shared runbook ${Date.now()}`;
+  const created = await request.post('/api/canvases.create', {
+    headers: { authorization: `Bearer ${bot.token}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: { title, document_content: JSON.stringify({ type: 'markdown', markdown: 'steps' }) },
+  });
+  const canvas = await created.json();
+  expect(canvas.ok, JSON.stringify(canvas)).toBe(true);
+
+  const shared = await request.post('/api/canvases.access.set', {
+    headers: { authorization: `Bearer ${bot.token}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: { canvas_id: canvas.canvas_id, access_level: 'read', user_ids: 'Udev' },
+  });
+  expect((await shared.json()).ok, 'share').toBe(true);
+
+  await page.goto('/app/activity?channel=Cdev');
+  const row = page.locator('.activity-row', { hasText: title });
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText('Shared');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // The row links to the canvas it names.
+  await row.locator('[data-activity-source]').click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
