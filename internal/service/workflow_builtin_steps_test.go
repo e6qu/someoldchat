@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -247,6 +248,74 @@ func TestDelayStepDurationIsBounded(t *testing.T) {
 		candidate.Steps = steps
 		if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", candidate, workflow.Version, true); err == nil {
 			t.Errorf("a %s delay was accepted", name)
+		}
+	}
+}
+
+// Slack's "wait until a date" step. It reuses the delay machinery — the run
+// parks on a durable wake instant and a worker resumes it — and differs only in
+// how the instant is arrived at: a fixed moment rather than one measured from
+// when the run reached the step.
+func TestWaitUntilStepParksUntilTheNamedInstant(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	at := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	steps := `[
+		{"id":"hold","type":"wait_until","wait_until":{"unix_seconds":` + strconv.FormatInt(at.Unix(), 10) + `}},
+		{"id":"say","type":"message","message":{"conversation":"C1","text":"the day arrived"}}
+	]`
+	run := publishAndRun(t, messages, workflow, steps, `{}`, "wait-until")
+	if run.Status != domain.WorkflowRunRunning {
+		t.Fatalf("run status = %q, want it parked until the named instant", run.Status)
+	}
+	if resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", at.Add(-time.Minute), 10); err != nil || resumed != 0 {
+		t.Fatalf("resumed = %d err = %v, want nothing due a minute early", resumed, err)
+	}
+	if resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", at, 10); err != nil || resumed != 1 {
+		t.Fatalf("resumed = %d err = %v, want the wait due at the instant it names", resumed, err)
+	}
+	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range page.Messages {
+		if message.Text == "the day arrived" {
+			return
+		}
+	}
+	t.Fatalf("the step after the wait never ran: %+v", page.Messages)
+}
+
+// A date already past is not an error and must not park a run indefinitely: the
+// wait it describes has been satisfied, so the next sweep resumes it.
+func TestWaitUntilAPastInstantIsAlreadyDue(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	past := time.Now().UTC().Add(-48 * time.Hour).Unix()
+	steps := `[{"id":"hold","type":"wait_until","wait_until":{"unix_seconds":` + strconv.FormatInt(past, 10) + `}}]`
+	run := publishAndRun(t, messages, workflow, steps, `{}`, "wait-past")
+	if resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", time.Now().UTC(), 10); err != nil || resumed != 1 {
+		t.Fatalf("resumed = %d err = %v, want a past instant to be due at once", resumed, err)
+	}
+	after, err := messages.GetWorkflowRun(ctx, "T1", "U1", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("run status = %q, want completed", after.Status)
+	}
+}
+
+func TestWaitUntilStepDefinitionIsValidated(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	for name, steps := range map[string]string{
+		"no instant":     `[{"id":"a","type":"wait_until"}]`,
+		"zero":           `[{"id":"a","type":"wait_until","wait_until":{"unix_seconds":0}}]`,
+		"negative":       `[{"id":"a","type":"wait_until","wait_until":{"unix_seconds":-5}}]`,
+		"a function too": `[{"id":"a","type":"wait_until","function_id":"triage","wait_until":{"unix_seconds":1800000000}}]`,
+	} {
+		candidate := workflow
+		candidate.Steps = steps
+		if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", candidate, workflow.Version, true); err == nil {
+			t.Errorf("%s was accepted as a wait-until step", name)
 		}
 	}
 }
