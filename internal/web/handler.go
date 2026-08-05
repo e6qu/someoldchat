@@ -6476,7 +6476,21 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		if slices.Contains(item.Kinds, domain.ActivityInvitation) && item.SourceAvailable {
+		if item.CanvasID != "" && item.SourceAvailable {
+			// A canvas share is an invitation from a different object, so it
+			// shares the kind and differs only in what it names and where it
+			// goes. The title comes from the read rather than a second lookup,
+			// because the store already resolved it under the access rule that
+			// decided whether this row is reachable at all.
+			title := strings.TrimSpace(item.CanvasTitle)
+			if title == "" {
+				title = "a canvas"
+			}
+			view.Text = template.HTML("Shared " + template.HTMLEscapeString(title) + " with you.")
+			view.SourceURL = "/app/canvases/" + url.PathEscape(string(item.CanvasID))
+			view.ChannelName = title
+		}
+		if item.CanvasID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) && item.SourceAvailable {
 			conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation)
 			if conversationErr == nil {
 				name := conversationName(conversation)

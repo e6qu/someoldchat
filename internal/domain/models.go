@@ -1229,20 +1229,29 @@ func (layout ActivityLayout) Valid() bool {
 // is hydrated only after authorization; SourceAvailable distinguishes a
 // deleted/inaccessible source from a malformed empty message.
 type ActivityItem struct {
-	ID              ActivityID
-	WorkspaceID     WorkspaceID
-	UserID          UserID
-	Kinds           []ActivityKind
-	ActorID         UserID
-	Conversation    ConversationID
-	MessageID       MessageID
-	ReminderID      LaterReminderID
-	ReactionName    string
-	OccurredAt      time.Time
-	ReadAt          time.Time
-	ClearedAt       time.Time
-	Message         Message
-	Reminder        LaterReminder
+	ID           ActivityID
+	WorkspaceID  WorkspaceID
+	UserID       UserID
+	Kinds        []ActivityKind
+	ActorID      UserID
+	Conversation ConversationID
+	// CanvasID is set when the item is a canvas someone shared with this
+	// member. It sits beside Conversation rather than replacing it because an
+	// invitation to a channel and a share of a canvas are the same news — you
+	// have been given access to something — arriving from different objects,
+	// and Slack files both under invitations.
+	CanvasID     CanvasID
+	MessageID    MessageID
+	ReminderID   LaterReminderID
+	ReactionName string
+	OccurredAt   time.Time
+	ReadAt       time.Time
+	ClearedAt    time.Time
+	Message      Message
+	Reminder     LaterReminder
+	// CanvasTitle is resolved when the item is read, like Message and Reminder,
+	// so a row can name what was shared without the reader following the link.
+	CanvasTitle     string
 	SourceAvailable bool
 }
 

@@ -38,6 +38,8 @@ type ActivityItem struct {
 	Message         *Message               `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
 	Reminder        *LaterReminder         `protobuf:"bytes,14,opt,name=reminder,proto3" json:"reminder,omitempty"`
 	SourceAvailable bool                   `protobuf:"varint,15,opt,name=source_available,json=sourceAvailable,proto3" json:"source_available,omitempty"`
+	CanvasId        string                 `protobuf:"bytes,16,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
+	CanvasTitle     string                 `protobuf:"bytes,17,opt,name=canvas_title,json=canvasTitle,proto3" json:"canvas_title,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -175,6 +177,20 @@ func (x *ActivityItem) GetSourceAvailable() bool {
 		return x.SourceAvailable
 	}
 	return false
+}
+
+func (x *ActivityItem) GetCanvasId() string {
+	if x != nil {
+		return x.CanvasId
+	}
+	return ""
+}
+
+func (x *ActivityItem) GetCanvasTitle() string {
+	if x != nil {
+		return x.CanvasTitle
+	}
+	return ""
 }
 
 type ActivityRequest struct {
@@ -1209,7 +1225,7 @@ var File_sameoldchat_chat_v1_activity_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\x95\x04\n" +
+	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\xd5\x04\n" +
 	"\fActivityItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -1230,7 +1246,9 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"cleared_at\x18\f \x01(\x03R\tclearedAt\x126\n" +
 	"\amessage\x18\r \x01(\v2\x1c.sameoldchat.chat.v1.MessageR\amessage\x12>\n" +
 	"\breminder\x18\x0e \x01(\v2\".sameoldchat.chat.v1.LaterReminderR\breminder\x12)\n" +
-	"\x10source_available\x18\x0f \x01(\bR\x0fsourceAvailable\"\xd5\x01\n" +
+	"\x10source_available\x18\x0f \x01(\bR\x0fsourceAvailable\x12\x1b\n" +
+	"\tcanvas_id\x18\x10 \x01(\tR\bcanvasId\x12!\n" +
+	"\fcanvas_title\x18\x11 \x01(\tR\vcanvasTitle\"\xd5\x01\n" +
 	"\x0fActivityRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +

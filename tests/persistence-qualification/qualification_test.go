@@ -122,6 +122,7 @@ func runQualification(t *testing.T, open opener) {
 		{"canvas search folds text and stops at the reader's access", canvasSearchFoldsTextAndStopsAtAccess},
 		{"directory search folds names on every profile", directorySearchFoldsNamesOnEveryProfile},
 		{"a file description survives and belongs to its uploader", fileDescriptionBelongsToItsUploader},
+		{"a canvas share reaches Activity on every profile", canvasShareReachesActivity},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

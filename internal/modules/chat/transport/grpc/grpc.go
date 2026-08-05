@@ -9746,6 +9746,7 @@ func encodeProtoActivityItem(value domain.ActivityItem) *chatv1.ActivityItem {
 		MessageId: string(value.MessageID), ReminderId: string(value.ReminderID),
 		ReactionName: value.ReactionName, OccurredAt: value.OccurredAt.UTC().UnixNano(),
 		SourceAvailable: value.SourceAvailable,
+		CanvasId:        string(value.CanvasID), CanvasTitle: value.CanvasTitle,
 	}
 	if !value.ReadAt.IsZero() {
 		result.ReadAt = value.ReadAt.UTC().UnixNano()
@@ -9772,6 +9773,7 @@ func decodeProtoActivityItem(value *chatv1.ActivityItem) (domain.ActivityItem, e
 		Conversation: domain.ConversationID(value.GetConversationId()), MessageID: domain.MessageID(value.GetMessageId()),
 		ReminderID: domain.LaterReminderID(value.GetReminderId()), ReactionName: value.GetReactionName(),
 		OccurredAt: time.Unix(0, value.GetOccurredAt()).UTC(), SourceAvailable: value.GetSourceAvailable(),
+		CanvasID: domain.CanvasID(value.GetCanvasId()), CanvasTitle: value.GetCanvasTitle(),
 	}
 	for _, encoded := range value.GetKinds() {
 		kind := domain.ActivityKind(encoded)

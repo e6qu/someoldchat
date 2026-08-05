@@ -219,3 +219,68 @@ func TestCanvasSearchRefusesAModifierItCannotHonour(t *testing.T) {
 		t.Fatalf("empty canvas search = %v, want ErrInvalidSearch", err)
 	}
 }
+
+// Sharing a canvas is news, and Activity is where a member finds out. The two
+// silences matter as much as the item: re-granting access someone already has
+// tells them nothing, and sharing with yourself is not being told anything.
+func TestSharingACanvasReachesTheOtherMembersActivity(t *testing.T) {
+	ctx, _, messages := canvasWorld(t)
+	canvas, err := messages.CreateCanvas(ctx, "T1", "U1", "Runbook", `{"type":"markdown","markdown":"steps"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := messages.Activity(ctx, "T1", "U2", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].CanvasID != canvas.ID {
+		t.Fatalf("activity = %+v, want one canvas share", page.Items)
+	}
+	if !page.Items[0].SourceAvailable || page.Items[0].CanvasTitle != "Runbook" {
+		t.Fatalf("item = %+v, want it reachable and named", page.Items[0])
+	}
+
+	// Re-granting is not news.
+	if err := messages.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "write", nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := messages.Activity(ctx, "T1", "U2", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil || len(again.Items) != 1 {
+		t.Fatalf("activity after re-granting = %+v err = %v, want still one", again.Items, err)
+	}
+
+	// The owner is told nothing about their own share.
+	own, err := messages.Activity(ctx, "T1", "U1", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil || len(own.Items) != 0 {
+		t.Fatalf("the sharer's activity = %+v err = %v, want none", own.Items, err)
+	}
+}
+
+// The row survives the grant being withdrawn, and says the source is gone
+// rather than offering a link that would refuse the reader.
+func TestAWithdrawnCanvasShareStaysInActivityAsUnavailable(t *testing.T) {
+	ctx, _, messages := canvasWorld(t)
+	canvas, err := messages.CreateCanvas(ctx, "T1", "U1", "Runbook", `{"type":"markdown","markdown":"steps"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DeleteCanvasAccess(ctx, "T1", "U1", canvas.ID, nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := messages.Activity(ctx, "T1", "U2", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("activity = %+v, want the row to survive", page.Items)
+	}
+	if page.Items[0].SourceAvailable {
+		t.Fatalf("item = %+v, want it marked unreachable", page.Items[0])
+	}
+}
