@@ -24,6 +24,8 @@ const (
 	InteractionsService_ListFollowedThreads_FullMethodName          = "/sameoldchat.chat.v1.InteractionsService/ListFollowedThreads"
 	InteractionsService_RecordActivity_FullMethodName               = "/sameoldchat.chat.v1.InteractionsService/RecordActivity"
 	InteractionsService_ResumeWorkflowDelays_FullMethodName         = "/sameoldchat.chat.v1.InteractionsService/ResumeWorkflowDelays"
+	InteractionsService_SetAssistantThread_FullMethodName           = "/sameoldchat.chat.v1.InteractionsService/SetAssistantThread"
+	InteractionsService_GetAssistantThread_FullMethodName           = "/sameoldchat.chat.v1.InteractionsService/GetAssistantThread"
 	InteractionsService_GetReadCursor_FullMethodName                = "/sameoldchat.chat.v1.InteractionsService/GetReadCursor"
 	InteractionsService_ThreadSummaries_FullMethodName              = "/sameoldchat.chat.v1.InteractionsService/ThreadSummaries"
 	InteractionsService_MessageAt_FullMethodName                    = "/sameoldchat.chat.v1.InteractionsService/MessageAt"
@@ -49,6 +51,8 @@ type InteractionsServiceClient interface {
 	ListFollowedThreads(ctx context.Context, in *FollowedThreadsRequest, opts ...grpc.CallOption) (*FollowedThreadPage, error)
 	RecordActivity(ctx context.Context, in *RecordActivityRequest, opts ...grpc.CallOption) (*RecordActivityResponse, error)
 	ResumeWorkflowDelays(ctx context.Context, in *ResumeWorkflowDelaysRequest, opts ...grpc.CallOption) (*ResumeWorkflowDelaysResponse, error)
+	SetAssistantThread(ctx context.Context, in *SetAssistantThreadRequest, opts ...grpc.CallOption) (*SetAssistantThreadResponse, error)
+	GetAssistantThread(ctx context.Context, in *AssistantThreadRequest, opts ...grpc.CallOption) (*AssistantThread, error)
 	// Named GetReadCursor because an rpc named ReadCursor would shadow the
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(ctx context.Context, in *ReadCursorRequest, opts ...grpc.CallOption) (*ReadCursor, error)
@@ -119,6 +123,26 @@ func (c *interactionsServiceClient) ResumeWorkflowDelays(ctx context.Context, in
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ResumeWorkflowDelaysResponse)
 	err := c.cc.Invoke(ctx, InteractionsService_ResumeWorkflowDelays_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) SetAssistantThread(ctx context.Context, in *SetAssistantThreadRequest, opts ...grpc.CallOption) (*SetAssistantThreadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetAssistantThreadResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_SetAssistantThread_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) GetAssistantThread(ctx context.Context, in *AssistantThreadRequest, opts ...grpc.CallOption) (*AssistantThread, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AssistantThread)
+	err := c.cc.Invoke(ctx, InteractionsService_GetAssistantThread_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -274,6 +298,8 @@ type InteractionsServiceServer interface {
 	ListFollowedThreads(context.Context, *FollowedThreadsRequest) (*FollowedThreadPage, error)
 	RecordActivity(context.Context, *RecordActivityRequest) (*RecordActivityResponse, error)
 	ResumeWorkflowDelays(context.Context, *ResumeWorkflowDelaysRequest) (*ResumeWorkflowDelaysResponse, error)
+	SetAssistantThread(context.Context, *SetAssistantThreadRequest) (*SetAssistantThreadResponse, error)
+	GetAssistantThread(context.Context, *AssistantThreadRequest) (*AssistantThread, error)
 	// Named GetReadCursor because an rpc named ReadCursor would shadow the
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error)
@@ -313,6 +339,12 @@ func (UnimplementedInteractionsServiceServer) RecordActivity(context.Context, *R
 }
 func (UnimplementedInteractionsServiceServer) ResumeWorkflowDelays(context.Context, *ResumeWorkflowDelaysRequest) (*ResumeWorkflowDelaysResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResumeWorkflowDelays not implemented")
+}
+func (UnimplementedInteractionsServiceServer) SetAssistantThread(context.Context, *SetAssistantThreadRequest) (*SetAssistantThreadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetAssistantThread not implemented")
+}
+func (UnimplementedInteractionsServiceServer) GetAssistantThread(context.Context, *AssistantThreadRequest) (*AssistantThread, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAssistantThread not implemented")
 }
 func (UnimplementedInteractionsServiceServer) GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetReadCursor not implemented")
@@ -462,6 +494,42 @@ func _InteractionsService_ResumeWorkflowDelays_Handler(srv interface{}, ctx cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(InteractionsServiceServer).ResumeWorkflowDelays(ctx, req.(*ResumeWorkflowDelaysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_SetAssistantThread_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetAssistantThreadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).SetAssistantThread(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_SetAssistantThread_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).SetAssistantThread(ctx, req.(*SetAssistantThreadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_GetAssistantThread_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssistantThreadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).GetAssistantThread(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_GetAssistantThread_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).GetAssistantThread(ctx, req.(*AssistantThreadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -744,6 +812,14 @@ var InteractionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResumeWorkflowDelays",
 			Handler:    _InteractionsService_ResumeWorkflowDelays_Handler,
+		},
+		{
+			MethodName: "SetAssistantThread",
+			Handler:    _InteractionsService_SetAssistantThread_Handler,
+		},
+		{
+			MethodName: "GetAssistantThread",
+			Handler:    _InteractionsService_GetAssistantThread_Handler,
 		},
 		{
 			MethodName: "GetReadCursor",

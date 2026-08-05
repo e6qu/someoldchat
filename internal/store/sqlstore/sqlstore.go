@@ -186,6 +186,12 @@ CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, app_id TEXT NOT NULL DEFA
 CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> '';
 CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workflow_run_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), function_id TEXT NOT NULL DEFAULT '', edit_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', step_name TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', resume_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS workflow_steps_resume ON workflow_steps(status, resume_at);
+CREATE TABLE IF NOT EXISTS assistant_threads (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+ thread_ts TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
+ prompts_title TEXT NOT NULL DEFAULT '', prompts TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL,
+ PRIMARY KEY (workspace_id, conversation_id, thread_ts)
+);
 CREATE TABLE IF NOT EXISTS workflows (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
  owner_id TEXT NOT NULL REFERENCES users(id), callback_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
@@ -538,7 +544,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 136
+const schemaVersion = 137
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3118,6 +3124,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE rtm_connections ADD COLUMN cursor INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return fmt.Errorf("migrate RTM connection cursor: %w", err)
 			}
+		}
+	}
+	if version < 137 {
+		// Assistant apps set a title, a transient status and suggested prompts
+		// on a thread. None of it is content, so it lives beside the thread
+		// rather than in it.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS assistant_threads (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+			thread_ts TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
+			prompts_title TEXT NOT NULL DEFAULT '', prompts TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
+		)`); err != nil {
+			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
 	if version < 136 {
@@ -6331,6 +6350,57 @@ const workflowStepColumns = `id, workflow_run_id, workspace_id, app_id, user_id,
 // DueWorkflowDelays lists the delay steps that are due. It reads only waiting
 // steps carrying a wake time, so a step waiting on a person — which has none —
 // is never mistaken for one waiting on the clock.
+// SetAssistantThread upserts one field. The row is created on first write so an
+// app may set a status before anything else exists for the thread.
+func (s *Store) SetAssistantThread(ctx context.Context, value domain.AssistantThread, field domain.AssistantThreadField, event events.Event) error {
+	if !field.Valid() || value.WorkspaceID == "" || value.Conversation == "" || value.ThreadTimestamp == "" {
+		return store.InvalidArgument("assistant thread state requires a workspace, conversation, thread and field")
+	}
+	prompts, err := json.Marshal(value.Prompts)
+	if err != nil {
+		return err
+	}
+	column := map[domain.AssistantThreadField]string{
+		domain.AssistantThreadTitle:   "title = excluded.title",
+		domain.AssistantThreadStatus:  "status = excluded.status",
+		domain.AssistantThreadPrompts: "prompts_title = excluded.prompts_title, prompts = excluded.prompts",
+	}[field]
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_threads(workspace_id, conversation_id, thread_ts, title, status, prompts_title, prompts, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id, conversation_id, thread_ts) DO UPDATE SET `+column+`, updated_at = excluded.updated_at`,
+		value.WorkspaceID, value.Conversation, string(value.ThreadTimestamp), value.Title, value.Status, value.PromptsTitle, string(prompts), value.UpdatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetAssistantThread(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.AssistantThread, error) {
+	value := domain.AssistantThread{WorkspaceID: workspace, Conversation: conversation, ThreadTimestamp: thread}
+	var prompts string
+	var updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT title, status, prompts_title, prompts, updated_at FROM assistant_threads WHERE workspace_id = ? AND conversation_id = ? AND thread_ts = ?`,
+		workspace, conversation, string(thread)).Scan(&value.Title, &value.Status, &value.PromptsTitle, &prompts, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.AssistantThread{}, store.ErrNotFound
+	}
+	if err != nil {
+		return domain.AssistantThread{}, err
+	}
+	if err := json.Unmarshal([]byte(prompts), &value.Prompts); err != nil {
+		return domain.AssistantThread{}, err
+	}
+	value.UpdatedAt = time.Unix(0, updated).UTC()
+	return value, nil
+}
+
 func (s *Store) DueWorkflowDelays(ctx context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.WorkflowStep, error) {
 	if limit <= 0 {
 		return nil, store.InvalidArgument("workflow delay limit must be positive")

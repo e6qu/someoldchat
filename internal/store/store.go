@@ -618,6 +618,11 @@ type Store interface {
 	// workspace of "" asks across every workspace, which is what the global
 	// worker queue does.
 	DueWorkflowDelays(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.WorkflowStep, error)
+	// SetAssistantThread writes exactly one field of a thread's assistant
+	// state. The field is explicit because each API method sets one, and a
+	// whole-record write would clear whatever the caller left empty.
+	SetAssistantThread(context.Context, domain.AssistantThread, domain.AssistantThreadField, events.Event) error
+	GetAssistantThread(context.Context, domain.WorkspaceID, domain.ConversationID, domain.MessageTimestamp) (domain.AssistantThread, error)
 	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
 	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)

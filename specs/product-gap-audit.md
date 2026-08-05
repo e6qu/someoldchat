@@ -142,14 +142,14 @@ implementation MUST NOT narrow the target.
 
 ## Web API and app-platform gaps
 
-The 62 unimplemented current Web API methods are, as reported by
+The 59 unimplemented current Web API methods are, as reported by
 `make compatibility-report` — which is the authority, not this table:
 
 | Namespace | Missing | Boundary |
 | --- | ---: | --- |
 | `admin.*` | 47 | Enterprise analytics, policies, roles, bulk conversation operations, org sessions, and org-wide app/function/workflow administration |
 | `apps.*` | 5 | External-auth get/delete, app activity history, app icons, and user connection state |
-| `assistant.*` | 5 | Assistant search context and thread title/status/suggested-prompt presentation |
+| `assistant.*` | 2 | Assistant search context. Thread title, status and suggested prompts are implemented and rendered in the thread pane |
 | `team.*` | 3 | Billing and external-team administration |
 | `functions.*` | 1 | Workflow-step response export |
 | `users.*` | 1 | Discoverable contacts |
