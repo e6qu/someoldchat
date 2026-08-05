@@ -1378,6 +1378,27 @@ func (r Remote) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoCanvasPage(out)
 }
 
+func (r Remote) CanvasRevisions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasRevisionPage, error) {
+	out, err := r.canvases.CanvasRevisions(ctx, &chatv1.CanvasRevisionsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id),
+		Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.CanvasRevisionPage{}, err
+	}
+	return decodeProtoCanvasRevisionPage(out)
+}
+
+func (r Remote) RestoreCanvasRevision(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64) (domain.Canvas, error) {
+	out, err := r.canvases.RestoreCanvasRevision(ctx, &chatv1.RestoreCanvasRevisionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Version: version,
+	})
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	return decodeProtoCanvas(out)
+}
+
 func (r Remote) SearchCanvases(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.CanvasSearchRequest) (domain.CanvasPage, error) {
 	out, err := r.canvases.SearchCanvases(ctx, &chatv1.SearchCanvasesRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Query: request.Query,
@@ -4542,6 +4563,60 @@ func (s *Server) GetCanvasAccess(ctx context.Context, input *chatv1.CanvasReques
 		return nil, mapError(err)
 	}
 	return &chatv1.CanvasAccessResponse{CanvasId: string(value.CanvasID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}, nil
+}
+
+func (s *Server) CanvasRevisions(ctx context.Context, input *chatv1.CanvasRevisionsRequest) (*chatv1.CanvasRevisionPage, error) {
+	value, err := s.implementation.CanvasRevisions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvasRevisionPage(value), nil
+}
+
+func (s *Server) RestoreCanvasRevision(ctx context.Context, input *chatv1.RestoreCanvasRevisionRequest) (*chatv1.Canvas, error) {
+	value, err := s.implementation.RestoreCanvasRevision(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetVersion())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvas(value), nil
+}
+
+func encodeProtoCanvasRevision(value domain.CanvasRevision) *chatv1.CanvasRevision {
+	return &chatv1.CanvasRevision{
+		CanvasId: string(value.CanvasID), WorkspaceId: string(value.WorkspaceID), Version: value.Version,
+		Title: value.Title, DocumentContent: value.DocumentContent, EditedBy: string(value.EditedBy),
+		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+	}
+}
+
+func decodeProtoCanvasRevision(value *chatv1.CanvasRevision) domain.CanvasRevision {
+	if value == nil {
+		return domain.CanvasRevision{}
+	}
+	return domain.CanvasRevision{
+		CanvasID: domain.CanvasID(value.GetCanvasId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		Version: value.GetVersion(), Title: value.GetTitle(), DocumentContent: value.GetDocumentContent(),
+		EditedBy: domain.UserID(value.GetEditedBy()), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+	}
+}
+
+func encodeProtoCanvasRevisionPage(value domain.CanvasRevisionPage) *chatv1.CanvasRevisionPage {
+	revisions := make([]*chatv1.CanvasRevision, 0, len(value.Revisions))
+	for _, revision := range value.Revisions {
+		revisions = append(revisions, encodeProtoCanvasRevision(revision))
+	}
+	return &chatv1.CanvasRevisionPage{Revisions: revisions, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoCanvasRevisionPage(value *chatv1.CanvasRevisionPage) (domain.CanvasRevisionPage, error) {
+	if value == nil {
+		return domain.CanvasRevisionPage{}, errors.New("typed canvas revision page is incomplete")
+	}
+	revisions := make([]domain.CanvasRevision, 0, len(value.GetRevisions()))
+	for _, revision := range value.GetRevisions() {
+		revisions = append(revisions, decodeProtoCanvasRevision(revision))
+	}
+	return domain.CanvasRevisionPage{Revisions: revisions, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
 
 func (s *Server) SearchCanvases(ctx context.Context, input *chatv1.SearchCanvasesRequest) (*chatv1.CanvasPage, error) {

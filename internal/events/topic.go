@@ -343,6 +343,7 @@ var topicRules = []topicRule{
 	{topic: "huddle.ended", note: "not pinned: Slack documents no huddle event"},
 	{topic: "canvas.created", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot"},
+	{topic: "canvas.restored", note: "first-party: restoring a revision is an ordinary edit with its own name, so a reader can tell a rewind from a rewrite; canvases postdate the snapshot and Slack publishes no event for either"},
 	{topic: "canvas.deleted", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.create_reverted", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.access_set", note: "not pinned: canvases postdate the snapshot"},

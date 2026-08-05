@@ -154,6 +154,18 @@ for later steps and conditions to read.
 
 ## Evidence
 
+- A canvas keeps the revision each edit replaced, written in the same
+  transaction as the edit so a canvas cannot change without the record of what
+  it was. A revision records the state it *superseded* rather than the one that
+  arrived, which is what lets the history be read backwards; it is numbered by
+  the version the canvas held while that content was current, so restoring
+  revision 3 puts revision 3's content back rather than making every reader
+  subtract one. Restoring is an ordinary edit — the current content becomes a
+  revision of its own, so restoring the wrong one is itself undoable and the
+  version keeps counting forward. History is readable exactly when the canvas
+  is, by the canvas's own visibility rule rather than a second one, and a
+  deleted canvas takes its history with it. The count is bounded, and the
+  oldest rows are dropped by the write that creates one rather than by a worker.
 - A list item carries an assignee and a due date as columns of their own rather
   than cells inside the free-form fields, because the product asks both
   questions itself — who is this for, is it late — and a value buried in JSON

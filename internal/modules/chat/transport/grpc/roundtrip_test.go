@@ -348,6 +348,8 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
 		},
+		"CanvasRevision":     {sample: &domain.CanvasRevision{}, through: throughInfallible(encodeProtoCanvasRevision, decodeProtoCanvasRevision)},
+		"CanvasRevisionPage": {sample: &domain.CanvasRevisionPage{}, through: through(encodeProtoCanvasRevisionPage, decodeProtoCanvasRevisionPage)},
 		"ListItemSummary": {
 			sample:  &domain.ListItemSummary{},
 			through: throughInfallible(encodeProtoListItemSummary, decodeProtoListItemSummary),

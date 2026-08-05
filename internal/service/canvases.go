@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -312,6 +313,57 @@ func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.W
 		result = append(result, section)
 	}
 	return result, nil
+}
+
+// CanvasRevisions reads what a canvas said before, newest first. Read access is
+// enough: a member who may read a canvas may read what it used to say, because
+// the history is the same document at an earlier moment and withholding it
+// would be withholding content they can already see the successor of.
+func (m Messages) CanvasRevisions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasRevisionPage, error) {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+		return domain.CanvasRevisionPage{}, err
+	}
+	return m.Store.ListCanvasRevisions(ctx, workspaceID, userID, id, request)
+}
+
+// RestoreCanvasRevision puts an earlier revision back. It is an ordinary edit
+// rather than a rewind: the current content becomes a revision of its own, so
+// restoring the wrong one is itself undoable, and the version keeps counting
+// forward. A history you can fall out of is worse than none.
+func (m Messages) RestoreCanvasRevision(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64) (domain.Canvas, error) {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessWrite); err != nil {
+		return domain.Canvas{}, err
+	}
+	page, err := m.Store.ListCanvasRevisions(ctx, workspaceID, userID, id, domain.PageRequest{Limit: domain.CanvasRevisionLimit})
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	var wanted domain.CanvasRevision
+	for _, revision := range page.Revisions {
+		if revision.Version == version {
+			wanted = revision
+			break
+		}
+	}
+	if wanted.CanvasID == "" {
+		return domain.Canvas{}, ErrInvalidCanvas
+	}
+	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	canvas.Title = wanted.Title
+	canvas.DocumentContent = wanted.DocumentContent
+	canvas.Version++
+	canvas.UpdatedAt = time.Now().UTC()
+	event, err := canvasEvent(workspaceID, userID, "canvas.restored", id, canvas.UpdatedAt, events.String("restored_version", strconv.FormatInt(version, 10)))
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {
+		return domain.Canvas{}, err
+	}
+	return canvas, nil
 }
 
 // SearchCanvases answers the Canvases tab. It reuses the one query parser every

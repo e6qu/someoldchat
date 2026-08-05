@@ -3082,3 +3082,83 @@ func searchModifiersMeanTheSame(t *testing.T, open opener) {
 		t.Fatalf("has:link = %+v, want only the message carrying a URL", links.Messages)
 	}
 }
+
+// A revision records the state it replaced, not the one that arrived. That is
+// the whole difference between a history you can read backwards and a log of
+// what happened, and the two profiles build it differently — one reads the row
+// before updating it, the other copies the value it is about to overwrite — so
+// both are driven through the same sequence.
+func canvasRevisionsRecordWhatWasReplaced(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	canvas := domain.Canvas{
+		ID: domain.CanvasID("Cv-history-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Title: "First", DocumentContent: `{"sections":[{"id":"s1","type":"markdown","text":"first body"}]}`,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.repository.CreateCanvas(ctx, canvas, f.event("canvas", "canvas.created", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	// A canvas nobody has edited has no history, rather than one row saying it
+	// has always said what it says.
+	page := domain.PageRequest{Limit: 20}
+	empty, err := f.repository.ListCanvasRevisions(ctx, f.workspaceID, f.userID, canvas.ID, page)
+	if err != nil || len(empty.Revisions) != 0 {
+		t.Fatalf("history before any edit = %+v err = %v, want none", empty.Revisions, err)
+	}
+
+	for index, edit := range []struct{ title, body string }{
+		{"Second", "second body"},
+		{"Third", "third body"},
+	} {
+		canvas.Title = edit.title
+		canvas.DocumentContent = `{"sections":[{"id":"s1","type":"markdown","text":"` + edit.body + `"}]}`
+		canvas.Version = int64(index) + 2
+		canvas.UpdatedAt = now.Add(time.Duration(index+1) * time.Minute)
+		edited := f.event("edit-"+edit.title, "canvas.updated", string(canvas.ID))
+		edited.ActorID = f.userID
+		if err := f.repository.UpdateCanvas(ctx, canvas, edited); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	history, err := f.repository.ListCanvasRevisions(ctx, f.workspaceID, f.userID, canvas.ID, page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Revisions) != 2 {
+		t.Fatalf("history = %+v, want two revisions after two edits", history.Revisions)
+	}
+	// Newest first, and each row is what the canvas said before that edit.
+	if history.Revisions[0].Version != 2 || history.Revisions[0].Title != "Second" {
+		t.Fatalf("newest revision = %+v, want version 2 titled Second", history.Revisions[0])
+	}
+	if history.Revisions[1].Version != 1 || history.Revisions[1].Title != "First" {
+		t.Fatalf("oldest revision = %+v, want version 1 titled First", history.Revisions[1])
+	}
+	if history.Revisions[0].EditedBy != f.userID {
+		t.Fatalf("revision editor = %q, want the member who replaced it", history.Revisions[0].EditedBy)
+	}
+
+	// A member with no grant cannot read the history, for the same reason they
+	// cannot read the canvas: it is the same document at an earlier moment.
+	stranger := domain.UserID("U-nohistory-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: stranger, WorkspaceID: f.workspaceID, Email: "nohistory-" + f.suffix + "@example.com", Name: "stranger"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repository.ListCanvasRevisions(ctx, f.workspaceID, stranger, canvas.ID, page); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a stranger read the history: %v", err)
+	}
+
+	// Deleting a canvas takes its history with it, or the content of a deleted
+	// document would remain readable to anything querying the table.
+	if err := f.repository.DeleteCanvas(ctx, f.workspaceID, canvas.ID, f.event("delete", "canvas.deleted", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repository.ListCanvasRevisions(ctx, f.workspaceID, f.userID, canvas.ID, page); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("history survived the canvas: %v", err)
+	}
+}

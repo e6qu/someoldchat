@@ -554,7 +554,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 145
+const schemaVersion = 146
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3147,6 +3147,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 146 {
+		// What a canvas said before an edit replaced it. The row is written in
+		// the same transaction as the edit, so a canvas cannot be changed
+		// without the history of what it was.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvas_revisions (
+			canvas_id TEXT NOT NULL REFERENCES canvases(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			version INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', document_content TEXT NOT NULL DEFAULT '',
+			edited_by TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
+			PRIMARY KEY (canvas_id, version)
+		)`); err != nil {
+			return fmt.Errorf("migrate canvas revisions: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS canvas_revisions_canvas ON canvas_revisions(canvas_id, version DESC)`); err != nil {
+			return fmt.Errorf("index canvas revisions: %w", err)
 		}
 	}
 	if version < 145 {
@@ -13164,6 +13180,15 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		return err
 	}
 	defer tx.Rollback()
+	// The revision is captured before the update and inside the same
+	// transaction, so a canvas cannot change without the record of what it was.
+	// Reading it first is also what makes the row the *superseded* state rather
+	// than the arriving one.
+	var previousTitle, previousContent string
+	previousErr := tx.QueryRowContext(ctx, `SELECT title, document_content FROM canvases WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.ID, canvas.WorkspaceID, canvas.Version-1).Scan(&previousTitle, &previousContent)
+	if previousErr != nil && !errors.Is(previousErr, sql.ErrNoRows) {
+		return previousErr
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, search_folded = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID, canvas.Version-1)
 	if err != nil {
 		return err
@@ -13182,10 +13207,84 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		}
 		return store.ErrNotFound
 	}
+	if previousErr == nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_revisions(canvas_id, workspace_id, version, title, document_content, edited_by, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(canvas_id, version) DO NOTHING`,
+			canvas.ID, canvas.WorkspaceID, canvas.Version-1, previousTitle, previousContent, event.ActorID, canvas.UpdatedAt.UTC().Unix()); err != nil {
+			return err
+		}
+		// The oldest revisions past the limit are dropped here rather than by a
+		// worker: the write that creates one is the only moment the count can
+		// grow, so there is nothing to schedule and nothing to recover.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM canvas_revisions WHERE canvas_id = ? AND version <= (
+			SELECT MIN(version) FROM (SELECT version FROM canvas_revisions WHERE canvas_id = ? ORDER BY version DESC LIMIT ?) AS kept
+		) - 1`, canvas.ID, canvas.ID, domain.CanvasRevisionLimit); err != nil {
+			return err
+		}
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ListCanvasRevisions reads what a canvas said before, newest first. Visibility
+// is the canvas's own: a revision is readable exactly when the canvas is, so
+// there is no second rule here to drift from the directory's.
+func (s *Store) ListCanvasRevisions(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasRevisionPage, error) {
+	if err := store.CheckPage(request); err != nil {
+		return domain.CanvasRevisionPage{}, err
+	}
+	visible, err := s.canvasVisible(ctx, workspace, user, id)
+	if err != nil {
+		return domain.CanvasRevisionPage{}, err
+	}
+	if !visible {
+		return domain.CanvasRevisionPage{}, store.ErrNotFound
+	}
+	query := `SELECT canvas_id, workspace_id, version, title, document_content, edited_by, created_at FROM canvas_revisions WHERE canvas_id = ? AND workspace_id = ?`
+	args := []any{id, workspace}
+	if request.Cursor != "" {
+		before, cursorErr := domain.DecodeListCursor(request.Cursor)
+		if cursorErr != nil {
+			return domain.CanvasRevisionPage{}, cursorErr
+		}
+		version, convErr := strconv.ParseInt(before, 10, 64)
+		if convErr != nil {
+			return domain.CanvasRevisionPage{}, domain.ErrInvalidCursor
+		}
+		query += ` AND version < ?`
+		args = append(args, version)
+	}
+	query += ` ORDER BY version DESC LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.CanvasRevisionPage{}, err
+	}
+	values := make([]domain.CanvasRevision, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.CanvasRevision
+		var created int64
+		if err := rows.Scan(&value.CanvasID, &value.WorkspaceID, &value.Version, &value.Title, &value.DocumentContent, &value.EditedBy, &created); err != nil {
+			rows.Close()
+			return domain.CanvasRevisionPage{}, err
+		}
+		value.CreatedAt = time.Unix(created, 0).UTC()
+		values = append(values, value)
+	}
+	if err := closeRows(rows); err != nil {
+		return domain.CanvasRevisionPage{}, err
+	}
+	page := domain.CanvasRevisionPage{Revisions: values, HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		page.Revisions = page.Revisions[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(strconv.FormatInt(page.Revisions[len(page.Revisions)-1].Version, 10))
+		if err != nil {
+			return domain.CanvasRevisionPage{}, err
+		}
+	}
+	return page, nil
 }
 
 func (s *Store) DeleteCanvas(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID, event events.Event) error {
@@ -13195,6 +13294,12 @@ func (s *Store) DeleteCanvas(ctx context.Context, workspace domain.WorkspaceID, 
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM canvas_access WHERE canvas_id = ?`, id); err != nil {
+		return err
+	}
+	// A deleted canvas takes its history with it. Leaving revisions behind
+	// would keep the content of a document somebody deleted, readable by
+	// anything that queried the table directly.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM canvas_revisions WHERE canvas_id = ?`, id); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace)

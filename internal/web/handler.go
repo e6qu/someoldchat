@@ -539,6 +539,16 @@ type assistantPromptView struct {
 	Message string
 }
 
+type canvasRevisionView struct {
+	Version     int64
+	Title       string
+	Excerpt     string
+	EditorName  string
+	DisplayTime string
+	MachineTime string
+	RestoreURL  string
+}
+
 type canvasData struct {
 	ID    string
 	Title string
@@ -554,6 +564,11 @@ type canvasData struct {
 	CanDelete      bool
 	ReadOnlyReason string
 	Notice         string
+	// Revisions is what the canvas said before, newest first. It is shown to
+	// anyone who may read the canvas, because a revision is the same document
+	// at an earlier moment; restoring one needs write access, so the control
+	// appears only where the edit would be accepted.
+	Revisions []canvasRevisionView
 }
 
 type canvasSectionView struct {
@@ -1232,6 +1247,13 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.canvas-history{margin-top:24px;border-top:1px solid var(--line);padding-top:16px}
+.revisions{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.revision{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.revision-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.revision-title{font-weight:700}
+.revision-time,.revision-editor{color:var(--muted);font-size:12px}
+.revision-excerpt{margin:6px 0 8px;color:var(--muted);font-size:13px}
 .message-file.is-image{flex-wrap:wrap}
 .message-image{max-width:min(360px,100%);max-height:280px;height:auto;border-radius:8px;display:block}
 .message-file-meta.undescribed{color:var(--danger)}
@@ -2636,7 +2658,11 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
     <div class="actions"><button type="submit">Save section {{.Position}}</button></div>
   </form>{{else if $.CanWrite}}<p class="notice" role="note">This section is {{.Type}} content. It is shown as stored; editing it here would flatten it, so this client does not offer that.</p>{{end}}
 </section>{{end}}
-{{if and .CanWrite (not .Sections)}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value=""><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000"></textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}{{if .CanDelete}}<form class="delete" method="post" action="/app/canvases/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Delete canvas</button></form>{{end}}</article></main>{{end}}`
+{{if and .CanWrite (not .Sections)}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value=""><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000"></textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}{{if .Revisions}}<section class="canvas-history" aria-labelledby="canvas-history-heading"><h3 id="canvas-history-heading">History</h3>
+<ul class="revisions">{{range .Revisions}}<li class="revision"><span class="revision-head"><span class="revision-title">{{.Title}}</span><time class="revision-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .EditorName}}<span class="revision-editor">replaced by {{.EditorName}}</span>{{end}}</span>{{if .Excerpt}}<p class="revision-excerpt">{{.Excerpt}}</p>{{end}}{{if .RestoreURL}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><button type="submit">Restore this revision</button></form>{{end}}</li>{{end}}</ul>
+<p class="read-only">Restoring is an ordinary edit: the current content becomes a revision of its own, so restoring the wrong one can be undone.</p>
+</section>{{end}}
+{{if .CanDelete}}<form class="delete" method="post" action="/app/canvases/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Delete canvas</button></form>{{end}}</article></main>{{end}}`
 
 var canvasTemplate = mustPage(canvasMarkup)
 
@@ -4097,6 +4123,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/canvases/{canvasID}", h.canvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/update", h.updateCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
 	mux.HandleFunc("GET /app/lists", h.lists)
 	mux.HandleFunc("POST /app/lists/create", h.createList)
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
@@ -7872,7 +7899,63 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	if !readable {
 		readOnlyReason = "This canvas could not be read as a document. It is shown as stored so nothing is lost, and editing is disabled until it can be parsed."
 	}
-	h.writeHTML(w, canvasTemplate, canvasData{ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+	revisions := make([]canvasRevisionView, 0, 8)
+	if history, historyErr := h.Messages.CanvasRevisions(r.Context(), principal.WorkspaceID, principal.UserID, value.ID, domain.PageRequest{Limit: 10}); historyErr == nil {
+		names := h.newUserNames(r.Context(), principal)
+		for _, revision := range history.Revisions {
+			view := canvasRevisionView{
+				Version: revision.Version, Title: revision.Title,
+				Excerpt:     canvasRevisionExcerpt(revision),
+				DisplayTime: formatTime(revision.CreatedAt), MachineTime: revision.CreatedAt.UTC().Format(time.RFC3339Nano),
+			}
+			if revision.EditedBy != "" {
+				view.EditorName = names.name(revision.EditedBy)
+			}
+			if canEdit && readable {
+				view.RestoreURL = "/app/canvases/" + url.PathEscape(string(value.ID)) + "/restore"
+			}
+			revisions = append(revisions, view)
+		}
+	}
+	h.writeHTML(w, canvasTemplate, canvasData{Revisions: revisions, ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+}
+
+// canvasRevisionExcerpt is the opening of what the canvas said, bounded. A
+// history list is for recognising the moment you want, not for reading the
+// document twice.
+func canvasRevisionExcerpt(revision domain.CanvasRevision) string {
+	text := strings.TrimSpace(strings.TrimPrefix(domain.CanvasSearchText(revision.Title, revision.DocumentContent), revision.Title))
+	text = strings.Join(strings.Fields(text), " ")
+	if runes := []rune(text); len(runes) > canvasSnippetRunes {
+		return strings.TrimSpace(string(runes[:canvasSnippetRunes])) + "…"
+	}
+	return text
+}
+
+// restoreCanvas puts an earlier revision back as an ordinary edit, so the
+// content it replaced becomes a revision of its own and a wrong restore is
+// itself undoable.
+func (h Handler) restoreCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
+	if !ok {
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	version, convErr := strconv.ParseInt(strings.TrimSpace(fields["version"]), 10, 64)
+	if convErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The canvas was not restored", "Choose a revision from the history and try again.")
+		return
+	}
+	if _, err := h.Messages.RestoreCanvasRevision(r.Context(), principal.WorkspaceID, principal.UserID, id, version); err != nil {
+		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not restored", "It changed elsewhere, or that revision is no longer kept. Reload the canvas and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id))+"?notice="+url.QueryEscape("Canvas restored"))
 }
 
 func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {

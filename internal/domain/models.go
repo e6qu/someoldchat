@@ -1564,6 +1564,38 @@ type Canvas struct {
 	UpdatedAt time.Time
 }
 
+// CanvasRevision is what a canvas said before an edit replaced it.
+//
+// It records the state that was superseded rather than the state that arrived,
+// which is the difference between a history you can read backwards and a log of
+// what happened. Version is the version the canvas held while this content was
+// current, so restoring revision 3 means putting revision 3's content back — a
+// row numbered by the edit that displaced it would make every reader subtract
+// one.
+type CanvasRevision struct {
+	CanvasID        CanvasID
+	WorkspaceID     WorkspaceID
+	Version         int64
+	Title           string
+	DocumentContent string
+	// EditedBy is who replaced this content, not who wrote it. A history
+	// answers "who changed this", and the person who wrote a revision is the
+	// EditedBy of the row before it.
+	EditedBy  UserID
+	CreatedAt time.Time
+}
+
+type CanvasRevisionPage struct {
+	Revisions  []CanvasRevision
+	NextCursor Cursor
+	HasMore    bool
+}
+
+// CanvasRevisionLimit bounds how many revisions one canvas keeps. A document
+// edited all day would otherwise grow an unbounded table nobody reads past the
+// first screen of, and Slack's own history is not infinite either.
+const CanvasRevisionLimit = 50
+
 type CanvasAccess struct {
 	CanvasID   CanvasID
 	EntityType string

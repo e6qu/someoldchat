@@ -408,6 +408,8 @@ type Service interface {
 	CanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) (domain.CanvasAccess, error)
 	Canvases(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.CanvasPage, error)
 	SearchCanvases(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasSearchRequest) (domain.CanvasPage, error)
+	CanvasRevisions(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.PageRequest) (domain.CanvasRevisionPage, error)
+	RestoreCanvasRevision(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, int64) (domain.Canvas, error)
 	SearchPeople(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.UserPage, error)
 	SearchChannels(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.ConversationPage, error)
 	EditCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) error

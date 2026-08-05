@@ -1945,6 +1945,47 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A history is only useful if both compositions agree on what it
+			// says and on which way round it reads: a revision records the
+			// state it *replaced*, so the newest row is what the canvas said
+			// before the last edit, not what it says now. Restoring is an
+			// ordinary edit, so the current content becomes a revision of its
+			// own and restoring the wrong one is itself undoable.
+			name: "canvas revisions record what was replaced and can be restored",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "First title", `{"type":"markdown","markdown":"first body"}`, "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"replace","document_content":{"type":"markdown","markdown":"second body"}}]`); err != nil {
+					return nil, err
+				}
+				page := domain.PageRequest{Limit: 10}
+				history, err := chat.CanvasRevisions(ctx, "T1", "U1", canvas.ID, page)
+				if err != nil {
+					return nil, err
+				}
+				titles := make([]string, 0, len(history.Revisions))
+				for _, revision := range history.Revisions {
+					titles = append(titles, revision.Title)
+				}
+				// A version nobody wrote cannot be restored.
+				_, missingErr := chat.RestoreCanvasRevision(ctx, "T1", "U1", canvas.ID, 99)
+				restored, err := chat.RestoreCanvasRevision(ctx, "T1", "U1", canvas.ID, 1)
+				if err != nil {
+					return nil, err
+				}
+				after, err := chat.CanvasRevisions(ctx, "T1", "U1", canvas.ID, page)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					len(history.Revisions), titles, missingErr != nil,
+					restored.Title, restored.Version, len(after.Revisions),
+				}, nil
+			},
+		},
+		{
 			// A search that matched more than the directory would disclose the
 			// title of a canvas the reader cannot open, so the two compositions
 			// have to agree on the visibility rule as well as on the matching.

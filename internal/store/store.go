@@ -861,6 +861,10 @@ type Store interface {
 	// the visibility rule ListCanvases applies, because a search that matched
 	// more would disclose the title of a canvas the reader cannot open.
 	SearchCanvases(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasSearch) (domain.CanvasPage, error)
+	// ListCanvasRevisions reads what a canvas said before. A revision is
+	// readable exactly when the canvas is, so this asks the canvas's own
+	// visibility rather than carrying a second rule that could drift.
+	ListCanvasRevisions(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.PageRequest) (domain.CanvasRevisionPage, error)
 	RecordSearchHistory(context.Context, domain.SearchHistoryEntry) error
 	ListSearchHistory(context.Context, domain.WorkspaceID, domain.UserID, int) ([]domain.SearchHistoryEntry, error)
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error
