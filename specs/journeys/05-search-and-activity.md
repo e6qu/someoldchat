@@ -182,6 +182,12 @@ Implemented evidence:
   and legacy combined `search.all` require user tokens, enforce documented
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
+- Following a result arrives at the message it names. Two mechanisms carry it
+  and neither is obvious: the permalink's window cursor ends just after the hit,
+  so the hit is the last message in the window, and the fragment focuses it
+  because a message carries `tabindex="-1"`. A browser journey pins both, so a
+  change to either is caught rather than silently moving the reader to the wrong
+  end of the right window. The arrival is announced and briefly marked.
 - Results mark the terms that matched. Marking is threaded into the one branch
   of the Slack-markup renderer that emits literal prose rather than applied to
   its output, because a substitution over finished HTML would put tags inside
@@ -237,8 +243,9 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
   match, because a substring search for the term would mark the wrong span
   whenever the match was in the title — every `to:`/link/specific emoji/`hasmy:` modifier,
   prefix `*`, section-valued `in:`, Slack's natural month/year date forms,
-  participant-accurate `with:` thread semantics, thread-specific entry scope, or
-  a return to the exact hit inside the opened conversation;
+  participant-accurate `with:` thread semantics, or history on both sides of an
+  opened hit — the result window ends at the message it names, so a reader
+  cannot scroll forward into newer messages without navigating again;
 - the Slack APIs retain documented compatibility deviations for relevance
   scoring, highlight markers, cursor pagination on file/combined legacy
   results, match projection detail, and full tier rate limiting;

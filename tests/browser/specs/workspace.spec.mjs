@@ -3018,6 +3018,43 @@ test('[SEARCH-01 SEARCH-02 A11Y-01] search results emphasise the terms that matc
   await expect(page.locator('.result mark', { hasText: 'from' })).toHaveCount(0);
 });
 
+// A search result is a link to one message. Following it already arrived at the
+// right message and this pins that: the link carries a window cursor ending
+// just after the hit, so the hit is the last message in the window, and the
+// fragment focuses it because a message is focusable. Both halves are load
+// bearing and neither is obvious, which is why they are asserted rather than
+// assumed — an innocent change to either would move the reader to the wrong
+// end of the conversation with nothing to notice it.
+//
+// What is new is the arrival being announced and marked, so a member who
+// followed the link knows which message answered their search without comparing
+// timestamps.
+test('[SEARCH-01 NAV-03 A11Y-01] opening a search result arrives at that message and says so', async ({ page, context, request }) => {
+  await signIn(context);
+  const needle = `arrival-${Date.now()}`;
+  await postThroughTheAPI(request, `${needle} the message we are looking for`);
+  // Newer messages, so an arrival that ignored the link's window would show
+  // these instead.
+  for (let index = 0; index < 12; index += 1) {
+    await postThroughTheAPI(request, `${needle} later noise ${index}`);
+  }
+
+  await page.goto(`/app/search?q=${encodeURIComponent(needle + ' looking')}&channel=Cdev`);
+  await page.locator('.result').first().click();
+
+  const arrived = page.locator('.message').filter({ hasText: 'the message we are looking for' });
+  await expect(arrived).toHaveCount(1);
+  // Focused, not merely scrolled to: a fragment moves the viewport, and the
+  // keyboard only follows because the message is focusable.
+  await expect(arrived).toBeFocused();
+  await expect(arrived).toBeInViewport();
+  // The arrival is marked until the reader engages. The live region carries the
+  // same news, but it is shared with live-activity announcements that unrelated
+  // traffic in this workspace produces, so the durable half is what is asserted.
+  await expect(arrived).toHaveClass(/is-arrival/);
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
