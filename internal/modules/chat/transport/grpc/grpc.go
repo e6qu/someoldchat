@@ -4085,6 +4085,16 @@ func (r Remote) WorkspaceNotificationPreferences(ctx context.Context, workspaceI
 	return decodeProtoWorkspaceNotificationPreferences(out)
 }
 
+func (r Remote) SetNotificationSchedule(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, schedule domain.NotificationSchedule) (domain.WorkspaceNotificationPreferences, error) {
+	out, err := r.activity.SetNotificationSchedule(ctx, &chatv1.SetNotificationScheduleRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Schedule: encodeProtoNotificationSchedule(schedule),
+	})
+	if err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	return decodeProtoWorkspaceNotificationPreferences(out)
+}
+
 func (r Remote) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
 	out, err := r.activity.SetWorkspaceNotificationPreferences(ctx, &chatv1.SetWorkspaceNotificationPreferencesRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Level: string(level),
@@ -7390,6 +7400,14 @@ func (s *Server) GetWorkspaceNotificationPreferences(ctx context.Context, input 
 	return encodeProtoWorkspaceNotificationPreferences(preferences), nil
 }
 
+func (s *Server) SetNotificationSchedule(ctx context.Context, input *chatv1.SetNotificationScheduleRequest) (*chatv1.WorkspaceNotificationPreferences, error) {
+	preferences, err := s.implementation.SetNotificationSchedule(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), decodeProtoNotificationSchedule(input.GetSchedule()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspaceNotificationPreferences(preferences), nil
+}
+
 func (s *Server) SetWorkspaceNotificationPreferences(ctx context.Context, input *chatv1.SetWorkspaceNotificationPreferencesRequest) (*chatv1.WorkspaceNotificationPreferences, error) {
 	preferences, err := s.implementation.SetWorkspaceNotificationPreferences(
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
@@ -9820,6 +9838,32 @@ func encodeProtoWorkspaceNotificationPreferences(value domain.WorkspaceNotificat
 		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Level: string(value.Level),
 		Keywords: append([]string(nil), value.Keywords...), ActivityChannels: value.ActivityChannels, ActivityReminders: value.ActivityReminders,
 		BrowserNotifications: value.BrowserNotifications,
+		Schedule:             encodeProtoNotificationSchedule(value.Schedule),
+	}
+}
+
+func encodeProtoNotificationSchedule(value domain.NotificationSchedule) *chatv1.NotificationSchedule {
+	days := make([]int32, 0, len(value.Days))
+	for _, day := range value.Days {
+		days = append(days, int32(day))
+	}
+	return &chatv1.NotificationSchedule{
+		Enabled: value.Enabled, Days: days,
+		StartMinute: int32(value.StartMinute), EndMinute: int32(value.EndMinute), TimeZone: value.TimeZone,
+	}
+}
+
+func decodeProtoNotificationSchedule(value *chatv1.NotificationSchedule) domain.NotificationSchedule {
+	if value == nil {
+		return domain.NotificationSchedule{}
+	}
+	var days []time.Weekday
+	for _, day := range value.GetDays() {
+		days = append(days, time.Weekday(day))
+	}
+	return domain.NotificationSchedule{
+		Enabled: value.GetEnabled(), Days: days,
+		StartMinute: int(value.GetStartMinute()), EndMinute: int(value.GetEndMinute()), TimeZone: value.GetTimeZone(),
 	}
 }
 
@@ -9832,6 +9876,7 @@ func decodeProtoWorkspaceNotificationPreferences(value *chatv1.WorkspaceNotifica
 		Level: domain.NotificationLevel(value.GetLevel()), Keywords: domain.NormalizeNotificationKeywords(value.GetKeywords()),
 		ActivityChannels: value.GetActivityChannels(), ActivityReminders: value.GetActivityReminders(),
 		BrowserNotifications: value.GetBrowserNotifications(),
+		Schedule:             decodeProtoNotificationSchedule(value.GetSchedule()),
 	}
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, errors.New("typed workspace notification preferences are invalid")

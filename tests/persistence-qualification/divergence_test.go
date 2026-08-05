@@ -2868,3 +2868,62 @@ func canvasShareReachesActivity(t *testing.T, open opener) {
 		t.Fatalf("activity after withdrawal = %+v, want the row kept and marked unreachable", after.Items)
 	}
 }
+
+// A schedule is a set of days, a pair of minutes and a zone name, and every
+// piece of it has to come back exactly: a day dropped in storage silences a
+// member on a day they asked to be reachable, and a zone lost turns their
+// window into the server's. The profiles encode the day set differently — JSON
+// in a column against a slice in a map — which is where a drop would happen.
+func notificationScheduleRoundTrips(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	schedule := domain.NotificationSchedule{
+		Enabled: true, Days: []time.Weekday{time.Monday, time.Wednesday, time.Saturday},
+		StartMinute: 9*60 + 30, EndMinute: 18*60 + 45, TimeZone: "Europe/Berlin",
+	}
+	preferences := domain.DefaultWorkspaceNotificationPreferences(f.workspaceID, f.userID)
+	preferences.Schedule = schedule
+	if err := f.repository.SetWorkspaceNotificationPreferences(ctx, preferences, f.event("schedule", "notification.preferences_changed", string(f.userID))); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.repository.GetWorkspaceNotificationPreferences(ctx, f.workspaceID, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Schedule.Enabled || stored.Schedule.StartMinute != schedule.StartMinute || stored.Schedule.EndMinute != schedule.EndMinute || stored.Schedule.TimeZone != schedule.TimeZone {
+		t.Fatalf("schedule = %+v, want %+v", stored.Schedule, schedule)
+	}
+	if len(stored.Schedule.Days) != len(schedule.Days) {
+		t.Fatalf("days = %v, want %v", stored.Schedule.Days, schedule.Days)
+	}
+	for index, day := range schedule.Days {
+		if stored.Schedule.Days[index] != day {
+			t.Fatalf("days = %v, want %v", stored.Schedule.Days, schedule.Days)
+		}
+	}
+	// The stored window means the same thing on both profiles, which is the
+	// property a member actually experiences.
+	inside := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC) // 12:00 in Berlin, a Wednesday
+	outside := time.Date(2026, 8, 5, 20, 0, 0, 0, time.UTC)
+	if !stored.Schedule.AllowsAt(inside) || stored.Schedule.AllowsAt(outside) {
+		t.Fatalf("stored schedule allowed %v/%v, want inside only", stored.Schedule.AllowsAt(inside), stored.Schedule.AllowsAt(outside))
+	}
+
+	// Turning it off leaves nothing behind that could switch it back on.
+	preferences.Schedule = domain.NotificationSchedule{}
+	if err := f.repository.SetWorkspaceNotificationPreferences(ctx, preferences, f.event("schedule-off", "notification.preferences_changed", string(f.userID))); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := f.repository.GetWorkspaceNotificationPreferences(ctx, f.workspaceID, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Schedule.Enabled || len(cleared.Schedule.Days) != 0 {
+		t.Fatalf("cleared schedule = %+v, want it off and empty", cleared.Schedule)
+	}
+	if !cleared.Schedule.AllowsAt(outside) {
+		t.Fatal("a schedule that is off suppressed a notification")
+	}
+}

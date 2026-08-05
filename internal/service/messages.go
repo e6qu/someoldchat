@@ -4883,19 +4883,23 @@ func (m Messages) WorkspaceNotificationPreferences(ctx context.Context, workspac
 	return m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
 }
 
-func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
+// SetNotificationSchedule writes the window a member allows notifications in.
+// It is a call of its own rather than four more arguments on the preferences
+// setter, because it is a separate form answering a separate question, and
+// because a setter that took everything would let either form silently undo the
+// other.
+func (m Messages) SetNotificationSchedule(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, schedule domain.NotificationSchedule) (domain.WorkspaceNotificationPreferences, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err
 	}
-	preferences := domain.WorkspaceNotificationPreferences{
-		WorkspaceID: workspaceID, UserID: userID, Level: level,
-		Keywords:         domain.NormalizeNotificationKeywords(keywords),
-		ActivityChannels: activityChannels, ActivityReminders: activityReminders,
-		BrowserNotifications: browserNotifications,
+	if !schedule.Valid() {
+		return domain.WorkspaceNotificationPreferences{}, store.InvalidArgument("notification schedule is invalid")
 	}
-	if !preferences.Valid() {
-		return domain.WorkspaceNotificationPreferences{}, store.InvalidArgument("workspace notification preferences are invalid")
+	preferences, err := m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
+	if err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
 	}
+	preferences.Schedule = schedule
 	now := time.Now().UTC()
 	event, err := newEvent(workspaceID, userID, events.NewPayload(
 		"notification.preferences_changed",
@@ -4903,6 +4907,43 @@ func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, works
 	), now)
 	if err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	if err := m.Store.SetWorkspaceNotificationPreferences(ctx, preferences, event); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	return preferences, nil
+}
+
+func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	// The schedule is carried forward rather than defaulted. This call builds a
+	// whole record from its arguments, and the schedule is not one of them, so
+	// saving the notification form would otherwise silently switch off a window
+	// the member set on a different form — the same whole-record hazard the
+	// assistant thread state was designed around.
+	current, err := m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
+	if err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	preferences := domain.WorkspaceNotificationPreferences{
+		WorkspaceID: workspaceID, UserID: userID, Level: level,
+		Keywords:         domain.NormalizeNotificationKeywords(keywords),
+		ActivityChannels: activityChannels, ActivityReminders: activityReminders,
+		BrowserNotifications: browserNotifications,
+		Schedule:             current.Schedule,
+	}
+	if !preferences.Valid() {
+		return domain.WorkspaceNotificationPreferences{}, store.InvalidArgument("workspace notification preferences are invalid")
+	}
+	now := time.Now().UTC()
+	event, eventErr := newEvent(workspaceID, userID, events.NewPayload(
+		"notification.preferences_changed",
+		events.String("user_id", string(userID)),
+	), now)
+	if eventErr != nil {
+		return domain.WorkspaceNotificationPreferences{}, eventErr
 	}
 	if err := m.Store.SetWorkspaceNotificationPreferences(ctx, preferences, event); err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err

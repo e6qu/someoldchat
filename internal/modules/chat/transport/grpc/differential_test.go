@@ -1772,6 +1772,36 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A schedule is set on its own form and the rest of the preferences
+			// on another, so the compositions have to agree that neither
+			// silently undoes the other — the setter builds a whole record from
+			// its arguments and the schedule is not one of them.
+			name: "a notification schedule survives an unrelated preference write",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				schedule := domain.NotificationSchedule{
+					Enabled: true, Days: []time.Weekday{time.Monday, time.Friday},
+					StartMinute: 9 * 60, EndMinute: 18 * 60, TimeZone: "Europe/Berlin",
+				}
+				if _, err := chat.SetNotificationSchedule(ctx, "T1", "U1", schedule); err != nil {
+					return nil, err
+				}
+				after, err := chat.SetWorkspaceNotificationPreferences(ctx, "T1", "U1", domain.NotificationAll, []string{"deploy"}, true, true, true)
+				if err != nil {
+					return nil, err
+				}
+				// An invalid schedule is refused rather than stored, and an
+				// empty window is the commonest way to write one by accident.
+				_, invalidErr := chat.SetNotificationSchedule(ctx, "T1", "U1", domain.NotificationSchedule{
+					Enabled: true, Days: []time.Weekday{time.Monday}, StartMinute: 9 * 60, EndMinute: 9 * 60, TimeZone: "UTC",
+				})
+				read, err := chat.WorkspaceNotificationPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{after.Schedule.Enabled, after.Schedule.Days, after.Schedule.StartMinute, after.Schedule.EndMinute, after.Schedule.TimeZone, invalidErr != nil, read.Schedule.Enabled}, nil
+			},
+		},
+		{
 			// A description is the uploader's account of their own file, so the
 			// permission is the interesting part: both compositions have to
 			// agree that someone else's attempt fails rather than silently

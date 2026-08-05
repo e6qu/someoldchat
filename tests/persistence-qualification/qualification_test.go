@@ -123,6 +123,7 @@ func runQualification(t *testing.T, open opener) {
 		{"directory search folds names on every profile", directorySearchFoldsNamesOnEveryProfile},
 		{"a file description survives and belongs to its uploader", fileDescriptionBelongsToItsUploader},
 		{"a canvas share reaches Activity on every profile", canvasShareReachesActivity},
+		{"a notification schedule round-trips on every profile", notificationScheduleRoundTrips},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
