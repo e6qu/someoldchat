@@ -2910,6 +2910,47 @@ test('[COMP-04 A11Y-01] a member composing is shown to the conversation and stop
   await expect(page.locator('.typing')).toHaveText('', { timeout: 20000 });
 });
 
+// Slack's search has a Canvases tab beside Messages and Files, and a canvas is
+// findable by what is written inside it rather than only by its name. The tab
+// is driven through the API a canvas app would use, so the body being searched
+// is a real stored document and not a title in disguise.
+// Slack's search has a Canvases tab beside Messages and Files, and a canvas is
+// findable by what is written inside it rather than only by its name. The canvas
+// is created through the first-party surface so it belongs to the member doing
+// the searching, which is also what makes the last assertion meaningful: the
+// index is the document's prose, not the JSON it is stored as.
+test('[SEARCH-01 SEARCH-02 A11Y-01] canvases are searchable by their title and their prose', async ({ page, context }) => {
+  await signIn(context);
+  const needle = `canvas-search-${Date.now()}`;
+
+  await page.goto('/app/canvases');
+  await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
+  await page.getByLabel('Name').fill(`${needle} runbook`);
+  await page.getByLabel('Content').fill(`roll back the ${needle} deployment`);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByText(`${needle} runbook`)).toBeVisible();
+
+  await page.goto(`/app/search?q=${encodeURIComponent(needle)}&type=canvases`);
+  await expect(page.getByRole('link', { name: 'Canvases' })).toBeVisible();
+  await expect(page.locator('.canvas-result', { hasText: `${needle} runbook` })).toHaveCount(1);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // The body is searchable, not only the name: a phrase that appears nowhere in
+  // the title still finds the canvas.
+  await page.goto(`/app/search?q=${encodeURIComponent('roll back the ' + needle)}&type=canvases`);
+  const result = page.locator('.canvas-result', { hasText: `${needle} runbook` });
+  await expect(result).toHaveCount(1);
+
+  // The result opens the canvas it names.
+  await result.click();
+  await expect(page.getByRole('heading', { name: `${needle} runbook` })).toBeVisible();
+
+  // A term that appears only in the stored JSON envelope is not prose, so it
+  // must find nothing — otherwise the index is the syntax rather than the text.
+  await page.goto('/app/search?q=sections&type=canvases');
+  await expect(page.getByText('No matching canvases.')).toBeVisible();
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

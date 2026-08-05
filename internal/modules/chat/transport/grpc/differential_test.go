@@ -1758,6 +1758,50 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A search that matched more than the directory would disclose the
+			// title of a canvas the reader cannot open, so the two compositions
+			// have to agree on the visibility rule as well as on the matching.
+			// U1 owns the canvas; U2 has no grant on it.
+			name: "canvas search matches prose and stops at the reader's access",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Deployment runbook", `{"type":"markdown","markdown":"roll back with the previous revision"}`, "")
+				if err != nil {
+					return nil, err
+				}
+				page := domain.PageRequest{Limit: 10}
+				byTitle, err := chat.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "runbook", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				// Folding is the product's one fold: a different case must
+				// still match, in both compositions.
+				byBody, err := chat.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "ROLL BACK", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				// The document is stored as JSON. Searching for one of its keys
+				// must find nothing, or the index is the syntax rather than the
+				// prose.
+				bySyntax, err := chat.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "sections", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				excluded, err := chat.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "runbook -deployment", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				stranger, err := chat.SearchCanvases(ctx, "T1", "U2", domain.CanvasSearchRequest{Query: "runbook", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				// A conversation modifier has no meaning for an object that is
+				// not in a conversation, and is refused rather than dropped.
+				_, scopedErr := chat.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "runbook in:#general", Page: page})
+				found := len(byTitle.Canvases) == 1 && byTitle.Canvases[0].ID == canvas.ID
+				return []any{found, len(byBody.Canvases), len(bySyntax.Canvases), len(excluded.Canvases), len(stranger.Canvases), scopedErr != nil}, nil
+			},
+		},
+		{
 			// Typing signals are the one piece of state that crosses the seam
 			// without an event behind it, so nothing else in this suite would
 			// notice if one composition quietly journalled them. What the two
@@ -2829,7 +2873,6 @@ var parityGaps = map[string]struct{}{
 	"ConversationInfo":                   {},
 	"CountSocketModeConnections":         {},
 	"CreateAppInstallation":              {},
-	"CreateCanvas":                       {},
 	"CreateExternalIdentity":             {},
 	"CreateRTMConnection":                {},
 	"CreateSession":                      {},

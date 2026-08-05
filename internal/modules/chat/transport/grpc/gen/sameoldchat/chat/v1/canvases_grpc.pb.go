@@ -25,6 +25,7 @@ const (
 	CanvasesService_GetCanvas_FullMethodName                = "/sameoldchat.chat.v1.CanvasesService/GetCanvas"
 	CanvasesService_GetCanvasAccess_FullMethodName          = "/sameoldchat.chat.v1.CanvasesService/GetCanvasAccess"
 	CanvasesService_ListCanvases_FullMethodName             = "/sameoldchat.chat.v1.CanvasesService/ListCanvases"
+	CanvasesService_SearchCanvases_FullMethodName           = "/sameoldchat.chat.v1.CanvasesService/SearchCanvases"
 	CanvasesService_EditCanvas_FullMethodName               = "/sameoldchat.chat.v1.CanvasesService/EditCanvas"
 	CanvasesService_DeleteCanvas_FullMethodName             = "/sameoldchat.chat.v1.CanvasesService/DeleteCanvas"
 	CanvasesService_SetCanvasAccess_FullMethodName          = "/sameoldchat.chat.v1.CanvasesService/SetCanvasAccess"
@@ -42,6 +43,7 @@ type CanvasesServiceClient interface {
 	GetCanvas(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*Canvas, error)
 	GetCanvasAccess(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*CanvasAccessResponse, error)
 	ListCanvases(ctx context.Context, in *CanvasesRequest, opts ...grpc.CallOption) (*CanvasPage, error)
+	SearchCanvases(ctx context.Context, in *SearchCanvasesRequest, opts ...grpc.CallOption) (*CanvasPage, error)
 	EditCanvas(ctx context.Context, in *EditCanvasRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	DeleteCanvas(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetCanvasAccess(ctx context.Context, in *CanvasAccessRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -117,6 +119,16 @@ func (c *canvasesServiceClient) ListCanvases(ctx context.Context, in *CanvasesRe
 	return out, nil
 }
 
+func (c *canvasesServiceClient) SearchCanvases(ctx context.Context, in *SearchCanvasesRequest, opts ...grpc.CallOption) (*CanvasPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanvasPage)
+	err := c.cc.Invoke(ctx, CanvasesService_SearchCanvases_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *canvasesServiceClient) EditCanvas(ctx context.Context, in *EditCanvasRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -177,6 +189,7 @@ type CanvasesServiceServer interface {
 	GetCanvas(context.Context, *CanvasRequest) (*Canvas, error)
 	GetCanvasAccess(context.Context, *CanvasRequest) (*CanvasAccessResponse, error)
 	ListCanvases(context.Context, *CanvasesRequest) (*CanvasPage, error)
+	SearchCanvases(context.Context, *SearchCanvasesRequest) (*CanvasPage, error)
 	EditCanvas(context.Context, *EditCanvasRequest) (*MutationResponse, error)
 	DeleteCanvas(context.Context, *CanvasRequest) (*MutationResponse, error)
 	SetCanvasAccess(context.Context, *CanvasAccessRequest) (*MutationResponse, error)
@@ -208,6 +221,9 @@ func (UnimplementedCanvasesServiceServer) GetCanvasAccess(context.Context, *Canv
 }
 func (UnimplementedCanvasesServiceServer) ListCanvases(context.Context, *CanvasesRequest) (*CanvasPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListCanvases not implemented")
+}
+func (UnimplementedCanvasesServiceServer) SearchCanvases(context.Context, *SearchCanvasesRequest) (*CanvasPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchCanvases not implemented")
 }
 func (UnimplementedCanvasesServiceServer) EditCanvas(context.Context, *EditCanvasRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EditCanvas not implemented")
@@ -352,6 +368,24 @@ func _CanvasesService_ListCanvases_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CanvasesService_SearchCanvases_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchCanvasesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).SearchCanvases(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_SearchCanvases_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).SearchCanvases(ctx, req.(*SearchCanvasesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _CanvasesService_EditCanvas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EditCanvasRequest)
 	if err := dec(in); err != nil {
@@ -472,6 +506,10 @@ var CanvasesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListCanvases",
 			Handler:    _CanvasesService_ListCanvases_Handler,
+		},
+		{
+			MethodName: "SearchCanvases",
+			Handler:    _CanvasesService_SearchCanvases_Handler,
 		},
 		{
 			MethodName: "EditCanvas",

@@ -132,3 +132,32 @@ type FileSearchRequest struct {
 	Count        int
 	Page         int
 }
+
+// CanvasSearch is the normalized plan every repository executes for a canvas
+// search. Like the message and file plans it carries resolved identifiers, not
+// human text: turning "from:@ada" into a user id is an authorization-aware step
+// and belongs to the service.
+//
+// It is deliberately smaller than the file plan. Slack's canvas results are not
+// scoped by conversation, because a canvas is not in one — a channel canvas is
+// reached through its channel and a standalone canvas through a grant — so a
+// conversation modifier here would answer a question the object model does not
+// ask.
+type CanvasSearch struct {
+	Terms         []string
+	ExcludedTerms []string
+	Owner         UserID
+	ExcludedOwner UserID
+	After         time.Time
+	Before        time.Time
+	Sort          SearchSort
+	Direction     SearchDirection
+	Page          PageRequest
+}
+
+type CanvasSearchRequest struct {
+	Query     string
+	Sort      SearchSort
+	Direction SearchDirection
+	Page      PageRequest
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -311,6 +312,52 @@ func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.W
 		result = append(result, section)
 	}
 	return result, nil
+}
+
+// SearchCanvases answers the Canvases tab. It reuses the one query parser every
+// other search uses, so `from:@ada`, `-word` and a quoted phrase mean here what
+// they mean in Messages and Files; a canvas-only dialect would be a surprise
+// rather than a feature.
+//
+// Modifiers the object model cannot answer are refused rather than ignored. A
+// canvas is not in a conversation — a channel canvas is reached through its
+// channel and a standalone one through a grant — so `in:#general` has no
+// meaning here, and silently dropping it would return results that look like an
+// answer to a question nobody asked.
+func (m Messages) SearchCanvases(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.CanvasSearchRequest) (domain.CanvasPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	request.Query = strings.TrimSpace(request.Query)
+	if request.Query == "" || utf8.RuneCountInString(request.Query) > 500 {
+		return domain.CanvasPage{}, ErrInvalidSearch
+	}
+	if err := store.CheckAscendingPage(request.Page); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	sortOrder, direction, err := domain.NormalizeSearchOrder(string(request.Sort), string(request.Direction))
+	if err != nil {
+		return domain.CanvasPage{}, ErrInvalidSearch
+	}
+	parsed, err := parseSearchQuery(request.Query)
+	if err != nil {
+		return domain.CanvasPage{}, ErrInvalidSearch
+	}
+	if parsed.conversation != "" || parsed.excludedConversation != "" {
+		return domain.CanvasPage{}, ErrInvalidSearch
+	}
+	search := domain.CanvasSearch{
+		Terms: parsed.terms, ExcludedTerms: parsed.excludedTerms,
+		After: parsed.after, Before: parsed.before,
+		Sort: sortOrder, Direction: direction, Page: request.Page,
+	}
+	if parsed.author != "" {
+		search.Owner = m.resolveSearchUser(ctx, workspaceID, userID, parsed.author)
+	}
+	if parsed.excludedAuthor != "" {
+		search.ExcludedOwner = m.resolveSearchUser(ctx, workspaceID, userID, parsed.excludedAuthor)
+	}
+	return m.Store.SearchCanvases(ctx, workspaceID, userID, search)
 }
 
 func validateCanvasAccess(access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {

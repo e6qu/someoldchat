@@ -39,6 +39,16 @@ message CanvasesRequest {
   bool descending = 5;
 }
 
+message SearchCanvasesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 limit = 4;
+  string cursor = 5;
+  string sort = 6;
+  string direction = 7;
+}
+
 message CanvasPage {
   repeated Canvas canvases = 1;
   string next_cursor = 2;
@@ -100,6 +110,7 @@ service CanvasesService {
   rpc GetCanvas(CanvasRequest) returns (Canvas);
   rpc GetCanvasAccess(CanvasRequest) returns (CanvasAccessResponse);
   rpc ListCanvases(CanvasesRequest) returns (CanvasPage);
+  rpc SearchCanvases(SearchCanvasesRequest) returns (CanvasPage);
   rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
   rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);
   rpc SetCanvasAccess(CanvasAccessRequest) returns (MutationResponse);

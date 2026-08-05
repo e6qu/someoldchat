@@ -405,6 +405,7 @@ type Service interface {
 	Canvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) (domain.Canvas, error)
 	CanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) (domain.CanvasAccess, error)
 	Canvases(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.CanvasPage, error)
+	SearchCanvases(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasSearchRequest) (domain.CanvasPage, error)
 	EditCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) error
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
 	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string, []domain.ConversationID, []domain.UserID) error

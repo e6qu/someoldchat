@@ -4464,3 +4464,25 @@ func TestTheNotificationsPageNamesWhatItCannotDeliver(t *testing.T) {
 		"Your browser also has to allow notifications",
 	)
 }
+
+// The Canvases tab is the newest search surface, and this is where its wiring is
+// checked end to end through the handler: the tab exists, a canvas is found by
+// its prose, and the stored JSON envelope is not part of the index.
+func TestCanvasSearchTabFindsProseAndNotStoredSyntax(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	canvas, err := service.Messages{Store: s}.CreateCanvas(context.Background(), "T1", "U1", "Deployment runbook", `{"type":"markdown","markdown":"roll back the previous revision"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byTitle := get(t, mux, "/app/search?q=runbook&type=canvases&channel=Cdev")
+	if byTitle.Code != http.StatusOK {
+		t.Fatalf("canvas search status=%d body=%s", byTitle.Code, byTitle.Body)
+	}
+	requireContains(t, "canvas search by title", byTitle.Body.String(), "Canvases", "Deployment runbook", string(canvas.ID))
+
+	byBody := get(t, mux, "/app/search?q=roll+back&type=canvases&channel=Cdev")
+	requireContains(t, "canvas search by body", byBody.Body.String(), "Deployment runbook")
+
+	syntax := get(t, mux, "/app/search?q=sections&type=canvases&channel=Cdev")
+	requireContains(t, "canvas search for stored syntax", syntax.Body.String(), "No matching canvases.")
+}

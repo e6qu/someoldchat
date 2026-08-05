@@ -1419,6 +1419,42 @@ type CanvasSection struct {
 	Text string
 }
 
+// CanvasDocument is the stored shape of a canvas body. It lives here rather
+// than beside the editor because the store needs it too: a canvas is searchable
+// by its prose, and the folded column that makes it searchable has to be built
+// from the same sections the editor writes. Two decoders for one shape is how a
+// search index comes to disagree with the document it indexes.
+type CanvasDocument struct {
+	Sections []CanvasSection `json:"sections"`
+}
+
+// CanvasSearchText is the prose a canvas is findable by: its title and the text
+// of its sections, and nothing else.
+//
+// Indexing the stored JSON directly would be simpler and wrong. A member
+// searching for "type" would match the key of every section ever written, and a
+// member searching for a heading they can see would miss it whenever the
+// document held any punctuation JSON escapes. Content that cannot be decoded
+// contributes its title alone rather than failing the write: a canvas with a
+// body this version cannot read is still a canvas someone should be able to
+// find by name.
+func CanvasSearchText(title, content string) string {
+	var document CanvasDocument
+	if err := json.Unmarshal([]byte(content), &document); err != nil {
+		return title
+	}
+	parts := make([]string, 0, len(document.Sections)+1)
+	if strings.TrimSpace(title) != "" {
+		parts = append(parts, title)
+	}
+	for _, section := range document.Sections {
+		if strings.TrimSpace(section.Text) != "" {
+			parts = append(parts, section.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 type FileComment struct {
 	ID          FileCommentID
 	File        FileID

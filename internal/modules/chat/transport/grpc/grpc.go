@@ -1345,6 +1345,18 @@ func (r Remote) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoCanvasPage(out)
 }
 
+func (r Remote) SearchCanvases(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.CanvasSearchRequest) (domain.CanvasPage, error) {
+	out, err := r.canvases.SearchCanvases(ctx, &chatv1.SearchCanvasesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Query: request.Query,
+		Limit: int32(request.Page.Limit), Cursor: string(request.Page.Cursor),
+		Sort: string(request.Sort), Direction: string(request.Direction),
+	})
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	return decodeProtoCanvasPage(out)
+}
+
 func (r Remote) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
 	out, err := r.canvases.EditCanvas(ctx, &chatv1.EditCanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Changes: changes})
 	if err != nil {
@@ -4471,6 +4483,19 @@ func (s *Server) GetCanvasAccess(ctx context.Context, input *chatv1.CanvasReques
 		return nil, mapError(err)
 	}
 	return &chatv1.CanvasAccessResponse{CanvasId: string(value.CanvasID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}, nil
+}
+
+func (s *Server) SearchCanvases(ctx context.Context, input *chatv1.SearchCanvasesRequest) (*chatv1.CanvasPage, error) {
+	value, err := s.implementation.SearchCanvases(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasSearchRequest{
+		Query:     input.GetQuery(),
+		Sort:      domain.SearchSort(input.GetSort()),
+		Direction: domain.SearchDirection(input.GetDirection()),
+		Page:      protoPageRequest(input.GetLimit(), input.GetCursor()),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvasPage(value), nil
 }
 
 func (s *Server) ListCanvases(ctx context.Context, input *chatv1.CanvasesRequest) (*chatv1.CanvasPage, error) {

@@ -343,6 +343,93 @@ func (s *Store) ListCanvases(_ context.Context, workspace domain.WorkspaceID, us
 	return page, err
 }
 
+// SearchCanvases mirrors the SQL profile, including the part that matters: the
+// visibility test is the same one the directory applies, so a search cannot
+// reveal the title of a canvas the reader could not have opened.
+//
+// The folded text is computed here rather than stored because this profile has
+// no schema to store it in; the SQL profile keeps a column because decoding
+// every document per query is only free when the whole workspace is a map.
+func (s *Store) SearchCanvases(_ context.Context, workspace domain.WorkspaceID, userID domain.UserID, search domain.CanvasSearch) (domain.CanvasPage, error) {
+	if err := store.CheckAscendingPage(search.Page); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	after, err := domain.DecodeListCursor(search.Page.Cursor)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	terms := make([]string, 0, len(search.Terms))
+	for _, term := range search.Terms {
+		terms = append(terms, domain.FoldSearchText(term))
+	}
+	excluded := make([]string, 0, len(search.ExcludedTerms))
+	for _, term := range search.ExcludedTerms {
+		excluded = append(excluded, domain.FoldSearchText(term))
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.Canvas, 0, search.Page.Limit+1)
+	for _, canvas := range s.canvases {
+		if canvas.WorkspaceID != workspace || (after != "" && string(canvas.ID) <= after) {
+			continue
+		}
+		if search.Owner != "" && canvas.OwnerID != search.Owner {
+			continue
+		}
+		if search.ExcludedOwner != "" && canvas.OwnerID == search.ExcludedOwner {
+			continue
+		}
+		if !search.After.IsZero() && canvas.UpdatedAt.Before(search.After) {
+			continue
+		}
+		if !search.Before.IsZero() && !canvas.UpdatedAt.Before(search.Before) {
+			continue
+		}
+		folded := domain.FoldSearchText(domain.CanvasSearchText(canvas.Title, canvas.DocumentContent))
+		if !containsEveryTerm(folded, terms) || containsAnyTerm(folded, excluded) {
+			continue
+		}
+		_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, userID, func(visit func(string, string, string)) {
+			for _, grant := range s.canvasAccess {
+				if grant.CanvasID == canvas.ID {
+					visit(grant.EntityType, grant.EntityID, grant.Access)
+				}
+			}
+		})
+		if allowed {
+			values = append(values, canvas)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > search.Page.Limit
+	if hasMore {
+		values = values[:search.Page.Limit]
+	}
+	page := domain.CanvasPage{Canvases: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
+func containsEveryTerm(folded string, terms []string) bool {
+	for _, term := range terms {
+		if !strings.Contains(folded, term) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsAnyTerm(folded string, terms []string) bool {
+	for _, term := range terms {
+		if strings.Contains(folded, term) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) UpdateCanvas(_ context.Context, canvas domain.Canvas, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

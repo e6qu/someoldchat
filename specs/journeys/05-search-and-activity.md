@@ -182,8 +182,16 @@ Implemented evidence:
   and legacy combined `search.all` require user tokens, enforce documented
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
-- The first-party search surface provides real Messages, Files, People, and
-  Channels results, durable per-member recent searches, and visibility-aware
+- Canvas search is answered from the prose inside the stored document rather
+  than from the JSON it is stored as, so a term matching a structural key finds
+  nothing and a heading a member can see is findable. The SQL profile keeps a
+  folded column written on every canvas write and backfilled on migration; the
+  memory profile folds on read. Cross-profile qualification drives both to the
+  same matches, the same exclusions, and the same silence for a reader with no
+  grant — the visibility rule is the canvas directory's, so a search cannot
+  disclose a title the directory would withhold.
+- The first-party search surface provides real Messages, Files, Canvases,
+  People, and Channels results, durable per-member recent searches, and visibility-aware
   typeahead links to real people, channels, and hosted files. It also provides
   URL-backed sender/conversation/date/content/order filters, authenticated file
   links, explicit current-conversation scope, and `Command/Control+F`.
@@ -204,8 +212,10 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with
   notification-producing mutations committed after the upgrade;
-- search does not yet provide Canvases results, Slack's semantic relevance
-  scoring or highlighting, every `to:`/link/specific emoji/`hasmy:` modifier,
+- search does not yet provide Slack's semantic relevance scoring or
+  highlighting — a canvas result carries a leading snippet rather than a marked
+  match, because a substring search for the term would mark the wrong span
+  whenever the match was in the title — every `to:`/link/specific emoji/`hasmy:` modifier,
   prefix `*`, section-valued `in:`, Slack's natural month/year date forms,
   participant-accurate `with:` thread semantics, complete People/Channels
   pagination, thread-specific entry scope, or a highlighted exact-hit return

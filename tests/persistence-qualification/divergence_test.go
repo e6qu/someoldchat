@@ -2576,3 +2576,81 @@ func typingSignalsExpireWithoutBeingRetracted(t *testing.T, open opener) {
 		t.Fatalf("a non-member saw %+v", outside)
 	}
 }
+
+// Canvas search is the first search this product answers from prose held inside
+// a JSON document, and the two profiles reach it differently: the SQL profile
+// keeps a folded column written on every canvas write, the memory profile folds
+// on read. Those are two implementations of one rule, which is exactly the
+// shape that drifts, so the contract drives both to the same answers — and to
+// the same silence for a reader with no grant.
+func canvasSearchFoldsTextAndStopsAtAccess(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	stranger := domain.UserID("U-stranger-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: stranger, WorkspaceID: f.workspaceID, Email: "stranger-" + f.suffix + "@example.com", Name: "stranger"}); err != nil {
+		t.Fatal(err)
+	}
+	canvas := domain.Canvas{
+		ID: domain.CanvasID("Cv-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Title: "Deployment Runbook", Version: 1,
+		DocumentContent: `{"sections":[{"id":"s1","type":"markdown","text":"Roll back with the previous revision"}]}`,
+		CreatedAt:       time.Unix(1700000000, 0).UTC(), UpdatedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	if err := f.repository.CreateCanvas(ctx, canvas, f.event("canvas", "canvas.created", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	page := domain.PageRequest{Limit: 10}
+	for name, search := range map[string]domain.CanvasSearch{
+		"title in another case": {Terms: []string{"runbook"}, Page: page},
+		"body in another case":  {Terms: []string{"ROLL BACK"}, Page: page},
+		"owner modifier":        {Terms: []string{"runbook"}, Owner: f.userID, Page: page},
+	} {
+		found, err := f.repository.SearchCanvases(ctx, f.workspaceID, f.userID, search)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(found.Canvases) != 1 || found.Canvases[0].ID != canvas.ID {
+			t.Fatalf("%s found %+v, want the canvas", name, found.Canvases)
+		}
+	}
+
+	// The stored document is JSON. An index built from the raw bytes would
+	// match its keys, so every canvas in the workspace would answer to
+	// "sections" and none would answer to a term split by an escape.
+	for name, search := range map[string]domain.CanvasSearch{
+		"JSON key":         {Terms: []string{"sections"}, Page: page},
+		"excluded term":    {Terms: []string{"runbook"}, ExcludedTerms: []string{"deployment"}, Page: page},
+		"excluded owner":   {Terms: []string{"runbook"}, ExcludedOwner: f.userID, Page: page},
+		"absent term":      {Terms: []string{"unrelated"}, Page: page},
+		"term and a miss":  {Terms: []string{"runbook", "unrelated"}, Page: page},
+		"updated after it": {Terms: []string{"runbook"}, After: time.Unix(1800000000, 0).UTC(), Page: page},
+	} {
+		found, err := f.repository.SearchCanvases(ctx, f.workspaceID, f.userID, search)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(found.Canvases) != 0 {
+			t.Fatalf("%s found %+v, want nothing", name, found.Canvases)
+		}
+	}
+
+	// The visibility rule is the directory's. A member with no grant must not
+	// learn the title of a canvas they could not have opened.
+	blind, err := f.repository.SearchCanvases(ctx, f.workspaceID, stranger, domain.CanvasSearch{Terms: []string{"runbook"}, Page: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blind.Canvases) != 0 {
+		t.Fatalf("a member with no grant found %+v", blind.Canvases)
+	}
+	listed, err := f.repository.ListCanvases(ctx, f.workspaceID, stranger, page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Canvases) != len(blind.Canvases) {
+		t.Fatalf("search and directory disagree for a stranger: %d listed, %d found", len(listed.Canvases), len(blind.Canvases))
+	}
+}
