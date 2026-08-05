@@ -3278,6 +3278,39 @@ test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can
   await expect(page.locator('.revision').first()).toContainText('the replacement body');
 });
 
+// A canvas can be discussed a paragraph at a time. The comment survives the
+// paragraph: deleting one does not unsay what was said about it, and the page
+// says the section has gone rather than pointing at nothing.
+test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment outlives it', async ({ page, context }) => {
+  await signIn(context);
+  const name = `canvas-review-${Date.now()}`;
+  await page.goto('/app/canvases');
+  await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByLabel('Content').fill('the paragraph under review');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+  await expect(page.getByText('No comments yet.')).toBeVisible();
+
+  await page.getByLabel('About').selectOption({ label: 'Section 1' });
+  await page.locator('#comment-text').fill('this paragraph is wrong');
+  await page.getByRole('button', { name: 'Add comment' }).click();
+  const comment = page.locator('.comment').first();
+  await expect(comment).toContainText('this paragraph is wrong');
+  await expect(comment).toContainText('on Section 1');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Rewriting the paragraph the comment was about leaves the comment, now
+  // anchored to a section that is gone.
+  await page.getByLabel('Section 1 content').fill('a rewrite');
+  await page.getByRole('button', { name: 'Save section 1' }).click();
+  await expect(page.locator('.comment').first()).toContainText('this paragraph is wrong');
+
+  // A comment belongs to whoever wrote it, and this session wrote this one.
+  await page.locator('.comment').first().getByRole('button', { name: 'Delete comment' }).click();
+  await expect(page.getByText('No comments yet.')).toBeVisible();
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

@@ -865,6 +865,11 @@ type Store interface {
 	// readable exactly when the canvas is, so this asks the canvas's own
 	// visibility rather than carrying a second rule that could drift.
 	ListCanvasRevisions(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.PageRequest) (domain.CanvasRevisionPage, error)
+	// Canvas comments are readable and writable by anyone who may read the
+	// canvas: commenting is taking part in a document, not editing it.
+	CreateCanvasComment(context.Context, domain.CanvasComment, events.Event) error
+	DeleteCanvasComment(context.Context, domain.WorkspaceID, domain.CanvasCommentID, domain.UserID, events.Event) error
+	ListCanvasComments(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.PageRequest) (domain.CanvasCommentPage, error)
 	RecordSearchHistory(context.Context, domain.SearchHistoryEntry) error
 	ListSearchHistory(context.Context, domain.WorkspaceID, domain.UserID, int) ([]domain.SearchHistoryEntry, error)
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error

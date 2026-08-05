@@ -554,7 +554,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 146
+const schemaVersion = 147
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3147,6 +3147,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 147 {
+		// Comments anchored to a canvas section. Created beside the canvas in
+		// this ladder rather than in the base schema, for the reason the
+		// revision table learned the hard way: the base schema runs first, and
+		// a foreign key to a table the ladder creates fails on PostgreSQL.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvas_comments (
+			id TEXT PRIMARY KEY, canvas_id TEXT NOT NULL REFERENCES canvases(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			section_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id),
+			text TEXT NOT NULL, created_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+			return fmt.Errorf("migrate canvas comments: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS canvas_comments_canvas ON canvas_comments(canvas_id, created_at, id)`); err != nil {
+			return fmt.Errorf("index canvas comments: %w", err)
 		}
 	}
 	if version < 146 {
@@ -13228,6 +13244,107 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 	return tx.Commit()
 }
 
+// CreateCanvasComment records a remark on a section. Visibility is the canvas's
+// own — a member who may read the canvas may comment on it — so the check is the
+// shared predicate rather than a second rule.
+func (s *Store) CreateCanvasComment(ctx context.Context, comment domain.CanvasComment, event events.Event) error {
+	if comment.ID == "" || comment.CanvasID == "" || comment.UserID == "" || strings.TrimSpace(comment.Text) == "" {
+		return store.InvalidArgument("a canvas comment requires an identifier, a canvas, an author and text")
+	}
+	visible, err := s.canvasVisible(ctx, comment.WorkspaceID, comment.UserID, comment.CanvasID)
+	if err != nil {
+		return err
+	}
+	if !visible {
+		return store.ErrNotFound
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_comments(id, canvas_id, workspace_id, section_id, user_id, text, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+		comment.ID, comment.CanvasID, comment.WorkspaceID, comment.SectionID, comment.UserID, comment.Text, comment.CreatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteCanvasComment removes a remark. The author check is inside the
+// statement, so the permission cannot be lost between reading it and acting.
+func (s *Store) DeleteCanvasComment(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasCommentID, author domain.UserID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE canvas_comments SET deleted = 1 WHERE id = ? AND workspace_id = ? AND user_id = ? AND deleted = 0`, id, workspace, author)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ListCanvasComments reads a canvas's comments oldest first, which is how a
+// conversation reads.
+func (s *Store) ListCanvasComments(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.CanvasCommentPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.CanvasCommentPage{}, err
+	}
+	visible, err := s.canvasVisible(ctx, workspace, user, id)
+	if err != nil {
+		return domain.CanvasCommentPage{}, err
+	}
+	if !visible {
+		return domain.CanvasCommentPage{}, store.ErrNotFound
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, canvas_id, workspace_id, section_id, user_id, text, created_at FROM canvas_comments
+		WHERE canvas_id = ? AND workspace_id = ? AND deleted = 0 AND id > ? ORDER BY id LIMIT ?`, id, workspace, after, request.Limit+1)
+	if err != nil {
+		return domain.CanvasCommentPage{}, err
+	}
+	values := make([]domain.CanvasComment, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.CanvasComment
+		var created int64
+		if err := rows.Scan(&value.ID, &value.CanvasID, &value.WorkspaceID, &value.SectionID, &value.UserID, &value.Text, &created); err != nil {
+			rows.Close()
+			return domain.CanvasCommentPage{}, err
+		}
+		value.CreatedAt = time.Unix(0, created).UTC()
+		values = append(values, value)
+	}
+	if err := closeRows(rows); err != nil {
+		return domain.CanvasCommentPage{}, err
+	}
+	page := domain.CanvasCommentPage{Comments: values, HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		page.Comments = page.Comments[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(string(page.Comments[len(page.Comments)-1].ID))
+		if err != nil {
+			return domain.CanvasCommentPage{}, err
+		}
+	}
+	return page, nil
+}
+
 // ListCanvasRevisions reads what a canvas said before, newest first. Visibility
 // is the canvas's own: a revision is readable exactly when the canvas is, so
 // there is no second rule here to drift from the directory's.
@@ -13300,6 +13417,9 @@ func (s *Store) DeleteCanvas(ctx context.Context, workspace domain.WorkspaceID, 
 	// would keep the content of a document somebody deleted, readable by
 	// anything that queried the table directly.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM canvas_revisions WHERE canvas_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM canvas_comments WHERE canvas_id = ?`, id); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace)

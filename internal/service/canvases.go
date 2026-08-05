@@ -315,6 +315,63 @@ func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.W
 	return result, nil
 }
 
+// CommentOnCanvas records a remark against a section. Read access is enough:
+// commenting is taking part in a document, not editing it, and a canvas shared
+// for review that only its editors could discuss would make review impossible.
+//
+// The section is not checked against the document. A comment about a paragraph
+// that has since been rewritten or removed is still what somebody said — often
+// the reason it changed — so an anchor is a record of what was being discussed
+// rather than a foreign key.
+func (m Messages) CommentOnCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, sectionID, text string) (domain.CanvasComment, error) {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+		return domain.CanvasComment{}, err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || utf8.RuneCountInString(text) > domain.CanvasCommentLimit {
+		return domain.CanvasComment{}, ErrInvalidCanvas
+	}
+	identifier, err := domain.PublicID("temp:CC:")
+	if err != nil {
+		return domain.CanvasComment{}, err
+	}
+	comment := domain.CanvasComment{
+		ID: domain.CanvasCommentID(identifier), CanvasID: id, WorkspaceID: workspaceID,
+		SectionID: strings.TrimSpace(sectionID), UserID: userID, Text: text, CreatedAt: time.Now().UTC(),
+	}
+	event, err := canvasEvent(workspaceID, userID, "canvas.commented", id, comment.CreatedAt, events.String("comment_id", identifier))
+	if err != nil {
+		return domain.CanvasComment{}, err
+	}
+	if err := m.Store.CreateCanvasComment(ctx, comment, event); err != nil {
+		return domain.CanvasComment{}, err
+	}
+	return comment, nil
+}
+
+// CanvasComments reads a canvas's remarks, oldest first, which is how a
+// conversation reads.
+func (m Messages) CanvasComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+		return domain.CanvasCommentPage{}, err
+	}
+	return m.Store.ListCanvasComments(ctx, workspaceID, userID, id, request)
+}
+
+// DeleteCanvasComment removes a remark. Its author alone may: a comment is a
+// thing somebody said, and an editor who could delete what others said about
+// their document would make the comments worth less than silence.
+func (m Messages) DeleteCanvasComment(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasCommentID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload("canvas.comment_deleted", events.String("comment_id", string(id))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteCanvasComment(ctx, workspaceID, id, userID, event)
+}
+
 // CanvasRevisions reads what a canvas said before, newest first. Read access is
 // enough: a member who may read a canvas may read what it used to say, because
 // the history is the same document at an earlier moment and withholding it

@@ -21,6 +21,7 @@ type ListID string
 type ListItemID string
 type ListDownloadID string
 type FileCommentID string
+type CanvasCommentID string
 type ExternalUploadID string
 type ReminderID string
 type LaterReminderID string

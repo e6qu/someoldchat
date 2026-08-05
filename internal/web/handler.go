@@ -539,6 +539,17 @@ type assistantPromptView struct {
 	Message string
 }
 
+type canvasCommentView struct {
+	ID          string
+	AuthorName  string
+	SectionID   string
+	SectionName string
+	Text        string
+	DisplayTime string
+	MachineTime string
+	DeleteURL   string
+}
+
 type canvasRevisionView struct {
 	Version     int64
 	Title       string
@@ -564,6 +575,11 @@ type canvasData struct {
 	CanDelete      bool
 	ReadOnlyReason string
 	Notice         string
+	// Comments are the remarks on this canvas, oldest first. They are shown to
+	// anyone who may read it, and anyone who may read it may add one: a canvas
+	// shared for review that only its editors could discuss would make review
+	// impossible.
+	Comments []canvasCommentView
 	// Revisions is what the canvas said before, newest first. It is shown to
 	// anyone who may read the canvas, because a revision is the same document
 	// at an earlier moment; restoring one needs write access, so the control
@@ -1247,6 +1263,14 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.canvas-comments{margin-top:24px;border-top:1px solid var(--line);padding-top:16px}
+.comments{list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:10px}
+.comment{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.comment-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.comment-author{font-weight:700}
+.comment-anchor,.comment-time{color:var(--muted);font-size:12px}
+.comment-text{margin:6px 0 8px;white-space:pre-wrap}
+.new-comment{display:flex;flex-direction:column;gap:6px;max-width:520px}
 .canvas-history{margin-top:24px;border-top:1px solid var(--line);padding-top:16px}
 .revisions{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
 .revision{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
@@ -2658,7 +2682,15 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
     <div class="actions"><button type="submit">Save section {{.Position}}</button></div>
   </form>{{else if $.CanWrite}}<p class="notice" role="note">This section is {{.Type}} content. It is shown as stored; editing it here would flatten it, so this client does not offer that.</p>{{end}}
 </section>{{end}}
-{{if and .CanWrite (not .Sections)}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value=""><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000"></textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}{{if .Revisions}}<section class="canvas-history" aria-labelledby="canvas-history-heading"><h3 id="canvas-history-heading">History</h3>
+{{if and .CanWrite (not .Sections)}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value=""><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000"></textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}<section class="canvas-comments" aria-labelledby="canvas-comments-heading"><h3 id="canvas-comments-heading">Comments</h3>
+{{if .Comments}}<ul class="comments">{{range .Comments}}<li class="comment"><span class="comment-head"><span class="comment-author">{{.AuthorName}}</span>{{if .SectionName}}<span class="comment-anchor">on {{.SectionName}}</span>{{end}}<time class="comment-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span><p class="comment-text">{{.Text}}</p>{{if .DeleteURL}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Delete comment</button></form>{{end}}</li>{{end}}</ul>{{else}}<p class="empty">No comments yet.</p>{{end}}
+<form class="new-comment" method="post" action="/app/canvases/{{.ID}}/comments"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label for="comment-section">About</label><select id="comment-section" name="section_id"><option value="">The whole canvas</option>{{range .Sections}}<option value="{{.ID}}">Section {{.Position}}</option>{{end}}</select>
+<label for="comment-text">Comment</label><textarea id="comment-text" name="text" maxlength="4000" rows="2" required></textarea>
+<button type="submit">Add comment</button></form>
+<p class="read-only">Anyone who can read this canvas can comment on it. A comment belongs to whoever wrote it, and only they can delete it.</p>
+</section>
+{{if .Revisions}}<section class="canvas-history" aria-labelledby="canvas-history-heading"><h3 id="canvas-history-heading">History</h3>
 <ul class="revisions">{{range .Revisions}}<li class="revision"><span class="revision-head"><span class="revision-title">{{.Title}}</span><time class="revision-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .EditorName}}<span class="revision-editor">replaced by {{.EditorName}}</span>{{end}}</span>{{if .Excerpt}}<p class="revision-excerpt">{{.Excerpt}}</p>{{end}}{{if .RestoreURL}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><button type="submit">Restore this revision</button></form>{{end}}</li>{{end}}</ul>
 <p class="read-only">Restoring is an ordinary edit: the current content becomes a revision of its own, so restoring the wrong one can be undone.</p>
 </section>{{end}}
@@ -4124,6 +4156,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/canvases/{canvasID}/update", h.updateCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/comments", h.commentOnCanvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/comments/{commentID}/delete", h.deleteCanvasComment)
 	mux.HandleFunc("GET /app/lists", h.lists)
 	mux.HandleFunc("POST /app/lists/create", h.createList)
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
@@ -7899,6 +7933,33 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	if !readable {
 		readOnlyReason = "This canvas could not be read as a document. It is shown as stored so nothing is lost, and editing is disabled until it can be parsed."
 	}
+	comments := make([]canvasCommentView, 0, 8)
+	if page, commentErr := h.Messages.CanvasComments(r.Context(), principal.WorkspaceID, principal.UserID, value.ID, domain.PageRequest{Limit: 100}); commentErr == nil {
+		names := h.newUserNames(r.Context(), principal)
+		positions := make(map[string]int, len(sections))
+		for index, section := range sections {
+			positions[section.ID] = index + 1
+		}
+		for _, comment := range page.Comments {
+			view := canvasCommentView{
+				ID: string(comment.ID), AuthorName: names.name(comment.UserID), SectionID: comment.SectionID,
+				Text: comment.Text, DisplayTime: formatTime(comment.CreatedAt),
+				MachineTime: comment.CreatedAt.UTC().Format(time.RFC3339Nano),
+			}
+			if position, ok := positions[comment.SectionID]; ok {
+				view.SectionName = "Section " + strconv.Itoa(position)
+			} else if comment.SectionID != "" {
+				// The paragraph it was about has gone. Deleting a paragraph does
+				// not unsay what was said about it, so the comment stays and
+				// says what happened instead of pointing at nothing.
+				view.SectionName = "a removed section"
+			}
+			if comment.UserID == principal.UserID {
+				view.DeleteURL = "/app/canvases/" + url.PathEscape(string(value.ID)) + "/comments/" + url.PathEscape(string(comment.ID)) + "/delete"
+			}
+			comments = append(comments, view)
+		}
+	}
 	revisions := make([]canvasRevisionView, 0, 8)
 	if history, historyErr := h.Messages.CanvasRevisions(r.Context(), principal.WorkspaceID, principal.UserID, value.ID, domain.PageRequest{Limit: 10}); historyErr == nil {
 		names := h.newUserNames(r.Context(), principal)
@@ -7917,7 +7978,7 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 			revisions = append(revisions, view)
 		}
 	}
-	h.writeHTML(w, canvasTemplate, canvasData{Revisions: revisions, ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
 }
 
 // canvasRevisionExcerpt is the opening of what the canvas said, bounded. A
@@ -7935,6 +7996,44 @@ func canvasRevisionExcerpt(revision domain.CanvasRevision) string {
 // restoreCanvas puts an earlier revision back as an ordinary edit, so the
 // content it replaced becomes a revision of its own and a wrong restore is
 // itself undoable.
+func (h Handler) commentOnCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
+	if !ok {
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	if _, err := h.Messages.CommentOnCanvas(r.Context(), principal.WorkspaceID, principal.UserID, id, fields["section_id"], fields["text"]); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The comment was not added", "Write something to say, and check you can still open this canvas.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id)))
+}
+
+func (h Handler) deleteCanvasComment(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the canvas and try again."); !ok {
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	if err := h.Messages.DeleteCanvasComment(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasCommentID(strings.TrimSpace(r.PathValue("commentID")))); err != nil {
+		// A comment belongs to whoever wrote it, and someone else's comment
+		// answers exactly as a missing one does, so this cannot be used to
+		// learn that a comment exists.
+		h.writeMutationError(w, r, http.StatusNotFound, "The comment was not deleted", "It is no longer there, or it is not yours to delete.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id)))
+}
+
 func (h Handler) restoreCanvas(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {

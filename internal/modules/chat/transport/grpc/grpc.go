@@ -1378,6 +1378,40 @@ func (r Remote) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoCanvasPage(out)
 }
 
+func (r Remote) CommentOnCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, sectionID, text string) (domain.CanvasComment, error) {
+	out, err := r.canvases.CommentOnCanvas(ctx, &chatv1.CommentOnCanvasRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), SectionId: sectionID, Text: text,
+	})
+	if err != nil {
+		return domain.CanvasComment{}, err
+	}
+	return decodeProtoCanvasComment(out), nil
+}
+
+func (r Remote) CanvasComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {
+	out, err := r.canvases.CanvasComments(ctx, &chatv1.CanvasCommentsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id),
+		Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.CanvasCommentPage{}, err
+	}
+	return decodeProtoCanvasCommentPage(out)
+}
+
+func (r Remote) DeleteCanvasComment(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasCommentID) error {
+	out, err := r.canvases.DeleteCanvasComment(ctx, &chatv1.DeleteCanvasCommentRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CommentId: string(id),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed delete canvas comment response was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) CanvasRevisions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasRevisionPage, error) {
 	out, err := r.canvases.CanvasRevisions(ctx, &chatv1.CanvasRevisionsRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id),
@@ -4563,6 +4597,68 @@ func (s *Server) GetCanvasAccess(ctx context.Context, input *chatv1.CanvasReques
 		return nil, mapError(err)
 	}
 	return &chatv1.CanvasAccessResponse{CanvasId: string(value.CanvasID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}, nil
+}
+
+func (s *Server) CommentOnCanvas(ctx context.Context, input *chatv1.CommentOnCanvasRequest) (*chatv1.CanvasComment, error) {
+	value, err := s.implementation.CommentOnCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetSectionId(), input.GetText())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvasComment(value), nil
+}
+
+func (s *Server) CanvasComments(ctx context.Context, input *chatv1.CanvasCommentsRequest) (*chatv1.CanvasCommentPage, error) {
+	value, err := s.implementation.CanvasComments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvasCommentPage(value), nil
+}
+
+func (s *Server) DeleteCanvasComment(ctx context.Context, input *chatv1.DeleteCanvasCommentRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteCanvasComment(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasCommentID(input.GetCommentId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func encodeProtoCanvasComment(value domain.CanvasComment) *chatv1.CanvasComment {
+	return &chatv1.CanvasComment{
+		Id: string(value.ID), CanvasId: string(value.CanvasID), WorkspaceId: string(value.WorkspaceID),
+		SectionId: value.SectionID, UserId: string(value.UserID), Text: value.Text,
+		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), Deleted: value.Deleted,
+	}
+}
+
+func decodeProtoCanvasComment(value *chatv1.CanvasComment) domain.CanvasComment {
+	if value == nil {
+		return domain.CanvasComment{}
+	}
+	return domain.CanvasComment{
+		ID: domain.CanvasCommentID(value.GetId()), CanvasID: domain.CanvasID(value.GetCanvasId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), SectionID: value.GetSectionId(),
+		UserID: domain.UserID(value.GetUserId()), Text: value.GetText(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), Deleted: value.GetDeleted(),
+	}
+}
+
+func encodeProtoCanvasCommentPage(value domain.CanvasCommentPage) *chatv1.CanvasCommentPage {
+	comments := make([]*chatv1.CanvasComment, 0, len(value.Comments))
+	for _, comment := range value.Comments {
+		comments = append(comments, encodeProtoCanvasComment(comment))
+	}
+	return &chatv1.CanvasCommentPage{Comments: comments, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoCanvasCommentPage(value *chatv1.CanvasCommentPage) (domain.CanvasCommentPage, error) {
+	if value == nil {
+		return domain.CanvasCommentPage{}, errors.New("typed canvas comment page is incomplete")
+	}
+	comments := make([]domain.CanvasComment, 0, len(value.GetComments()))
+	for _, comment := range value.GetComments() {
+		comments = append(comments, decodeProtoCanvasComment(comment))
+	}
+	return domain.CanvasCommentPage{Comments: comments, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
 
 func (s *Server) CanvasRevisions(ctx context.Context, input *chatv1.CanvasRevisionsRequest) (*chatv1.CanvasRevisionPage, error) {
