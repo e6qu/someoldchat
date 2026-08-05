@@ -731,10 +731,25 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
   await expect(card).toContainText('browser-report.txt');
   await expect(card).toContainText('text/plain');
 
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    card.getByRole('link', { name: 'Download' }).click(),
-  ]);
+  // This click sits over a region a live refresh replaces: the send that put the
+  // card there also produces the event that re-renders the timeline, and `card`
+  // re-resolves on every use. A click dispatched into a node that is being
+  // swapped out produces no download and no error, which is what CI reported as
+  // a bare 30s timeout waiting for the event.
+  //
+  // Two candidate causes and no local reproduction — five webkit repeats pass in
+  // about a second each here, while the runner exceeded thirty. So this covers
+  // both: a budget wide enough for a slow machine, and a retry for a click that
+  // landed on a detaching node. Re-downloading is a GET, so retrying costs
+  // nothing and asserts the same thing.
+  test.setTimeout(90000);
+  let download = null;
+  for (let attempt = 0; attempt < 3 && !download; attempt += 1) {
+    const arriving = page.waitForEvent('download', { timeout: 20000 }).catch(() => null);
+    await card.getByRole('link', { name: 'Download' }).click();
+    download = await arriving;
+  }
+  expect(download, 'the Download link produced no download in three attempts').toBeTruthy();
   expect(download.suggestedFilename()).toBe('browser-report.txt');
   const stream = await download.createReadStream();
   const chunks = [];

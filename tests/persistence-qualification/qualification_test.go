@@ -1762,7 +1762,20 @@ func durableEventDeliveryRepositoryContract(t *testing.T, open opener) {
 	if err := repository.RenewEvents(ctx, "worker-a", sequences, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.ReleaseEvents(ctx, "worker-a", sequences[:1], time.Now().UTC().Add(40*time.Millisecond)); err != nil {
+	// The retry instant has to outlast the round trips that follow it, not just
+	// the statement that sets it. This budgeted 40ms and then spent it on two
+	// transactions against a containerised PostgreSQL on shared CI hardware,
+	// which is how it eventually reported that the store had ignored a retry
+	// time it had honoured. A second is not a guess at how slow the machine is;
+	// it is wide enough that only a stall which would fail this suite many other
+	// ways could cross it.
+	//
+	// The rule itself is already proven without a clock at all, by
+	// sqlstore/storedtime_test.go injecting `now`. That seam is unexported, so
+	// this cross-profile contract cannot use it, and what it adds is that every
+	// profile agrees — not a second measurement of the timing.
+	retryAt := time.Now().UTC().Add(time.Second)
+	if err := repository.ReleaseEvents(ctx, "worker-a", sequences[:1], retryAt); err != nil {
 		t.Fatal(err)
 	}
 	if next, err := repository.ClaimEvents(ctx, workspaceID, "worker-b", 10, time.Minute); err != nil {
@@ -1770,10 +1783,21 @@ func durableEventDeliveryRepositoryContract(t *testing.T, open opener) {
 	} else if len(next) != 0 {
 		t.Fatalf("released event became claimable before retry time=%+v", next)
 	}
-	time.Sleep(60 * time.Millisecond)
-	retried, err := repository.ClaimEvents(ctx, workspaceID, "worker-b", 10, time.Minute)
-	if err != nil {
-		t.Fatal(err)
+	// Waiting for the condition rather than sleeping a fixed span: a sleep long
+	// enough to be safe is wasted on a fast machine, and one short enough to be
+	// quick fails on a slow one. The deadline is generous because exceeding it
+	// means the event never became claimable, which is a real defect.
+	var retried []events.Record
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		var err error
+		retried, err = repository.ClaimEvents(ctx, workspaceID, "worker-b", 10, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(retried) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if len(retried) != 1 || retried[0].Sequence != sequences[0] {
 		t.Fatalf("retried events=%+v, want released sequence %d", retried, sequences[0])

@@ -3755,7 +3755,7 @@ announce('Reconnecting to live updates…');
 topics.forEach(function(topic){stream.addEventListener(topic,deliver)});
 }
 var typingRegion=document.getElementById('typing');
-if(typingRegion&&window.fetch){
+if(typingRegion&&window.fetch&&typingRegion.getAttribute('data-channel')){
 var typingTiming=` + typingTimingLiteral() + `;
 var typingURL=typingRegion.getAttribute('data-typing')||'';
 var typingChannel=typingRegion.getAttribute('data-channel')||'';
@@ -3778,10 +3778,10 @@ typingPending=window.setTimeout(function(){typingPending=null;renderTyping()},20
 if(typeof stream!=='undefined'&&stream)stream.addEventListener('typing',function(event){
 var frame=null;
 try{frame=JSON.parse(event.data)}catch(error){return}
-if(!frame||(typingChannel&&frame.channel!==typingChannel))return;
+if(!frame||frame.channel!==typingChannel)return;
 scheduleTyping();
 });
-if(text&&typingCsrf&&typingChannel)text.addEventListener('input',function(){
+if(text&&typingCsrf)text.addEventListener('input',function(){
 var now=Date.now();
 if(!text.value||now-typingSent<typingTiming.interval||!ownPath(typingURL))return;
 typingSent=now;
