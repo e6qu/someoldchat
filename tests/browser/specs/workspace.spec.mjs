@@ -3240,6 +3240,44 @@ test('[SEARCH-02] a named emoji search matches that reaction and not any reactio
   await expect(page.locator('.result')).toHaveCount(1);
 });
 
+// A canvas keeps what it said before, and a member can put it back. Restoring
+// is an ordinary edit rather than a rewind, so the content it replaced becomes
+// a revision of its own — which is what makes restoring the wrong one
+// recoverable rather than a second mistake.
+test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can be restored', async ({ page, context }) => {
+  await signIn(context);
+  const first = `canvas-past-${Date.now()}`;
+  await page.goto('/app/canvases');
+  await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
+  await page.getByLabel('Name').fill(first);
+  await page.getByLabel('Content').fill('the original body');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name: first })).toBeVisible();
+
+  // A canvas nobody has edited has no history to show.
+  await expect(page.getByRole('heading', { name: 'History', exact: true })).toHaveCount(0);
+
+  // A canvas created with content has one section, so the editor is the
+  // per-section one rather than the whole-document form.
+  const second = `${first} revised`;
+  await page.getByLabel('Title').fill(second);
+  await page.getByLabel('Section 1 content').fill('the replacement body');
+  await page.getByRole('button', { name: 'Save section 1' }).click();
+  await expect(page.getByRole('heading', { name: second })).toBeVisible();
+
+  // The history shows what it said before, not what it says now.
+  await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
+  const revision = page.locator('.revision').first();
+  await expect(revision).toContainText(first);
+  await expect(revision).toContainText('the original body');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await revision.getByRole('button', { name: 'Restore this revision' }).click();
+  await expect(page.getByRole('heading', { name: first })).toBeVisible();
+  // The replaced content is now itself a revision, so the restore is undoable.
+  await expect(page.locator('.revision').first()).toContainText('the replacement body');
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

@@ -39,6 +39,37 @@ message CanvasesRequest {
   bool descending = 5;
 }
 
+message CanvasRevision {
+  string canvas_id = 1;
+  string workspace_id = 2;
+  int64 version = 3;
+  string title = 4;
+  string document_content = 5;
+  string edited_by = 6;
+  int64 created_at_unix_nano = 7;
+}
+
+message CanvasRevisionPage {
+  repeated CanvasRevision revisions = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message CanvasRevisionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message RestoreCanvasRevisionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  int64 version = 4;
+}
+
 message SearchCanvasesRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -111,6 +142,8 @@ service CanvasesService {
   rpc GetCanvasAccess(CanvasRequest) returns (CanvasAccessResponse);
   rpc ListCanvases(CanvasesRequest) returns (CanvasPage);
   rpc SearchCanvases(SearchCanvasesRequest) returns (CanvasPage);
+  rpc CanvasRevisions(CanvasRevisionsRequest) returns (CanvasRevisionPage);
+  rpc RestoreCanvasRevision(RestoreCanvasRevisionRequest) returns (Canvas);
   rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
   rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);
   rpc SetCanvasAccess(CanvasAccessRequest) returns (MutationResponse);

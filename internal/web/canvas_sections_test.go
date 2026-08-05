@@ -54,7 +54,15 @@ func TestMultiSectionCanvasIsEditableSectionBySection(t *testing.T) {
 	}
 	after := get(t, mux, target).Body.String()
 	requireContains(t, "after the save", after, "First paragraph", "Second paragraph, revised")
-	if strings.Count(after, "Second paragraph<") > 0 {
+	// Scoped to the document rather than the page: the history panel below it
+	// shows what the canvas said before, and that is the point of the history —
+	// the replaced text appearing there is correct, and appearing twice in the
+	// document is the duplication this guards against.
+	document := after
+	if history := strings.Index(after, `class="canvas-history"`); history >= 0 {
+		document = after[:history]
+	}
+	if strings.Count(document, "Second paragraph<") > 0 {
 		t.Error("the original second section survived alongside its replacement")
 	}
 }
