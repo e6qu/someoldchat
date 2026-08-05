@@ -267,6 +267,22 @@ jobs:
       - name: Install browser qualification dependencies
         run: make browser-qualification
 
+      # Playwright already records a trace, a DOM snapshot and the network
+      # exchange for a failed test — the config asks for it — and this job threw
+      # all of it away. `[ACT-02 ACT-03]` has failed here roughly one run in four
+      # for several releases and is not reproducible locally, and every attempt
+      # to explain it from the assertion message alone has been wrong. Keeping
+      # what the run already captured is the difference between the next
+      # occurrence being evidence and being another guess.
+      - name: Keep the failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-qualification-failure
+          path: tests/browser/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
   shauth-sso:
     name: Shauth SSO qualification
     runs-on: ubuntu-24.04

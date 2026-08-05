@@ -267,6 +267,19 @@ entries:
     license: MPL-2.0
     purpose: Terraform validation in CI
     runtime: false
+  - id: action/actions/upload-artifact
+    kind: github-action
+    canonical: actions/upload-artifact
+    source: https://github.com/actions/upload-artifact
+    version: v7.0.1
+    revision: 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    published_at: 2026-04-10T16:08:32Z
+    evidence: https://api.github.com/repos/actions/upload-artifact/commits/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    checksum: git:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    provenance: github-commit
+    license: MIT
+    purpose: Keep Playwright's failure trace when browser qualification fails in CI
+    runtime: false
   - id: action/actions/setup-node
     kind: github-action
     canonical: actions/setup-node
