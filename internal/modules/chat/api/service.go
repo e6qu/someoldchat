@@ -430,6 +430,7 @@ type Service interface {
 	ListItems(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.PageRequest, bool) (domain.ListItemPage, error)
 	UpdateListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string, bool) (domain.ListItem, error)
 	AssignListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, domain.UserID, time.Time) (domain.ListItem, error)
+	AddListColumn(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string, domain.ListColumnType, []string) (domain.List, error)
 	ListAccessFor(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) error
 	UpdateListCells(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string) ([]domain.ListItem, error)
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, []domain.ListItemID) error

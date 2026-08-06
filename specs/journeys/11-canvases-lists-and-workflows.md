@@ -187,8 +187,17 @@ for later steps and conditions to read.
   A list created without a schema is given one primary text column so the client
   has something to show; that substitution is the product's convenience rather
   than the member's declaration, so it is not enforced and such lists stay
-  free-form. Authoring columns is an API operation; a first-party column editor
-  is absent and recorded as absent.
+  free-form. A column can be declared from the list page as well as through the
+  API. Declaring one appends rather than rewriting the schema, because every
+  cell references a column by key and a wholesale rewrite would let one edit
+  orphan every value in the list; the key is minted from the name and made
+  unique, so two columns called "Status" are survivable rather than a
+  collision. Declaring a column on a list already used free-form does not
+  strand its items: a cell the item already held is accepted, because the member
+  did not introduce an invisible cell but merely did not delete one, while a
+  newly invented column is still refused. Removing a column is not offered — it
+  would have to remove that value from every item, which is a deletion worth
+  asking for deliberately — and is recorded as absent.
 - A list item carries an assignee and a due date as columns of their own rather
   than cells inside the free-form fields, because the product asks both
   questions itself — who is this for, is it late — and a value buried in JSON
