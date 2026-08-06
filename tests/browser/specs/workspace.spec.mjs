@@ -3311,6 +3311,62 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await expect(page.getByText('No comments yet.')).toBeVisible();
 });
 
+// A list with declared columns shows its items under them rather than as a bare
+// title, and refuses a value a column cannot mean. The list is created through
+// the API because the first-party creation form does not author schemas — a
+// column editor is a separate surface and is recorded as absent.
+test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', async ({ page, context, request }) => {
+  await signIn(context);
+  const name = `Launch plan ${Date.now()}`;
+  const created = await request.post('/api/slackLists.create', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: {
+      name,
+      schema: JSON.stringify([
+        { key: 'title', name: 'Title', type: 'text', is_primary_column: true },
+        { key: 'status', name: 'Status', type: 'select', options: ['open', 'done'] },
+        { key: 'due', name: 'Due', type: 'date' },
+      ]),
+    },
+  });
+  const list = await created.json();
+  expect(list.ok, JSON.stringify(list)).toBe(true);
+  const listID = list.list.id;
+  expect(listID, JSON.stringify(list)).toBeTruthy();
+
+  const good = await request.post('/api/slackLists.items.create', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: {
+      list_id: listID,
+      initial_fields: JSON.stringify([
+        { column_id: 'title', value: 'ship it' },
+        { column_id: 'status', value: 'open' },
+        { column_id: 'due', value: '2026-09-01' },
+      ]),
+    },
+  });
+  expect((await good.json()).ok, 'conforming item').toBe(true);
+
+  // A value the column cannot mean is refused rather than stored.
+  const bad = await request.post('/api/slackLists.items.create', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: {
+      list_id: listID,
+      initial_fields: JSON.stringify([{ column_id: 'status', value: 'blocked' }]),
+    },
+  });
+  expect((await bad.json()).ok, 'an unoffered option was stored').toBe(false);
+
+  await page.goto(`/app/lists/${encodeURIComponent(listID)}`);
+  await expect(page.getByText('Columns: Title (text), Status (select), Due (date)')).toBeVisible();
+  const cells = page.locator('.item').first().locator('.cell-value');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('ship it');
+  await expect(cells.nth(1)).toHaveText('open');
+  await expect(cells.nth(2)).toHaveText('2026-09-01');
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

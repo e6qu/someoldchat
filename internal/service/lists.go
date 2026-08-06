@@ -118,6 +118,11 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 	if strings.TrimSpace(schema) == "" && copyFrom == "" {
 		schema = `[{"key":"title","name":"Title","type":"text","is_primary_column":true}]`
 	}
+	// A schema that cannot be read is refused at the door rather than stored
+	// and discovered later by every reader of the list.
+	if _, err := domain.ParseListSchema(schema); err != nil {
+		return domain.List{}, ErrInvalidList
+	}
 	schema, err = normalizeJSONArray(schema, "[]")
 	if err != nil {
 		return domain.List{}, ErrInvalidList
@@ -268,11 +273,18 @@ func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.Workspa
 	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return domain.ListItem{}, err
 	}
-	if _, err := m.Store.GetList(ctx, workspaceID, listID); err != nil {
+	list, err := m.Store.GetList(ctx, workspaceID, listID)
+	if err != nil {
 		return domain.ListItem{}, err
 	}
-	fields, err := normalizeJSONArray(fields, "[]")
+	fields, err = normalizeJSONArray(fields, "[]")
 	if err != nil {
+		return domain.ListItem{}, ErrInvalidList
+	}
+	// A cell under a column nobody declared is invisible to every reader of the
+	// list, so accepting it silently would lose the member's work while looking
+	// like it had been saved.
+	if err := domain.ValidateListFields(list.Schema, fields); err != nil {
 		return domain.ListItem{}, ErrInvalidList
 	}
 	id, err := domain.NewListItemID()
@@ -315,6 +327,13 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 	}
 	value.Fields, err = normalizeJSONArray(fields, value.Fields)
 	if err != nil {
+		return domain.ListItem{}, ErrInvalidList
+	}
+	list, err := m.Store.GetList(ctx, workspaceID, listID)
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	if err := domain.ValidateListFields(list.Schema, value.Fields); err != nil {
 		return domain.ListItem{}, ErrInvalidList
 	}
 	value.Archived = archived
