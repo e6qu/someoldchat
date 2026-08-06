@@ -167,6 +167,17 @@ for later steps and conditions to read.
   removal: revoking it would leave the channel with a tab pointing at a document
   nobody in it may open. A canvas that is not this workspace's canvas answers
   the sharing read as missing rather than as unshared, on both storage profiles.
+- A conversation's own canvas is reachable from the conversation. It is a
+  different thing from a canvas shared into the channel: a conversation has
+  exactly one, membership is what grants access to it, and leaving takes that
+  access away without anybody revoking a grant. Opening the link when there is
+  no canvas says so instead of creating one, because a canvas appearing because
+  somebody followed a link would put an edit in the conversation's history that
+  nobody made. A second creation is not the member's mistake — somebody else
+  made it first — so it arrives at the canvas that exists rather than at an
+  error. The sharing surface shows the conversation's grant and does not offer
+  to revoke it: without it the conversation would have a canvas nobody in it
+  could open.
 - The sharing surface is one surface. A list carries the same grant model a
   canvas does, so it answers the same two questions the same way: anyone who may
   open it sees who else may, and only its owner changes that. Writing it twice
@@ -265,8 +276,10 @@ single Markdown section commit title and body as one compare-and-swap revision.
 Structured canvases render read-only rather than being silently flattened.
 Comments, revision history, and sharing review are now built: the sharing
 surface names everyone who may open a canvas, and only its owner is offered the
-controls that change that. Collaborative cursors, autosave/offline recovery,
-full rich block editing, and tab attachment remain gaps.
+controls that change that. A conversation now reaches its own canvas from the
+conversation itself, and creating one is a deliberate act rather than a side
+effect of following the link. Collaborative cursors, autosave/offline recovery,
+and full rich block editing remain gaps.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,

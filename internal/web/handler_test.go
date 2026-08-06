@@ -355,6 +355,55 @@ func TestListSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt(t *testing.T) {
 	}
 }
 
+// A conversation's own canvas existed in the API and nowhere else: the store,
+// the service and conversations.canvases.create have carried it since canvases
+// were built, and no first-party surface offered or opened one.
+func TestChannelCanvasIsOfferedToMembersAndCreatedOnPurpose(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+
+	// The conversation offers its canvas to a member.
+	page := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "conversation", page.Body.String(), `href="/app/channel-canvas?channel=Cdev"`)
+
+	// Opening it says there is none rather than making one: a canvas appearing
+	// because somebody followed a link would put an edit in the channel's
+	// history that nobody made.
+	empty := get(t, mux, "/app/channel-canvas?channel=Cdev")
+	if empty.Code != http.StatusOK {
+		t.Fatalf("open channel canvas = %d: %s", empty.Code, empty.Body)
+	}
+	requireContains(t, "empty channel canvas", empty.Body.String(), "has no canvas yet", "Create the canvas")
+	messages := service.Messages{Store: s}
+	if _, err := messages.ConversationCanvas(context.Background(), "T1", "U1", "Cdev"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("opening the empty state created a canvas: %v", err)
+	}
+
+	created := postForm(t, mux, "/app/channel-canvas/create", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "channel": {"Cdev"}, "title": {"general"},
+	}.Encode(), false)
+	if created.Code != http.StatusSeeOther {
+		t.Fatalf("create channel canvas = %d: %s", created.Code, created.Body)
+	}
+	canvasURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	requireContains(t, "canvas page", get(t, mux, canvasURL).Body.String(), "general", "Sharing")
+
+	// The conversation now goes straight to the canvas it has.
+	again := get(t, mux, "/app/channel-canvas?channel=Cdev")
+	if again.Code != http.StatusSeeOther || again.Header().Get("Location") != canvasURL {
+		t.Fatalf("second open = %d %q, want a redirect to %s", again.Code, again.Header().Get("Location"), canvasURL)
+	}
+
+	// A conversation has exactly one. A second attempt is not the member's
+	// mistake — somebody else made it first — so it arrives at the canvas that
+	// exists rather than at an error.
+	second := postForm(t, mux, "/app/channel-canvas/create", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "channel": {"Cdev"}, "title": {"general again"},
+	}.Encode(), false)
+	if second.Code != http.StatusSeeOther || strings.Split(second.Header().Get("Location"), "?")[0] != canvasURL {
+		t.Fatalf("second create = %d %q, want the existing canvas", second.Code, second.Header().Get("Location"))
+	}
+}
+
 func TestCanvasEditorRefusesToFlattenStructuredContent(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}

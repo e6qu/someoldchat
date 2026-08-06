@@ -128,6 +128,7 @@ func runQualification(t *testing.T, open opener) {
 		{"search modifiers mean the same on every profile", searchModifiersMeanTheSame},
 		{"canvas revisions record what was replaced", canvasRevisionsRecordWhatWasReplaced},
 		{"canvas comments outlive the section they annotate", canvasCommentsOutliveTheirSection},
+		{"a conversation has exactly one canvas", aConversationHasExactlyOneCanvas},
 		{"canvas grants are listed in one stable order", canvasGrantsAreListedInOneStableOrder},
 		{"list grants are listed in one stable order", listGrantsAreListedInOneStableOrder},
 		{"a Slack Connect decision reaches its requester", connectDecisionReachesItsRequester},

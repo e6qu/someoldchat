@@ -3175,6 +3175,73 @@ func canvasRevisionsRecordWhatWasReplaced(t *testing.T, open opener) {
 // than of whichever profile answered; and a grant that was revoked has to be
 // gone from the list on both, because a stale row would tell an owner they had
 // shared something they had not.
+// aConversationHasExactlyOneCanvas is the storage half of the channel canvas.
+// The two profiles refuse a second one by different means — SQL probes for an
+// existing grant inside the transaction, memory walks its map — so agreeing
+// that a conversation has one canvas is a contract rather than an observation.
+// Access follows membership rather than a personal grant, which is the whole
+// point of a canvas belonging to a conversation instead of to a person.
+func aConversationHasExactlyOneCanvas(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	canvas := domain.Canvas{
+		ID: domain.CanvasID("Cv-channel-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Title: "Channel notes", DocumentContent: `{"sections":[{"id":"s1","type":"markdown","text":"what we agreed"}]}`,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.repository.CreateChannelCanvas(ctx, canvas, f.event("channel-canvas", "canvas.created", string(canvas.ID)), f.channelID, f.event("channel-grant", "canvas.access_set", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	found, err := f.repository.GetChannelCanvas(ctx, f.workspaceID, f.channelID)
+	if err != nil || found.ID != canvas.ID {
+		t.Fatalf("channel canvas = %+v, %v, want %s", found, err, canvas.ID)
+	}
+
+	// A second one is refused, and the refusal is the same on both profiles so
+	// a caller can tell "somebody else made it first" from a real failure.
+	second := canvas
+	second.ID = domain.CanvasID("Cv-channel-second-" + f.suffix)
+	if err := f.repository.CreateChannelCanvas(ctx, second, f.event("second-canvas", "canvas.created", string(second.ID)), f.channelID, f.event("second-grant", "canvas.access_set", string(second.ID))); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("second channel canvas: %v, want ErrAlreadyExists", err)
+	}
+	if _, err := f.repository.GetCanvas(ctx, f.workspaceID, second.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the refused canvas was written anyway: %v", err)
+	}
+
+	// Joining the conversation is what grants access, and leaving is what takes
+	// it away. A member who never held a personal grant still reads it.
+	joiner := domain.UserID("U-joiner-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: joiner, WorkspaceID: f.workspaceID, Email: "joiner-" + f.suffix + "@example.com", Name: "joiner"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repository.GetCanvasAccess(ctx, canvas.ID, joiner); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a non-member reached the channel canvas: %v", err)
+	}
+	if err := f.repository.SeedConversationMember(ctx, f.channelID, joiner); err != nil {
+		t.Fatal(err)
+	}
+	access, err := f.repository.GetCanvasAccess(ctx, canvas.ID, joiner)
+	if err != nil {
+		t.Fatalf("a member could not reach the channel canvas: %v", err)
+	}
+	if access.EntityType != "channel_canvas" || access.EntityID != string(f.channelID) || access.Access != store.AccessWrite {
+		t.Fatalf("member access = %+v, want write through the conversation", access)
+	}
+
+	// The sharing surface reads the same grant, and shows it as the channel's
+	// own rather than as something to revoke.
+	grants, err := f.repository.ListCanvasGrants(ctx, f.workspaceID, canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(grants) != 1 || grants[0].EntityType != "channel_canvas" || grants[0].EntityID != string(f.channelID) {
+		t.Fatalf("grants = %+v, want one channel_canvas grant", grants)
+	}
+}
+
 func canvasGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)
