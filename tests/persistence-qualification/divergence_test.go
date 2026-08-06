@@ -3263,6 +3263,80 @@ func canvasGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 	}
 }
 
+// listGrantsAreListedInOneStableOrder is the list half of the same contract.
+// Lists and canvases keep their grants in separate tables, so agreeing on one
+// says nothing about the other; the sharing surface is shared, and a surface
+// that reordered depending on which kind of document it was showing would be
+// the same defect the canvas contract exists to prevent.
+func listGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	value := domain.List{
+		ID: domain.ListID("Ls-grants-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Name: "Launch", Schema: "[]", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.repository.CreateList(ctx, value, f.event("list", "list.created", string(value.ID))); err != nil {
+		t.Fatal(err)
+	}
+	channel := domain.ConversationID("C-launch-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: f.workspaceID, Name: "launch"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"zoe", "ada"} {
+		if err := f.repository.SeedUser(ctx, domain.User{ID: domain.UserID("U-list-" + name + "-" + f.suffix), WorkspaceID: f.workspaceID, Email: "list-" + name + "-" + f.suffix + "@example.com", Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	written := []domain.ListAccess{
+		{ListID: value.ID, EntityType: "user", EntityID: "U-list-zoe-" + f.suffix, Access: "read"},
+		{ListID: value.ID, EntityType: "channel", EntityID: string(channel), Access: "write"},
+		{ListID: value.ID, EntityType: "user", EntityID: "U-list-ada-" + f.suffix, Access: "write"},
+	}
+	for index, grant := range written {
+		if err := f.repository.SetListAccess(ctx, grant, f.event("list-grant"+strconv.Itoa(index), "list.access_set", string(value.ID))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := f.repository.ListListGrants(ctx, f.workspaceID, value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	described := make([]string, 0, len(listed))
+	for _, grant := range listed {
+		described = append(described, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+	}
+	expected := []string{
+		"channel:" + string(channel) + ":write",
+		"user:U-list-ada-" + f.suffix + ":write",
+		"user:U-list-zoe-" + f.suffix + ":read",
+	}
+	if !slices.Equal(described, expected) {
+		t.Fatalf("grants = %v, want %v", described, expected)
+	}
+
+	if err := f.repository.DeleteListAccess(ctx, domain.ListAccess{ListID: value.ID, EntityType: "channel", EntityID: string(channel)}, f.event("list-revoke", "list.access_deleted", string(value.ID))); err != nil {
+		t.Fatal(err)
+	}
+	afterRevoke, err := f.repository.ListListGrants(ctx, f.workspaceID, value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, grant := range afterRevoke {
+		if grant.EntityID == string(channel) {
+			t.Fatalf("a revoked grant is still listed: %+v", afterRevoke)
+		}
+	}
+
+	// A list in another workspace is missing, not unshared: the empty list
+	// would read as "shared with nobody".
+	if _, err := f.repository.ListListGrants(ctx, domain.WorkspaceID("T-other-"+f.suffix), value.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("grants crossed a workspace boundary: %v", err)
+	}
+}
+
 func canvasCommentsOutliveTheirSection(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

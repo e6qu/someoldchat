@@ -475,13 +475,40 @@ func (s *Store) ListCanvasGrants(_ context.Context, workspace domain.WorkspaceID
 			grants = append(grants, grant)
 		}
 	}
-	sort.Slice(grants, func(left, right int) bool {
-		if grants[left].EntityType != grants[right].EntityType {
-			return grants[left].EntityType < grants[right].EntityType
-		}
-		return grants[left].EntityID < grants[right].EntityID
-	})
+	sortGrants(grants, func(grant domain.CanvasAccess) (string, string) { return grant.EntityType, grant.EntityID })
 	return grants, nil
+}
+
+// ListListGrants answers for a list what ListCanvasGrants answers for a canvas.
+func (s *Store) ListListGrants(_ context.Context, workspace domain.WorkspaceID, id domain.ListID) ([]domain.ListAccess, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.lists[id]
+	if !ok || value.WorkspaceID != workspace {
+		return nil, store.ErrNotFound
+	}
+	grants := make([]domain.ListAccess, 0, 8)
+	for _, grant := range s.listAccess {
+		if grant.ListID == id {
+			grants = append(grants, grant)
+		}
+	}
+	sortGrants(grants, func(grant domain.ListAccess) (string, string) { return grant.EntityType, grant.EntityID })
+	return grants, nil
+}
+
+// sortGrants puts a document's grants in the one order both profiles answer in.
+// Written once because a sharing list that reshuffled between two documents of
+// different kinds would be the same defect twice.
+func sortGrants[Grant any](grants []Grant, key func(Grant) (string, string)) {
+	sort.Slice(grants, func(left, right int) bool {
+		leftType, leftID := key(grants[left])
+		rightType, rightID := key(grants[right])
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		return leftID < rightID
+	})
 }
 
 // canvasReadableLocked is the shared access question both comment paths ask,

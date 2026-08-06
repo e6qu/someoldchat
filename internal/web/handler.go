@@ -589,31 +589,45 @@ type canvasData struct {
 	// them: they can already see who commented on it and who edited it, so who
 	// else may open it is not a further secret — and someone about to share it
 	// needs to know it is not already shared.
-	Grants []canvasGrantView
+	Grants []grantView
 	// ShareTargets are the people and channels this canvas is not shared with
 	// yet. Offering one it is already shared with would make a control whose
 	// only effect is to change a level, which the level control already does.
-	ShareTargets []canvasShareTargetView
+	ShareTargets []shareTargetView
 	// CanShare is the owner's alone. Granting is the strongest operation on a
 	// canvas, so write access does not put the form on the page.
 	CanShare bool
+	// SharePath is this document's own path, which the shared sharing markup
+	// posts beside rather than knowing the route for. ShareNoun is what the
+	// prose calls it.
+	SharePath string
+	ShareNoun string
 }
 
-// canvasGrantView is one line of the sharing list. Target is what the revoke
-// form posts back, "user:U1" or "channel:C1"; it is empty for a grant this
-// client cannot revoke, and the row says why instead of drawing a control that
-// would be refused.
-type canvasGrantView struct {
+// grantView is one line of a sharing list. Target is what the revoke form posts
+// back, "user:U1" or "channel:C1"; it is empty for a grant this client cannot
+// revoke, and the row says why instead of drawing a control that would be
+// refused.
+type grantView struct {
 	Name   string
 	Access string
 	Target string
 	Reason string
 }
 
-type canvasShareTargetView struct {
+type shareTargetView struct {
 	Value string
 	Name  string
 	Kind  string
+}
+
+// documentGrant is a grant with its document forgotten. Canvases and lists
+// carry the same grant model and want the same sharing surface, and the surface
+// does not care which kind of document it is describing.
+type documentGrant struct {
+	EntityType string
+	EntityID   string
+	Access     string
 }
 
 type canvasSectionView struct {
@@ -652,6 +666,14 @@ type listData struct {
 	CSRFToken string
 	CanWrite  bool
 	Notice    string
+	// Grants, ShareTargets, CanShare, SharePath and ShareNoun drive the sharing
+	// section this page shares with the canvas, by the same two rules: anyone
+	// who may open the list sees who else may, and only its owner changes that.
+	Grants       []grantView
+	ShareTargets []shareTargetView
+	CanShare     bool
+	SharePath    string
+	ShareNoun    string
 }
 
 type listItemView struct {
@@ -2719,12 +2741,29 @@ const documentsMarkup = `{{define "title"}}{{.Title}} · SameOldChat{{end}}
 
 var documentsTemplate = mustPage(documentsMarkup)
 
+// sharingStyle dresses the shared sharing section on every page that shows it.
+const sharingStyle = `.sharing{margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}.sharing h3{margin:0 0 10px}.grants{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}.grant{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:8px}.grant-who{font-weight:700}.grant-access,.grant-reason{color:var(--muted);font-size:12px}.grant form{margin-left:auto}.grant button{border:1px solid var(--line);border-radius:7px;padding:6px 10px;background:transparent;color:var(--text);font-weight:700}.share{display:grid;gap:8px;max-width:420px}.share select{padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.share button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}`
+
+// sharingSection is the sharing surface, written once because a canvas and a
+// list carry the same grant model and a member deciding who may open one is
+// answering the same question either way. SharePath is the document's own path,
+// so the forms post beside it rather than to a route this markup has to know.
+const sharingSection = `<section class="sharing" aria-labelledby="sharing-heading"><h3 id="sharing-heading">Sharing</h3>
+<ul class="grants">{{range .Grants}}<li class="grant"><span class="grant-who">{{.Name}}</span><span class="grant-access">{{.Access}}</span>{{if .Target}}{{if $.CanShare}}<form method="post" action="{{$.SharePath}}/share/revoke"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target" value="{{.Target}}"><button type="submit">Stop sharing with {{.Name}}</button></form>{{end}}{{else if .Reason}}<span class="grant-reason">{{.Reason}}</span>{{end}}</li>{{end}}</ul>
+{{if .CanShare}}<form class="share" method="post" action="{{.SharePath}}/share"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label for="share-target">Share with</label><select id="share-target" name="target" required><option value="">Choose a member or channel</option>{{range .ShareTargets}}<option value="{{.Value}}">{{.Kind}}: {{.Name}}</option>{{end}}</select>
+<label for="share-access">Access</label><select id="share-access" name="access"><option value="read">Can view</option><option value="write">Can edit</option></select>
+<button type="submit">Share {{.ShareNoun}}</button></form>
+<p class="read-only">Only you can change who this {{.ShareNoun}} is shared with. Sharing with a channel shares it with everyone in that channel.</p>
+{{else}}<p class="read-only">Only the owner can change who this {{.ShareNoun}} is shared with.</p>{{end}}
+</section>`
+
 const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(860px,calc(100% - 32px));margin:28px auto 56px}.canvas{padding:28px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.canvas h2{margin:0 0 8px}.canvas .meta{color:var(--muted);font-size:12px}.canvas-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
 .canvas-section{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.canvas-section:first-of-type{border-top:0;padding-top:0}
-.canvas-sharing{margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}.canvas-sharing h3{margin:0 0 10px}.grants{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}.grant{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:8px}.grant-who{font-weight:700}.grant-access,.grant-reason{color:var(--muted);font-size:12px}.grant form{margin-left:auto}.grant button{border:1px solid var(--line);border-radius:7px;padding:6px 10px;background:transparent;color:var(--text);font-weight:700}.share{display:grid;gap:8px;max-width:420px}.share select{padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.share button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}
+` + sharingStyle + `
 .editor{display:grid;gap:11px;margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}.editor label{display:grid;gap:6px;font-weight:700}.editor input,.editor textarea{padding:10px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor textarea{min-height:300px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
@@ -2746,15 +2785,7 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 <button type="submit">Add comment</button></form>
 <p class="read-only">Anyone who can read this canvas can comment on it. A comment belongs to whoever wrote it, and only they can delete it.</p>
 </section>
-<section class="canvas-sharing" aria-labelledby="canvas-sharing-heading"><h3 id="canvas-sharing-heading">Sharing</h3>
-<ul class="grants">{{range .Grants}}<li class="grant"><span class="grant-who">{{.Name}}</span><span class="grant-access">{{.Access}}</span>{{if .Target}}{{if $.CanShare}}<form method="post" action="/app/canvases/{{$.ID}}/share/revoke"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target" value="{{.Target}}"><button type="submit">Stop sharing with {{.Name}}</button></form>{{end}}{{else if .Reason}}<span class="grant-reason">{{.Reason}}</span>{{end}}</li>{{end}}</ul>
-{{if .CanShare}}<form class="share" method="post" action="/app/canvases/{{.ID}}/share"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-<label for="share-target">Share with</label><select id="share-target" name="target" required><option value="">Choose a member or channel</option>{{range .ShareTargets}}<option value="{{.Value}}">{{.Kind}}: {{.Name}}</option>{{end}}</select>
-<label for="share-access">Access</label><select id="share-access" name="access"><option value="read">Can view</option><option value="write">Can edit</option></select>
-<button type="submit">Share canvas</button></form>
-<p class="read-only">Only you can change who this canvas is shared with. Sharing with a channel shares it with everyone in that channel.</p>
-{{else}}<p class="read-only">Only the owner can change who this canvas is shared with.</p>{{end}}
-</section>
+` + sharingSection + `
 {{if .Revisions}}<section class="canvas-history" aria-labelledby="canvas-history-heading"><h3 id="canvas-history-heading">History</h3>
 <ul class="revisions">{{range .Revisions}}<li class="revision"><span class="revision-head"><span class="revision-title">{{.Title}}</span><time class="revision-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .EditorName}}<span class="revision-editor">replaced by {{.EditorName}}</span>{{end}}</span>{{if .Excerpt}}<p class="revision-excerpt">{{.Excerpt}}</p>{{end}}{{if .RestoreURL}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><button type="submit">Restore this revision</button></form>{{end}}</li>{{end}}</ul>
 <p class="read-only">Restoring is an ordinary edit: the current content becomes a revision of its own, so restoring the wrong one can be undone.</p>
@@ -2768,6 +2799,7 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(940px,calc(100% - 28px));margin:26px auto 56px}.heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.heading h2{margin:0}.new-item{display:flex;gap:8px;margin:18px 0}.new-item input{flex:1;min-width:0;padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:0;border-radius:7px;padding:9px 13px;background:var(--action);color:var(--on-strong);font-weight:800}
 .items{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item.archived .title{text-decoration:line-through;color:var(--muted)}.item form{margin:0}.item button{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}.empty{padding:30px;text-align:center;color:var(--muted)}.mode{color:var(--muted);font-size:13px}
+` + sharingStyle + `
 </style>{{end}}
 {{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>{{end}}
 {{if .CanWrite}}<details class="add-column"><summary>Add a column</summary><form method="post" action="/app/lists/{{.ID}}/columns"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -2782,7 +2814,8 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 <details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
 <label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $.Members}}<option value="{{.ID}}"{{if eq .ID $item.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
 <label for="due-{{.ID}}">Due</label><input id="due-{{.ID}}" type="date" name="due" value="{{.DueDate}}">
-<button type="submit">Save assignment</button></form></details>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}</main>{{end}}`
+<button type="submit">Save assignment</button></form></details>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}
+` + sharingSection + `</main>{{end}}`
 
 var listTemplate = mustPage(listMarkup)
 
@@ -4238,6 +4271,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/lists/create", h.createList)
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
 	mux.HandleFunc("POST /app/lists/{listID}/columns", h.addListColumn)
+	mux.HandleFunc("POST /app/lists/{listID}/share", h.shareList)
+	mux.HandleFunc("POST /app/lists/{listID}/share/revoke", h.revokeListShare)
 	mux.HandleFunc("POST /app/lists/{listID}/items/create", h.createListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/toggle", h.toggleListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/assign", h.assignListItem)
@@ -8074,36 +8109,29 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	grants, shareTargets := h.canvasSharing(r.Context(), principal, value, owner)
-	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), SharePath: "/app/canvases/" + url.PathEscape(string(value.ID)), ShareNoun: "canvas", ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
 }
 
-// canvasSharing builds the sharing list and, for the owner, the people and
+// documentSharing builds the sharing list and, for the owner, the people and
 // channels still worth offering. The list is for everyone who may read the
-// canvas; the targets are only ever used by the owner's form, so they are not
+// document; the targets are only ever used by the owner's form, so they are not
 // gathered for anybody else — a member who cannot grant has no use for a
-// directory walk on every canvas they open.
-func (h Handler) canvasSharing(ctx context.Context, principal auth.Principal, canvas domain.Canvas, owner bool) ([]canvasGrantView, []canvasShareTargetView) {
+// directory walk on every document they open.
+func (h Handler) documentSharing(ctx context.Context, principal auth.Principal, ownerID domain.UserID, listed []documentGrant, owner bool) ([]grantView, []shareTargetView) {
 	names := h.newUserNames(ctx, principal)
-	listed, err := h.Messages.CanvasGrants(ctx, principal.WorkspaceID, principal.UserID, canvas.ID)
-	if err != nil {
-		// Sharing is not why the canvas was opened. A canvas that reads but
-		// whose grants do not is still a canvas worth showing, so the section
-		// goes quiet rather than the page failing.
-		return nil, nil
-	}
-	grants := make([]canvasGrantView, 0, len(listed)+1)
-	grants = append(grants, canvasGrantView{Name: names.name(canvas.OwnerID), Access: canvasAccessLabel("owner"), Reason: "created it"})
-	shared := map[string]bool{"user:" + string(canvas.OwnerID): true}
+	grants := make([]grantView, 0, len(listed)+1)
+	grants = append(grants, grantView{Name: names.name(ownerID), Access: documentAccessLabel("owner"), Reason: "created it"})
+	shared := map[string]bool{"user:" + string(ownerID): true}
 	for _, grant := range listed {
-		view := canvasGrantView{Access: canvasAccessLabel(grant.Access)}
+		view := grantView{Access: documentAccessLabel(grant.Access)}
 		switch grant.EntityType {
 		case "user":
-			view.Name = names.name(domain.UserID(grant.EntityID))
-			if domain.UserID(grant.EntityID) == canvas.OwnerID {
+			if domain.UserID(grant.EntityID) == ownerID {
 				// The owner already leads the list; a second row for the same
 				// person would read as two people with the same name.
 				continue
 			}
+			view.Name = names.name(domain.UserID(grant.EntityID))
 			view.Target = "user:" + grant.EntityID
 		case "channel":
 			view.Name = names.channelName(domain.ConversationID(grant.EntityID))
@@ -8121,13 +8149,13 @@ func (h Handler) canvasSharing(ctx context.Context, principal auth.Principal, ca
 	if !owner {
 		return grants, nil
 	}
-	targets := make([]canvasShareTargetView, 0, 16)
+	targets := make([]shareTargetView, 0, 16)
 	if directory, dirErr := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: searchFilterOptionLimit}); dirErr == nil {
 		for _, candidate := range directory.Users {
 			if candidate.Deleted || shared["user:"+string(candidate.ID)] {
 				continue
 			}
-			targets = append(targets, canvasShareTargetView{Value: "user:" + string(candidate.ID), Name: displayName(candidate), Kind: "Member"})
+			targets = append(targets, shareTargetView{Value: "user:" + string(candidate.ID), Name: displayName(candidate), Kind: "Member"})
 		}
 	}
 	if channels, channelErr := h.visibleChannelOptions(ctx, principal); channelErr == nil {
@@ -8135,16 +8163,45 @@ func (h Handler) canvasSharing(ctx context.Context, principal auth.Principal, ca
 			if shared["channel:"+channel.ID] || shared["channel_canvas:"+channel.ID] {
 				continue
 			}
-			targets = append(targets, canvasShareTargetView{Value: "channel:" + channel.ID, Name: "#" + channel.Name, Kind: "Channel"})
+			targets = append(targets, shareTargetView{Value: "channel:" + channel.ID, Name: "#" + channel.Name, Kind: "Channel"})
 		}
 	}
 	return grants, targets
 }
 
-// canvasAccessLabel says what a grant lets someone do. The stored words are the
-// API's — "read", "write", "owner" — and a sharing list is read by whoever is
-// deciding what to give, not by whoever wrote the schema.
-func canvasAccessLabel(access string) string {
+// canvasSharing reads the grants on one canvas and describes them.
+func (h Handler) canvasSharing(ctx context.Context, principal auth.Principal, canvas domain.Canvas, owner bool) ([]grantView, []shareTargetView) {
+	listed, err := h.Messages.CanvasGrants(ctx, principal.WorkspaceID, principal.UserID, canvas.ID)
+	if err != nil {
+		// Sharing is not why the canvas was opened. A canvas that reads but
+		// whose grants do not is still a canvas worth showing, so the section
+		// goes quiet rather than the page failing.
+		return nil, nil
+	}
+	grants := make([]documentGrant, 0, len(listed))
+	for _, grant := range listed {
+		grants = append(grants, documentGrant{EntityType: grant.EntityType, EntityID: grant.EntityID, Access: grant.Access})
+	}
+	return h.documentSharing(ctx, principal, canvas.OwnerID, grants, owner)
+}
+
+// listSharing is the same read for a list.
+func (h Handler) listSharing(ctx context.Context, principal auth.Principal, value domain.List, owner bool) ([]grantView, []shareTargetView) {
+	listed, err := h.Messages.ListGrants(ctx, principal.WorkspaceID, principal.UserID, value.ID)
+	if err != nil {
+		return nil, nil
+	}
+	grants := make([]documentGrant, 0, len(listed))
+	for _, grant := range listed {
+		grants = append(grants, documentGrant{EntityType: grant.EntityType, EntityID: grant.EntityID, Access: grant.Access})
+	}
+	return h.documentSharing(ctx, principal, value.OwnerID, grants, owner)
+}
+
+// documentAccessLabel says what a grant lets someone do. The stored words are
+// the API's — "read", "write", "owner" — and a sharing list is read by whoever
+// is deciding what to give, not by whoever wrote the schema.
+func documentAccessLabel(access string) string {
 	switch access {
 	case "owner":
 		return "Owner"
@@ -8168,6 +8225,69 @@ func (h Handler) revokeCanvasShare(w http.ResponseWriter, r *http.Request) {
 	h.changeCanvasSharing(w, r, false)
 }
 
+// shareList and revokeListShare are the list's half of the same surface.
+func (h Handler) shareList(w http.ResponseWriter, r *http.Request) {
+	h.changeListSharing(w, r, true)
+}
+
+func (h Handler) revokeListShare(w http.ResponseWriter, r *http.Request) {
+	h.changeListSharing(w, r, false)
+}
+
+func (h Handler) changeListSharing(w http.ResponseWriter, r *http.Request, granting bool) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
+		return
+	}
+	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	channelIDs, userIDs, chosen := parseShareTarget(fields["target"])
+	if !chosen {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Sharing did not change", "Choose a member or a channel to share this list with.")
+		return
+	}
+	if granting {
+		err = h.Messages.SetListAccess(r.Context(), principal.WorkspaceID, principal.UserID, id, shareAccessLevel(fields["access"]), channelIDs, userIDs)
+	} else {
+		err = h.Messages.DeleteListAccess(r.Context(), principal.WorkspaceID, principal.UserID, id, channelIDs, userIDs)
+	}
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Sharing did not change", "Only the owner of a list can change who it is shared with.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
+}
+
+// parseShareTarget reads the one field the sharing form posts. The kind and the
+// identifier travel together because they are one choice in the form: a member
+// picks who to share with, not first what kind of thing they are about to pick.
+func parseShareTarget(raw string) ([]domain.ConversationID, []domain.UserID, bool) {
+	kind, target, split := strings.Cut(strings.TrimSpace(raw), ":")
+	if !split || target == "" {
+		return nil, nil, false
+	}
+	switch kind {
+	case "user":
+		return nil, []domain.UserID{domain.UserID(target)}, true
+	case "channel":
+		return []domain.ConversationID{domain.ConversationID(target)}, nil, true
+	}
+	return nil, nil, false
+}
+
+// shareAccessLevel defaults to the weaker grant. A form that lost its access
+// field must not hand out editing.
+func shareAccessLevel(raw string) string {
+	if access := strings.TrimSpace(raw); access != "" {
+		return access
+	}
+	return "read"
+}
+
 func (h Handler) changeCanvasSharing(w http.ResponseWriter, r *http.Request, granting bool) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {
@@ -8179,26 +8299,13 @@ func (h Handler) changeCanvasSharing(w http.ResponseWriter, r *http.Request, gra
 		return
 	}
 	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
-	kind, target, split := strings.Cut(strings.TrimSpace(fields["target"]), ":")
-	var channelIDs []domain.ConversationID
-	var userIDs []domain.UserID
-	switch {
-	case !split || target == "":
-	case kind == "user":
-		userIDs = []domain.UserID{domain.UserID(target)}
-	case kind == "channel":
-		channelIDs = []domain.ConversationID{domain.ConversationID(target)}
-	}
-	if len(channelIDs) == 0 && len(userIDs) == 0 {
+	channelIDs, userIDs, chosen := parseShareTarget(fields["target"])
+	if !chosen {
 		h.writeMutationError(w, r, http.StatusBadRequest, "Sharing did not change", "Choose a member or a channel to share this canvas with.")
 		return
 	}
 	if granting {
-		access := strings.TrimSpace(fields["access"])
-		if access == "" {
-			access = "read"
-		}
-		err = h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, id, access, channelIDs, userIDs)
+		err = h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, id, shareAccessLevel(fields["access"]), channelIDs, userIDs)
 	} else {
 		err = h.Messages.DeleteCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, id, channelIDs, userIDs)
 	}
@@ -8526,7 +8633,9 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 		more = "/app/lists/" + url.PathEscape(string(id)) + "?cursor=" + url.QueryEscape(string(page.NextCursor))
 	}
 	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
-	h.writeHTML(w, listTemplate, listData{ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+	owner := value.OwnerID == principal.UserID
+	grants, shareTargets := h.listSharing(r.Context(), principal, value, owner)
+	h.writeHTML(w, listTemplate, listData{Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeListsWrite), SharePath: "/app/lists/" + url.PathEscape(string(id)), ShareNoun: "list", ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
 }
 
 func (h Handler) createList(w http.ResponseWriter, r *http.Request) {

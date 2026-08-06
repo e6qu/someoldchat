@@ -11099,28 +11099,63 @@ func (s *Store) RecordListAssignment(ctx context.Context, item domain.ListItem, 
 // ListCanvasGrants reports every grant on one canvas, in a stable order so a
 // sharing list does not reshuffle between page loads.
 func (s *Store) ListCanvasGrants(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID) ([]domain.CanvasAccess, error) {
-	// A canvas that is not this workspace's canvas is missing, not unshared.
-	// Joining alone would have answered the empty list, which reads as "shared
-	// with nobody" — a sharing surface would then show a stranger's canvas as
-	// private to them rather than refusing to show it at all.
+	rows, err := s.listGrants(ctx, canvasAccessScope, workspace, string(id))
+	if err != nil {
+		return nil, err
+	}
+	grants := make([]domain.CanvasAccess, 0, len(rows))
+	for _, row := range rows {
+		grants = append(grants, domain.CanvasAccess{CanvasID: domain.CanvasID(row.documentID), EntityType: row.entityType, EntityID: row.entityID, Access: row.access})
+	}
+	return grants, nil
+}
+
+// ListListGrants answers for a list what ListCanvasGrants answers for a canvas.
+func (s *Store) ListListGrants(ctx context.Context, workspace domain.WorkspaceID, id domain.ListID) ([]domain.ListAccess, error) {
+	rows, err := s.listGrants(ctx, listAccessScope, workspace, string(id))
+	if err != nil {
+		return nil, err
+	}
+	grants := make([]domain.ListAccess, 0, len(rows))
+	for _, row := range rows {
+		grants = append(grants, domain.ListAccess{ListID: domain.ListID(row.documentID), EntityType: row.entityType, EntityID: row.entityID, Access: row.access})
+	}
+	return grants, nil
+}
+
+type grantRow struct {
+	documentID string
+	entityType string
+	entityID   string
+	access     string
+}
+
+// listGrants reports every grant on one document, in a stable order so a
+// sharing list does not reshuffle between page loads.
+//
+// A document that is not this workspace's document is missing, not unshared.
+// Joining alone would answer the empty list, which reads as "shared with
+// nobody" — a sharing surface would then show a stranger's document as private
+// to them rather than refusing to show it at all.
+func (s *Store) listGrants(ctx context.Context, scope accessScope, workspace domain.WorkspaceID, id string) ([]grantRow, error) {
 	var exists int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&exists); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+scope.documentTable+` WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if exists == 0 {
 		return nil, store.ErrNotFound
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT a.canvas_id, a.entity_type, a.entity_id, a.access_level
-		FROM canvas_access a JOIN canvases d ON d.id = a.canvas_id
-		WHERE a.canvas_id = ? AND d.workspace_id = ?
+	rows, err := s.db.QueryContext(ctx, `SELECT a.`+scope.keyColumn+`, a.entity_type, a.entity_id, a.access_level
+		FROM `+scope.accessTable+` a JOIN `+scope.documentTable+` d ON d.id = a.`+scope.keyColumn+`
+		WHERE a.`+scope.keyColumn+` = ? AND d.workspace_id = ?
 		ORDER BY a.entity_type, a.entity_id`, id, workspace)
 	if err != nil {
 		return nil, err
 	}
-	grants := make([]domain.CanvasAccess, 0, 8)
+	grants := make([]grantRow, 0, 8)
 	for rows.Next() {
-		var grant domain.CanvasAccess
-		if err := rows.Scan(&grant.CanvasID, &grant.EntityType, &grant.EntityID, &grant.Access); err != nil {
+		var grant grantRow
+		if err := rows.Scan(&grant.documentID, &grant.entityType, &grant.entityID, &grant.access); err != nil {
 			rows.Close()
 			return nil, err
 		}

@@ -1098,7 +1098,15 @@ func (r Remote) ListAccess(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err != nil {
 		return domain.ListAccess{}, err
 	}
-	return domain.ListAccess{ListID: domain.ListID(out.GetListId()), EntityType: out.GetEntityType(), EntityID: out.GetEntityId(), Access: out.GetAccess()}, nil
+	return decodeProtoListGrant(out), nil
+}
+
+func (r Remote) ListGrants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) ([]domain.ListAccess, error) {
+	out, err := r.lists.ListGrants(ctx, &chatv1.ListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id)})
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoListGrants(out.GetGrants()), nil
 }
 
 func (r Remote) Lists(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {
@@ -6835,7 +6843,42 @@ func (s *Server) GetListAccess(ctx context.Context, input *chatv1.ListItemReques
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &chatv1.ListAccessResponse{ListId: string(value.ListID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}, nil
+	return encodeProtoListGrant(value), nil
+}
+
+func (s *Server) ListGrants(ctx context.Context, input *chatv1.ListItemRequest) (*chatv1.ListGrantsResponse, error) {
+	grants, err := s.implementation.ListGrants(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListGrantsResponse{Grants: encodeProtoListGrants(grants)}, nil
+}
+
+func encodeProtoListGrant(value domain.ListAccess) *chatv1.ListAccessResponse {
+	return &chatv1.ListAccessResponse{ListId: string(value.ListID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}
+}
+
+func decodeProtoListGrant(value *chatv1.ListAccessResponse) domain.ListAccess {
+	if value == nil {
+		return domain.ListAccess{}
+	}
+	return domain.ListAccess{ListID: domain.ListID(value.GetListId()), EntityType: value.GetEntityType(), EntityID: value.GetEntityId(), Access: value.GetAccess()}
+}
+
+func encodeProtoListGrants(values []domain.ListAccess) []*chatv1.ListAccessResponse {
+	grants := make([]*chatv1.ListAccessResponse, 0, len(values))
+	for _, value := range values {
+		grants = append(grants, encodeProtoListGrant(value))
+	}
+	return grants
+}
+
+func decodeProtoListGrants(values []*chatv1.ListAccessResponse) []domain.ListAccess {
+	grants := make([]domain.ListAccess, 0, len(values))
+	for _, value := range values {
+		grants = append(grants, decodeProtoListGrant(value))
+	}
+	return grants
 }
 
 func (s *Server) ListLists(ctx context.Context, input *chatv1.ListsRequest) (*chatv1.ListPage, error) {

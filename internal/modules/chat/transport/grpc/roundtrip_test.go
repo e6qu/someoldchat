@@ -349,6 +349,15 @@ func conversionCases() map[string]conversionCase {
 			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
 		},
 		"CanvasGrant": {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
+		"ListGrant":   {sample: &domain.ListAccess{}, through: throughInfallible(encodeProtoListGrant, decodeProtoListGrant)},
+		"ListGrants": {
+			sample: &listGrantsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				value := filled.(*listGrantsRoundTrip)
+				wire := &chatv1.ListGrantsResponse{Grants: encodeProtoListGrants(value.Grants)}
+				return &listGrantsRoundTrip{Grants: decodeProtoListGrants(wire.GetGrants())}, wire, nil
+			},
+		},
 		"CanvasGrants": {
 			sample: &canvasGrantsRoundTrip{},
 			through: func(t *testing.T, filled any) (any, proto.Message, error) {
@@ -649,6 +658,10 @@ type typingSignalsRoundTrip struct {
 // about one grant on its own.
 type canvasGrantsRoundTrip struct {
 	Grants []domain.CanvasAccess
+}
+
+type listGrantsRoundTrip struct {
+	Grants []domain.ListAccess
 }
 
 type draftAttachmentsRoundTrip struct {

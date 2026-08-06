@@ -410,6 +410,7 @@ type Service interface {
 	SearchCanvases(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasSearchRequest) (domain.CanvasPage, error)
 	CanvasRevisions(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.PageRequest) (domain.CanvasRevisionPage, error)
 	CanvasGrants(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) ([]domain.CanvasAccess, error)
+	ListGrants(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) ([]domain.ListAccess, error)
 	CommentOnCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string, string) (domain.CanvasComment, error)
 	CanvasComments(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.PageRequest) (domain.CanvasCommentPage, error)
 	DeleteCanvasComment(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasCommentID) error

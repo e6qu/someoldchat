@@ -299,6 +299,62 @@ func TestCanvasSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt(t *testing.T) {
 	requireMissing(t, "reader view", readerPage.Body.String(), "Share canvas", "Stop sharing with")
 }
 
+// A list carries the same grant model as a canvas and had the same hole: the
+// API could share one and nothing in the client could show or change that. The
+// surface is now one surface, so this asserts the list half reaches it and
+// keeps the same two rules.
+func TestListSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "reviewer", RealName: "Bea Reviewer"})
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(context.Background(), "T1", "U1", "Launch", "", "[]", "", false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/lists/" + string(value.ID)
+	csrf := auth.CSRFToken("session")
+
+	page := get(t, mux, target)
+	requireContains(t, "unshared list", page.Body.String(), "Sharing", "Ada Developer", "Owner", "Share list", `value="user:U2"`)
+
+	shared := postForm(t, mux, target+"/share", url.Values{
+		"_csrf": {csrf}, "target": {"user:U2"}, "access": {"read"},
+	}.Encode(), false)
+	if shared.Code != http.StatusSeeOther {
+		t.Fatalf("share list = %d: %s", shared.Code, shared.Body)
+	}
+	page = get(t, mux, target)
+	requireContains(t, "shared list", page.Body.String(), "Bea Reviewer", "Can view", "Stop sharing with Bea Reviewer")
+	if _, err := messages.List(context.Background(), "T1", "U2", value.ID); err != nil {
+		t.Fatalf("the share did not grant access: %v", err)
+	}
+
+	// A reader sees the list of grants and none of the controls.
+	if err := s.SeedSession(context.Background(), "reader-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, target, nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "reader-session"})
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	readerPage := httptest.NewRecorder()
+	mux.ServeHTTP(readerPage, request)
+	if readerPage.Code != http.StatusOK {
+		t.Fatalf("reader open list = %d: %s", readerPage.Code, readerPage.Body)
+	}
+	requireContains(t, "reader view", readerPage.Body.String(), "Ada Developer", "Bea Reviewer", "Only the owner can change who this list is shared with")
+	requireMissing(t, "reader view", readerPage.Body.String(), "Share list", "Stop sharing with")
+
+	revoked := postForm(t, mux, target+"/share/revoke", url.Values{
+		"_csrf": {csrf}, "target": {"user:U2"},
+	}.Encode(), false)
+	if revoked.Code != http.StatusSeeOther {
+		t.Fatalf("revoke share = %d: %s", revoked.Code, revoked.Body)
+	}
+	if _, err := messages.List(context.Background(), "T1", "U2", value.ID); err == nil {
+		t.Fatal("revoking the share left the list readable")
+	}
+}
+
 func TestCanvasEditorRefusesToFlattenStructuredContent(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}
