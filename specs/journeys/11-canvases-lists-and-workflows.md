@@ -154,6 +154,19 @@ for later steps and conditions to read.
 
 ## Evidence
 
+- Who a canvas is shared with is now visible and changeable from the canvas
+  itself. Anyone who may open it sees the list: they can already see who
+  commented on it and who edited it, so who else may open it is not a further
+  secret, and someone about to share a canvas needs to know it is not already
+  shared. Changing the list belongs to the owner alone, which is the rule the
+  grant already enforced — write access is not enough to hand a canvas to
+  somebody else — so a reader is told that rather than shown a control that
+  would be refused. The owner heads the list even when nothing is shared,
+  because "shared with nobody" and "shared with everyone" must not render the
+  same. A channel's own canvas tab appears as a grant and is not offered for
+  removal: revoking it would leave the channel with a tab pointing at a document
+  nobody in it may open. A canvas that is not this workspace's canvas answers
+  the sharing read as missing rather than as unshared, on both storage profiles.
 - A canvas section can be commented on. Read access is enough to add one:
   commenting is taking part in a document rather than editing it, and a canvas
   shared for review that only its editors could discuss would defeat the reason
@@ -244,15 +257,17 @@ for later steps and conditions to read.
 CANVAS-01 and the basic persistence portion of CANVAS-02 now have a real
 workspace surface and access-filtered memory/SQL/gRPC reads. Owner edits of a
 single Markdown section commit title and body as one compare-and-swap revision.
-Structured canvases render read-only rather than being silently flattened;
-collaborative cursors, comments, history, autosave/offline recovery, full rich
-block editing, tab attachment, and sharing review remain gaps.
+Structured canvases render read-only rather than being silently flattened.
+Comments, revision history, and sharing review are now built: the sharing
+surface names everyone who may open a canvas, and only its owner is offered the
+controls that change that. Collaborative cursors, autosave/offline recovery,
+full rich block editing, and tab attachment remain gaps.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
-directory, to-do creation, item creation, and complete/restore flow. Custom
-schemas, templates, views, filters, sorting, assignments, dates, comments,
-attachments, item deletion, and full
-notification/workflow effects remain gaps.
+directory, to-do creation, item creation, and complete/restore flow. Typed columns,
+assignments, and due dates are now built. Templates, views, filters, sorting,
+comments, attachments, item deletion, and full notification/workflow effects
+remain gaps.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered

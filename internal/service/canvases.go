@@ -136,6 +136,18 @@ func (m Messages) CanvasAccess(ctx context.Context, workspaceID domain.Workspace
 	return m.Store.GetCanvasAccess(ctx, id, userID)
 }
 
+// CanvasGrants reports who a canvas is shared with. Read access is enough to
+// ask: a member who can open a document can already see the people commenting
+// on it and the people who edited it, so who else can open it is not a further
+// secret — and a member deciding whether to share it needs to know it is not
+// already shared.
+func (m Messages) CanvasGrants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) ([]domain.CanvasAccess, error) {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+		return nil, err
+	}
+	return m.Store.ListCanvasGrants(ctx, workspaceID, id)
+}
+
 func (m Messages) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, page domain.PageRequest) (domain.CanvasPage, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.CanvasPage{}, err

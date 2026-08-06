@@ -94,6 +94,23 @@ message CanvasRevisionPage {
   bool has_more = 3;
 }
 
+message CanvasGrant {
+  string canvas_id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string access = 4;
+}
+
+message CanvasGrantsResponse {
+  repeated CanvasGrant grants = 1;
+}
+
+message CanvasGrantsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+}
+
 message CanvasRevisionsRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -182,6 +199,7 @@ service CanvasesService {
   rpc ListCanvases(CanvasesRequest) returns (CanvasPage);
   rpc SearchCanvases(SearchCanvasesRequest) returns (CanvasPage);
   rpc CanvasRevisions(CanvasRevisionsRequest) returns (CanvasRevisionPage);
+  rpc CanvasGrants(CanvasGrantsRequest) returns (CanvasGrantsResponse);
   rpc CommentOnCanvas(CommentOnCanvasRequest) returns (CanvasComment);
   rpc CanvasComments(CanvasCommentsRequest) returns (CanvasCommentPage);
   rpc DeleteCanvasComment(DeleteCanvasCommentRequest) returns (MutationResponse);

@@ -231,6 +231,74 @@ func TestCanvasAndListJourneysUseDurableDocuments(t *testing.T) {
 	requireContains(t, "list directory", lists.Body.String(), "Launch", "To-do list")
 }
 
+// TestCanvasSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt covers the surface
+// that was missing entirely: the grant mechanism has existed since canvases
+// did, but nothing in this client showed a grant or made one, so a canvas could
+// only ever be shared by an app calling the API. The two halves are separate
+// claims — everyone who may open the canvas sees the list, and only its owner
+// gets the controls — so both are asserted here.
+func TestCanvasSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "reviewer", RealName: "Bea Reviewer"})
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Release plan", `{"type":"markdown","markdown":"Ship it"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/canvases/" + string(value.ID)
+	csrf := auth.CSRFToken("session")
+
+	page := get(t, mux, target)
+	// The owner is a line of the sharing list even with no grants: "shared with
+	// nobody" and "shared with everyone" must not look the same.
+	requireContains(t, "unshared canvas", page.Body.String(), "Sharing", "Ada Developer", "Owner", "Share canvas", `value="user:U2"`)
+
+	shared := postForm(t, mux, target+"/share", url.Values{
+		"_csrf": {csrf}, "target": {"user:U2"}, "access": {"write"},
+	}.Encode(), false)
+	if shared.Code != http.StatusSeeOther {
+		t.Fatalf("share canvas = %d: %s", shared.Code, shared.Body)
+	}
+	page = get(t, mux, target)
+	requireContains(t, "shared canvas", page.Body.String(), "Bea Reviewer", "Can edit", "Stop sharing with Bea Reviewer")
+	// Somebody already shared with is not offered again: the only effect would
+	// be to change the level, which the level control on the row does.
+	requireMissing(t, "shared canvas", page.Body.String(), `<option value="user:U2"`)
+	if _, err := messages.Canvas(context.Background(), "T1", "U2", value.ID); err != nil {
+		t.Fatalf("the share did not grant access: %v", err)
+	}
+
+	revoked := postForm(t, mux, target+"/share/revoke", url.Values{
+		"_csrf": {csrf}, "target": {"user:U2"},
+	}.Encode(), false)
+	if revoked.Code != http.StatusSeeOther {
+		t.Fatalf("revoke share = %d: %s", revoked.Code, revoked.Body)
+	}
+	if _, err := messages.Canvas(context.Background(), "T1", "U2", value.ID); err == nil {
+		t.Fatal("revoking the share left the canvas readable")
+	}
+
+	// A reader sees who it is shared with and gets no controls, because the
+	// service refuses a grant from anyone but the owner and a control that only
+	// ever produces a refusal is worse than no control.
+	if err := messages.SetCanvasAccess(context.Background(), "T1", "U1", value.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedSession(context.Background(), "reader-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, target, nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "reader-session"})
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	readerPage := httptest.NewRecorder()
+	mux.ServeHTTP(readerPage, request)
+	if readerPage.Code != http.StatusOK {
+		t.Fatalf("reader open canvas = %d: %s", readerPage.Code, readerPage.Body)
+	}
+	requireContains(t, "reader view", readerPage.Body.String(), "Ada Developer", "Bea Reviewer", "Only the owner can change who this canvas is shared with")
+	requireMissing(t, "reader view", readerPage.Body.String(), "Share canvas", "Stop sharing with")
+}
+
 func TestCanvasEditorRefusesToFlattenStructuredContent(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}

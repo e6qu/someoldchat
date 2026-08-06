@@ -3311,6 +3311,45 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await expect(page.getByText('No comments yet.')).toBeVisible();
 });
 
+// Who a canvas is shared with was invisible everywhere outside the API: the
+// grants existed, and nothing rendered one or made one. The journey shares with
+// a channel rather than a person because the session's member is the only human
+// in this workspace — sharing with a person is covered by the service, seam and
+// web tests, which can arrange two members.
+test('[CANVAS-01 A11Y-01] a canvas says who it is shared with and the owner can change it', async ({ page, context }) => {
+  await signIn(context);
+  const name = `canvas-sharing-${Date.now()}`;
+  await page.goto('/app/canvases');
+  await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByLabel('Content').fill('who else can read this');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  // A canvas shared with nobody still names its owner: "nobody" and "everyone"
+  // must not render the same.
+  const grants = page.locator('.grant');
+  await expect(grants).toHaveCount(1);
+  await expect(grants.first()).toContainText('SameOldChat');
+  await expect(grants.first()).toContainText('Owner');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.locator('#share-target').selectOption({ label: 'Channel: #general' });
+  await page.locator('#share-access').selectOption('write');
+  await page.getByRole('button', { name: 'Share canvas' }).click();
+  await expect(page.locator('.grant')).toHaveCount(2);
+  const channelGrant = page.locator('.grant', { hasText: '#general' });
+  await expect(channelGrant).toContainText('Can edit');
+
+  // A channel already shared with is not offered again: the only thing a
+  // second grant could do is change the level.
+  await expect(page.locator('#share-target option', { hasText: 'Channel: #general' })).toHaveCount(0);
+
+  await channelGrant.getByRole('button', { name: /Stop sharing with/ }).click();
+  await expect(page.locator('.grant')).toHaveCount(1);
+  await expect(page.locator('#share-target option', { hasText: 'Channel: #general' })).toHaveCount(1);
+});
+
 // A list with declared columns shows its items under them rather than as a bare
 // title, and refuses a value a column cannot mean. The list is created through
 // the API because the first-party creation form does not author schemas — a

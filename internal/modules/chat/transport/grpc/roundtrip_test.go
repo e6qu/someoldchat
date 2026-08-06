@@ -348,6 +348,15 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
 		},
+		"CanvasGrant": {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
+		"CanvasGrants": {
+			sample: &canvasGrantsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				value := filled.(*canvasGrantsRoundTrip)
+				wire := &chatv1.CanvasGrantsResponse{Grants: encodeProtoCanvasGrants(value.Grants)}
+				return &canvasGrantsRoundTrip{Grants: decodeProtoCanvasGrants(wire.GetGrants())}, wire, nil
+			},
+		},
 		"CanvasComment":      {sample: &domain.CanvasComment{}, through: throughInfallible(encodeProtoCanvasComment, decodeProtoCanvasComment)},
 		"CanvasCommentPage":  {sample: &domain.CanvasCommentPage{}, through: through(encodeProtoCanvasCommentPage, decodeProtoCanvasCommentPage)},
 		"CanvasRevision":     {sample: &domain.CanvasRevision{}, through: throughInfallible(encodeProtoCanvasRevision, decodeProtoCanvasRevision)},
@@ -633,6 +642,13 @@ type assistantPromptsRoundTrip struct {
 // the year 1754 would make an expired signal read as live for two centuries.
 type typingSignalsRoundTrip struct {
 	Signals []domain.TypingSignal
+}
+
+// canvasGrantsRoundTrip wraps the slice because a grant only ever crosses the
+// wire inside one: a sharing surface asks who a canvas is shared with, never
+// about one grant on its own.
+type canvasGrantsRoundTrip struct {
+	Grants []domain.CanvasAccess
 }
 
 type draftAttachmentsRoundTrip struct {
