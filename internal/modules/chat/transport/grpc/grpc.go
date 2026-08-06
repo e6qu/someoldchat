@@ -9989,6 +9989,7 @@ func encodeProtoActivityItem(value domain.ActivityItem) *chatv1.ActivityItem {
 		SourceAvailable: value.SourceAvailable,
 		CanvasId:        string(value.CanvasID), CanvasTitle: value.CanvasTitle,
 		ListItemId: string(value.ListItemID), ListId: string(value.ListID), ListName: value.ListName,
+		SharedInviteId: string(value.SharedInviteID), SharedInviteStatus: string(value.SharedInviteStatus),
 		ListItem: encodeProtoListItemSummary(value.ListItem),
 	}
 	if !value.ReadAt.IsZero() {
@@ -10018,6 +10019,7 @@ func decodeProtoActivityItem(value *chatv1.ActivityItem) (domain.ActivityItem, e
 		OccurredAt: time.Unix(0, value.GetOccurredAt()).UTC(), SourceAvailable: value.GetSourceAvailable(),
 		CanvasID: domain.CanvasID(value.GetCanvasId()), CanvasTitle: value.GetCanvasTitle(),
 		ListItemID: domain.ListItemID(value.GetListItemId()), ListID: domain.ListID(value.GetListId()), ListName: value.GetListName(),
+		SharedInviteID: domain.SharedInviteID(value.GetSharedInviteId()), SharedInviteStatus: domain.SharedInviteStatus(value.GetSharedInviteStatus()),
 		ListItem: decodeProtoListItemSummary(value.GetListItem()),
 	}
 	for _, encoded := range value.GetKinds() {

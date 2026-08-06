@@ -182,6 +182,15 @@ Implemented evidence:
   and legacy combined `search.all` require user tokens, enforce documented
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
+- A decision on a Slack Connect invitation reaches the member who asked for it.
+  Asking is not being told, so nothing lands until somebody decides; the
+  decider is told nothing, because they already know; and the row keys on the
+  invitation, so a decision later changed replaces the news rather than leaving
+  two rows that disagree. The status is read from the invitation as it stands
+  rather than copied into the row, so history is not rewritten to stay correct.
+  The row carries the conversation as well as the invitation: it links where the
+  member wants to go, and the invitation identifier is what tells "you were
+  added to #general" apart from "your invitation for #general was approved".
 - A canvas shared with a member reaches their Activity. The item is written by
   the transaction that grants the access, so access and the news of it cannot
   come apart, and it is written only when it is news: re-granting access someone

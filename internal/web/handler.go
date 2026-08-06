@@ -6620,6 +6620,25 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if item.SharedInviteID != "" && item.SourceAvailable {
+			// The two kinds of channel news read differently on purpose: being
+			// added to a channel and having your request to invite an
+			// organization decided are not the same thing to be told.
+			name := "a channel"
+			if conversation, convErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation); convErr == nil {
+				name = conversationName(conversation)
+				if !strings.HasPrefix(name, "#") {
+					name = "#" + name
+				}
+				view.SourceURL = appURL(string(conversation.ID), "", "", "", "")
+				view.ChannelName = name
+			}
+			decided := string(item.SharedInviteStatus)
+			if decided == "" {
+				decided = "decided"
+			}
+			view.Text = template.HTML("Your Slack Connect invitation for " + template.HTMLEscapeString(name) + " was " + template.HTMLEscapeString(decided) + ".")
+		}
 		if item.ListItemID != "" && item.SourceAvailable {
 			name := strings.TrimSpace(item.ListName)
 			if name == "" {
@@ -6650,7 +6669,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			view.SourceURL = "/app/canvases/" + url.PathEscape(string(item.CanvasID))
 			view.ChannelName = title
 		}
-		if item.CanvasID == "" && item.ListItemID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) && item.SourceAvailable {
+		if item.CanvasID == "" && item.ListItemID == "" && item.SharedInviteID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) && item.SourceAvailable {
 			conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation)
 			if conversationErr == nil {
 				name := conversationName(conversation)

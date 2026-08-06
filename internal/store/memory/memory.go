@@ -618,6 +618,24 @@ func (s *Store) DeleteCanvas(_ context.Context, workspace domain.WorkspaceID, id
 	return nil
 }
 
+// RecordSharedInviteDecision mirrors the SQL profile: one row per invitation,
+// so a decision that is later changed replaces the news rather than stacking a
+// second, contradictory copy of it.
+func (s *Store) RecordSharedInviteDecision(_ context.Context, invite domain.SharedInvite, actor domain.UserID, occurredAt time.Time) error {
+	if invite.ID == "" || invite.InvitedBy == "" {
+		return store.InvalidArgument("a shared invite decision requires an invitation and a requester")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := domain.ActivityIDFor(invite.InvitedBy, "shared_invite:"+string(invite.ID))
+	s.activityItems[id] = domain.ActivityItem{
+		ID: id, WorkspaceID: invite.WorkspaceID, UserID: invite.InvitedBy,
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, ActorID: actor,
+		SharedInviteID: invite.ID, Conversation: invite.ConversationID, OccurredAt: occurredAt.UTC(),
+	}
+	return nil
+}
+
 // RecordListAssignment mirrors the SQL profile: one item per assignment, keyed
 // so re-assigning the same item to the same member replaces the row rather than
 // stacking a second copy of the same news.
@@ -5776,6 +5794,15 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = true
 			}
 		}
+		if item.SharedInviteID != "" {
+			// The decision stays readable even if the conversation later
+			// becomes unreachable: it records what was decided about a request
+			// this member made, which remains true either way.
+			if invite, ok := s.sharedInvites[item.SharedInviteID]; ok && invite.WorkspaceID == workspace {
+				item.SharedInviteStatus = invite.Status
+				item.SourceAvailable = true
+			}
+		}
 		if item.ListItemID != "" {
 			// Like the canvas share, the row outlives the access that made it
 			// reachable: it records that the work was assigned, and the reader
@@ -5813,7 +5840,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = allowed
 			}
 		}
-		if item.CanvasID == "" && item.ListItemID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+		if item.CanvasID == "" && item.ListItemID == "" && item.SharedInviteID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
 			if conversation, ok := s.conversations[item.Conversation]; ok && s.canViewActivitySourceLocked(workspace, user, conversation) {
 				item.SourceAvailable = true
 			}

@@ -3251,3 +3251,86 @@ func canvasCommentsOutliveTheirSection(t *testing.T, open opener) {
 		t.Fatalf("comments after deletion = %+v err = %v, want none", gone.Comments, err)
 	}
 }
+
+// A decision on a Slack Connect invitation is news to whoever asked for it, and
+// the row keys on the invitation so a decision that is later changed replaces
+// the news rather than stacking a contradictory second copy. Both profiles have
+// to agree on that, and on the status the row reports.
+func connectDecisionReachesItsRequester(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	guest := domain.WorkspaceID("T-guest-" + f.suffix)
+	if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: guest, Name: "guest"}); err != nil {
+		t.Fatal(err)
+	}
+	admin := domain.UserID("U-admin-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: admin, WorkspaceID: f.workspaceID, Email: "admin-" + f.suffix + "@example.com", Name: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	invite := domain.SharedInvite{
+		ID: domain.SharedInviteID("SI-" + f.suffix), WorkspaceID: f.workspaceID, ConversationID: f.channelID,
+		TargetWorkspaceID: guest, InvitedBy: f.userID, Status: domain.SharedInvitePending,
+		CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if err := f.repository.CreateSharedInvite(ctx, invite, f.event("invite", "connect.invited", string(invite.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	invite.Status = domain.SharedInviteApproved
+	if err := f.repository.RecordSharedInviteDecision(ctx, invite, admin, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.repository.ListActivity(ctx, f.workspaceID, f.userID, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decision domain.ActivityItem
+	for _, item := range page.Items {
+		if item.SharedInviteID == invite.ID {
+			decision = item
+		}
+	}
+	if decision.SharedInviteID == "" {
+		t.Fatalf("requester activity = %+v, want the decision", page.Items)
+	}
+	if decision.Conversation != f.channelID || decision.ActorID != admin {
+		t.Fatalf("decision = %+v, want it to name the conversation and the decider", decision)
+	}
+	// The status comes from the invitation as it stands, not from the row, so a
+	// decision that changes later reads correctly without rewriting history.
+	if decision.SharedInviteStatus != domain.SharedInvitePending {
+		t.Fatalf("status = %q, want the invitation's stored status", decision.SharedInviteStatus)
+	}
+
+	// Recording again replaces the row rather than stacking a second copy.
+	if err := f.repository.RecordSharedInviteDecision(ctx, invite, admin, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.repository.ListActivity(ctx, f.workspaceID, f.userID, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, item := range again.Items {
+		if item.SharedInviteID == invite.ID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("the same decision was recorded %d times, want once", count)
+	}
+
+	// Nobody else is told.
+	other, err := f.repository.ListActivity(ctx, f.workspaceID, admin, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range other.Items {
+		if item.SharedInviteID == invite.ID {
+			t.Fatalf("someone other than the requester was told: %+v", item)
+		}
+	}
+}

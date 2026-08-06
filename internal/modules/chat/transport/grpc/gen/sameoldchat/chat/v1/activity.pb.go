@@ -22,30 +22,32 @@ const (
 )
 
 type ActivityItem struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId     string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId          string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Kinds           []string               `protobuf:"bytes,4,rep,name=kinds,proto3" json:"kinds,omitempty"`
-	ActorId         string                 `protobuf:"bytes,5,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	ConversationId  string                 `protobuf:"bytes,6,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
-	MessageId       string                 `protobuf:"bytes,7,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	ReminderId      string                 `protobuf:"bytes,8,opt,name=reminder_id,json=reminderId,proto3" json:"reminder_id,omitempty"`
-	ReactionName    string                 `protobuf:"bytes,9,opt,name=reaction_name,json=reactionName,proto3" json:"reaction_name,omitempty"`
-	OccurredAt      int64                  `protobuf:"varint,10,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
-	ReadAt          int64                  `protobuf:"varint,11,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
-	ClearedAt       int64                  `protobuf:"varint,12,opt,name=cleared_at,json=clearedAt,proto3" json:"cleared_at,omitempty"`
-	Message         *Message               `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
-	Reminder        *LaterReminder         `protobuf:"bytes,14,opt,name=reminder,proto3" json:"reminder,omitempty"`
-	SourceAvailable bool                   `protobuf:"varint,15,opt,name=source_available,json=sourceAvailable,proto3" json:"source_available,omitempty"`
-	CanvasId        string                 `protobuf:"bytes,16,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
-	CanvasTitle     string                 `protobuf:"bytes,17,opt,name=canvas_title,json=canvasTitle,proto3" json:"canvas_title,omitempty"`
-	ListItemId      string                 `protobuf:"bytes,18,opt,name=list_item_id,json=listItemId,proto3" json:"list_item_id,omitempty"`
-	ListId          string                 `protobuf:"bytes,19,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
-	ListName        string                 `protobuf:"bytes,20,opt,name=list_name,json=listName,proto3" json:"list_name,omitempty"`
-	ListItem        *ListItemSummary       `protobuf:"bytes,21,opt,name=list_item,json=listItem,proto3" json:"list_item,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Id                 string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId        string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId             string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Kinds              []string               `protobuf:"bytes,4,rep,name=kinds,proto3" json:"kinds,omitempty"`
+	ActorId            string                 `protobuf:"bytes,5,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	ConversationId     string                 `protobuf:"bytes,6,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	MessageId          string                 `protobuf:"bytes,7,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	ReminderId         string                 `protobuf:"bytes,8,opt,name=reminder_id,json=reminderId,proto3" json:"reminder_id,omitempty"`
+	ReactionName       string                 `protobuf:"bytes,9,opt,name=reaction_name,json=reactionName,proto3" json:"reaction_name,omitempty"`
+	OccurredAt         int64                  `protobuf:"varint,10,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	ReadAt             int64                  `protobuf:"varint,11,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
+	ClearedAt          int64                  `protobuf:"varint,12,opt,name=cleared_at,json=clearedAt,proto3" json:"cleared_at,omitempty"`
+	Message            *Message               `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	Reminder           *LaterReminder         `protobuf:"bytes,14,opt,name=reminder,proto3" json:"reminder,omitempty"`
+	SourceAvailable    bool                   `protobuf:"varint,15,opt,name=source_available,json=sourceAvailable,proto3" json:"source_available,omitempty"`
+	CanvasId           string                 `protobuf:"bytes,16,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
+	CanvasTitle        string                 `protobuf:"bytes,17,opt,name=canvas_title,json=canvasTitle,proto3" json:"canvas_title,omitempty"`
+	ListItemId         string                 `protobuf:"bytes,18,opt,name=list_item_id,json=listItemId,proto3" json:"list_item_id,omitempty"`
+	ListId             string                 `protobuf:"bytes,19,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
+	ListName           string                 `protobuf:"bytes,20,opt,name=list_name,json=listName,proto3" json:"list_name,omitempty"`
+	ListItem           *ListItemSummary       `protobuf:"bytes,21,opt,name=list_item,json=listItem,proto3" json:"list_item,omitempty"`
+	SharedInviteId     string                 `protobuf:"bytes,22,opt,name=shared_invite_id,json=sharedInviteId,proto3" json:"shared_invite_id,omitempty"`
+	SharedInviteStatus string                 `protobuf:"bytes,23,opt,name=shared_invite_status,json=sharedInviteStatus,proto3" json:"shared_invite_status,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ActivityItem) Reset() {
@@ -223,6 +225,20 @@ func (x *ActivityItem) GetListItem() *ListItemSummary {
 		return x.ListItem
 	}
 	return nil
+}
+
+func (x *ActivityItem) GetSharedInviteId() string {
+	if x != nil {
+		return x.SharedInviteId
+	}
+	return ""
+}
+
+func (x *ActivityItem) GetSharedInviteStatus() string {
+	if x != nil {
+		return x.SharedInviteStatus
+	}
+	return ""
 }
 
 // ListItemSummary is what an Activity row needs to name assigned work without
@@ -1471,7 +1487,7 @@ var File_sameoldchat_chat_v1_activity_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\xf0\x05\n" +
+	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\xcc\x06\n" +
 	"\fActivityItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -1499,7 +1515,9 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"listItemId\x12\x17\n" +
 	"\alist_id\x18\x13 \x01(\tR\x06listId\x12\x1b\n" +
 	"\tlist_name\x18\x14 \x01(\tR\blistName\x12A\n" +
-	"\tlist_item\x18\x15 \x01(\v2$.sameoldchat.chat.v1.ListItemSummaryR\blistItem\"~\n" +
+	"\tlist_item\x18\x15 \x01(\v2$.sameoldchat.chat.v1.ListItemSummaryR\blistItem\x12(\n" +
+	"\x10shared_invite_id\x18\x16 \x01(\tR\x0esharedInviteId\x120\n" +
+	"\x14shared_invite_status\x18\x17 \x01(\tR\x12sharedInviteStatus\"~\n" +
 	"\x0fListItemSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06fields\x18\x02 \x01(\tR\x06fields\x12\x1a\n" +
