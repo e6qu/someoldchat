@@ -595,11 +595,26 @@ type canvasSectionView struct {
 	Position int
 }
 
+type listCellView struct {
+	ColumnName string
+	Value      string
+}
+
+type listColumnView struct {
+	Key     string
+	Name    string
+	Type    string
+	Options []string
+}
+
 type listData struct {
 	ID       string
 	Name     string
 	TodoMode bool
 	Items    []listItemView
+	// Columns are the list's declared structure. Empty for an unstructured
+	// list, which is what a list created without a schema is.
+	Columns []listColumnView
 	// Members are who an item may be assigned to: the people who can already
 	// open this list. Offering anyone else would build a control that produces
 	// a refusal, which the universal contract forbids.
@@ -611,8 +626,12 @@ type listData struct {
 }
 
 type listItemView struct {
-	ID       string
-	Title    string
+	ID    string
+	Title string
+	// Cells are the item's values under the list's declared columns, in the
+	// order the columns were declared. A structured list shows these instead of
+	// a bare title, because the columns are what somebody said the list was for.
+	Cells    []listCellView
 	Archived bool
 	// AssigneeName is who the item is for, resolved for display. AssigneeID is
 	// what the form posts back, because a name is not an identity.
@@ -1263,6 +1282,11 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.list-columns{margin:0 0 10px;font-size:12px}
+.cells{display:flex;flex-wrap:wrap;gap:12px;flex:1}
+.cell{display:flex;flex-direction:column}
+.cell-name{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.cell-value{font-size:14px}
 .canvas-comments{margin-top:24px;border-top:1px solid var(--line);padding-top:16px}
 .comments{list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:10px}
 .comment{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
@@ -2704,7 +2728,8 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 .layout{width:min(940px,calc(100% - 28px));margin:26px auto 56px}.heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.heading h2{margin:0}.new-item{display:flex;gap:8px;margin:18px 0}.new-item input{flex:1;min-width:0;padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:0;border-radius:7px;padding:9px 13px;background:var(--action);color:var(--on-strong);font-weight:800}
 .items{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item.archived .title{text-decoration:line-through;color:var(--muted)}.item form{margin:0}.item button{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}.empty{padding:30px;text-align:center;color:var(--muted)}.mode{color:var(--muted);font-size:13px}
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}<ul class="items">{{range $item := .Items}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span><span class="title">{{.Title}}</span>{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}{{if $.CanWrite}}<form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
+{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>{{end}}
+<ul class="items">{{range $item := .Items}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span>{{if .Cells}}<span class="cells">{{range .Cells}}<span class="cell"><span class="cell-name">{{.ColumnName}}</span><span class="cell-value">{{if .Value}}{{.Value}}{{else}}—{{end}}</span></span>{{end}}</span>{{else}}<span class="title">{{.Title}}</span>{{end}}{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}{{if $.CanWrite}}<form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
 <details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
 <label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $.Members}}<option value="{{.ID}}"{{if eq .ID $item.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
 <label for="due-{{.ID}}">Due</label><input id="due-{{.ID}}" type="date" name="due" value="{{.DueDate}}">
@@ -8169,6 +8194,25 @@ func (h Handler) deleteCanvas(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app/canvases?notice=Canvas+deleted")
 }
 
+// listCellViews lays an item's cells out under the declared columns, in the
+// declared order. A column the item has no value for shows as empty rather than
+// being skipped, so a row lines up with the one above it.
+func listCellViews(columns []domain.ListColumn, fields string) []listCellView {
+	cells, err := domain.ParseListFields(fields)
+	if err != nil {
+		return nil
+	}
+	values := make(map[string]string, len(cells))
+	for _, cell := range cells {
+		values[strings.TrimSpace(cell.ColumnID)] = strings.TrimSpace(domain.ListCellText(cell.Value))
+	}
+	views := make([]listCellView, 0, len(columns))
+	for _, column := range columns {
+		views = append(views, listCellView{ColumnName: column.Name, Value: values[column.Key]})
+	}
+	return views
+}
+
 func listItemTitle(fields string) string {
 	var values []struct {
 		ColumnID string `json:"column_id"`
@@ -8264,9 +8308,26 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 			assignable = append(assignable, memberView{ID: string(candidate.ID), Name: displayName(candidate)})
 		}
 	}
+	columns, schemaErr := domain.ParseListSchema(value.Schema)
+	if schemaErr != nil {
+		// A schema this build cannot read must not hide the list. The items are
+		// still there and still readable; the structure is what is missing, and
+		// saying so beats an error page over a list somebody needs.
+		columns = nil
+	}
+	structured := domain.ListSchemaIsStructured(columns)
+	columnViews := make([]listColumnView, 0, len(columns))
+	if structured {
+		for _, column := range columns {
+			columnViews = append(columnViews, listColumnView{Key: column.Key, Name: column.Name, Type: string(column.Type), Options: column.Options})
+		}
+	}
 	items := make([]listItemView, 0, len(page.Items))
 	for _, item := range page.Items {
 		view := listItemView{ID: string(item.ID), Title: listItemTitle(item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID)}
+		if structured {
+			view.Cells = listCellViews(columns, item.Fields)
+		}
 		if item.AssigneeID != "" {
 			view.AssigneeName = names.name(item.AssigneeID)
 		}
@@ -8281,7 +8342,7 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 		more = "/app/lists/" + url.PathEscape(string(id)) + "?cursor=" + url.QueryEscape(string(page.NextCursor))
 	}
 	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
-	h.writeHTML(w, listTemplate, listData{ID: string(id), Name: value.Name, Members: assignable, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+	h.writeHTML(w, listTemplate, listData{ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
 }
 
 func (h Handler) createList(w http.ResponseWriter, r *http.Request) {

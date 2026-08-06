@@ -177,6 +177,18 @@ for later steps and conditions to read.
   is, by the canvas's own visibility rule rather than a second one, and a
   deleted canvas takes its history with it. The count is bounded, and the
   oldest rows are dropped by the write that creates one rather than by a worker.
+- A list declares typed columns — text, number, date, select, checkbox, person —
+  and an item is checked against them. Each type is a promise about what a cell
+  contains, so a value the column cannot mean is refused rather than stored for
+  the next reader to discover. A cell naming an undeclared column is refused
+  too, because it would be invisible to every reader of the list. A missing cell
+  is not an error: a row with a blank status is an ordinary row, and demanding
+  every column would make a list unusable exactly while it is being filled in.
+  A list created without a schema is given one primary text column so the client
+  has something to show; that substitution is the product's convenience rather
+  than the member's declaration, so it is not enforced and such lists stay
+  free-form. Authoring columns is an API operation; a first-party column editor
+  is absent and recorded as absent.
 - A list item carries an assignee and a due date as columns of their own rather
   than cells inside the free-form fields, because the product asks both
   questions itself — who is this for, is it late — and a value buried in JSON
