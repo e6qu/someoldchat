@@ -129,6 +129,7 @@ func runQualification(t *testing.T, open opener) {
 		{"canvas revisions record what was replaced", canvasRevisionsRecordWhatWasReplaced},
 		{"canvas comments outlive the section they annotate", canvasCommentsOutliveTheirSection},
 		{"canvas grants are listed in one stable order", canvasGrantsAreListedInOneStableOrder},
+		{"list grants are listed in one stable order", listGrantsAreListedInOneStableOrder},
 		{"a Slack Connect decision reaches its requester", connectDecisionReachesItsRequester},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })

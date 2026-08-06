@@ -901,6 +901,10 @@ type Store interface {
 	// the asking member may see that is the service's question, because it is
 	// the same question as whether they may open the canvas at all.
 	ListCanvasGrants(context.Context, domain.WorkspaceID, domain.CanvasID) ([]domain.CanvasAccess, error)
+	// ListListGrants is the same question about a list. Lists and canvases
+	// carry the same grant model, so the sharing surface is the same surface
+	// and both need the same read behind it.
+	ListListGrants(context.Context, domain.WorkspaceID, domain.ListID) ([]domain.ListAccess, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageSearch) (domain.MessagePage, error)
 	CreateList(context.Context, domain.List, events.Event) error
 	// CreateListWithItems creates a list and its initial items as one unit.

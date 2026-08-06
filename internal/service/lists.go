@@ -185,6 +185,17 @@ func (m Messages) List(ctx context.Context, workspaceID domain.WorkspaceID, user
 	return m.Store.GetList(ctx, workspaceID, id)
 }
 
+// ListGrants reports who a list is shared with, by the same rule CanvasGrants
+// follows: read access is enough to ask, because a member who can open a
+// document can already see the work in it, and a member deciding whether to
+// share it needs to know it is not already shared.
+func (m Messages) ListGrants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) ([]domain.ListAccess, error) {
+	if err := m.requireListAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+		return nil, err
+	}
+	return m.Store.ListListGrants(ctx, workspaceID, id)
+}
+
 func (m Messages) ListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) (domain.ListAccess, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.ListAccess{}, err

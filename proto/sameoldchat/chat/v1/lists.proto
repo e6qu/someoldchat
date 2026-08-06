@@ -158,6 +158,13 @@ message ListAccessResponse {
   string access = 4;
 }
 
+// ListGrantsResponse carries every grant on one list. The element is the same
+// message a single-grant read answers with, because a grant is one record
+// whether it is asked about on its own or listed beside the others.
+message ListGrantsResponse {
+  repeated ListAccessResponse grants = 1;
+}
+
 message ListDownloadRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -194,6 +201,7 @@ service ListsService {
   rpc CreateList(CreateListRequest) returns (ListResponse);
   rpc GetList(ListItemRequest) returns (ListResponse);
   rpc GetListAccess(ListItemRequest) returns (ListAccessResponse);
+  rpc ListGrants(ListItemRequest) returns (ListGrantsResponse);
   rpc ListLists(ListsRequest) returns (ListPage);
   rpc UpdateList(UpdateListRequest) returns (ListResponse);
   rpc CreateListItem(CreateListItemRequest) returns (ListItemResponse);

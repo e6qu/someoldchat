@@ -1986,6 +1986,44 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A list carries the same grant model as a canvas, so it has to
+			// answer the same pair: a reader sees who it is shared with, and
+			// only the owner changes that. Both compositions have to agree,
+			// including on the order — a sharing list that reshuffled between
+			// page loads would make a member doubt what they just changed.
+			name: "list grants are readable by a reader and changeable by the owner",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateList(ctx, "T1", "U1", "Launch", "", "[]", "", false, true)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetListAccess(ctx, "T1", "U1", created.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				if err := chat.SetListAccess(ctx, "T1", "U1", created.ID, "read", []domain.ConversationID{"C1"}, nil); err != nil {
+					return nil, err
+				}
+				grants, err := chat.ListGrants(ctx, "T1", "U2", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(grants))
+				for _, grant := range grants {
+					listed = append(listed, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+				}
+				readerGrant := chat.SetListAccess(ctx, "T1", "U2", created.ID, "write", nil, []domain.UserID{"U3"}) != nil
+				_, strangerErr := chat.ListGrants(ctx, "T1", "U3", created.ID)
+				if err := chat.DeleteListAccess(ctx, "T1", "U1", created.ID, nil, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				after, err := chat.ListGrants(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				return []any{listed, readerGrant, strangerErr != nil, len(after)}, nil
+			},
+		},
+		{
 			// Who a canvas is shared with is readable by anyone who may open
 			// it, and changeable only by its owner. Both compositions have to
 			// agree on that pair, and on the order the grants come back in: a
@@ -3232,7 +3270,6 @@ var parityGaps = map[string]struct{}{
 	"DeleteCanvas":                       {},
 	"DeleteFile":                         {},
 	"DeleteFileComment":                  {},
-	"DeleteListAccess":                   {},
 	"DeleteListItems":                    {},
 	"DeleteReminder":                     {},
 	"DeleteScheduledMessage":             {},
@@ -3326,7 +3363,6 @@ var parityGaps = map[string]struct{}{
 	"SetConversationRetention":                {},
 	"SetConversationTopic":                    {},
 	"SetExternalInvitePermissions":            {},
-	"SetListAccess":                           {},
 	"SetSocketModeCursor":                     {},
 	"SetUserExpiration":                       {},
 	"SetUserGroupEnabled":                     {},

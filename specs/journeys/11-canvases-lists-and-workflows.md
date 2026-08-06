@@ -167,6 +167,11 @@ for later steps and conditions to read.
   removal: revoking it would leave the channel with a tab pointing at a document
   nobody in it may open. A canvas that is not this workspace's canvas answers
   the sharing read as missing rather than as unshared, on both storage profiles.
+- The sharing surface is one surface. A list carries the same grant model a
+  canvas does, so it answers the same two questions the same way: anyone who may
+  open it sees who else may, and only its owner changes that. Writing it twice
+  would have been two chances to disagree about who may see a grant, which is
+  the question the whole model exists to answer.
 - A canvas section can be commented on. Read access is enough to add one:
   commenting is taking part in a document rather than editing it, and a canvas
   shared for review that only its editors could discuss would defeat the reason
@@ -265,9 +270,10 @@ full rich block editing, and tab attachment remain gaps.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,
-assignments, and due dates are now built. Templates, views, filters, sorting,
-comments, attachments, item deletion, and full notification/workflow effects
-remain gaps.
+assignments, due dates, and sharing review are now built — a list carries the
+same grants a canvas does, so it reaches the same sharing surface. Templates,
+views, filters, sorting, comments, attachments, item deletion, and full
+notification/workflow effects remain gaps.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered

@@ -3350,6 +3350,38 @@ test('[CANVAS-01 A11Y-01] a canvas says who it is shared with and the owner can 
   await expect(page.locator('#share-target option', { hasText: 'Channel: #general' })).toHaveCount(1);
 });
 
+// A list carries the same grants as a canvas and had the same hole. The surface
+// is now one surface, so this drives the list half of it end to end — including
+// that revoking puts the channel back in the picker, which is the state the
+// owner has to be able to get back to after a mistake.
+test('[LIST-01 A11Y-01] a list says who it is shared with and the owner can change it', async ({ page, context }) => {
+  await signIn(context);
+  const name = `Shared launch ${Date.now()}`;
+  await page.goto('/app/lists');
+  await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  const grants = page.locator('.grant');
+  await expect(grants).toHaveCount(1);
+  await expect(grants.first()).toContainText('SameOldChat');
+  await expect(grants.first()).toContainText('Owner');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.locator('#share-target').selectOption({ label: 'Channel: #general' });
+  await page.locator('#share-access').selectOption('read');
+  await page.getByRole('button', { name: 'Share list' }).click();
+  await expect(page.locator('.grant')).toHaveCount(2);
+  const channelGrant = page.locator('.grant', { hasText: '#general' });
+  await expect(channelGrant).toContainText('Can view');
+  await expect(page.locator('#share-target option', { hasText: 'Channel: #general' })).toHaveCount(0);
+
+  await channelGrant.getByRole('button', { name: /Stop sharing with/ }).click();
+  await expect(page.locator('.grant')).toHaveCount(1);
+  await expect(page.locator('#share-target option', { hasText: 'Channel: #general' })).toHaveCount(1);
+});
+
 // A list with declared columns shows its items under them rather than as a bare
 // title, and refuses a value a column cannot mean. The list is created through
 // the API because the first-party creation form does not author schemas — a
