@@ -376,7 +376,7 @@ CREATE INDEX IF NOT EXISTS thread_follows_conversation_root ON thread_follows(co
 CREATE TABLE IF NOT EXISTS activity_items (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '',
- reminder_id TEXT NOT NULL DEFAULT '', canvas_id TEXT NOT NULL DEFAULT '', list_item_id TEXT NOT NULL DEFAULT '', list_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
+ reminder_id TEXT NOT NULL DEFAULT '', canvas_id TEXT NOT NULL DEFAULT '', list_item_id TEXT NOT NULL DEFAULT '', list_id TEXT NOT NULL DEFAULT '', shared_invite_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
  read_at INTEGER NOT NULL DEFAULT 0, cleared_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS activity_items_user_time ON activity_items(workspace_id, user_id, cleared_at, occurred_at DESC, id DESC);
@@ -554,7 +554,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 147
+const schemaVersion = 148
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3147,6 +3147,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 148 {
+		// A decision on a Slack Connect invitation is news to whoever asked for
+		// it. The identifier is its own column beside conversation_id: the row
+		// links to the conversation, and the column is what tells "you were
+		// added" apart from "your request was approved".
+		columns, err := s.tableColumns(ctx, db, "activity_items")
+		if err != nil {
+			return err
+		}
+		if !columns["shared_invite_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE activity_items ADD COLUMN shared_invite_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate activity shared invite: %w", err)
+			}
 		}
 	}
 	if version < 147 {
@@ -10890,7 +10905,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	if !request.Valid() {
 		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
 	}
-	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.canvas_id, a.list_item_id, a.list_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
+	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.canvas_id, a.list_item_id, a.list_id, a.shared_invite_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
 		FROM activity_items a WHERE a.workspace_id = ? AND a.user_id = ?`
 	args := []any{workspace, user}
 	if request.ClearedOnly {
@@ -10925,7 +10940,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	for rows.Next() {
 		var item domain.ActivityItem
 		var occurredAt, readAt, clearedAt int64
-		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.CanvasID, &item.ListItemID, &item.ListID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.CanvasID, &item.ListItemID, &item.ListID, &item.SharedInviteID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
 			rows.Close()
 			return domain.ActivityPage{}, err
 		}
@@ -10991,6 +11006,18 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 				}
 			}
 		}
+		if item.SharedInviteID != "" {
+			// The decision stays readable even if the conversation later
+			// becomes unreachable: it records what was decided about a request
+			// this member made, which remains true either way.
+			invite, inviteErr := s.GetSharedInvite(ctx, item.SharedInviteID)
+			if inviteErr == nil && invite.WorkspaceID == workspace {
+				item.SharedInviteStatus = invite.Status
+				item.SourceAvailable = true
+			} else if inviteErr != nil && !errors.Is(inviteErr, store.ErrNotFound) {
+				return domain.ActivityPage{}, inviteErr
+			}
+		}
 		if item.ListItemID != "" {
 			// The row outlives the access that made it reachable, like the
 			// canvas share: it records that the work was assigned, which stays
@@ -11030,7 +11057,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 				return domain.ActivityPage{}, canvasErr
 			}
 		}
-		if item.CanvasID == "" && item.ListItemID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+		if item.CanvasID == "" && item.ListItemID == "" && item.SharedInviteID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
 			visible, visibilityErr := s.activitySourceVisible(ctx, workspace, user, item.Conversation)
 			if visibilityErr != nil {
 				return domain.ActivityPage{}, visibilityErr
@@ -11061,6 +11088,30 @@ func (s *Store) RecordListAssignment(ctx context.Context, item domain.ListItem, 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, list_item_id, list_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET actor_id = excluded.actor_id, occurred_at = excluded.occurred_at, read_at = 0, cleared_at = 0`,
 		id, item.WorkspaceID, item.AssigneeID, actor, item.ID, item.ListID, occurredAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RecordSharedInviteDecision writes the news that a request this member made
+// has been decided. One row per invitation, so a decision that is later changed
+// replaces the news rather than stacking a contradictory second copy.
+func (s *Store) RecordSharedInviteDecision(ctx context.Context, invite domain.SharedInvite, actor domain.UserID, occurredAt time.Time) error {
+	if invite.ID == "" || invite.InvitedBy == "" {
+		return store.InvalidArgument("a shared invite decision requires an invitation and a requester")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	id := domain.ActivityIDFor(invite.InvitedBy, "shared_invite:"+string(invite.ID))
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, shared_invite_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET actor_id = excluded.actor_id, occurred_at = excluded.occurred_at, read_at = 0, cleared_at = 0`,
+		id, invite.WorkspaceID, invite.InvitedBy, actor, invite.ConversationID, invite.ID, occurredAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {

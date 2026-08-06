@@ -639,6 +639,10 @@ type Store interface {
 	// are assignments — a due date moved on an item someone already holds is
 	// not one — and the service knows which.
 	RecordListAssignment(context.Context, domain.ListItem, domain.UserID, time.Time) error
+	// RecordSharedInviteDecision tells the member who asked for a Slack Connect
+	// invitation what was decided. Like a list assignment it is separate from
+	// the mutation, because only some transitions are news to them.
+	RecordSharedInviteDecision(context.Context, domain.SharedInvite, domain.UserID, time.Time) error
 	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
 	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)

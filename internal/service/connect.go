@@ -136,6 +136,15 @@ func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.Wor
 		return domain.SharedInvite{}, err
 	}
 	invite.Status = to
+	// The member who asked for the invitation is told what was decided. It is
+	// news only to them and only when someone else decided: an administrator
+	// approving their own request has not been told anything, and the requester
+	// is the one person who has been waiting.
+	if invite.InvitedBy != "" && invite.InvitedBy != actorID {
+		if err := m.Store.RecordSharedInviteDecision(ctx, invite, actorID, now); err != nil {
+			return domain.SharedInvite{}, err
+		}
+	}
 	return invite, nil
 }
 

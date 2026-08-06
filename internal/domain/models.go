@@ -1349,16 +1349,23 @@ type ActivityItem struct {
 	// been given something". The growth is deliberate and bounded: each names a
 	// different object, and one column holding any of them would make every
 	// reader guess which it was holding.
-	ListItemID   ListItemID
-	ListID       ListID
-	MessageID    MessageID
-	ReminderID   LaterReminderID
-	ReactionName string
-	OccurredAt   time.Time
-	ReadAt       time.Time
-	ClearedAt    time.Time
-	Message      Message
-	Reminder     LaterReminder
+	ListItemID ListItemID
+	ListID     ListID
+	// SharedInviteID is set when the item is a decision on a Slack Connect
+	// invitation this member asked for. The conversation it concerns is carried
+	// in Conversation, so the row links where the member wants to go; this
+	// field exists to tell the two kinds of channel news apart, because "you
+	// were added to #general" and "your invitation to #general was approved"
+	// are different things to be told.
+	SharedInviteID SharedInviteID
+	MessageID      MessageID
+	ReminderID     LaterReminderID
+	ReactionName   string
+	OccurredAt     time.Time
+	ReadAt         time.Time
+	ClearedAt      time.Time
+	Message        Message
+	Reminder       LaterReminder
 	// CanvasTitle is resolved when the item is read, like Message and Reminder,
 	// so a row can name what was shared without the reader following the link.
 	CanvasTitle string
@@ -1367,9 +1374,12 @@ type ActivityItem struct {
 	// own rather than a whole ListItem so the conversion is complete rather
 	// than lossy — a row carrying a half-filled item would be a second,
 	// differently-shaped copy of the record that nothing else could trust.
-	ListItem        ListItemSummary
-	ListName        string
-	SourceAvailable bool
+	ListItem ListItemSummary
+	ListName string
+	// SharedInviteStatus is resolved when the item is read, so a row can say
+	// what was decided without the reader opening anything.
+	SharedInviteStatus SharedInviteStatus
+	SourceAvailable    bool
 }
 
 type ActivityQuery struct {
