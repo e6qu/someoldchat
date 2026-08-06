@@ -1158,6 +1158,17 @@ func (r Remote) ListAccessFor(ctx context.Context, workspaceID domain.WorkspaceI
 	return err
 }
 
+func (r Remote) AddListColumn(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, name string, columnType domain.ListColumnType, options []string) (domain.List, error) {
+	out, err := r.lists.AddListColumn(ctx, &chatv1.AddListColumnRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id),
+		Name: name, Type: string(columnType), Options: options,
+	})
+	if err != nil {
+		return domain.List{}, err
+	}
+	return decodeProtoList(out)
+}
+
 func (r Remote) AssignListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, assignee domain.UserID, dueAt time.Time) (domain.ListItem, error) {
 	out, err := r.lists.AssignListItem(ctx, &chatv1.AssignListItemRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID),
@@ -6827,6 +6838,14 @@ func (s *Server) UpdateListItem(ctx context.Context, input *chatv1.UpdateListIte
 		return nil, mapError(err)
 	}
 	return &chatv1.ListItemResponse{Ok: true, Item: encodeProtoListItem(value)}, nil
+}
+
+func (s *Server) AddListColumn(ctx context.Context, input *chatv1.AddListColumnRequest) (*chatv1.List, error) {
+	value, err := s.implementation.AddListColumn(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetName(), domain.ListColumnType(input.GetType()), input.GetOptions())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoList(value), nil
 }
 
 func (s *Server) AssignListItem(ctx context.Context, input *chatv1.AssignListItemRequest) (*chatv1.ListItem, error) {

@@ -1803,6 +1803,47 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Declaring a column is additive by construction — no item has a
+			// value under a column that did not exist — and the compositions
+			// have to agree on the key it mints, because every cell references
+			// it. Two columns with the same name are survivable rather than a
+			// collision, which is the part a single-composition test would miss.
+			name: "a declared column is appended with a stable key",
+			seed: seedListAssignmentParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				const listID = domain.ListID("Lx-assign")
+				first, err := chat.AddListColumn(ctx, "T1", "U1", listID, "Due date", domain.ListColumnDate, nil)
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.AddListColumn(ctx, "T1", "U1", listID, "Due date", domain.ListColumnText, nil)
+				if err != nil {
+					return nil, err
+				}
+				columns, err := domain.ParseListSchema(second.Schema)
+				if err != nil {
+					return nil, err
+				}
+				keys := make([]string, 0, len(columns))
+				for _, column := range columns {
+					keys = append(keys, column.Key+":"+string(column.Type))
+				}
+				// A select with no options is a text column that refuses every
+				// value, so it is refused rather than created.
+				_, emptySelectErr := chat.AddListColumn(ctx, "T1", "U1", listID, "Status", domain.ListColumnSelect, nil)
+				// The item that existed before still conforms: declaring a
+				// column cannot invalidate what was already written.
+				item, err := chat.GetListItem(ctx, "T1", "U1", listID, "Li-assign")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.UpdateListItem(ctx, "T1", "U1", listID, item.ID, item.Fields, false); err != nil {
+					return nil, err
+				}
+				return []any{keys, first.Version, second.Version, emptySelectErr != nil}, nil
+			},
+		},
+		{
 			// Assignment is where a list stops being a document and becomes
 			// work, so the compositions have to agree on who may receive it and
 			// on the news reaching them. U2 can read the list; U3 cannot, and
@@ -3170,7 +3211,6 @@ var parityGaps = map[string]struct{}{
 	"GetAuthMethod":                           {},
 	"GetCall":                                 {},
 	"GetListDownload":                         {},
-	"GetListItem":                             {},
 	"GetSocketModeCursor":                     {},
 	"HandleAppResponse":                       {},
 	"IntegrationLogs":                         {},
@@ -3260,7 +3300,6 @@ var parityGaps = map[string]struct{}{
 	"UpdateCall":                              {},
 	"UpdateList":                              {},
 	"UpdateListCells":                         {},
-	"UpdateListItem":                          {},
 	"UpdateRemoteFile":                        {},
 	"UpdateUserGroup":                         {},
 	"UpdateView":                              {},

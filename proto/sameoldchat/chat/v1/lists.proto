@@ -33,6 +33,15 @@ message ListItem {
   int64 due_at_unix_nano = 13;
 }
 
+message AddListColumnRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string name = 4;
+  string type = 5;
+  repeated string options = 6;
+}
+
 message AssignListItemRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -192,6 +201,7 @@ service ListsService {
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
   rpc UpdateListItem(UpdateListItemRequest) returns (ListItemResponse);
   rpc AssignListItem(AssignListItemRequest) returns (ListItem);
+  rpc AddListColumn(AddListColumnRequest) returns (List);
   rpc UpdateListCells(UpdateListItemRequest) returns (ListItemsResponse);
   rpc DeleteListItems(DeleteListItemsRequest) returns (ListOKResponse);
   rpc SetListAccess(ListAccessRequest) returns (ListOKResponse);

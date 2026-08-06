@@ -3315,6 +3315,32 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
 // title, and refuses a value a column cannot mean. The list is created through
 // the API because the first-party creation form does not author schemas — a
 // column editor is a separate surface and is recorded as absent.
+test('[LIST-01 A11Y-01] a column can be declared from the list page', async ({ page, context }) => {
+  await signIn(context);
+  const name = `Structured ${Date.now()}`;
+  await page.goto('/app/lists');
+  await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  await page.getByRole('group').filter({ hasText: 'Add a column' }).locator('summary').click();
+  await page.locator('#column-name').fill('Status');
+  await page.locator('#column-type').selectOption('select');
+  await page.locator('#column-options').fill('open, done');
+  await page.getByRole('button', { name: 'Add column' }).click();
+  await expect(page.getByText('Columns: Title (text), Status (select)')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // A select with no options is a text column that refuses every value, so it
+  // is refused rather than created.
+  await page.getByRole('group').filter({ hasText: 'Add a column' }).locator('summary').click();
+  await page.locator('#column-name').fill('Priority');
+  await page.locator('#column-type').selectOption('select');
+  await page.getByRole('button', { name: 'Add column' }).click();
+  await expect(page.getByText('The column was not added')).toBeVisible();
+});
+
 test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', async ({ page, context, request }) => {
   await signIn(context);
   const name = `Launch plan ${Date.now()}`;

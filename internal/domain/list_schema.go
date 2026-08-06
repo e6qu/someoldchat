@@ -163,7 +163,15 @@ func ParseListFields(raw string) ([]ListCell, error) {
 // A missing cell is not an error. A row with a blank status is an ordinary row,
 // and demanding every column would make a list unusable exactly when it is most
 // useful: while it is being filled in.
-func ValidateListFields(schema string, fields string) error {
+//
+// previous is what the item already held, and its column names are accepted
+// even when the schema does not declare them. Declaring the first column on a
+// list that has been used free-form would otherwise make every existing item
+// unwritable: the member did not introduce an invisible cell, they merely did
+// not delete one, and refusing their edit would punish them for adding
+// structure to their own list. New cells under undeclared columns are still
+// refused, so the rule tightens going forward without breaking what is there.
+func ValidateListFields(schema string, fields string, previous string) error {
 	columns, err := ParseListSchema(schema)
 	if err != nil {
 		return err
@@ -179,9 +187,19 @@ func ValidateListFields(schema string, fields string) error {
 	for _, column := range columns {
 		declared[column.Key] = column
 	}
+	inherited := make(map[string]struct{})
+	if existing, err := ParseListFields(previous); err == nil {
+		for _, cell := range existing {
+			inherited[strings.TrimSpace(cell.ColumnID)] = struct{}{}
+		}
+	}
 	for _, cell := range cells {
-		column, known := declared[strings.TrimSpace(cell.ColumnID)]
+		id := strings.TrimSpace(cell.ColumnID)
+		column, known := declared[id]
 		if !known {
+			if _, carried := inherited[id]; carried {
+				continue
+			}
 			return errInvalidListSchema
 		}
 		if !columnAccepts(column, cell.Value) {
@@ -245,4 +263,53 @@ func ListCellText(value any) string {
 		}
 		return string(encoded)
 	}
+}
+
+// ListColumnKey mints a stable identifier from a column's name.
+//
+// A key is what every item's cells reference, so it has to be something a
+// person can recognise in stored JSON while they are working out why a value is
+// not showing — "due_date" rather than an opaque draw. It is derived from the
+// name and then made unique against the columns already there, because two
+// columns called "Status" are a mistake worth surviving rather than a collision
+// worth failing on.
+func ListColumnKey(name string, existing []ListColumn) string {
+	var builder strings.Builder
+	for _, character := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
+			builder.WriteRune(character)
+		case character == ' ' || character == '-' || character == '_':
+			builder.WriteByte('_')
+		}
+	}
+	base := strings.Trim(builder.String(), "_")
+	if base == "" {
+		base = "column"
+	}
+	taken := make(map[string]struct{}, len(existing))
+	for _, column := range existing {
+		taken[column.Key] = struct{}{}
+	}
+	candidate := base
+	for suffix := 2; ; suffix++ {
+		if _, clash := taken[candidate]; !clash {
+			return candidate
+		}
+		candidate = base + "_" + strconv.Itoa(suffix)
+	}
+}
+
+// EncodeListSchema writes columns back in the shape they are stored in, so a
+// schema this product authored is read by the same parser that reads one an app
+// authored.
+func EncodeListSchema(columns []ListColumn) (string, error) {
+	if len(columns) == 0 {
+		return "[]", nil
+	}
+	encoded, err := json.Marshal(columns)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }

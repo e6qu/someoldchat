@@ -269,6 +269,70 @@ func (m Messages) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID
 	return value, nil
 }
 
+// AddListColumn declares a new column on an existing list.
+//
+// It appends rather than replacing the schema, because every item's cells
+// reference the columns already there by key: rewriting the schema wholesale
+// would let one edit silently orphan every value in the list. A new column is
+// additive by construction — no item has a value under it yet, so no item stops
+// conforming.
+//
+// The key is minted from the name and made unique, so two columns called
+// "Status" are survivable rather than a collision.
+func (m Messages) AddListColumn(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, name string, columnType domain.ListColumnType, options []string) (domain.List, error) {
+	if err := m.requireListAccess(ctx, workspaceID, userID, id, documentAccessWrite); err != nil {
+		return domain.List{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || !columnType.Valid() {
+		return domain.List{}, ErrInvalidList
+	}
+	value, err := m.Store.GetList(ctx, workspaceID, id)
+	if err != nil {
+		return domain.List{}, err
+	}
+	columns, err := domain.ParseListSchema(value.Schema)
+	if err != nil {
+		return domain.List{}, ErrInvalidList
+	}
+	if len(columns) >= domain.ListColumnLimit {
+		return domain.List{}, ErrInvalidList
+	}
+	cleaned := make([]string, 0, len(options))
+	for _, option := range options {
+		if trimmed := strings.TrimSpace(option); trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	// A select with no options is a text column that refuses every value, so it
+	// is refused here rather than created and discovered by whoever tries to
+	// fill it in.
+	if columnType == domain.ListColumnSelect && len(cleaned) == 0 {
+		return domain.List{}, ErrInvalidList
+	}
+	added := domain.ListColumn{Key: domain.ListColumnKey(name, columns), Name: name, Type: columnType, Options: cleaned}
+	// The first declared column is the primary one, so a list that had only the
+	// substituted default keeps showing something in its first position.
+	if len(columns) == 0 {
+		added.Primary = true
+	}
+	schema, err := domain.EncodeListSchema(append(columns, added))
+	if err != nil {
+		return domain.List{}, err
+	}
+	value.Schema = schema
+	value.Version++
+	value.UpdatedAt = time.Now().UTC()
+	event, err := listEvent(workspaceID, userID, "list.updated", events.String("list_id", string(id)), events.String("column_key", added.Key))
+	if err != nil {
+		return domain.List{}, err
+	}
+	if err := m.Store.UpdateList(ctx, value, event); err != nil {
+		return domain.List{}, err
+	}
+	return value, nil
+}
+
 func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, parentItemID domain.ListItemID, fields string) (domain.ListItem, error) {
 	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return domain.ListItem{}, err
@@ -284,7 +348,7 @@ func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.Workspa
 	// A cell under a column nobody declared is invisible to every reader of the
 	// list, so accepting it silently would lose the member's work while looking
 	// like it had been saved.
-	if err := domain.ValidateListFields(list.Schema, fields); err != nil {
+	if err := domain.ValidateListFields(list.Schema, fields, ""); err != nil {
 		return domain.ListItem{}, ErrInvalidList
 	}
 	id, err := domain.NewListItemID()
@@ -325,6 +389,7 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.ListItem{}, err
 	}
+	previousFields := value.Fields
 	value.Fields, err = normalizeJSONArray(fields, value.Fields)
 	if err != nil {
 		return domain.ListItem{}, ErrInvalidList
@@ -333,7 +398,7 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.ListItem{}, err
 	}
-	if err := domain.ValidateListFields(list.Schema, value.Fields); err != nil {
+	if err := domain.ValidateListFields(list.Schema, value.Fields, previousFields); err != nil {
 		return domain.ListItem{}, ErrInvalidList
 	}
 	value.Archived = archived

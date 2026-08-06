@@ -277,6 +277,90 @@ func (x *ListItem) GetDueAtUnixNano() int64 {
 	return 0
 }
 
+type AddListColumnRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ListId        string                 `protobuf:"bytes,3,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Type          string                 `protobuf:"bytes,5,opt,name=type,proto3" json:"type,omitempty"`
+	Options       []string               `protobuf:"bytes,6,rep,name=options,proto3" json:"options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddListColumnRequest) Reset() {
+	*x = AddListColumnRequest{}
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddListColumnRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddListColumnRequest) ProtoMessage() {}
+
+func (x *AddListColumnRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddListColumnRequest.ProtoReflect.Descriptor instead.
+func (*AddListColumnRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AddListColumnRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AddListColumnRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AddListColumnRequest) GetListId() string {
+	if x != nil {
+		return x.ListId
+	}
+	return ""
+}
+
+func (x *AddListColumnRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AddListColumnRequest) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *AddListColumnRequest) GetOptions() []string {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
 type AssignListItemRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -291,7 +375,7 @@ type AssignListItemRequest struct {
 
 func (x *AssignListItemRequest) Reset() {
 	*x = AssignListItemRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -303,7 +387,7 @@ func (x *AssignListItemRequest) String() string {
 func (*AssignListItemRequest) ProtoMessage() {}
 
 func (x *AssignListItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -316,7 +400,7 @@ func (x *AssignListItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssignListItemRequest.ProtoReflect.Descriptor instead.
 func (*AssignListItemRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{2}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AssignListItemRequest) GetWorkspaceId() string {
@@ -372,7 +456,7 @@ type ListItemPage struct {
 
 func (x *ListItemPage) Reset() {
 	*x = ListItemPage{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -384,7 +468,7 @@ func (x *ListItemPage) String() string {
 func (*ListItemPage) ProtoMessage() {}
 
 func (x *ListItemPage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -397,7 +481,7 @@ func (x *ListItemPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemPage.ProtoReflect.Descriptor instead.
 func (*ListItemPage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{3}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListItemPage) GetItems() []*ListItem {
@@ -434,7 +518,7 @@ type ListsRequest struct {
 
 func (x *ListsRequest) Reset() {
 	*x = ListsRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -446,7 +530,7 @@ func (x *ListsRequest) String() string {
 func (*ListsRequest) ProtoMessage() {}
 
 func (x *ListsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -459,7 +543,7 @@ func (x *ListsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListsRequest.ProtoReflect.Descriptor instead.
 func (*ListsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListsRequest) GetWorkspaceId() string {
@@ -508,7 +592,7 @@ type ListPage struct {
 
 func (x *ListPage) Reset() {
 	*x = ListPage{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -520,7 +604,7 @@ func (x *ListPage) String() string {
 func (*ListPage) ProtoMessage() {}
 
 func (x *ListPage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -533,7 +617,7 @@ func (x *ListPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPage.ProtoReflect.Descriptor instead.
 func (*ListPage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListPage) GetLists() []*List {
@@ -572,7 +656,7 @@ type ListDownload struct {
 
 func (x *ListDownload) Reset() {
 	*x = ListDownload{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +668,7 @@ func (x *ListDownload) String() string {
 func (*ListDownload) ProtoMessage() {}
 
 func (x *ListDownload) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +681,7 @@ func (x *ListDownload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDownload.ProtoReflect.Descriptor instead.
 func (*ListDownload) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListDownload) GetId() string {
@@ -665,7 +749,7 @@ type CreateListRequest struct {
 
 func (x *CreateListRequest) Reset() {
 	*x = CreateListRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -677,7 +761,7 @@ func (x *CreateListRequest) String() string {
 func (*CreateListRequest) ProtoMessage() {}
 
 func (x *CreateListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -690,7 +774,7 @@ func (x *CreateListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateListRequest.ProtoReflect.Descriptor instead.
 func (*CreateListRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CreateListRequest) GetWorkspaceId() string {
@@ -764,7 +848,7 @@ type UpdateListRequest struct {
 
 func (x *UpdateListRequest) Reset() {
 	*x = UpdateListRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -776,7 +860,7 @@ func (x *UpdateListRequest) String() string {
 func (*UpdateListRequest) ProtoMessage() {}
 
 func (x *UpdateListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -789,7 +873,7 @@ func (x *UpdateListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateListRequest.ProtoReflect.Descriptor instead.
 func (*UpdateListRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateListRequest) GetWorkspaceId() string {
@@ -853,7 +937,7 @@ type ListItemRequest struct {
 
 func (x *ListItemRequest) Reset() {
 	*x = ListItemRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -865,7 +949,7 @@ func (x *ListItemRequest) String() string {
 func (*ListItemRequest) ProtoMessage() {}
 
 func (x *ListItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -878,7 +962,7 @@ func (x *ListItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemRequest.ProtoReflect.Descriptor instead.
 func (*ListItemRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListItemRequest) GetWorkspaceId() string {
@@ -922,7 +1006,7 @@ type CreateListItemRequest struct {
 
 func (x *CreateListItemRequest) Reset() {
 	*x = CreateListItemRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -934,7 +1018,7 @@ func (x *CreateListItemRequest) String() string {
 func (*CreateListItemRequest) ProtoMessage() {}
 
 func (x *CreateListItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -947,7 +1031,7 @@ func (x *CreateListItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateListItemRequest.ProtoReflect.Descriptor instead.
 func (*CreateListItemRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CreateListItemRequest) GetWorkspaceId() string {
@@ -999,7 +1083,7 @@ type ListItemsRequest struct {
 
 func (x *ListItemsRequest) Reset() {
 	*x = ListItemsRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1011,7 +1095,7 @@ func (x *ListItemsRequest) String() string {
 func (*ListItemsRequest) ProtoMessage() {}
 
 func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1024,7 +1108,7 @@ func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemsRequest.ProtoReflect.Descriptor instead.
 func (*ListItemsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{11}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListItemsRequest) GetWorkspaceId() string {
@@ -1083,7 +1167,7 @@ type UpdateListItemRequest struct {
 
 func (x *UpdateListItemRequest) Reset() {
 	*x = UpdateListItemRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1095,7 +1179,7 @@ func (x *UpdateListItemRequest) String() string {
 func (*UpdateListItemRequest) ProtoMessage() {}
 
 func (x *UpdateListItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1108,7 +1192,7 @@ func (x *UpdateListItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateListItemRequest.ProtoReflect.Descriptor instead.
 func (*UpdateListItemRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UpdateListItemRequest) GetWorkspaceId() string {
@@ -1165,7 +1249,7 @@ type DeleteListItemsRequest struct {
 
 func (x *DeleteListItemsRequest) Reset() {
 	*x = DeleteListItemsRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1177,7 +1261,7 @@ func (x *DeleteListItemsRequest) String() string {
 func (*DeleteListItemsRequest) ProtoMessage() {}
 
 func (x *DeleteListItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1190,7 +1274,7 @@ func (x *DeleteListItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteListItemsRequest.ProtoReflect.Descriptor instead.
 func (*DeleteListItemsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteListItemsRequest) GetWorkspaceId() string {
@@ -1235,7 +1319,7 @@ type ListAccessRequest struct {
 
 func (x *ListAccessRequest) Reset() {
 	*x = ListAccessRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1247,7 +1331,7 @@ func (x *ListAccessRequest) String() string {
 func (*ListAccessRequest) ProtoMessage() {}
 
 func (x *ListAccessRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1260,7 +1344,7 @@ func (x *ListAccessRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAccessRequest.ProtoReflect.Descriptor instead.
 func (*ListAccessRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{14}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListAccessRequest) GetWorkspaceId() string {
@@ -1317,7 +1401,7 @@ type ListAccessResponse struct {
 
 func (x *ListAccessResponse) Reset() {
 	*x = ListAccessResponse{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1329,7 +1413,7 @@ func (x *ListAccessResponse) String() string {
 func (*ListAccessResponse) ProtoMessage() {}
 
 func (x *ListAccessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1342,7 +1426,7 @@ func (x *ListAccessResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAccessResponse.ProtoReflect.Descriptor instead.
 func (*ListAccessResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{15}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListAccessResponse) GetListId() string {
@@ -1386,7 +1470,7 @@ type ListDownloadRequest struct {
 
 func (x *ListDownloadRequest) Reset() {
 	*x = ListDownloadRequest{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1398,7 +1482,7 @@ func (x *ListDownloadRequest) String() string {
 func (*ListDownloadRequest) ProtoMessage() {}
 
 func (x *ListDownloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1411,7 +1495,7 @@ func (x *ListDownloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDownloadRequest.ProtoReflect.Descriptor instead.
 func (*ListDownloadRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{16}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListDownloadRequest) GetWorkspaceId() string {
@@ -1459,7 +1543,7 @@ type ListResponse struct {
 
 func (x *ListResponse) Reset() {
 	*x = ListResponse{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1471,7 +1555,7 @@ func (x *ListResponse) String() string {
 func (*ListResponse) ProtoMessage() {}
 
 func (x *ListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1484,7 +1568,7 @@ func (x *ListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListResponse.ProtoReflect.Descriptor instead.
 func (*ListResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{17}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListResponse) GetOk() bool {
@@ -1511,7 +1595,7 @@ type ListItemResponse struct {
 
 func (x *ListItemResponse) Reset() {
 	*x = ListItemResponse{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1523,7 +1607,7 @@ func (x *ListItemResponse) String() string {
 func (*ListItemResponse) ProtoMessage() {}
 
 func (x *ListItemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1536,7 +1620,7 @@ func (x *ListItemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemResponse.ProtoReflect.Descriptor instead.
 func (*ListItemResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{18}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListItemResponse) GetOk() bool {
@@ -1563,7 +1647,7 @@ type ListItemsResponse struct {
 
 func (x *ListItemsResponse) Reset() {
 	*x = ListItemsResponse{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[19]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1575,7 +1659,7 @@ func (x *ListItemsResponse) String() string {
 func (*ListItemsResponse) ProtoMessage() {}
 
 func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[19]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,7 +1672,7 @@ func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemsResponse.ProtoReflect.Descriptor instead.
 func (*ListItemsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{19}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListItemsResponse) GetOk() bool {
@@ -1615,7 +1699,7 @@ type ListDownloadResponse struct {
 
 func (x *ListDownloadResponse) Reset() {
 	*x = ListDownloadResponse{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[20]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1627,7 +1711,7 @@ func (x *ListDownloadResponse) String() string {
 func (*ListDownloadResponse) ProtoMessage() {}
 
 func (x *ListDownloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[20]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1640,7 +1724,7 @@ func (x *ListDownloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDownloadResponse.ProtoReflect.Descriptor instead.
 func (*ListDownloadResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{20}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListDownloadResponse) GetOk() bool {
@@ -1666,7 +1750,7 @@ type ListOKResponse struct {
 
 func (x *ListOKResponse) Reset() {
 	*x = ListOKResponse{}
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1678,7 +1762,7 @@ func (x *ListOKResponse) String() string {
 func (*ListOKResponse) ProtoMessage() {}
 
 func (x *ListOKResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1691,7 +1775,7 @@ func (x *ListOKResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListOKResponse.ProtoReflect.Descriptor instead.
 func (*ListOKResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{21}
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListOKResponse) GetOk() bool {
@@ -1739,7 +1823,14 @@ const file_sameoldchat_chat_v1_lists_proto_rawDesc = "" +
 	"\aversion\x18\v \x01(\x03R\aversion\x12\x1f\n" +
 	"\vassignee_id\x18\f \x01(\tR\n" +
 	"assigneeId\x12'\n" +
-	"\x10due_at_unix_nano\x18\r \x01(\x03R\rdueAtUnixNano\"\xcf\x01\n" +
+	"\x10due_at_unix_nano\x18\r \x01(\x03R\rdueAtUnixNano\"\xad\x01\n" +
+	"\x14AddListColumnRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
+	"\alist_id\x18\x03 \x01(\tR\x06listId\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x05 \x01(\tR\x04type\x12\x18\n" +
+	"\aoptions\x18\x06 \x03(\tR\aoptions\"\xcf\x01\n" +
 	"\x15AssignListItemRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
@@ -1855,7 +1946,7 @@ const file_sameoldchat_chat_v1_lists_proto_rawDesc = "" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12=\n" +
 	"\bdownload\x18\x02 \x01(\v2!.sameoldchat.chat.v1.ListDownloadR\bdownload\" \n" +
 	"\x0eListOKResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xff\v\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\xd6\f\n" +
 	"\fListsService\x12W\n" +
 	"\n" +
 	"CreateList\x12&.sameoldchat.chat.v1.CreateListRequest\x1a!.sameoldchat.chat.v1.ListResponse\x12R\n" +
@@ -1868,7 +1959,8 @@ const file_sameoldchat_chat_v1_lists_proto_rawDesc = "" +
 	"\vGetListItem\x12$.sameoldchat.chat.v1.ListItemRequest\x1a%.sameoldchat.chat.v1.ListItemResponse\x12Z\n" +
 	"\tListItems\x12%.sameoldchat.chat.v1.ListItemsRequest\x1a&.sameoldchat.chat.v1.ListItemsResponse\x12c\n" +
 	"\x0eUpdateListItem\x12*.sameoldchat.chat.v1.UpdateListItemRequest\x1a%.sameoldchat.chat.v1.ListItemResponse\x12[\n" +
-	"\x0eAssignListItem\x12*.sameoldchat.chat.v1.AssignListItemRequest\x1a\x1d.sameoldchat.chat.v1.ListItem\x12e\n" +
+	"\x0eAssignListItem\x12*.sameoldchat.chat.v1.AssignListItemRequest\x1a\x1d.sameoldchat.chat.v1.ListItem\x12U\n" +
+	"\rAddListColumn\x12).sameoldchat.chat.v1.AddListColumnRequest\x1a\x19.sameoldchat.chat.v1.List\x12e\n" +
 	"\x0fUpdateListCells\x12*.sameoldchat.chat.v1.UpdateListItemRequest\x1a&.sameoldchat.chat.v1.ListItemsResponse\x12c\n" +
 	"\x0fDeleteListItems\x12+.sameoldchat.chat.v1.DeleteListItemsRequest\x1a#.sameoldchat.chat.v1.ListOKResponse\x12\\\n" +
 	"\rSetListAccess\x12&.sameoldchat.chat.v1.ListAccessRequest\x1a#.sameoldchat.chat.v1.ListOKResponse\x12_\n" +
@@ -1888,72 +1980,75 @@ func file_sameoldchat_chat_v1_lists_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_lists_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_lists_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_sameoldchat_chat_v1_lists_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_sameoldchat_chat_v1_lists_proto_goTypes = []any{
 	(*List)(nil),                   // 0: sameoldchat.chat.v1.List
 	(*ListItem)(nil),               // 1: sameoldchat.chat.v1.ListItem
-	(*AssignListItemRequest)(nil),  // 2: sameoldchat.chat.v1.AssignListItemRequest
-	(*ListItemPage)(nil),           // 3: sameoldchat.chat.v1.ListItemPage
-	(*ListsRequest)(nil),           // 4: sameoldchat.chat.v1.ListsRequest
-	(*ListPage)(nil),               // 5: sameoldchat.chat.v1.ListPage
-	(*ListDownload)(nil),           // 6: sameoldchat.chat.v1.ListDownload
-	(*CreateListRequest)(nil),      // 7: sameoldchat.chat.v1.CreateListRequest
-	(*UpdateListRequest)(nil),      // 8: sameoldchat.chat.v1.UpdateListRequest
-	(*ListItemRequest)(nil),        // 9: sameoldchat.chat.v1.ListItemRequest
-	(*CreateListItemRequest)(nil),  // 10: sameoldchat.chat.v1.CreateListItemRequest
-	(*ListItemsRequest)(nil),       // 11: sameoldchat.chat.v1.ListItemsRequest
-	(*UpdateListItemRequest)(nil),  // 12: sameoldchat.chat.v1.UpdateListItemRequest
-	(*DeleteListItemsRequest)(nil), // 13: sameoldchat.chat.v1.DeleteListItemsRequest
-	(*ListAccessRequest)(nil),      // 14: sameoldchat.chat.v1.ListAccessRequest
-	(*ListAccessResponse)(nil),     // 15: sameoldchat.chat.v1.ListAccessResponse
-	(*ListDownloadRequest)(nil),    // 16: sameoldchat.chat.v1.ListDownloadRequest
-	(*ListResponse)(nil),           // 17: sameoldchat.chat.v1.ListResponse
-	(*ListItemResponse)(nil),       // 18: sameoldchat.chat.v1.ListItemResponse
-	(*ListItemsResponse)(nil),      // 19: sameoldchat.chat.v1.ListItemsResponse
-	(*ListDownloadResponse)(nil),   // 20: sameoldchat.chat.v1.ListDownloadResponse
-	(*ListOKResponse)(nil),         // 21: sameoldchat.chat.v1.ListOKResponse
+	(*AddListColumnRequest)(nil),   // 2: sameoldchat.chat.v1.AddListColumnRequest
+	(*AssignListItemRequest)(nil),  // 3: sameoldchat.chat.v1.AssignListItemRequest
+	(*ListItemPage)(nil),           // 4: sameoldchat.chat.v1.ListItemPage
+	(*ListsRequest)(nil),           // 5: sameoldchat.chat.v1.ListsRequest
+	(*ListPage)(nil),               // 6: sameoldchat.chat.v1.ListPage
+	(*ListDownload)(nil),           // 7: sameoldchat.chat.v1.ListDownload
+	(*CreateListRequest)(nil),      // 8: sameoldchat.chat.v1.CreateListRequest
+	(*UpdateListRequest)(nil),      // 9: sameoldchat.chat.v1.UpdateListRequest
+	(*ListItemRequest)(nil),        // 10: sameoldchat.chat.v1.ListItemRequest
+	(*CreateListItemRequest)(nil),  // 11: sameoldchat.chat.v1.CreateListItemRequest
+	(*ListItemsRequest)(nil),       // 12: sameoldchat.chat.v1.ListItemsRequest
+	(*UpdateListItemRequest)(nil),  // 13: sameoldchat.chat.v1.UpdateListItemRequest
+	(*DeleteListItemsRequest)(nil), // 14: sameoldchat.chat.v1.DeleteListItemsRequest
+	(*ListAccessRequest)(nil),      // 15: sameoldchat.chat.v1.ListAccessRequest
+	(*ListAccessResponse)(nil),     // 16: sameoldchat.chat.v1.ListAccessResponse
+	(*ListDownloadRequest)(nil),    // 17: sameoldchat.chat.v1.ListDownloadRequest
+	(*ListResponse)(nil),           // 18: sameoldchat.chat.v1.ListResponse
+	(*ListItemResponse)(nil),       // 19: sameoldchat.chat.v1.ListItemResponse
+	(*ListItemsResponse)(nil),      // 20: sameoldchat.chat.v1.ListItemsResponse
+	(*ListDownloadResponse)(nil),   // 21: sameoldchat.chat.v1.ListDownloadResponse
+	(*ListOKResponse)(nil),         // 22: sameoldchat.chat.v1.ListOKResponse
 }
 var file_sameoldchat_chat_v1_lists_proto_depIdxs = []int32{
 	1,  // 0: sameoldchat.chat.v1.ListItemPage.items:type_name -> sameoldchat.chat.v1.ListItem
 	0,  // 1: sameoldchat.chat.v1.ListPage.lists:type_name -> sameoldchat.chat.v1.List
 	0,  // 2: sameoldchat.chat.v1.ListResponse.list:type_name -> sameoldchat.chat.v1.List
 	1,  // 3: sameoldchat.chat.v1.ListItemResponse.item:type_name -> sameoldchat.chat.v1.ListItem
-	3,  // 4: sameoldchat.chat.v1.ListItemsResponse.page:type_name -> sameoldchat.chat.v1.ListItemPage
-	6,  // 5: sameoldchat.chat.v1.ListDownloadResponse.download:type_name -> sameoldchat.chat.v1.ListDownload
-	7,  // 6: sameoldchat.chat.v1.ListsService.CreateList:input_type -> sameoldchat.chat.v1.CreateListRequest
-	9,  // 7: sameoldchat.chat.v1.ListsService.GetList:input_type -> sameoldchat.chat.v1.ListItemRequest
-	9,  // 8: sameoldchat.chat.v1.ListsService.GetListAccess:input_type -> sameoldchat.chat.v1.ListItemRequest
-	4,  // 9: sameoldchat.chat.v1.ListsService.ListLists:input_type -> sameoldchat.chat.v1.ListsRequest
-	8,  // 10: sameoldchat.chat.v1.ListsService.UpdateList:input_type -> sameoldchat.chat.v1.UpdateListRequest
-	10, // 11: sameoldchat.chat.v1.ListsService.CreateListItem:input_type -> sameoldchat.chat.v1.CreateListItemRequest
-	9,  // 12: sameoldchat.chat.v1.ListsService.GetListItem:input_type -> sameoldchat.chat.v1.ListItemRequest
-	11, // 13: sameoldchat.chat.v1.ListsService.ListItems:input_type -> sameoldchat.chat.v1.ListItemsRequest
-	12, // 14: sameoldchat.chat.v1.ListsService.UpdateListItem:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
-	2,  // 15: sameoldchat.chat.v1.ListsService.AssignListItem:input_type -> sameoldchat.chat.v1.AssignListItemRequest
-	12, // 16: sameoldchat.chat.v1.ListsService.UpdateListCells:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
-	13, // 17: sameoldchat.chat.v1.ListsService.DeleteListItems:input_type -> sameoldchat.chat.v1.DeleteListItemsRequest
-	14, // 18: sameoldchat.chat.v1.ListsService.SetListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
-	14, // 19: sameoldchat.chat.v1.ListsService.DeleteListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
-	16, // 20: sameoldchat.chat.v1.ListsService.StartListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
-	16, // 21: sameoldchat.chat.v1.ListsService.GetListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
-	17, // 22: sameoldchat.chat.v1.ListsService.CreateList:output_type -> sameoldchat.chat.v1.ListResponse
-	17, // 23: sameoldchat.chat.v1.ListsService.GetList:output_type -> sameoldchat.chat.v1.ListResponse
-	15, // 24: sameoldchat.chat.v1.ListsService.GetListAccess:output_type -> sameoldchat.chat.v1.ListAccessResponse
-	5,  // 25: sameoldchat.chat.v1.ListsService.ListLists:output_type -> sameoldchat.chat.v1.ListPage
-	17, // 26: sameoldchat.chat.v1.ListsService.UpdateList:output_type -> sameoldchat.chat.v1.ListResponse
-	18, // 27: sameoldchat.chat.v1.ListsService.CreateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
-	18, // 28: sameoldchat.chat.v1.ListsService.GetListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
-	19, // 29: sameoldchat.chat.v1.ListsService.ListItems:output_type -> sameoldchat.chat.v1.ListItemsResponse
-	18, // 30: sameoldchat.chat.v1.ListsService.UpdateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
-	1,  // 31: sameoldchat.chat.v1.ListsService.AssignListItem:output_type -> sameoldchat.chat.v1.ListItem
-	19, // 32: sameoldchat.chat.v1.ListsService.UpdateListCells:output_type -> sameoldchat.chat.v1.ListItemsResponse
-	21, // 33: sameoldchat.chat.v1.ListsService.DeleteListItems:output_type -> sameoldchat.chat.v1.ListOKResponse
-	21, // 34: sameoldchat.chat.v1.ListsService.SetListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
-	21, // 35: sameoldchat.chat.v1.ListsService.DeleteListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
-	20, // 36: sameoldchat.chat.v1.ListsService.StartListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
-	20, // 37: sameoldchat.chat.v1.ListsService.GetListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
-	22, // [22:38] is the sub-list for method output_type
-	6,  // [6:22] is the sub-list for method input_type
+	4,  // 4: sameoldchat.chat.v1.ListItemsResponse.page:type_name -> sameoldchat.chat.v1.ListItemPage
+	7,  // 5: sameoldchat.chat.v1.ListDownloadResponse.download:type_name -> sameoldchat.chat.v1.ListDownload
+	8,  // 6: sameoldchat.chat.v1.ListsService.CreateList:input_type -> sameoldchat.chat.v1.CreateListRequest
+	10, // 7: sameoldchat.chat.v1.ListsService.GetList:input_type -> sameoldchat.chat.v1.ListItemRequest
+	10, // 8: sameoldchat.chat.v1.ListsService.GetListAccess:input_type -> sameoldchat.chat.v1.ListItemRequest
+	5,  // 9: sameoldchat.chat.v1.ListsService.ListLists:input_type -> sameoldchat.chat.v1.ListsRequest
+	9,  // 10: sameoldchat.chat.v1.ListsService.UpdateList:input_type -> sameoldchat.chat.v1.UpdateListRequest
+	11, // 11: sameoldchat.chat.v1.ListsService.CreateListItem:input_type -> sameoldchat.chat.v1.CreateListItemRequest
+	10, // 12: sameoldchat.chat.v1.ListsService.GetListItem:input_type -> sameoldchat.chat.v1.ListItemRequest
+	12, // 13: sameoldchat.chat.v1.ListsService.ListItems:input_type -> sameoldchat.chat.v1.ListItemsRequest
+	13, // 14: sameoldchat.chat.v1.ListsService.UpdateListItem:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
+	3,  // 15: sameoldchat.chat.v1.ListsService.AssignListItem:input_type -> sameoldchat.chat.v1.AssignListItemRequest
+	2,  // 16: sameoldchat.chat.v1.ListsService.AddListColumn:input_type -> sameoldchat.chat.v1.AddListColumnRequest
+	13, // 17: sameoldchat.chat.v1.ListsService.UpdateListCells:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
+	14, // 18: sameoldchat.chat.v1.ListsService.DeleteListItems:input_type -> sameoldchat.chat.v1.DeleteListItemsRequest
+	15, // 19: sameoldchat.chat.v1.ListsService.SetListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
+	15, // 20: sameoldchat.chat.v1.ListsService.DeleteListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
+	17, // 21: sameoldchat.chat.v1.ListsService.StartListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
+	17, // 22: sameoldchat.chat.v1.ListsService.GetListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
+	18, // 23: sameoldchat.chat.v1.ListsService.CreateList:output_type -> sameoldchat.chat.v1.ListResponse
+	18, // 24: sameoldchat.chat.v1.ListsService.GetList:output_type -> sameoldchat.chat.v1.ListResponse
+	16, // 25: sameoldchat.chat.v1.ListsService.GetListAccess:output_type -> sameoldchat.chat.v1.ListAccessResponse
+	6,  // 26: sameoldchat.chat.v1.ListsService.ListLists:output_type -> sameoldchat.chat.v1.ListPage
+	18, // 27: sameoldchat.chat.v1.ListsService.UpdateList:output_type -> sameoldchat.chat.v1.ListResponse
+	19, // 28: sameoldchat.chat.v1.ListsService.CreateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
+	19, // 29: sameoldchat.chat.v1.ListsService.GetListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
+	20, // 30: sameoldchat.chat.v1.ListsService.ListItems:output_type -> sameoldchat.chat.v1.ListItemsResponse
+	19, // 31: sameoldchat.chat.v1.ListsService.UpdateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
+	1,  // 32: sameoldchat.chat.v1.ListsService.AssignListItem:output_type -> sameoldchat.chat.v1.ListItem
+	0,  // 33: sameoldchat.chat.v1.ListsService.AddListColumn:output_type -> sameoldchat.chat.v1.List
+	20, // 34: sameoldchat.chat.v1.ListsService.UpdateListCells:output_type -> sameoldchat.chat.v1.ListItemsResponse
+	22, // 35: sameoldchat.chat.v1.ListsService.DeleteListItems:output_type -> sameoldchat.chat.v1.ListOKResponse
+	22, // 36: sameoldchat.chat.v1.ListsService.SetListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
+	22, // 37: sameoldchat.chat.v1.ListsService.DeleteListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
+	21, // 38: sameoldchat.chat.v1.ListsService.StartListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
+	21, // 39: sameoldchat.chat.v1.ListsService.GetListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
+	23, // [23:40] is the sub-list for method output_type
+	6,  // [6:23] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -1970,7 +2065,7 @@ func file_sameoldchat_chat_v1_lists_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_lists_proto_rawDesc), len(file_sameoldchat_chat_v1_lists_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

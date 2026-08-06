@@ -12,16 +12,16 @@ import (
 // as a free-form checklist.
 func TestOneDefaultColumnIsNotAStructure(t *testing.T) {
 	single := `[{"key":"title","name":"Title","type":"text","is_primary_column":true}]`
-	if err := ValidateListFields(single, `[{"column_id":"anything","value":"free form"}]`); err != nil {
+	if err := ValidateListFields(single, `[{"column_id":"anything","value":"free form"}]`, ""); err != nil {
 		t.Fatalf("an unstructured list refused a cell: %v", err)
 	}
-	if err := ValidateListFields("", `[{"column_id":"anything","value":"free form"}]`); err != nil {
+	if err := ValidateListFields("", `[{"column_id":"anything","value":"free form"}]`, ""); err != nil {
 		t.Fatalf("a list with no schema refused a cell: %v", err)
 	}
 	// Two columns, or one that is not a plain text primary, is somebody having
 	// said what the list is for.
 	declared := `[{"key":"title","name":"Title","type":"text","is_primary_column":true},{"key":"status","name":"Status","type":"select","options":["open","done"]}]`
-	if err := ValidateListFields(declared, `[{"column_id":"anything","value":"x"}]`); !errors.Is(err, errInvalidListSchema) {
+	if err := ValidateListFields(declared, `[{"column_id":"anything","value":"x"}]`, ""); !errors.Is(err, errInvalidListSchema) {
 		t.Fatalf("a declared list accepted an undeclared column: %v", err)
 	}
 }
@@ -37,7 +37,7 @@ func TestAColumnRefusesWhatItCannotMean(t *testing.T) {
 		"a checkbox that is a word": `[{"column_id":"done","value":"yes"}]`,
 		"an option nobody offered":  `[{"column_id":"status","value":"blocked"}]`,
 	} {
-		if err := ValidateListFields(schema, fields); !errors.Is(err, errInvalidListSchema) {
+		if err := ValidateListFields(schema, fields, ""); !errors.Is(err, errInvalidListSchema) {
 			t.Fatalf("%s was accepted", name)
 		}
 	}
@@ -51,7 +51,7 @@ func TestAColumnRefusesWhatItCannotMean(t *testing.T) {
 		"a cell left unset":   `[{"column_id":"count","value":null}]`,
 		"a row missing cells": `[{"column_id":"title","value":"only this"}]`,
 	} {
-		if err := ValidateListFields(schema, fields); err != nil {
+		if err := ValidateListFields(schema, fields, ""); err != nil {
 			t.Fatalf("%s was refused: %v", name, err)
 		}
 	}

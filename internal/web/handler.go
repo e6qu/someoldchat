@@ -1282,6 +1282,8 @@ const workspaceRefinements = `<style>
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+.add-column{margin:0 0 14px}
+.add-column form{display:flex;flex-direction:column;gap:6px;max-width:420px;margin-top:8px}
 .list-columns{margin:0 0 10px;font-size:12px}
 .cells{display:flex;flex-wrap:wrap;gap:12px;flex:1}
 .cell{display:flex;flex-direction:column}
@@ -2729,6 +2731,14 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 .items{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item.archived .title{text-decoration:line-through;color:var(--muted)}.item form{margin:0}.item button{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}.empty{padding:30px;text-align:center;color:var(--muted)}.mode{color:var(--muted);font-size:13px}
 </style>{{end}}
 {{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>{{end}}
+{{if .CanWrite}}<details class="add-column"><summary>Add a column</summary><form method="post" action="/app/lists/{{.ID}}/columns"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label for="column-name">Name</label><input id="column-name" name="name" maxlength="80" required>
+<label for="column-type">Type</label><select id="column-type" name="type"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="select">Select</option><option value="checkbox">Checkbox</option><option value="person">Person</option></select>
+<label for="column-options">Options</label><input id="column-options" name="options" maxlength="500" placeholder="open, done" aria-describedby="column-options-hint">
+<span id="column-options-hint" class="muted">Comma separated, and required for a Select column.</span>
+<button type="submit">Add column</button></form>
+<p class="read-only">A column is added to the end. Removing one is not offered here: it would have to remove that value from every item, which is a deletion worth asking for deliberately.</p>
+</details>{{end}}
 <ul class="items">{{range $item := .Items}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span>{{if .Cells}}<span class="cells">{{range .Cells}}<span class="cell"><span class="cell-name">{{.ColumnName}}</span><span class="cell-value">{{if .Value}}{{.Value}}{{else}}—{{end}}</span></span>{{end}}</span>{{else}}<span class="title">{{.Title}}</span>{{end}}{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}{{if $.CanWrite}}<form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
 <details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
 <label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $.Members}}<option value="{{.ID}}"{{if eq .ID $item.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
@@ -4186,6 +4196,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/lists", h.lists)
 	mux.HandleFunc("POST /app/lists/create", h.createList)
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
+	mux.HandleFunc("POST /app/lists/{listID}/columns", h.addListColumn)
 	mux.HandleFunc("POST /app/lists/{listID}/items/create", h.createListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/toggle", h.toggleListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/assign", h.assignListItem)
@@ -8361,6 +8372,34 @@ func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(value.ID)))
+}
+
+// addListColumn declares a column from the list page. Options are comma
+// separated because a select's options are a short list of short words, and a
+// control that made a member add them one at a time would be a worse answer to
+// a smaller problem.
+func (h Handler) addListColumn(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
+		return
+	}
+	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	options := make([]string, 0, 4)
+	for _, option := range strings.Split(fields["options"], ",") {
+		if trimmed := strings.TrimSpace(option); trimmed != "" {
+			options = append(options, trimmed)
+		}
+	}
+	if _, err := h.Messages.AddListColumn(r.Context(), principal.WorkspaceID, principal.UserID, id, fields["name"], domain.ListColumnType(strings.TrimSpace(fields["type"])), options); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The column was not added", "Give the column a name, and list at least one option for a Select column.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
 }
 
 func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
