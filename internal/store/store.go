@@ -896,6 +896,11 @@ type Store interface {
 	// GetCanvasAccess resolves the effective access one user has to one canvas.
 	// See GetListAccess for the resolution rules; canvases follow them exactly.
 	GetCanvasAccess(context.Context, domain.CanvasID, domain.UserID) (domain.CanvasAccess, error)
+	// ListCanvasGrants reports every grant on one canvas, which is what a
+	// sharing surface shows. It answers who a canvas is shared with; whether
+	// the asking member may see that is the service's question, because it is
+	// the same question as whether they may open the canvas at all.
+	ListCanvasGrants(context.Context, domain.WorkspaceID, domain.CanvasID) ([]domain.CanvasAccess, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageSearch) (domain.MessagePage, error)
 	CreateList(context.Context, domain.List, events.Event) error
 	// CreateListWithItems creates a list and its initial items as one unit.

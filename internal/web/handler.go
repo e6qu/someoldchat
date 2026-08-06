@@ -585,6 +585,35 @@ type canvasData struct {
 	// at an earlier moment; restoring one needs write access, so the control
 	// appears only where the edit would be accepted.
 	Revisions []canvasRevisionView
+	// Grants are who this canvas is shared with. Anyone who may open it sees
+	// them: they can already see who commented on it and who edited it, so who
+	// else may open it is not a further secret — and someone about to share it
+	// needs to know it is not already shared.
+	Grants []canvasGrantView
+	// ShareTargets are the people and channels this canvas is not shared with
+	// yet. Offering one it is already shared with would make a control whose
+	// only effect is to change a level, which the level control already does.
+	ShareTargets []canvasShareTargetView
+	// CanShare is the owner's alone. Granting is the strongest operation on a
+	// canvas, so write access does not put the form on the page.
+	CanShare bool
+}
+
+// canvasGrantView is one line of the sharing list. Target is what the revoke
+// form posts back, "user:U1" or "channel:C1"; it is empty for a grant this
+// client cannot revoke, and the row says why instead of drawing a control that
+// would be refused.
+type canvasGrantView struct {
+	Name   string
+	Access string
+	Target string
+	Reason string
+}
+
+type canvasShareTargetView struct {
+	Value string
+	Name  string
+	Kind  string
 }
 
 type canvasSectionView struct {
@@ -2695,6 +2724,7 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(860px,calc(100% - 32px));margin:28px auto 56px}.canvas{padding:28px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.canvas h2{margin:0 0 8px}.canvas .meta{color:var(--muted);font-size:12px}.canvas-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
 .canvas-section{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.canvas-section:first-of-type{border-top:0;padding-top:0}
+.canvas-sharing{margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}.canvas-sharing h3{margin:0 0 10px}.grants{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}.grant{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:8px}.grant-who{font-weight:700}.grant-access,.grant-reason{color:var(--muted);font-size:12px}.grant form{margin-left:auto}.grant button{border:1px solid var(--line);border-radius:7px;padding:6px 10px;background:transparent;color:var(--text);font-weight:700}.share{display:grid;gap:8px;max-width:420px}.share select{padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.share button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}
 .editor{display:grid;gap:11px;margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}.editor label{display:grid;gap:6px;font-weight:700}.editor input,.editor textarea{padding:10px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor textarea{min-height:300px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
@@ -2715,6 +2745,15 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 <label for="comment-text">Comment</label><textarea id="comment-text" name="text" maxlength="4000" rows="2" required></textarea>
 <button type="submit">Add comment</button></form>
 <p class="read-only">Anyone who can read this canvas can comment on it. A comment belongs to whoever wrote it, and only they can delete it.</p>
+</section>
+<section class="canvas-sharing" aria-labelledby="canvas-sharing-heading"><h3 id="canvas-sharing-heading">Sharing</h3>
+<ul class="grants">{{range .Grants}}<li class="grant"><span class="grant-who">{{.Name}}</span><span class="grant-access">{{.Access}}</span>{{if .Target}}{{if $.CanShare}}<form method="post" action="/app/canvases/{{$.ID}}/share/revoke"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target" value="{{.Target}}"><button type="submit">Stop sharing with {{.Name}}</button></form>{{end}}{{else if .Reason}}<span class="grant-reason">{{.Reason}}</span>{{end}}</li>{{end}}</ul>
+{{if .CanShare}}<form class="share" method="post" action="/app/canvases/{{.ID}}/share"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label for="share-target">Share with</label><select id="share-target" name="target" required><option value="">Choose a member or channel</option>{{range .ShareTargets}}<option value="{{.Value}}">{{.Kind}}: {{.Name}}</option>{{end}}</select>
+<label for="share-access">Access</label><select id="share-access" name="access"><option value="read">Can view</option><option value="write">Can edit</option></select>
+<button type="submit">Share canvas</button></form>
+<p class="read-only">Only you can change who this canvas is shared with. Sharing with a channel shares it with everyone in that channel.</p>
+{{else}}<p class="read-only">Only the owner can change who this canvas is shared with.</p>{{end}}
 </section>
 {{if .Revisions}}<section class="canvas-history" aria-labelledby="canvas-history-heading"><h3 id="canvas-history-heading">History</h3>
 <ul class="revisions">{{range .Revisions}}<li class="revision"><span class="revision-head"><span class="revision-title">{{.Title}}</span><time class="revision-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .EditorName}}<span class="revision-editor">replaced by {{.EditorName}}</span>{{end}}</span>{{if .Excerpt}}<p class="revision-excerpt">{{.Excerpt}}</p>{{end}}{{if .RestoreURL}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><button type="submit">Restore this revision</button></form>{{end}}</li>{{end}}</ul>
@@ -4191,6 +4230,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/canvases/{canvasID}/update", h.updateCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/share", h.shareCanvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/share/revoke", h.revokeCanvasShare)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/comments", h.commentOnCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/comments/{commentID}/delete", h.deleteCanvasComment)
 	mux.HandleFunc("GET /app/lists", h.lists)
@@ -7988,9 +8029,9 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	if !readable {
 		readOnlyReason = "This canvas could not be read as a document. It is shown as stored so nothing is lost, and editing is disabled until it can be parsed."
 	}
+	names := h.newUserNames(r.Context(), principal)
 	comments := make([]canvasCommentView, 0, 8)
 	if page, commentErr := h.Messages.CanvasComments(r.Context(), principal.WorkspaceID, principal.UserID, value.ID, domain.PageRequest{Limit: 100}); commentErr == nil {
-		names := h.newUserNames(r.Context(), principal)
 		positions := make(map[string]int, len(sections))
 		for index, section := range sections {
 			positions[section.ID] = index + 1
@@ -8017,7 +8058,6 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	}
 	revisions := make([]canvasRevisionView, 0, 8)
 	if history, historyErr := h.Messages.CanvasRevisions(r.Context(), principal.WorkspaceID, principal.UserID, value.ID, domain.PageRequest{Limit: 10}); historyErr == nil {
-		names := h.newUserNames(r.Context(), principal)
 		for _, revision := range history.Revisions {
 			view := canvasRevisionView{
 				Version: revision.Version, Title: revision.Title,
@@ -8033,7 +8073,140 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 			revisions = append(revisions, view)
 		}
 	}
-	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+	grants, shareTargets := h.canvasSharing(r.Context(), principal, value, owner)
+	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+}
+
+// canvasSharing builds the sharing list and, for the owner, the people and
+// channels still worth offering. The list is for everyone who may read the
+// canvas; the targets are only ever used by the owner's form, so they are not
+// gathered for anybody else — a member who cannot grant has no use for a
+// directory walk on every canvas they open.
+func (h Handler) canvasSharing(ctx context.Context, principal auth.Principal, canvas domain.Canvas, owner bool) ([]canvasGrantView, []canvasShareTargetView) {
+	names := h.newUserNames(ctx, principal)
+	listed, err := h.Messages.CanvasGrants(ctx, principal.WorkspaceID, principal.UserID, canvas.ID)
+	if err != nil {
+		// Sharing is not why the canvas was opened. A canvas that reads but
+		// whose grants do not is still a canvas worth showing, so the section
+		// goes quiet rather than the page failing.
+		return nil, nil
+	}
+	grants := make([]canvasGrantView, 0, len(listed)+1)
+	grants = append(grants, canvasGrantView{Name: names.name(canvas.OwnerID), Access: canvasAccessLabel("owner"), Reason: "created it"})
+	shared := map[string]bool{"user:" + string(canvas.OwnerID): true}
+	for _, grant := range listed {
+		view := canvasGrantView{Access: canvasAccessLabel(grant.Access)}
+		switch grant.EntityType {
+		case "user":
+			view.Name = names.name(domain.UserID(grant.EntityID))
+			if domain.UserID(grant.EntityID) == canvas.OwnerID {
+				// The owner already leads the list; a second row for the same
+				// person would read as two people with the same name.
+				continue
+			}
+			view.Target = "user:" + grant.EntityID
+		case "channel":
+			view.Name = names.channelName(domain.ConversationID(grant.EntityID))
+			view.Target = "channel:" + grant.EntityID
+		default:
+			// A channel's own canvas tab. Revoking it would leave the channel
+			// with a tab pointing at a document nobody in it may open, so this
+			// client shows the grant and does not offer to remove it.
+			view.Name = names.channelName(domain.ConversationID(grant.EntityID))
+			view.Reason = "this is the channel's canvas"
+		}
+		shared[grant.EntityType+":"+grant.EntityID] = true
+		grants = append(grants, view)
+	}
+	if !owner {
+		return grants, nil
+	}
+	targets := make([]canvasShareTargetView, 0, 16)
+	if directory, dirErr := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: searchFilterOptionLimit}); dirErr == nil {
+		for _, candidate := range directory.Users {
+			if candidate.Deleted || shared["user:"+string(candidate.ID)] {
+				continue
+			}
+			targets = append(targets, canvasShareTargetView{Value: "user:" + string(candidate.ID), Name: displayName(candidate), Kind: "Member"})
+		}
+	}
+	if channels, channelErr := h.visibleChannelOptions(ctx, principal); channelErr == nil {
+		for _, channel := range channels {
+			if shared["channel:"+channel.ID] || shared["channel_canvas:"+channel.ID] {
+				continue
+			}
+			targets = append(targets, canvasShareTargetView{Value: "channel:" + channel.ID, Name: "#" + channel.Name, Kind: "Channel"})
+		}
+	}
+	return grants, targets
+}
+
+// canvasAccessLabel says what a grant lets someone do. The stored words are the
+// API's — "read", "write", "owner" — and a sharing list is read by whoever is
+// deciding what to give, not by whoever wrote the schema.
+func canvasAccessLabel(access string) string {
+	switch access {
+	case "owner":
+		return "Owner"
+	case "write":
+		return "Can edit"
+	case "read":
+		return "Can view"
+	default:
+		return access
+	}
+}
+
+// shareCanvas grants access to one person or one channel. The target arrives as
+// a single field because the two are one choice in the form: a member picks who
+// to share with, not first what kind of thing they are about to pick.
+func (h Handler) shareCanvas(w http.ResponseWriter, r *http.Request) {
+	h.changeCanvasSharing(w, r, true)
+}
+
+func (h Handler) revokeCanvasShare(w http.ResponseWriter, r *http.Request) {
+	h.changeCanvasSharing(w, r, false)
+}
+
+func (h Handler) changeCanvasSharing(w http.ResponseWriter, r *http.Request, granting bool) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
+	if !ok {
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	kind, target, split := strings.Cut(strings.TrimSpace(fields["target"]), ":")
+	var channelIDs []domain.ConversationID
+	var userIDs []domain.UserID
+	switch {
+	case !split || target == "":
+	case kind == "user":
+		userIDs = []domain.UserID{domain.UserID(target)}
+	case kind == "channel":
+		channelIDs = []domain.ConversationID{domain.ConversationID(target)}
+	}
+	if len(channelIDs) == 0 && len(userIDs) == 0 {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Sharing did not change", "Choose a member or a channel to share this canvas with.")
+		return
+	}
+	if granting {
+		access := strings.TrimSpace(fields["access"])
+		if access == "" {
+			access = "read"
+		}
+		err = h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, id, access, channelIDs, userIDs)
+	} else {
+		err = h.Messages.DeleteCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, id, channelIDs, userIDs)
+	}
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Sharing did not change", "Only the owner of a canvas can change who it is shared with.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id)))
 }
 
 // canvasRevisionExcerpt is the opening of what the canvas said, bounded. A
@@ -8048,9 +8221,6 @@ func canvasRevisionExcerpt(revision domain.CanvasRevision) string {
 	return text
 }
 
-// restoreCanvas puts an earlier revision back as an ordinary edit, so the
-// content it replaced becomes a revision of its own and a wrong restore is
-// itself undoable.
 func (h Handler) commentOnCanvas(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
 	if err != nil {
@@ -8089,6 +8259,9 @@ func (h Handler) deleteCanvasComment(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id)))
 }
 
+// restoreCanvas puts an earlier revision back as an ordinary edit, so the
+// content it replaced becomes a revision of its own and a wrong restore is
+// itself undoable.
 func (h Handler) restoreCanvas(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {

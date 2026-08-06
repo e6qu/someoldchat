@@ -459,6 +459,31 @@ func (s *Store) UpdateCanvas(_ context.Context, canvas domain.Canvas, event even
 	return nil
 }
 
+// ListCanvasGrants mirrors the SQL profile, including the order: a sharing list
+// that reshuffled between page loads would make a member doubt what they just
+// changed.
+func (s *Store) ListCanvasGrants(_ context.Context, workspace domain.WorkspaceID, id domain.CanvasID) ([]domain.CanvasAccess, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	canvas, ok := s.canvases[id]
+	if !ok || canvas.WorkspaceID != workspace {
+		return nil, store.ErrNotFound
+	}
+	grants := make([]domain.CanvasAccess, 0, 8)
+	for _, grant := range s.canvasAccess {
+		if grant.CanvasID == id {
+			grants = append(grants, grant)
+		}
+	}
+	sort.Slice(grants, func(left, right int) bool {
+		if grants[left].EntityType != grants[right].EntityType {
+			return grants[left].EntityType < grants[right].EntityType
+		}
+		return grants[left].EntityID < grants[right].EntityID
+	})
+	return grants, nil
+}
+
 // canvasReadableLocked is the shared access question both comment paths ask,
 // answered once so a create and a read cannot disagree about who may take part.
 func (s *Store) canvasReadableLocked(workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID) bool {

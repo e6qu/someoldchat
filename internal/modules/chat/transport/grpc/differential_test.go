@@ -1986,6 +1986,48 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Who a canvas is shared with is readable by anyone who may open
+			// it, and changeable only by its owner. Both compositions have to
+			// agree on that pair, and on the order the grants come back in: a
+			// sharing list that reshuffled between page loads would make a
+			// member doubt what they just changed.
+			name: "canvas grants are readable by a reader and changeable by the owner",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Shared plan", `{"type":"markdown","markdown":"the plan"}`, "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				if err := chat.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "read", []domain.ConversationID{"C1"}, nil); err != nil {
+					return nil, err
+				}
+				// A reader may see who else it is shared with.
+				grants, err := chat.CanvasGrants(ctx, "T1", "U2", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(grants))
+				for _, grant := range grants {
+					listed = append(listed, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+				}
+				// A reader may not change them: granting is the strongest
+				// operation on a canvas and belongs to its owner.
+				readerGrant := chat.SetCanvasAccess(ctx, "T1", "U2", canvas.ID, "write", nil, []domain.UserID{"U3"}) != nil
+				// A member with no access at all cannot even ask.
+				_, strangerErr := chat.CanvasGrants(ctx, "T1", "U3", canvas.ID)
+				if err := chat.DeleteCanvasAccess(ctx, "T1", "U1", canvas.ID, nil, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				after, err := chat.CanvasGrants(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				return []any{listed, readerGrant, strangerErr != nil, len(after)}, nil
+			},
+		},
+		{
 			// Commenting needs read access rather than write, because a canvas
 			// shared for review that only its editors could discuss would make
 			// review impossible — and deleting a comment belongs to whoever
@@ -3188,7 +3230,6 @@ var parityGaps = map[string]struct{}{
 	"CreateRTMConnection":                {},
 	"CreateSession":                      {},
 	"DeleteCanvas":                       {},
-	"DeleteCanvasAccess":                 {},
 	"DeleteFile":                         {},
 	"DeleteFileComment":                  {},
 	"DeleteListAccess":                   {},

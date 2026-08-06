@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -3168,6 +3169,100 @@ func canvasRevisionsRecordWhatWasReplaced(t *testing.T, open opener) {
 // the comment is why it went. Both profiles have to agree on that, and on the
 // access rule: reading and writing a comment both need only read access to the
 // canvas, and deleting one belongs to its author.
+// canvasGrantsAreListedInOneStableOrder is the storage half of the sharing
+// surface. A sharing list is read repeatedly by the same person while they
+// decide what to change, so the order has to be a property of the data rather
+// than of whichever profile answered; and a grant that was revoked has to be
+// gone from the list on both, because a stale row would tell an owner they had
+// shared something they had not.
+func canvasGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	canvas := domain.Canvas{
+		ID: domain.CanvasID("Cv-grants-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Title: "Shared plan", DocumentContent: `{"sections":[{"id":"s1","type":"markdown","text":"the plan"}]}`,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.repository.CreateCanvas(ctx, canvas, f.event("canvas", "canvas.created", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	channel := domain.ConversationID("C-review-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: f.workspaceID, Name: "review"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"zoe", "ada"} {
+		if err := f.repository.SeedUser(ctx, domain.User{ID: domain.UserID("U-" + name + "-" + f.suffix), WorkspaceID: f.workspaceID, Email: name + "-" + f.suffix + "@example.com", Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Written in an order no profile would return them in, so a list that came
+	// back in insertion order would fail here rather than pass by accident.
+	written := []domain.CanvasAccess{
+		{CanvasID: canvas.ID, EntityType: "user", EntityID: "U-zoe-" + f.suffix, Access: "read"},
+		{CanvasID: canvas.ID, EntityType: "channel", EntityID: string(channel), Access: "write"},
+		{CanvasID: canvas.ID, EntityType: "user", EntityID: "U-ada-" + f.suffix, Access: "write"},
+	}
+	for index, grant := range written {
+		if err := f.repository.SetCanvasAccess(ctx, grant, f.event("grant"+strconv.Itoa(index), "canvas.access_set", string(canvas.ID))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := f.repository.ListCanvasGrants(ctx, f.workspaceID, canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	described := make([]string, 0, len(listed))
+	for _, grant := range listed {
+		described = append(described, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+	}
+	expected := []string{
+		"channel:C-review-" + f.suffix + ":write",
+		"user:U-ada-" + f.suffix + ":write",
+		"user:U-zoe-" + f.suffix + ":read",
+	}
+	if !slices.Equal(described, expected) {
+		t.Fatalf("grants = %v, want %v", described, expected)
+	}
+
+	// Raising a level replaces the grant instead of adding a second one: a
+	// sharing list showing the same person twice with two answers would leave
+	// the owner unable to tell what access they had given.
+	raised := written[0]
+	raised.Access = "write"
+	if err := f.repository.SetCanvasAccess(ctx, raised, f.event("raise", "canvas.access_set", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	afterRaise, err := f.repository.ListCanvasGrants(ctx, f.workspaceID, canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterRaise) != 3 || afterRaise[2].EntityID != raised.EntityID || afterRaise[2].Access != "write" {
+		t.Fatalf("grants after raising a level = %+v, want three with the raised one at write", afterRaise)
+	}
+
+	if err := f.repository.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: raised.EntityID}, f.event("revoke", "canvas.access_deleted", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	afterRevoke, err := f.repository.ListCanvasGrants(ctx, f.workspaceID, canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, grant := range afterRevoke {
+		if grant.EntityID == raised.EntityID {
+			t.Fatalf("a revoked grant is still listed: %+v", afterRevoke)
+		}
+	}
+
+	// A canvas in another workspace is not this workspace's canvas, whatever
+	// its identifier says.
+	if _, err := f.repository.ListCanvasGrants(ctx, domain.WorkspaceID("T-other-"+f.suffix), canvas.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("grants crossed a workspace boundary: %v", err)
+	}
+}
+
 func canvasCommentsOutliveTheirSection(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

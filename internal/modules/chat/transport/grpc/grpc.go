@@ -1423,6 +1423,14 @@ func (r Remote) DeleteCanvasComment(ctx context.Context, workspaceID domain.Work
 	return nil
 }
 
+func (r Remote) CanvasGrants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) ([]domain.CanvasAccess, error) {
+	out, err := r.canvases.CanvasGrants(ctx, &chatv1.CanvasGrantsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id)})
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoCanvasGrants(out.GetGrants()), nil
+}
+
 func (r Remote) CanvasRevisions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasRevisionPage, error) {
 	out, err := r.canvases.CanvasRevisions(ctx, &chatv1.CanvasRevisionsRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id),
@@ -4670,6 +4678,47 @@ func decodeProtoCanvasCommentPage(value *chatv1.CanvasCommentPage) (domain.Canva
 		comments = append(comments, decodeProtoCanvasComment(comment))
 	}
 	return domain.CanvasCommentPage{Comments: comments, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+}
+
+func (s *Server) CanvasGrants(ctx context.Context, input *chatv1.CanvasGrantsRequest) (*chatv1.CanvasGrantsResponse, error) {
+	grants, err := s.implementation.CanvasGrants(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.CanvasGrantsResponse{Grants: encodeProtoCanvasGrants(grants)}, nil
+}
+
+func encodeProtoCanvasGrant(value domain.CanvasAccess) *chatv1.CanvasGrant {
+	return &chatv1.CanvasGrant{
+		CanvasId: string(value.CanvasID), EntityType: value.EntityType,
+		EntityId: value.EntityID, Access: value.Access,
+	}
+}
+
+func decodeProtoCanvasGrant(value *chatv1.CanvasGrant) domain.CanvasAccess {
+	if value == nil {
+		return domain.CanvasAccess{}
+	}
+	return domain.CanvasAccess{
+		CanvasID: domain.CanvasID(value.GetCanvasId()), EntityType: value.GetEntityType(),
+		EntityID: value.GetEntityId(), Access: value.GetAccess(),
+	}
+}
+
+func encodeProtoCanvasGrants(values []domain.CanvasAccess) []*chatv1.CanvasGrant {
+	grants := make([]*chatv1.CanvasGrant, 0, len(values))
+	for _, value := range values {
+		grants = append(grants, encodeProtoCanvasGrant(value))
+	}
+	return grants
+}
+
+func decodeProtoCanvasGrants(values []*chatv1.CanvasGrant) []domain.CanvasAccess {
+	grants := make([]domain.CanvasAccess, 0, len(values))
+	for _, value := range values {
+		grants = append(grants, decodeProtoCanvasGrant(value))
+	}
+	return grants
 }
 
 func (s *Server) CanvasRevisions(ctx context.Context, input *chatv1.CanvasRevisionsRequest) (*chatv1.CanvasRevisionPage, error) {

@@ -11096,6 +11096,39 @@ func (s *Store) RecordListAssignment(ctx context.Context, item domain.ListItem, 
 	return tx.Commit()
 }
 
+// ListCanvasGrants reports every grant on one canvas, in a stable order so a
+// sharing list does not reshuffle between page loads.
+func (s *Store) ListCanvasGrants(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID) ([]domain.CanvasAccess, error) {
+	// A canvas that is not this workspace's canvas is missing, not unshared.
+	// Joining alone would have answered the empty list, which reads as "shared
+	// with nobody" — a sharing surface would then show a stranger's canvas as
+	// private to them rather than refusing to show it at all.
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if exists == 0 {
+		return nil, store.ErrNotFound
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT a.canvas_id, a.entity_type, a.entity_id, a.access_level
+		FROM canvas_access a JOIN canvases d ON d.id = a.canvas_id
+		WHERE a.canvas_id = ? AND d.workspace_id = ?
+		ORDER BY a.entity_type, a.entity_id`, id, workspace)
+	if err != nil {
+		return nil, err
+	}
+	grants := make([]domain.CanvasAccess, 0, 8)
+	for rows.Next() {
+		var grant domain.CanvasAccess
+		if err := rows.Scan(&grant.CanvasID, &grant.EntityType, &grant.EntityID, &grant.Access); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		grants = append(grants, grant)
+	}
+	return grants, closeRows(rows)
+}
+
 // RecordSharedInviteDecision writes the news that a request this member made
 // has been decided. One row per invitation, so a decision that is later changed
 // replaces the news rather than stacking a contradictory second copy.
