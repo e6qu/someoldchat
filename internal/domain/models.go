@@ -1585,6 +1585,39 @@ type CanvasRevision struct {
 	CreatedAt time.Time
 }
 
+// CanvasComment is a remark anchored to one section of a canvas.
+//
+// It is anchored rather than attached to the document because a canvas is a
+// document people argue about a paragraph at a time, and a comment list with no
+// anchor is a chat log next to a page. The anchor is the section identifier the
+// editor already assigns, so a comment survives the section's text changing —
+// which is the ordinary case, since the comment is usually why it changed.
+type CanvasComment struct {
+	ID          CanvasCommentID
+	CanvasID    CanvasID
+	WorkspaceID WorkspaceID
+	// SectionID is the section this comment is about. A comment whose section
+	// has since been removed keeps its identifier and is shown against the
+	// document instead: deleting a paragraph does not unsay what was said about
+	// it, and silently dropping the comment would lose the reason it went.
+	SectionID string
+	UserID    UserID
+	Text      string
+	CreatedAt time.Time
+	Deleted   bool
+}
+
+// CanvasCommentLimit bounds one comment. It is a remark on a paragraph, not a
+// second document; a comment longer than the section it annotates is a sign the
+// conversation belongs in a channel.
+const CanvasCommentLimit = 4000
+
+type CanvasCommentPage struct {
+	Comments   []CanvasComment
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type CanvasRevisionPage struct {
 	Revisions  []CanvasRevision
 	NextCursor Cursor

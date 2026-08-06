@@ -154,6 +154,17 @@ for later steps and conditions to read.
 
 ## Evidence
 
+- A canvas section can be commented on. Read access is enough to add one:
+  commenting is taking part in a document rather than editing it, and a canvas
+  shared for review that only its editors could discuss would defeat the reason
+  it was shared. Deleting a comment belongs to its author alone — an editor who
+  could remove what others said about their own document would make the comments
+  worth less than silence — and a stranger's attempt answers exactly as a
+  missing comment does, so it cannot be used to learn that one exists. The
+  anchor is a record of what was being discussed rather than a foreign key: a
+  comment survives its section being rewritten or removed, which is usually why
+  it went, and the client says the section has gone rather than pointing at
+  nothing.
 - A canvas keeps the revision each edit replaced, written in the same
   transaction as the edit so a canvas cannot change without the record of what
   it was. A revision records the state it *superseded* rather than the one that

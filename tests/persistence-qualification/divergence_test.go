@@ -3162,3 +3162,92 @@ func canvasRevisionsRecordWhatWasReplaced(t *testing.T, open opener) {
 		t.Fatalf("history survived the canvas: %v", err)
 	}
 }
+
+// A comment's anchor is a record of what was being discussed rather than a
+// foreign key, so it survives the section being rewritten or removed — usually
+// the comment is why it went. Both profiles have to agree on that, and on the
+// access rule: reading and writing a comment both need only read access to the
+// canvas, and deleting one belongs to its author.
+func canvasCommentsOutliveTheirSection(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	reader := domain.UserID("U-reviewer-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: reader, WorkspaceID: f.workspaceID, Email: "reviewer-" + f.suffix + "@example.com", Name: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	canvas := domain.Canvas{
+		ID: domain.CanvasID("Cv-comments-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Title: "Under review", DocumentContent: `{"sections":[{"id":"s1","type":"markdown","text":"the proposal"}]}`,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.repository.CreateCanvas(ctx, canvas, f.event("canvas", "canvas.created", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(reader), Access: "read"}, f.event("grant", "canvas.access_changed", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	comment := domain.CanvasComment{
+		ID: domain.CanvasCommentID("CC-" + f.suffix), CanvasID: canvas.ID, WorkspaceID: f.workspaceID,
+		SectionID: "s1", UserID: reader, Text: "this paragraph is wrong", CreatedAt: now.Add(time.Minute),
+	}
+	if err := f.repository.CreateCanvasComment(ctx, comment, f.event("comment", "canvas.commented", string(comment.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	page := domain.PageRequest{Limit: 20}
+	seen, err := f.repository.ListCanvasComments(ctx, f.workspaceID, f.userID, canvas.ID, page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen.Comments) != 1 || seen.Comments[0].SectionID != "s1" || seen.Comments[0].UserID != reader {
+		t.Fatalf("comments = %+v, want the reviewer's anchored comment", seen.Comments)
+	}
+
+	// The section it was about is removed. The comment stays, keeping the
+	// anchor: deleting a paragraph does not unsay what was said about it.
+	canvas.DocumentContent = `{"sections":[{"id":"s2","type":"markdown","text":"a rewrite"}]}`
+	canvas.Version = 2
+	canvas.UpdatedAt = now.Add(2 * time.Minute)
+	if err := f.repository.UpdateCanvas(ctx, canvas, f.event("rewrite", "canvas.updated", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.repository.ListCanvasComments(ctx, f.workspaceID, f.userID, canvas.ID, page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Comments) != 1 || after.Comments[0].SectionID != "s1" {
+		t.Fatalf("comments after the rewrite = %+v, want the comment with its original anchor", after.Comments)
+	}
+
+	// A member with no grant can neither read nor add one.
+	stranger := domain.UserID("U-outsider-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: stranger, WorkspaceID: f.workspaceID, Email: "outsider-" + f.suffix + "@example.com", Name: "outsider"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repository.ListCanvasComments(ctx, f.workspaceID, stranger, canvas.ID, page); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a stranger read the comments: %v", err)
+	}
+	strangerComment := comment
+	strangerComment.ID = domain.CanvasCommentID("CC-outsider-" + f.suffix)
+	strangerComment.UserID = stranger
+	if err := f.repository.CreateCanvasComment(ctx, strangerComment, f.event("comment-outsider", "canvas.commented", string(strangerComment.ID))); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a stranger commented: %v", err)
+	}
+
+	// Deletion belongs to the author, and answers a stranger's attempt exactly
+	// as it answers a missing comment.
+	if err := f.repository.DeleteCanvasComment(ctx, f.workspaceID, comment.ID, f.userID, f.event("delete-wrong", "canvas.comment_deleted", string(comment.ID))); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the canvas owner deleted the reviewer's comment: %v", err)
+	}
+	if err := f.repository.DeleteCanvasComment(ctx, f.workspaceID, comment.ID, reader, f.event("delete", "canvas.comment_deleted", string(comment.ID))); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := f.repository.ListCanvasComments(ctx, f.workspaceID, f.userID, canvas.ID, page)
+	if err != nil || len(gone.Comments) != 0 {
+		t.Fatalf("comments after deletion = %+v err = %v, want none", gone.Comments, err)
+	}
+}

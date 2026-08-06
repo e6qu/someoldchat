@@ -39,6 +39,45 @@ message CanvasesRequest {
   bool descending = 5;
 }
 
+message CanvasComment {
+  string id = 1;
+  string canvas_id = 2;
+  string workspace_id = 3;
+  string section_id = 4;
+  string user_id = 5;
+  string text = 6;
+  int64 created_at_unix_nano = 7;
+  bool deleted = 8;
+}
+
+message CanvasCommentPage {
+  repeated CanvasComment comments = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message CommentOnCanvasRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  string section_id = 4;
+  string text = 5;
+}
+
+message CanvasCommentsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message DeleteCanvasCommentRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string comment_id = 3;
+}
+
 message CanvasRevision {
   string canvas_id = 1;
   string workspace_id = 2;
@@ -143,6 +182,9 @@ service CanvasesService {
   rpc ListCanvases(CanvasesRequest) returns (CanvasPage);
   rpc SearchCanvases(SearchCanvasesRequest) returns (CanvasPage);
   rpc CanvasRevisions(CanvasRevisionsRequest) returns (CanvasRevisionPage);
+  rpc CommentOnCanvas(CommentOnCanvasRequest) returns (CanvasComment);
+  rpc CanvasComments(CanvasCommentsRequest) returns (CanvasCommentPage);
+  rpc DeleteCanvasComment(DeleteCanvasCommentRequest) returns (MutationResponse);
   rpc RestoreCanvasRevision(RestoreCanvasRevisionRequest) returns (Canvas);
   rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
   rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);

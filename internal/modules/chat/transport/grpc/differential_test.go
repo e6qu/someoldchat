@@ -1945,6 +1945,48 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Commenting needs read access rather than write, because a canvas
+			// shared for review that only its editors could discuss would make
+			// review impossible — and deleting a comment belongs to whoever
+			// said it, so an editor cannot delete what others said about their
+			// own document. Both compositions have to agree on that pair.
+			name: "a canvas comment needs only read access and belongs to its author",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Under review", `{"type":"markdown","markdown":"the proposal"}`, "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				// A reader may comment even though they may not edit.
+				comment, err := chat.CommentOnCanvas(ctx, "T1", "U2", canvas.ID, "s1", "this paragraph is wrong")
+				if err != nil {
+					return nil, err
+				}
+				page := domain.PageRequest{Limit: 10}
+				seen, err := chat.CanvasComments(ctx, "T1", "U1", canvas.ID, page)
+				if err != nil {
+					return nil, err
+				}
+				// The owner cannot delete what somebody else said.
+				ownerDelete := chat.DeleteCanvasComment(ctx, "T1", "U1", comment.ID) != nil
+				// A member with no grant can neither read nor comment.
+				_, strangerErr := chat.CanvasComments(ctx, "T1", "U3", canvas.ID, page)
+				if err := chat.DeleteCanvasComment(ctx, "T1", "U2", comment.ID); err != nil {
+					return nil, err
+				}
+				after, err := chat.CanvasComments(ctx, "T1", "U1", canvas.ID, page)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					len(seen.Comments), seen.Comments[0].SectionID, seen.Comments[0].Text,
+					string(seen.Comments[0].UserID), ownerDelete, strangerErr != nil, len(after.Comments),
+				}, nil
+			},
+		},
+		{
 			// A history is only useful if both compositions agree on what it
 			// says and on which way round it reads: a revision records the
 			// state it *replaced*, so the newest row is what the canvas said
@@ -3198,7 +3240,6 @@ var parityGaps = map[string]struct{}{
 	"ScheduleMessageWithBlocksAndAttachments": {},
 	"ScheduledMessagesForCredential":          {},
 	"SetAuthMethod":                           {},
-	"SetCanvasAccess":                         {},
 	"SetConversationArchived":                 {},
 	"SetConversationPurpose":                  {},
 	"SetConversationRetention":                {},

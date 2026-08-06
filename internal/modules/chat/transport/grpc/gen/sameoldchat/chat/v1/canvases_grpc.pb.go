@@ -27,6 +27,9 @@ const (
 	CanvasesService_ListCanvases_FullMethodName             = "/sameoldchat.chat.v1.CanvasesService/ListCanvases"
 	CanvasesService_SearchCanvases_FullMethodName           = "/sameoldchat.chat.v1.CanvasesService/SearchCanvases"
 	CanvasesService_CanvasRevisions_FullMethodName          = "/sameoldchat.chat.v1.CanvasesService/CanvasRevisions"
+	CanvasesService_CommentOnCanvas_FullMethodName          = "/sameoldchat.chat.v1.CanvasesService/CommentOnCanvas"
+	CanvasesService_CanvasComments_FullMethodName           = "/sameoldchat.chat.v1.CanvasesService/CanvasComments"
+	CanvasesService_DeleteCanvasComment_FullMethodName      = "/sameoldchat.chat.v1.CanvasesService/DeleteCanvasComment"
 	CanvasesService_RestoreCanvasRevision_FullMethodName    = "/sameoldchat.chat.v1.CanvasesService/RestoreCanvasRevision"
 	CanvasesService_EditCanvas_FullMethodName               = "/sameoldchat.chat.v1.CanvasesService/EditCanvas"
 	CanvasesService_DeleteCanvas_FullMethodName             = "/sameoldchat.chat.v1.CanvasesService/DeleteCanvas"
@@ -47,6 +50,9 @@ type CanvasesServiceClient interface {
 	ListCanvases(ctx context.Context, in *CanvasesRequest, opts ...grpc.CallOption) (*CanvasPage, error)
 	SearchCanvases(ctx context.Context, in *SearchCanvasesRequest, opts ...grpc.CallOption) (*CanvasPage, error)
 	CanvasRevisions(ctx context.Context, in *CanvasRevisionsRequest, opts ...grpc.CallOption) (*CanvasRevisionPage, error)
+	CommentOnCanvas(ctx context.Context, in *CommentOnCanvasRequest, opts ...grpc.CallOption) (*CanvasComment, error)
+	CanvasComments(ctx context.Context, in *CanvasCommentsRequest, opts ...grpc.CallOption) (*CanvasCommentPage, error)
+	DeleteCanvasComment(ctx context.Context, in *DeleteCanvasCommentRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	RestoreCanvasRevision(ctx context.Context, in *RestoreCanvasRevisionRequest, opts ...grpc.CallOption) (*Canvas, error)
 	EditCanvas(ctx context.Context, in *EditCanvasRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	DeleteCanvas(ctx context.Context, in *CanvasRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -143,6 +149,36 @@ func (c *canvasesServiceClient) CanvasRevisions(ctx context.Context, in *CanvasR
 	return out, nil
 }
 
+func (c *canvasesServiceClient) CommentOnCanvas(ctx context.Context, in *CommentOnCanvasRequest, opts ...grpc.CallOption) (*CanvasComment, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanvasComment)
+	err := c.cc.Invoke(ctx, CanvasesService_CommentOnCanvas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *canvasesServiceClient) CanvasComments(ctx context.Context, in *CanvasCommentsRequest, opts ...grpc.CallOption) (*CanvasCommentPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanvasCommentPage)
+	err := c.cc.Invoke(ctx, CanvasesService_CanvasComments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *canvasesServiceClient) DeleteCanvasComment(ctx context.Context, in *DeleteCanvasCommentRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, CanvasesService_DeleteCanvasComment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *canvasesServiceClient) RestoreCanvasRevision(ctx context.Context, in *RestoreCanvasRevisionRequest, opts ...grpc.CallOption) (*Canvas, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Canvas)
@@ -215,6 +251,9 @@ type CanvasesServiceServer interface {
 	ListCanvases(context.Context, *CanvasesRequest) (*CanvasPage, error)
 	SearchCanvases(context.Context, *SearchCanvasesRequest) (*CanvasPage, error)
 	CanvasRevisions(context.Context, *CanvasRevisionsRequest) (*CanvasRevisionPage, error)
+	CommentOnCanvas(context.Context, *CommentOnCanvasRequest) (*CanvasComment, error)
+	CanvasComments(context.Context, *CanvasCommentsRequest) (*CanvasCommentPage, error)
+	DeleteCanvasComment(context.Context, *DeleteCanvasCommentRequest) (*MutationResponse, error)
 	RestoreCanvasRevision(context.Context, *RestoreCanvasRevisionRequest) (*Canvas, error)
 	EditCanvas(context.Context, *EditCanvasRequest) (*MutationResponse, error)
 	DeleteCanvas(context.Context, *CanvasRequest) (*MutationResponse, error)
@@ -253,6 +292,15 @@ func (UnimplementedCanvasesServiceServer) SearchCanvases(context.Context, *Searc
 }
 func (UnimplementedCanvasesServiceServer) CanvasRevisions(context.Context, *CanvasRevisionsRequest) (*CanvasRevisionPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method CanvasRevisions not implemented")
+}
+func (UnimplementedCanvasesServiceServer) CommentOnCanvas(context.Context, *CommentOnCanvasRequest) (*CanvasComment, error) {
+	return nil, status.Error(codes.Unimplemented, "method CommentOnCanvas not implemented")
+}
+func (UnimplementedCanvasesServiceServer) CanvasComments(context.Context, *CanvasCommentsRequest) (*CanvasCommentPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method CanvasComments not implemented")
+}
+func (UnimplementedCanvasesServiceServer) DeleteCanvasComment(context.Context, *DeleteCanvasCommentRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteCanvasComment not implemented")
 }
 func (UnimplementedCanvasesServiceServer) RestoreCanvasRevision(context.Context, *RestoreCanvasRevisionRequest) (*Canvas, error) {
 	return nil, status.Error(codes.Unimplemented, "method RestoreCanvasRevision not implemented")
@@ -436,6 +484,60 @@ func _CanvasesService_CanvasRevisions_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CanvasesService_CommentOnCanvas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommentOnCanvasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).CommentOnCanvas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_CommentOnCanvas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).CommentOnCanvas(ctx, req.(*CommentOnCanvasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CanvasesService_CanvasComments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CanvasCommentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).CanvasComments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_CanvasComments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).CanvasComments(ctx, req.(*CanvasCommentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CanvasesService_DeleteCanvasComment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteCanvasCommentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CanvasesServiceServer).DeleteCanvasComment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CanvasesService_DeleteCanvasComment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CanvasesServiceServer).DeleteCanvasComment(ctx, req.(*DeleteCanvasCommentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _CanvasesService_RestoreCanvasRevision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RestoreCanvasRevisionRequest)
 	if err := dec(in); err != nil {
@@ -582,6 +684,18 @@ var CanvasesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CanvasRevisions",
 			Handler:    _CanvasesService_CanvasRevisions_Handler,
+		},
+		{
+			MethodName: "CommentOnCanvas",
+			Handler:    _CanvasesService_CommentOnCanvas_Handler,
+		},
+		{
+			MethodName: "CanvasComments",
+			Handler:    _CanvasesService_CanvasComments_Handler,
+		},
+		{
+			MethodName: "DeleteCanvasComment",
+			Handler:    _CanvasesService_DeleteCanvasComment_Handler,
 		},
 		{
 			MethodName: "RestoreCanvasRevision",

@@ -127,6 +127,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an assigned list item reaches Activity on every profile", listAssignmentReachesActivity},
 		{"search modifiers mean the same on every profile", searchModifiersMeanTheSame},
 		{"canvas revisions record what was replaced", canvasRevisionsRecordWhatWasReplaced},
+		{"canvas comments outlive the section they annotate", canvasCommentsOutliveTheirSection},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
