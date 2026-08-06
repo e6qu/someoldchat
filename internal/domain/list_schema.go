@@ -152,6 +152,65 @@ func ParseListFields(raw string) ([]ListCell, error) {
 	return cells, nil
 }
 
+// RemoveListColumn drops one column from a schema. It reports whether the
+// column was there, so a caller can tell "removed" from "there was nothing to
+// remove" rather than reporting success for a key nobody declared.
+//
+// The primary column cannot be removed. It is what an item is called in every
+// place a list is shown as a row, so a list without one would render as a set
+// of unlabelled cells; Slack does not offer it either.
+func RemoveListColumn(columns []ListColumn, key string) ([]ListColumn, error) {
+	key = strings.TrimSpace(key)
+	remaining := make([]ListColumn, 0, len(columns))
+	found := false
+	for _, column := range columns {
+		if column.Key == key {
+			if column.Primary {
+				return nil, errInvalidListSchema
+			}
+			found = true
+			continue
+		}
+		remaining = append(remaining, column)
+	}
+	if !found {
+		return nil, errInvalidListSchema
+	}
+	return remaining, nil
+}
+
+// ListFieldsWithout returns an item's cells with one column's cell removed.
+//
+// Removing a column has to remove the values under it, not just stop showing
+// them: a cell left behind would be invisible, would still be carried by every
+// later edit, and would come back to life the day somebody declared a new
+// column that happened to mint the same key.
+func ListFieldsWithout(fields string, key string) (string, error) {
+	cells, err := ParseListFields(fields)
+	if err != nil {
+		return "", err
+	}
+	key = strings.TrimSpace(key)
+	kept := make([]ListCell, 0, len(cells))
+	for _, cell := range cells {
+		if strings.TrimSpace(cell.ColumnID) == key {
+			continue
+		}
+		kept = append(kept, cell)
+	}
+	if len(kept) == len(cells) {
+		// Nothing to rewrite. Returning the stored text unchanged keeps an item
+		// that never held this cell byte-identical, so a removal does not
+		// rewrite every row in the list to reformat its JSON.
+		return fields, nil
+	}
+	encoded, err := json.Marshal(kept)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
 // ValidateListFields checks an item against its list's columns.
 //
 // A list with no schema accepts anything, which is what an unstructured list

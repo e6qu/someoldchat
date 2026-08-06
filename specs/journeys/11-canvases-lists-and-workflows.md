@@ -167,6 +167,12 @@ for later steps and conditions to read.
   removal: revoking it would leave the channel with a tab pointing at a document
   nobody in it may open. A canvas that is not this workspace's canvas answers
   the sharing read as missing rather than as unshared, on both storage profiles.
+- An item is named by its own primary column. It used to be looked up under
+  "title", which is the column this client substitutes for a list created
+  without a schema, so every list that declared its own primary column — which
+  is every list built through the column editor or through the API — rendered
+  its items blank the moment the row was not drawn as cells. Removing a column
+  exposed it; the defect needed no removal to reach.
 - A list item can be deleted, separately from being completed. Completing hides
   an item and can be undone; deleting cannot, so it is its own control saying so
   rather than a second meaning for the same button, and an item added by mistake
@@ -235,9 +241,16 @@ for later steps and conditions to read.
   collision. Declaring a column on a list already used free-form does not
   strand its items: a cell the item already held is accepted, because the member
   did not introduce an invisible cell but merely did not delete one, while a
-  newly invented column is still refused. Removing a column is not offered — it
-  would have to remove that value from every item, which is a deletion worth
-  asking for deliberately — and is recorded as absent.
+  newly invented column is still refused. A column can also be removed, which is the deletion
+  that claim was deferring: it takes what every item recorded under that column
+  with it, in the same transaction as the schema change, because a schema that
+  no longer declares a column while items still carry values under it is a list
+  nobody can read correctly — the values are invisible, every later edit carries
+  them, and a new column minting the same key would bring them back. The control
+  says what goes. The column that names the item stays, because a list without
+  one renders as unlabelled cells, and the row says why rather than offering a
+  control that would be refused. An item that never held the removed cell is
+  left byte-identical, so reshaping a list does not rewrite every row in it.
 - A list item carries an assignee and a due date as columns of their own rather
   than cells inside the free-form fields, because the product asks both
   questions itself — who is this for, is it late — and a value buried in JSON

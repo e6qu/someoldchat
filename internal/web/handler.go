@@ -659,9 +659,12 @@ type listCellView struct {
 }
 
 type listColumnView struct {
-	Key     string
-	Name    string
-	Type    string
+	Key  string
+	Name string
+	Type string
+	// Primary marks the column that names the item. It cannot be removed, and
+	// the row says why rather than offering a control the service refuses.
+	Primary bool
 	Options []string
 }
 
@@ -2831,9 +2834,14 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(940px,calc(100% - 28px));margin:26px auto 56px}.heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.heading h2{margin:0}.new-item{display:flex;gap:8px;margin:18px 0}.new-item input{flex:1;min-width:0;padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:0;border-radius:7px;padding:9px 13px;background:var(--action);color:var(--on-strong);font-weight:800}
 .items{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item.archived .title{text-decoration:line-through;color:var(--muted)}.item form{margin:0}.item button{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}.empty{padding:30px;text-align:center;color:var(--muted)}.mode{color:var(--muted);font-size:13px}
+.remove-column{margin:10px 0 16px}.remove-column summary{cursor:pointer;font-weight:800}.column-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}.column-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:8px}.column-name{font-weight:700}.column-type,.column-reason{color:var(--muted);font-size:12px}.column-row form{margin-left:auto}.column-row button{border:1px solid var(--line);border-radius:7px;padding:6px 10px;background:transparent;color:var(--text);font-weight:700}
 ` + sharingStyle + `
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>{{end}}
+{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>
+{{if .CanWrite}}<details class="remove-column"><summary>Remove a column</summary>
+<p class="read-only">Removing a column deletes what every item recorded under it, for good. The first column names the item and stays.</p>
+<ul class="column-list">{{range .Columns}}<li class="column-row"><span class="column-name">{{.Name}}</span><span class="column-type">{{.Type}}</span>{{if .Primary}}<span class="column-reason">names the item</span>{{else}}<form method="post" action="/app/lists/{{$.ID}}/columns/remove"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="key" value="{{.Key}}"><button type="submit">Remove {{.Name}}</button></form>{{end}}</li>{{end}}</ul>
+</details>{{end}}{{end}}
 {{if .CanWrite}}<details class="add-column"><summary>Add a column</summary><form method="post" action="/app/lists/{{.ID}}/columns"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
 <label for="column-name">Name</label><input id="column-name" name="name" maxlength="80" required>
 <label for="column-type">Type</label><select id="column-type" name="type"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="select">Select</option><option value="checkbox">Checkbox</option><option value="person">Person</option></select>
@@ -4308,6 +4316,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/lists/create", h.createList)
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
 	mux.HandleFunc("POST /app/lists/{listID}/columns", h.addListColumn)
+	mux.HandleFunc("POST /app/lists/{listID}/columns/remove", h.removeListColumn)
 	mux.HandleFunc("POST /app/lists/{listID}/share", h.shareList)
 	mux.HandleFunc("POST /app/lists/{listID}/share/revoke", h.revokeListShare)
 	mux.HandleFunc("POST /app/lists/{listID}/items/create", h.createListItem)
@@ -8617,20 +8626,37 @@ func listCellViews(columns []domain.ListColumn, fields string) []listCellView {
 	return views
 }
 
-func listItemTitle(fields string) string {
-	var values []struct {
-		ColumnID string `json:"column_id"`
-		Value    any    `json:"value"`
-	}
-	if json.Unmarshal([]byte(fields), &values) != nil {
+// listItemTitle is what an item is called when the row is not drawn as cells.
+//
+// It used to look only for a cell under "title", which is the column this
+// client substitutes for a list created without a schema. A list that declared
+// its own primary column under any other name — which is every list built
+// through AddListColumn or through the API — rendered every item blank as soon
+// as the row was not shown as cells, so the primary column is now what is
+// asked for first and "title" is the fallback it always was.
+func listItemTitle(columns []domain.ListColumn, fields string) string {
+	cells, err := domain.ParseListFields(fields)
+	if err != nil {
 		return ""
 	}
-	for _, value := range values {
-		if value.ColumnID == "title" {
-			return strings.TrimSpace(fmt.Sprint(value.Value))
+	wanted := "title"
+	for _, column := range columns {
+		if column.Primary {
+			wanted = column.Key
+			break
 		}
 	}
-	return ""
+	named := ""
+	for _, cell := range cells {
+		id := strings.TrimSpace(cell.ColumnID)
+		if id == wanted {
+			return strings.TrimSpace(domain.ListCellText(cell.Value))
+		}
+		if id == "title" && named == "" {
+			named = strings.TrimSpace(domain.ListCellText(cell.Value))
+		}
+	}
+	return named
 }
 
 func listTitleFields(title string) string {
@@ -8723,12 +8749,12 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 	columnViews := make([]listColumnView, 0, len(columns))
 	if structured {
 		for _, column := range columns {
-			columnViews = append(columnViews, listColumnView{Key: column.Key, Name: column.Name, Type: string(column.Type), Options: column.Options})
+			columnViews = append(columnViews, listColumnView{Key: column.Key, Name: column.Name, Type: string(column.Type), Primary: column.Primary, Options: column.Options})
 		}
 	}
 	items := make([]listItemView, 0, len(page.Items))
 	for _, item := range page.Items {
-		view := listItemView{ID: string(item.ID), Title: listItemTitle(item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID)}
+		view := listItemView{ID: string(item.ID), Title: listItemTitle(columns, item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID)}
 		if structured {
 			view.Cells = listCellViews(columns, item.Fields)
 		}
@@ -8792,6 +8818,27 @@ func (h Handler) addListColumn(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.Messages.AddListColumn(r.Context(), principal.WorkspaceID, principal.UserID, id, fields["name"], domain.ListColumnType(strings.TrimSpace(fields["type"])), options); err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "The column was not added", "Give the column a name, and list at least one option for a Select column.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
+}
+
+// removeListColumn drops a column and every value recorded under it. Adding a
+// column cannot invalidate anything; removing one deletes data, so the control
+// says what goes and this is a separate route rather than a mode of the other.
+func (h Handler) removeListColumn(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
+		return
+	}
+	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	if _, err := h.Messages.RemoveListColumn(r.Context(), principal.WorkspaceID, principal.UserID, id, fields["key"]); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The column was not removed", "The first column names the item and stays, and a column that is already gone cannot be removed again.")
 		return
 	}
 	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))

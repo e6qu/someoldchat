@@ -3023,6 +3023,85 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 	}
 }
 
+// removingAListColumnTakesItsCellsWithIt pins the one write in this product
+// that changes a schema and the rows under it at the same time. A schema that
+// no longer declares a column while items still carry values under it is a list
+// nobody can read correctly: the values are invisible, every later edit carries
+// them, and a new column minting the same key would bring them back. Both
+// profiles do the rewrite themselves rather than taking rewritten rows from the
+// caller, so this is the only place that says they do it alike.
+func removingAListColumnTakesItsCellsWithIt(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	schema := `[{"key":"task","name":"Task","type":"text","is_primary_column":true},{"key":"status","name":"Status","type":"select","options":["open","done"]}]`
+	list := domain.List{ID: domain.ListID("Ls-column-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID, Name: "Launch", Schema: schema, Version: 1, CreatedAt: now, UpdatedAt: now}
+	if err := f.repository.CreateList(ctx, list, f.event("column-list", "list.created", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	filled := domain.ListItem{ID: domain.ListItemID("Li-filled-" + f.suffix), ListID: list.ID, WorkspaceID: f.workspaceID, Fields: `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`, CreatedBy: f.userID, UpdatedBy: f.userID, Version: 1, CreatedAt: now, UpdatedAt: now}
+	untouched := filled
+	untouched.ID = domain.ListItemID("Li-untouched-" + f.suffix)
+	untouched.Fields = `[{"column_id":"task","value":"no status here"}]`
+	for _, item := range []domain.ListItem{filled, untouched} {
+		if err := f.repository.CreateListItem(ctx, item, f.event("column-item-"+string(item.ID), "list.item.created", string(item.ID))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A stale version loses, exactly as it does for an ordinary list edit: two
+	// members removing different columns at once must not silently merge into
+	// one schema that reflects only the second.
+	stale := list
+	stale.Schema = `[{"key":"task","name":"Task","type":"text","is_primary_column":true}]`
+	stale.Version = 1
+	if err := f.repository.RemoveListColumn(ctx, stale, "status", f.event("column-stale", "list.updated", string(list.ID))); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale removal: %v, want ErrConflict", err)
+	}
+
+	updated := list
+	updated.Schema = `[{"key":"task","name":"Task","type":"text","is_primary_column":true}]`
+	updated.Version = 2
+	updated.UpdatedAt = now.Add(time.Minute)
+	if err := f.repository.RemoveListColumn(ctx, updated, "status", f.event("column-remove", "list.updated", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := f.repository.GetList(ctx, f.workspaceID, list.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Schema != updated.Schema || stored.Version != 2 {
+		t.Fatalf("stored list = %+v, want the rewritten schema at version 2", stored)
+	}
+	after, err := f.repository.GetListItem(ctx, f.workspaceID, list.ID, filled.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells, err := domain.ParseListFields(after.Fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cells) != 1 || cells[0].ColumnID != "task" || domain.ListCellText(cells[0].Value) != "ship it" {
+		t.Fatalf("item cells = %+v, want only the surviving column's value", cells)
+	}
+	if after.Version != filled.Version+1 {
+		t.Fatalf("rewritten item version = %d, want %d: a concurrent editor holding the old one must lose", after.Version, filled.Version+1)
+	}
+
+	// An item that never held the cell is left exactly as it was, so removing a
+	// column does not rewrite every row in the list to reformat its JSON.
+	same, err := f.repository.GetListItem(ctx, f.workspaceID, list.ID, untouched.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.Fields != untouched.Fields || same.Version != untouched.Version {
+		t.Fatalf("untouched item = %+v, want it unchanged at version %d", same, untouched.Version)
+	}
+}
+
 // deletingAListItemIsAllOrNothingAndSurvivesInActivity covers the two things
 // the client's delete control depends on. A batch that names one item that is
 // not there must delete none of them — SQL gets that from its transaction,

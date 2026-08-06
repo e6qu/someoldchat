@@ -17577,6 +17577,91 @@ func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event
 	return s.UpdateListItems(ctx, []domain.ListItem{value}, []events.Event{event})
 }
 
+// RemoveListColumn rewrites the schema and every cell under the removed column
+// in one transaction. The rewrite is done here rather than by the caller so the
+// items cannot be read, changed and written back across two transactions, which
+// would let an item created in between keep a cell under a column that no
+// longer exists.
+func (s *Store) RemoveListColumn(ctx context.Context, value domain.List, key string, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE lists SET schema_json = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`,
+		value.Schema, value.Version, domain.NewStoredTime(value.UpdatedAt), value.ID, value.WorkspaceID, value.Version-1)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		if err != nil {
+			return err
+		}
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM lists WHERE id = ? AND workspace_id = ?)`, value.ID, value.WorkspaceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return store.ErrConflict
+		}
+		return store.ErrNotFound
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, fields, version, updated_by, updated_at FROM list_items WHERE list_id = ? AND workspace_id = ?`, value.ID, value.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	type pending struct {
+		id        domain.ListItemID
+		fields    string
+		version   int
+		updatedBy domain.UserID
+		updatedAt domain.StoredTime
+	}
+	changed := make([]pending, 0, 16)
+	for rows.Next() {
+		var row pending
+		if err := rows.Scan(&row.id, &row.fields, &row.version, &row.updatedBy, &row.updatedAt); err != nil {
+			rows.Close()
+			return err
+		}
+		stripped, err := domain.ListFieldsWithout(row.fields, key)
+		if err != nil {
+			// An item whose cells this build cannot read keeps them. Refusing
+			// the whole removal because one row is unreadable would leave the
+			// column in place for everybody.
+			continue
+		}
+		if stripped == row.fields {
+			continue
+		}
+		row.fields = stripped
+		// The row keeps whoever last changed it, and when, unless the event
+		// says. An event without an actor is a system rewrite, and blanking
+		// updated_by for one would both lose the fact and break the reference
+		// the column carries.
+		if event.ActorID != "" {
+			row.updatedBy = event.ActorID
+		}
+		if !event.CreatedAt.IsZero() {
+			row.updatedAt = domain.NewStoredTime(event.CreatedAt.UTC())
+		}
+		changed = append(changed, row)
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	for _, row := range changed {
+		if _, err := tx.ExecContext(ctx, `UPDATE list_items SET fields = ?, updated_by = ?, updated_at = ?, version = ? WHERE id = ? AND list_id = ? AND workspace_id = ?`,
+			row.fields, row.updatedBy, row.updatedAt, row.version+1, row.id, value.ID, value.WorkspaceID); err != nil {
+			return err
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) UpdateListItems(ctx context.Context, values []domain.ListItem, records []events.Event) error {
 	if len(values) == 0 || len(values) != len(records) {
 		return store.ErrInvalidArgument

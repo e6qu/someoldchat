@@ -344,6 +344,50 @@ func (m Messages) AddListColumn(ctx context.Context, workspaceID domain.Workspac
 	return value, nil
 }
 
+// RemoveListColumn drops a column and everything recorded under it.
+//
+// This is the counterpart of AddListColumn and is deliberately louder: adding a
+// column cannot invalidate anything, while removing one deletes a value from
+// every item that had it. The values go rather than being left orphaned,
+// because a cell under no column is invisible to every reader, is carried by
+// every later edit, and would come back the day a new column minted the same
+// key.
+//
+// The primary column stays. It is what an item is called wherever a list is
+// shown as a row, so a list without one renders as unlabelled cells.
+func (m Messages) RemoveListColumn(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, key string) (domain.List, error) {
+	if err := m.requireListAccess(ctx, workspaceID, userID, id, documentAccessWrite); err != nil {
+		return domain.List{}, err
+	}
+	value, err := m.Store.GetList(ctx, workspaceID, id)
+	if err != nil {
+		return domain.List{}, err
+	}
+	columns, err := domain.ParseListSchema(value.Schema)
+	if err != nil {
+		return domain.List{}, ErrInvalidList
+	}
+	remaining, err := domain.RemoveListColumn(columns, key)
+	if err != nil {
+		return domain.List{}, ErrInvalidList
+	}
+	schema, err := domain.EncodeListSchema(remaining)
+	if err != nil {
+		return domain.List{}, err
+	}
+	value.Schema = schema
+	value.Version++
+	value.UpdatedAt = time.Now().UTC()
+	event, err := listEvent(workspaceID, userID, "list.updated", events.String("list_id", string(id)), events.String("removed_column_key", strings.TrimSpace(key)))
+	if err != nil {
+		return domain.List{}, err
+	}
+	if err := m.Store.RemoveListColumn(ctx, value, strings.TrimSpace(key), event); err != nil {
+		return domain.List{}, err
+	}
+	return value, nil
+}
+
 func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, parentItemID domain.ListItemID, fields string) (domain.ListItem, error) {
 	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return domain.ListItem{}, err

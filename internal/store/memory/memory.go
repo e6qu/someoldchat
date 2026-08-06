@@ -9678,6 +9678,41 @@ func (s *Store) DeleteListItem(ctx context.Context, workspace domain.WorkspaceID
 	return s.DeleteListItems(ctx, workspace, listID, []domain.ListItemID{id}, event)
 }
 
+// RemoveListColumn mirrors the SQL profile: the schema and every cell under the
+// removed column change together, under one lock.
+func (s *Store) RemoveListColumn(_ context.Context, value domain.List, key string, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := s.lists[value.ID]
+	if !ok || existing.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if existing.Version != value.Version-1 {
+		return store.ErrConflict
+	}
+	s.lists[value.ID] = value
+	for id, item := range s.listItems[value.ID] {
+		stripped, err := domain.ListFieldsWithout(item.Fields, key)
+		if err != nil || stripped == item.Fields {
+			// An item whose cells this build cannot read keeps them, as on SQL.
+			continue
+		}
+		item.Fields = stripped
+		// The row keeps whoever last changed it, and when, unless the event
+		// says — the same rule the SQL profile follows.
+		if event.ActorID != "" {
+			item.UpdatedBy = event.ActorID
+		}
+		if !event.CreatedAt.IsZero() {
+			item.UpdatedAt = event.CreatedAt.UTC()
+		}
+		item.Version++
+		s.listItems[value.ID][id] = item
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) DeleteListItems(_ context.Context, workspace domain.WorkspaceID, listID domain.ListID, ids []domain.ListItemID, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

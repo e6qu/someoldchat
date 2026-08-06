@@ -42,6 +42,13 @@ message AddListColumnRequest {
   repeated string options = 6;
 }
 
+message RemoveListColumnRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string key = 4;
+}
+
 message AssignListItemRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -210,6 +217,7 @@ service ListsService {
   rpc UpdateListItem(UpdateListItemRequest) returns (ListItemResponse);
   rpc AssignListItem(AssignListItemRequest) returns (ListItem);
   rpc AddListColumn(AddListColumnRequest) returns (List);
+  rpc RemoveListColumn(RemoveListColumnRequest) returns (List);
   rpc UpdateListCells(UpdateListItemRequest) returns (ListItemsResponse);
   rpc DeleteListItems(DeleteListItemsRequest) returns (ListOKResponse);
   rpc SetListAccess(ListAccessRequest) returns (ListOKResponse);

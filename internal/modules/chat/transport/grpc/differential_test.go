@@ -1986,6 +1986,47 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Removing a column has to take the values under it with it, and
+			// has to refuse the primary column. Both compositions must agree,
+			// because a schema and its cells disagreeing is a list nobody can
+			// read correctly.
+			name: "removing a list column takes its cells and spares the primary column",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				list, err := chat.CreateList(ctx, "T1", "U1", "Launch", "", "[]", "", false, false)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.AddListColumn(ctx, "T1", "U1", list.ID, "Task", domain.ListColumnText, nil); err != nil {
+					return nil, err
+				}
+				if _, err := chat.AddListColumn(ctx, "T1", "U1", list.ID, "Status", domain.ListColumnSelect, []string{"open", "done"}); err != nil {
+					return nil, err
+				}
+				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`)
+				if err != nil {
+					return nil, err
+				}
+				// The primary column is what an item is called, so it stays.
+				primaryRefused := func() bool {
+					_, err := chat.RemoveListColumn(ctx, "T1", "U1", list.ID, "task")
+					return err != nil
+				}()
+				absentRefused := func() bool {
+					_, err := chat.RemoveListColumn(ctx, "T1", "U1", list.ID, "nothing-called-this")
+					return err != nil
+				}()
+				after, err := chat.RemoveListColumn(ctx, "T1", "U1", list.ID, "status")
+				if err != nil {
+					return nil, err
+				}
+				stripped, err := chat.GetListItem(ctx, "T1", "U1", list.ID, item.ID)
+				if err != nil {
+					return nil, err
+				}
+				return []any{after.Schema, stripped.Fields, primaryRefused, absentRefused}, nil
+			},
+		},
+		{
 			// A list carries the same grant model as a canvas, so it has to
 			// answer the same pair: a reader sees who it is shared with, and
 			// only the owner changes that. Both compositions have to agree,
