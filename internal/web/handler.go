@@ -400,16 +400,21 @@ type pageData struct {
 	// dialog cannot describe a binding the page does not announce.
 	Keyboard       []keyboardSectionView
 	ReminderUnread bool
-	IsMember       bool
-	CanPost        bool
-	CanSchedule    bool
-	CanUpload      bool
-	CanJoin        bool
-	CanCreate      bool
-	JoinURL        string
-	Username       string
-	UserInitial    string
-	OlderURL       string
+	// CanvasURL opens this conversation's own canvas. Slack gives every channel
+	// one canvas of its own, which is not the same thing as a canvas shared
+	// into it; it is empty until somebody writes in it, and it is offered only
+	// to members, because only a member may read or create one.
+	CanvasURL   string
+	IsMember    bool
+	CanPost     bool
+	CanSchedule bool
+	CanUpload   bool
+	CanJoin     bool
+	CanCreate   bool
+	JoinURL     string
+	Username    string
+	UserInitial string
+	OlderURL    string
 	// LatestURL is set when the rendered window is not the newest one. It is
 	// both the "jump to the latest messages" pager and the composer's
 	// data-newest, so a post made while reading older history takes the
@@ -558,6 +563,16 @@ type canvasRevisionView struct {
 	DisplayTime string
 	MachineTime string
 	RestoreURL  string
+}
+
+// channelCanvasData is the empty state of a conversation's own canvas: the one
+// moment it has nothing to show, because it does not exist yet.
+type channelCanvasData struct {
+	Channel     string
+	ChannelName string
+	CSRFToken   string
+	CanCreate   bool
+	Notice      string
 }
 
 type canvasData struct {
@@ -1867,6 +1882,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
           </form>
           {{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to channel</a>{{end}}
+          {{if .CanvasURL}}<a href="{{.CanvasURL}}" aria-label="Open the canvas for this conversation">Canvas</a>{{end}}
           <a href="/app?channel={{.Channel}}&amp;details=1" aria-label="Open conversation details" {{ariaKeyshortcuts "Conversation details"}}>Details</a>
           <button type="button" id="open-keyboard-help" aria-haspopup="dialog" aria-controls="keyboard-help" {{ariaKeyshortcuts "Keyboard shortcuts"}}>Keyboard shortcuts</button>
         </div>
@@ -2793,6 +2809,22 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 {{if .CanDelete}}<form class="delete" method="post" action="/app/canvases/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Delete canvas</button></form>{{end}}</article></main>{{end}}`
 
 var canvasTemplate = mustPage(canvasMarkup)
+
+const channelCanvasMarkup = `{{define "title"}}Canvas · #{{.ChannelName}} · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(720px,calc(100% - 32px));margin:28px auto 56px;padding:26px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.layout h2{margin:0 0 10px}.layout p{color:var(--muted)}
+form{display:grid;gap:10px;max-width:420px;margin-top:18px}label{display:grid;gap:6px;font-weight:700}input{padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}
+</style>{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to #{{.ChannelName}}</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+<h2>#{{.ChannelName}} has no canvas yet</h2>
+<p>A conversation's canvas is a document that belongs to the conversation itself, and everyone in it can read and write it. It is not the same as a canvas shared into the channel: a conversation has exactly one of these.</p>
+{{if .CanCreate}}<form method="post" action="/app/channel-canvas/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="channel" value="{{.Channel}}">
+<label for="canvas-title">Title<input id="canvas-title" name="title" maxlength="255" value="{{.ChannelName}}" required></label>
+<button type="submit">Create the canvas</button></form>
+{{else}}<p class="read-only">Creating one needs permission to write canvases, which this session does not have.</p>{{end}}</main>{{end}}`
+
+var channelCanvasTemplate = mustPage(channelCanvasMarkup)
 
 const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -4263,6 +4295,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/canvases/{canvasID}/update", h.updateCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
+	mux.HandleFunc("GET /app/channel-canvas", h.channelCanvas)
+	mux.HandleFunc("POST /app/channel-canvas/create", h.createChannelCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/share", h.shareCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/share/revoke", h.revokeCanvasShare)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/comments", h.commentOnCanvas)
@@ -5193,6 +5227,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Keyboard:         keyboardHelp(),
 		Assistant:        h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp)),
 		ReminderUnread:   reminderUnread,
+		CanvasURL:        channelCanvasURL(principal, conversation, isMember),
 		IsMember:         isMember,
 		CanPost:          canPost,
 		CanSchedule:      principal.HasScope(auth.ScopeChatWrite),
@@ -8314,6 +8349,80 @@ func (h Handler) changeCanvasSharing(w http.ResponseWriter, r *http.Request, gra
 		return
 	}
 	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id)))
+}
+
+// channelCanvasURL offers a conversation's own canvas to the members who could
+// use it. A non-member cannot read one and cannot create one, so the link would
+// only ever produce a refusal; a client without the canvas scope is in the same
+// position for a different reason.
+func channelCanvasURL(principal auth.Principal, conversation domain.Conversation, isMember bool) string {
+	if !isMember || conversation.ID == "" || !principal.HasScope(auth.ScopeCanvasesRead) {
+		return ""
+	}
+	return "/app/channel-canvas?channel=" + url.QueryEscape(string(conversation.ID))
+}
+
+// channelCanvas opens the conversation's own canvas, or says there is not one
+// yet. It does not create one: a canvas appearing because somebody followed a
+// link would make the channel's history say an edit happened when nobody wrote
+// anything, so creating stays a thing a member does on purpose.
+func (h Handler) channelCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.URL.Query().Get("channel")))
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		h.writeStoreError(w, err, "That conversation is not available.")
+		return
+	}
+	canvas, err := h.Messages.ConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err == nil {
+		http.Redirect(w, r, "/app/canvases/"+url.PathEscape(string(canvas.ID)), http.StatusSeeOther)
+		return
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		h.writeStoreError(w, err, "That conversation's canvas is not available.")
+		return
+	}
+	csrf, err := pageCSRFToken(r)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	h.writeHTML(w, channelCanvasTemplate, channelCanvasData{
+		Channel: string(channel), ChannelName: conversationName(conversation), CSRFToken: csrf,
+		CanCreate: principal.HasScope(auth.ScopeCanvasesWrite),
+		Notice:    strings.TrimSpace(r.URL.Query().Get("notice")),
+	}, http.StatusOK, "canvas rendering unavailable")
+}
+
+// createChannelCanvas makes the one canvas a conversation may have. A second
+// attempt is not an error the member caused: somebody else made it first, so
+// they are sent to the canvas that now exists rather than told they failed.
+func (h Handler) createChannelCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the conversation and try again.")
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	canvas, err := h.Messages.CreateConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, channel, strings.TrimSpace(fields["title"]), "")
+	if err != nil {
+		if existing, lookupErr := h.Messages.ConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, channel); lookupErr == nil {
+			h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(existing.ID)))
+			return
+		}
+		h.writeMutationError(w, r, http.StatusBadRequest, "The canvas was not created", "Join the conversation and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(canvas.ID)))
 }
 
 // canvasRevisionExcerpt is the opening of what the canvas said, bounded. A

@@ -3311,6 +3311,43 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await expect(page.getByText('No comments yet.')).toBeVisible();
 });
 
+// A conversation's own canvas is a different thing from a canvas shared into
+// it: a conversation has exactly one, everybody in it can write it, and nobody
+// has to be granted anything. It existed in the store, the service and
+// conversations.canvases.create, and no first-party surface opened one.
+test('[CANVAS-01 A11Y-01] a conversation offers its own canvas and creating it is deliberate', async ({ page, context }) => {
+  await signIn(context);
+  const name = `channel-canvas-${Date.now()}`;
+  const created = await page.request.post('/api/conversations.create', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { name },
+  });
+  const conversation = await created.json();
+  expect(conversation.ok, JSON.stringify(conversation)).toBe(true);
+  const channel = conversation.channel.id;
+
+  await page.goto(`/app?channel=${channel}`);
+  await page.getByRole('link', { name: 'Open the canvas for this conversation' }).click();
+
+  // Following the link does not make a canvas: an edit nobody made must not
+  // appear in the conversation's history.
+  await expect(page.getByRole('heading', { name: `#${name} has no canvas yet` })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('button', { name: 'Create the canvas' }).click();
+  await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+  // It is the conversation's canvas, so the sharing list says so and does not
+  // offer to revoke the grant that makes it one.
+  const grant = page.locator('.grant', { hasText: `#${name}` });
+  await expect(grant).toContainText("this is the channel's canvas");
+  await expect(grant.getByRole('button')).toHaveCount(0);
+
+  // The conversation now goes straight to the canvas it has.
+  await page.goto(`/app?channel=${channel}`);
+  await page.getByRole('link', { name: 'Open the canvas for this conversation' }).click();
+  await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+});
+
 // Who a canvas is shared with was invisible everywhere outside the API: the
 // grants existed, and nothing rendered one or made one. The journey shares with
 // a channel rather than a person because the session's member is the only human
