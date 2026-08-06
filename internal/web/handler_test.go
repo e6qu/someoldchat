@@ -358,6 +358,53 @@ func TestListSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt(t *testing.T) {
 // A conversation's own canvas existed in the API and nowhere else: the store,
 // the service and conversations.canvases.create have carried it since canvases
 // were built, and no first-party surface offered or opened one.
+// Completing an item hides it and can be undone; deleting one cannot. The
+// client only ever offered the first, so an item added by mistake stayed in the
+// list forever with a line through it. slackLists.items.delete has existed
+// throughout.
+func TestListItemCanBeDeletedForGoodAndCompletionStillCannot(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(context.Background(), "T1", "U1", "Launch", "", "[]", "", false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/lists/" + string(value.ID)
+	csrf := auth.CSRFToken("session")
+
+	if created := postForm(t, mux, target+"/items/create", url.Values{"_csrf": {csrf}, "title": {"added by mistake"}}.Encode(), false); created.Code != http.StatusSeeOther {
+		t.Fatalf("create item = %d: %s", created.Code, created.Body)
+	}
+	page := get(t, mux, target)
+	requireContains(t, "list", page.Body.String(), "added by mistake", "Delete this item", "for good")
+	match := regexp.MustCompile(`/items/([^/]+)/delete`).FindStringSubmatch(page.Body.String())
+	if len(match) != 2 {
+		t.Fatalf("no delete control: %s", page.Body)
+	}
+
+	// Completing it keeps it, which is the distinction the two controls exist
+	// to draw.
+	if done := postForm(t, mux, target+"/items/"+match[1]+"/toggle", url.Values{"_csrf": {csrf}, "archived": {"true"}}.Encode(), false); done.Code != http.StatusSeeOther {
+		t.Fatalf("complete item = %d: %s", done.Code, done.Body)
+	}
+	requireContains(t, "completed list", get(t, mux, target).Body.String(), "added by mistake", "Restore")
+
+	deleted := postForm(t, mux, target+"/items/"+match[1]+"/delete", url.Values{"_csrf": {csrf}}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete item = %d: %s", deleted.Code, deleted.Body)
+	}
+	after := get(t, mux, target)
+	requireMissing(t, "list after deletion", after.Body.String(), "added by mistake")
+	requireContains(t, "list after deletion", after.Body.String(), "No items yet.")
+
+	// Deleting it again answers as it would for an item somebody else has
+	// already deleted, rather than reporting a failure the member caused.
+	repeat := postForm(t, mux, target+"/items/"+match[1]+"/delete", url.Values{"_csrf": {csrf}}.Encode(), false)
+	if repeat.Code != http.StatusNotFound {
+		t.Fatalf("second delete = %d: %s", repeat.Code, repeat.Body)
+	}
+}
+
 func TestChannelCanvasIsOfferedToMembersAndCreatedOnPurpose(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 

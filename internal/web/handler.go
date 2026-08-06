@@ -2846,7 +2846,10 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 <details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
 <label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $.Members}}<option value="{{.ID}}"{{if eq .ID $item.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
 <label for="due-{{.ID}}">Due</label><input id="due-{{.ID}}" type="date" name="due" value="{{.DueDate}}">
-<button type="submit">Save assignment</button></form></details>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}
+<button type="submit">Save assignment</button></form></details>
+<details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+<p class="read-only">Deleting removes this item and everything on it for good. Completing it instead keeps it and can be undone.</p>
+<button type="submit">Delete this item</button></form></details>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}
 ` + sharingSection + `</main>{{end}}`
 
 var listTemplate = mustPage(listMarkup)
@@ -4309,6 +4312,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/lists/{listID}/share/revoke", h.revokeListShare)
 	mux.HandleFunc("POST /app/lists/{listID}/items/create", h.createListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/toggle", h.toggleListItem)
+	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/delete", h.deleteListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/assign", h.assignListItem)
 	mux.HandleFunc("GET /app/workflows", h.workflows)
 	mux.HandleFunc("POST /app/workflows/create", h.createWorkflow)
@@ -8815,6 +8819,31 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 // is a date rather than an instant, because "due Tuesday" is what a member
 // means; it is read as the end of that day in UTC so an item is not late the
 // moment the day begins somewhere.
+// deleteListItem removes an item for good. Completing an item hides it and can
+// be undone; this cannot, which is why it is a separate control that says so
+// rather than a second meaning for the same button.
+func (h Handler) deleteListItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the list and try again."); !ok {
+		return
+	}
+	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	item := domain.ListItemID(strings.TrimSpace(r.PathValue("itemID")))
+	if err := h.Messages.DeleteListItems(r.Context(), principal.WorkspaceID, principal.UserID, id, []domain.ListItemID{item}); err != nil {
+		// A member who cannot see the item is answered exactly as a member
+		// looking at one somebody else has already deleted: the two are the
+		// same fact from here, and distinguishing them would say whether an
+		// item exists to somebody who may not know.
+		h.writeMutationError(w, r, http.StatusNotFound, "The item was not deleted", "It is no longer there, or this list is not yours to change.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
+}
+
 func (h Handler) assignListItem(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeListsWrite)
 	if err != nil {

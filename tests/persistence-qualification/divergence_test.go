@@ -3023,6 +3023,91 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 	}
 }
 
+// deletingAListItemIsAllOrNothingAndSurvivesInActivity covers the two things
+// the client's delete control depends on. A batch that names one item that is
+// not there must delete none of them — SQL gets that from its transaction,
+// memory from checking every id before it removes any, so agreeing is a
+// contract rather than a shared implementation. And an assignment already
+// announced in Activity must survive the item it pointed at: the news that
+// somebody gave you work is still true after the work is deleted, and a row
+// that vanished would leave the member wondering what they were told.
+func deletingAListItemIsAllOrNothingAndSurvivesInActivity(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignee := domain.UserID("U-assignee-delete-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: assignee, WorkspaceID: f.workspaceID, Email: "assignee-delete-" + f.suffix + "@example.com", Name: "assignee"}); err != nil {
+		t.Fatal(err)
+	}
+	list := domain.List{ID: domain.ListID("Ls-delete-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID, Name: "Launch", Schema: "[]", CreatedAt: now, UpdatedAt: now}
+	if err := f.repository.CreateList(ctx, list, f.event("delete-list", "list.created", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: string(assignee), Access: "read"}, f.event("delete-grant", "list.access_set", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	kept := domain.ListItem{ID: domain.ListItemID("Li-kept-" + f.suffix), ListID: list.ID, WorkspaceID: f.workspaceID, Fields: `[{"column_id":"title","value":"keep me"}]`, CreatedBy: f.userID, UpdatedBy: f.userID, CreatedAt: now, UpdatedAt: now}
+	doomed := kept
+	doomed.ID = domain.ListItemID("Li-doomed-" + f.suffix)
+	doomed.Fields = `[{"column_id":"title","value":"delete me"}]`
+	doomed.AssigneeID = assignee
+	for _, item := range []domain.ListItem{kept, doomed} {
+		if err := f.repository.CreateListItem(ctx, item, f.event("create-"+string(item.ID), "list.item.created", string(item.ID))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.repository.RecordListAssignment(ctx, doomed, f.userID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// Before the deletion the row is reachable. Without this the assertion
+	// below would pass for a row that was never reachable at all.
+	announced, err := f.repository.ListActivity(ctx, f.workspaceID, assignee, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(announced.Items) != 1 || !announced.Items[0].SourceAvailable {
+		t.Fatalf("assignment before deletion = %+v, want one reachable row", announced.Items)
+	}
+
+	// One good id and one that is not there deletes neither. A batch that
+	// half-applied would leave a member unable to say what they had removed.
+	if err := f.repository.DeleteListItems(ctx, f.workspaceID, list.ID, []domain.ListItemID{kept.ID, domain.ListItemID("Li-absent-" + f.suffix)}, f.event("delete-partial", "list.items.deleted", string(list.ID))); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("partial delete: %v, want ErrNotFound", err)
+	}
+	if _, err := f.repository.GetListItem(ctx, f.workspaceID, list.ID, kept.ID); err != nil {
+		t.Fatalf("a refused batch deleted an item anyway: %v", err)
+	}
+
+	if err := f.repository.DeleteListItems(ctx, f.workspaceID, list.ID, []domain.ListItemID{doomed.ID}, f.event("delete-one", "list.items.deleted", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repository.GetListItem(ctx, f.workspaceID, list.ID, doomed.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the deleted item is still there: %v", err)
+	}
+	remaining, err := f.repository.ListItems(ctx, f.workspaceID, list.ID, domain.PageRequest{Limit: 20}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining.Items) != 1 || remaining.Items[0].ID != kept.ID {
+		t.Fatalf("remaining items = %+v, want only %s", remaining.Items, kept.ID)
+	}
+
+	// The assignment stays in Activity, saying its source has gone.
+	page, err := f.repository.ListActivity(ctx, f.workspaceID, assignee, domain.ActivityQuery{Page: domain.PageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ListItemID != doomed.ID {
+		t.Fatalf("assignee activity = %+v, want the assignment it was told about", page.Items)
+	}
+	if page.Items[0].SourceAvailable {
+		t.Fatalf("activity claims the deleted item is still reachable: %+v", page.Items[0])
+	}
+}
+
 // A named emoji and a link are predicates the two profiles express differently
 // — one as SQL against the reactions table and the message text, the other as a
 // walk over maps — so the contract drives both. The named-emoji case is the one

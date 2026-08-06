@@ -167,6 +167,17 @@ for later steps and conditions to read.
   removal: revoking it would leave the channel with a tab pointing at a document
   nobody in it may open. A canvas that is not this workspace's canvas answers
   the sharing read as missing rather than as unshared, on both storage profiles.
+- A list item can be deleted, separately from being completed. Completing hides
+  an item and can be undone; deleting cannot, so it is its own control saying so
+  rather than a second meaning for the same button, and an item added by mistake
+  no longer has to stay in the list forever with a line through it. Deleting a
+  batch is all or nothing on every profile: a batch naming one item that is not
+  there removes none of them, because a half-applied delete would leave a member
+  unable to say what they had removed. An assignment already announced in
+  Activity survives the item it pointed at and reports that its source has gone
+  — the news that somebody gave you work is still true after the work is
+  deleted, and a row that vanished would leave the member wondering what they
+  had been told.
 - A conversation's own canvas is reachable from the conversation. It is a
   different thing from a canvas shared into the channel: a conversation has
   exactly one, membership is what grants access to it, and leaving takes that
@@ -284,9 +295,9 @@ and full rich block editing remain gaps.
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,
 assignments, due dates, and sharing review are now built — a list carries the
-same grants a canvas does, so it reaches the same sharing surface. Templates,
-views, filters, sorting, comments, attachments, item deletion, and full
-notification/workflow effects remain gaps.
+same grants a canvas does, so it reaches the same sharing surface. An item can be deleted for good, which
+completing it deliberately does not do. Templates, views, filters, sorting,
+comments, attachments, and full notification/workflow effects remain gaps.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered

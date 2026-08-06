@@ -3387,6 +3387,38 @@ test('[CANVAS-01 A11Y-01] a canvas says who it is shared with and the owner can 
   await expect(page.locator('#share-target option', { hasText: 'Channel: #general' })).toHaveCount(1);
 });
 
+// Completing an item hides it and can be undone; deleting one cannot. The
+// client only ever offered the first, so an item added by mistake stayed in the
+// list forever with a line through it. The journey drives both so the
+// distinction is asserted rather than described.
+test('[LIST-01 A11Y-01] a list item can be completed reversibly or deleted for good', async ({ page, context }) => {
+  await signIn(context);
+  const name = `Deletable ${Date.now()}`;
+  await page.goto('/app/lists');
+  await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  await page.getByPlaceholder('Add an item').fill('added by mistake');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByText('added by mistake')).toBeVisible();
+
+  // Completing keeps it, which is the distinction the two controls exist to
+  // draw.
+  await page.getByRole('button', { name: 'Complete' }).click();
+  await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
+  await expect(page.getByText('added by mistake')).toBeVisible();
+
+  await page.getByRole('group').filter({ hasText: 'Delete' }).first().locator('summary').click();
+  await expect(page.getByText('for good')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.getByRole('button', { name: 'Delete this item' }).click();
+
+  await expect(page.getByText('added by mistake')).toHaveCount(0);
+  await expect(page.getByText('No items yet.')).toBeVisible();
+});
+
 // A list carries the same grants as a canvas and had the same hole. The surface
 // is now one surface, so this drives the list half of it end to end — including
 // that revoking puts the channel back in the picker, which is the state the
