@@ -184,6 +184,22 @@ a private channel, and cannot be converted a second time.
 
 ## Evidence
 
+- A workspace administrator can change a channel between public and private
+  from the channel itself, in both directions. The two are one decision — who
+  may read this — and one control, because separating them would hide that only
+  one of them is reversible: making a channel private hides what was said from
+  people who could read it, while making one public shows it to people who
+  never could, and nothing in the product takes that back. The control says
+  which of those is about to happen before it is used. A channel an external
+  organization is in cannot be made public: those members joined a private
+  conversation, and no administrator of this workspace speaks for a workspace
+  they never agreed to be visible to. Changing visibility is not membership —
+  the people in the channel stay in it — and a channel that is already in the
+  asked-for state is refused as the wrong kind of conversation rather than as a
+  missing one, which is now the same answer on both storage profiles; the SQL
+  profile used to answer "not found" for a channel that plainly exists.
+
+
 - Browser journeys cover browse/join/create/details/leave/archive plus the
   dedicated DM surface at desktop and narrow widths. Handler/service/store/API
   journeys cover one-to-one/group open, naming, close, idempotent close,

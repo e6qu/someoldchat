@@ -1104,7 +1104,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetExcludeFromSlackAi/
   - method: admin.conversations.convertToPublic
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.convertToPublic/
   - method: admin.conversations.createForObjects

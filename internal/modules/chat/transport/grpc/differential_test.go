@@ -701,6 +701,39 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The two conversions are not one operation with a flag. Making a
+			// channel private hides what was said from people who could read
+			// it; making one public shows it to people who never could, and
+			// nothing takes that back. Both compositions have to agree on the
+			// asymmetry and on refusing a channel an external organization is
+			// in.
+			name: "a channel converts between public and private, and a connected channel does not",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				privately, err := chat.AdminConvertConversationToPrivate(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				// Converting again is the state that was asked for on neither
+				// profile: it is the wrong kind of conversation now.
+				repeated := func() bool {
+					_, err := chat.AdminConvertConversationToPrivate(ctx, "T1", "UA", "C1")
+					return err != nil
+				}()
+				publicly, err := chat.AdminConvertConversationToPublic(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				// A member cannot convert anything.
+				_, memberErr := chat.AdminConvertConversationToPrivate(ctx, "T1", "U1", "C1")
+				_, memberPublic := chat.AdminConvertConversationToPublic(ctx, "T1", "U1", "C1")
+				missing := func() bool {
+					_, err := chat.AdminConvertConversationToPublic(ctx, "T1", "UA", "C-not-here")
+					return err != nil
+				}()
+				return []any{privately.IsPrivate, repeated, publicly.IsPrivate, memberErr != nil, memberPublic != nil, missing}, nil
+			},
+		},
+		{
 			// An administrator has to be able to find a workflow they do not own
 			// and take it out of service. Both compositions must agree, because
 			// an administrator told a workflow is stopped while it still runs
@@ -3424,7 +3457,6 @@ var parityGaps = map[string]struct{}{
 	"AdminAssignUser":                    {},
 	"AdminConnectedChannelInfo":          {},
 	"AdminConversationTeams":             {},
-	"AdminConvertConversationToPrivate":  {},
 	"AdminCreateIncomingWebhook":         {},
 	"AdminCreateUser":                    {},
 	"AdminCreateWorkspace":               {},

@@ -1278,7 +1278,7 @@ const file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc = "" +
 	"\bteam_ids\x18\x01 \x03(\tR\ateamIds\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xaf\x14\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xb0\x15\n" +
 	"\x1cConversationMutationsService\x12c\n" +
 	"\x10OpenConversation\x12,.sameoldchat.chat.v1.OpenConversationRequest\x1a!.sameoldchat.chat.v1.Conversation\x12}\n" +
 	"\x1dAddPeopleToDirectConversation\x129.sameoldchat.chat.v1.AddPeopleToDirectConversationRequest\x1a!.sameoldchat.chat.v1.Conversation\x12y\n" +
@@ -1299,7 +1299,8 @@ const file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc = "" +
 	"\"AdminRemoveConversationAccessGroup\x123.sameoldchat.chat.v1.ConversationAccessGroupRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12\x84\x01\n" +
 	"!AdminListConversationAccessGroups\x12(.sameoldchat.chat.v1.ConversationRequest\x1a5.sameoldchat.chat.v1.ConversationAccessGroupsResponse\x12z\n" +
 	"\x1eAdminInviteConversationMembers\x125.sameoldchat.chat.v1.InviteConversationMembersRequest\x1a!.sameoldchat.chat.v1.Conversation\x12\x80\x01\n" +
-	"!AdminConvertConversationToPrivate\x128.sameoldchat.chat.v1.ConvertConversationToPrivateRequest\x1a!.sameoldchat.chat.v1.Conversation\x12\x81\x01\n" +
+	"!AdminConvertConversationToPrivate\x128.sameoldchat.chat.v1.ConvertConversationToPrivateRequest\x1a!.sameoldchat.chat.v1.Conversation\x12\x7f\n" +
+	" AdminConvertConversationToPublic\x128.sameoldchat.chat.v1.ConvertConversationToPrivateRequest\x1a!.sameoldchat.chat.v1.Conversation\x12\x81\x01\n" +
 	"\x16AdminConversationTeams\x122.sameoldchat.chat.v1.AdminConversationTeamsRequest\x1a3.sameoldchat.chat.v1.AdminConversationTeamsResponse\x12v\n" +
 	"\x19AdminSetConversationTeams\x122.sameoldchat.chat.v1.AdminConversationTeamsRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
@@ -1358,32 +1359,34 @@ var file_sameoldchat_chat_v1_conversation_mutations_proto_depIdxs = []int32{
 	4,  // 17: sameoldchat.chat.v1.ConversationMutationsService.AdminListConversationAccessGroups:input_type -> sameoldchat.chat.v1.ConversationRequest
 	5,  // 18: sameoldchat.chat.v1.ConversationMutationsService.AdminInviteConversationMembers:input_type -> sameoldchat.chat.v1.InviteConversationMembersRequest
 	15, // 19: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPrivate:input_type -> sameoldchat.chat.v1.ConvertConversationToPrivateRequest
-	16, // 20: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
-	16, // 21: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
-	18, // 22: sameoldchat.chat.v1.ConversationMutationsService.OpenConversation:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 23: sameoldchat.chat.v1.ConversationMutationsService.AddPeopleToDirectConversation:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 24: sameoldchat.chat.v1.ConversationMutationsService.ConvertGroupDirectToPrivate:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 25: sameoldchat.chat.v1.ConversationMutationsService.CreateConversation:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 26: sameoldchat.chat.v1.ConversationMutationsService.JoinConversation:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 27: sameoldchat.chat.v1.ConversationMutationsService.InviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
-	7,  // 28: sameoldchat.chat.v1.ConversationMutationsService.LeaveConversation:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 29: sameoldchat.chat.v1.ConversationMutationsService.KickConversationMember:output_type -> sameoldchat.chat.v1.MutationResponse
-	18, // 30: sameoldchat.chat.v1.ConversationMutationsService.RenameConversation:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 31: sameoldchat.chat.v1.ConversationMutationsService.SetConversationTopic:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 32: sameoldchat.chat.v1.ConversationMutationsService.SetConversationPurpose:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 33: sameoldchat.chat.v1.ConversationMutationsService.SetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 34: sameoldchat.chat.v1.ConversationMutationsService.AdminRenameConversation:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 35: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
-	7,  // 36: sameoldchat.chat.v1.ConversationMutationsService.AdminDeleteConversation:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 37: sameoldchat.chat.v1.ConversationMutationsService.AdminAddConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 38: sameoldchat.chat.v1.ConversationMutationsService.AdminRemoveConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
-	14, // 39: sameoldchat.chat.v1.ConversationMutationsService.AdminListConversationAccessGroups:output_type -> sameoldchat.chat.v1.ConversationAccessGroupsResponse
-	18, // 40: sameoldchat.chat.v1.ConversationMutationsService.AdminInviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
-	18, // 41: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPrivate:output_type -> sameoldchat.chat.v1.Conversation
-	17, // 42: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:output_type -> sameoldchat.chat.v1.AdminConversationTeamsResponse
-	7,  // 43: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:output_type -> sameoldchat.chat.v1.MutationResponse
-	22, // [22:44] is the sub-list for method output_type
-	0,  // [0:22] is the sub-list for method input_type
+	15, // 20: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPublic:input_type -> sameoldchat.chat.v1.ConvertConversationToPrivateRequest
+	16, // 21: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
+	16, // 22: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
+	18, // 23: sameoldchat.chat.v1.ConversationMutationsService.OpenConversation:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 24: sameoldchat.chat.v1.ConversationMutationsService.AddPeopleToDirectConversation:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 25: sameoldchat.chat.v1.ConversationMutationsService.ConvertGroupDirectToPrivate:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 26: sameoldchat.chat.v1.ConversationMutationsService.CreateConversation:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 27: sameoldchat.chat.v1.ConversationMutationsService.JoinConversation:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 28: sameoldchat.chat.v1.ConversationMutationsService.InviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
+	7,  // 29: sameoldchat.chat.v1.ConversationMutationsService.LeaveConversation:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 30: sameoldchat.chat.v1.ConversationMutationsService.KickConversationMember:output_type -> sameoldchat.chat.v1.MutationResponse
+	18, // 31: sameoldchat.chat.v1.ConversationMutationsService.RenameConversation:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 32: sameoldchat.chat.v1.ConversationMutationsService.SetConversationTopic:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 33: sameoldchat.chat.v1.ConversationMutationsService.SetConversationPurpose:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 34: sameoldchat.chat.v1.ConversationMutationsService.SetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 35: sameoldchat.chat.v1.ConversationMutationsService.AdminRenameConversation:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 36: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
+	7,  // 37: sameoldchat.chat.v1.ConversationMutationsService.AdminDeleteConversation:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 38: sameoldchat.chat.v1.ConversationMutationsService.AdminAddConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 39: sameoldchat.chat.v1.ConversationMutationsService.AdminRemoveConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
+	14, // 40: sameoldchat.chat.v1.ConversationMutationsService.AdminListConversationAccessGroups:output_type -> sameoldchat.chat.v1.ConversationAccessGroupsResponse
+	18, // 41: sameoldchat.chat.v1.ConversationMutationsService.AdminInviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 42: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPrivate:output_type -> sameoldchat.chat.v1.Conversation
+	18, // 43: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPublic:output_type -> sameoldchat.chat.v1.Conversation
+	17, // 44: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:output_type -> sameoldchat.chat.v1.AdminConversationTeamsResponse
+	7,  // 45: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:output_type -> sameoldchat.chat.v1.MutationResponse
+	23, // [23:46] is the sub-list for method output_type
+	0,  // [0:23] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name

@@ -9543,31 +9543,47 @@ func (s *Store) SetSocketModeCursor(ctx context.Context, appID domain.AppID, cur
 }
 
 func (s *Store) SetConversationPrivate(ctx context.Context, conversation domain.ConversationID, event events.Event) (domain.Conversation, error) {
+	return s.setConversationVisibility(ctx, conversation, true, event)
+}
+
+// SetConversationPublic is the reverse of SetConversationPrivate.
+func (s *Store) SetConversationPublic(ctx context.Context, conversation domain.ConversationID, event events.Event) (domain.Conversation, error) {
+	return s.setConversationVisibility(ctx, conversation, false, event)
+}
+
+// setConversationVisibility flips one channel between public and private.
+//
+// It probes before writing so a channel that is already in the asked-for state
+// is refused as the wrong kind of conversation rather than as a missing one.
+// The single conditional UPDATE it replaces could not tell those apart, so this
+// profile answered ErrNotFound where memory answered
+// ErrInvalidConversationType — two compositions disagreeing about what happened
+// to a channel that plainly exists.
+func (s *Store) setConversationVisibility(ctx context.Context, conversation domain.ConversationID, private bool, event events.Event) (domain.Conversation, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE conversations SET is_private = 1 WHERE id = ? AND is_private = 0 AND is_direct = 0 AND is_group_direct = 0`, conversation)
-	if err != nil {
-		return domain.Conversation{}, err
+	var wasPrivate, direct, groupDirect int
+	if err := tx.QueryRowContext(ctx, `SELECT is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&wasPrivate, &direct, &groupDirect); err != nil {
+		return domain.Conversation{}, translateNotFound(err)
 	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return domain.Conversation{}, err
+	if direct != 0 || groupDirect != 0 || (wasPrivate != 0) == private {
+		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
-	if changed != 1 {
-		return domain.Conversation{}, store.ErrNotFound
+	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET is_private = ? WHERE id = ?`, boolInt(private), conversation); err != nil {
+		return domain.Conversation{}, err
 	}
 	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
 	var value domain.Conversation
-	var private, direct, groupDirect, archived int
-	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
+	var storedPrivate, storedDirect, storedGroupDirect, archived int
+	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &storedPrivate, &storedDirect, &storedGroupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, storedPrivate != 0, storedDirect != 0, storedGroupDirect != 0
 	if err := tx.Commit(); err != nil {
 		return domain.Conversation{}, err
 	}

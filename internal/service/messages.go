@@ -4080,6 +4080,45 @@ func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspa
 	return m.Store.SetConversationPrivate(ctx, conversationID, event)
 }
 
+// AdminConvertConversationToPublic is the reverse of
+// AdminConvertConversationToPrivate, and is deliberately stricter.
+//
+// Making a channel private hides what was said from people who could already
+// read it. Making one public shows what was said to people who never could, and
+// nothing in the product can take that back — so the two are not the same
+// operation with a flag flipped.
+//
+// A channel an external organization is in is refused. Those members joined a
+// private conversation; making it public would expose it to a workspace they
+// never agreed to be visible to, and no administrator of this workspace speaks
+// for them.
+func (m Messages) AdminConvertConversationToPublic(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Conversation, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
+		return domain.Conversation{}, err
+	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	if !conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	teams, _, err := m.Store.ListConversationTeams(ctx, workspaceID, conversationID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	for _, team := range teams {
+		if team != workspaceID {
+			return domain.Conversation{}, ErrInvalidConversation
+		}
+	}
+	event, err := newEvent(workspaceID, userID, conversationPayload("conversation.converted_to_public", conversationID), time.Now().UTC())
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.SetConversationPublic(ctx, conversationID, event)
+}
+
 func (m Messages) AdminGetConversationPrefs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationPrefs, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.ConversationPrefs{}, err

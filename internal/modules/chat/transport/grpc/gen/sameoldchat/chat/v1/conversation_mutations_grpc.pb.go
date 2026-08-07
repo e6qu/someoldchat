@@ -39,6 +39,7 @@ const (
 	ConversationMutationsService_AdminListConversationAccessGroups_FullMethodName  = "/sameoldchat.chat.v1.ConversationMutationsService/AdminListConversationAccessGroups"
 	ConversationMutationsService_AdminInviteConversationMembers_FullMethodName     = "/sameoldchat.chat.v1.ConversationMutationsService/AdminInviteConversationMembers"
 	ConversationMutationsService_AdminConvertConversationToPrivate_FullMethodName  = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPrivate"
+	ConversationMutationsService_AdminConvertConversationToPublic_FullMethodName   = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPublic"
 	ConversationMutationsService_AdminConversationTeams_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConversationTeams"
 	ConversationMutationsService_AdminSetConversationTeams_FullMethodName          = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationTeams"
 )
@@ -67,6 +68,7 @@ type ConversationMutationsServiceClient interface {
 	AdminListConversationAccessGroups(ctx context.Context, in *ConversationRequest, opts ...grpc.CallOption) (*ConversationAccessGroupsResponse, error)
 	AdminInviteConversationMembers(ctx context.Context, in *InviteConversationMembersRequest, opts ...grpc.CallOption) (*Conversation, error)
 	AdminConvertConversationToPrivate(ctx context.Context, in *ConvertConversationToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error)
+	AdminConvertConversationToPublic(ctx context.Context, in *ConvertConversationToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error)
 	AdminConversationTeams(ctx context.Context, in *AdminConversationTeamsRequest, opts ...grpc.CallOption) (*AdminConversationTeamsResponse, error)
 	AdminSetConversationTeams(ctx context.Context, in *AdminConversationTeamsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 }
@@ -279,6 +281,16 @@ func (c *conversationMutationsServiceClient) AdminConvertConversationToPrivate(c
 	return out, nil
 }
 
+func (c *conversationMutationsServiceClient) AdminConvertConversationToPublic(ctx context.Context, in *ConvertConversationToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminConvertConversationToPublic_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *conversationMutationsServiceClient) AdminConversationTeams(ctx context.Context, in *AdminConversationTeamsRequest, opts ...grpc.CallOption) (*AdminConversationTeamsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminConversationTeamsResponse)
@@ -323,6 +335,7 @@ type ConversationMutationsServiceServer interface {
 	AdminListConversationAccessGroups(context.Context, *ConversationRequest) (*ConversationAccessGroupsResponse, error)
 	AdminInviteConversationMembers(context.Context, *InviteConversationMembersRequest) (*Conversation, error)
 	AdminConvertConversationToPrivate(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error)
+	AdminConvertConversationToPublic(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error)
 	AdminConversationTeams(context.Context, *AdminConversationTeamsRequest) (*AdminConversationTeamsResponse, error)
 	AdminSetConversationTeams(context.Context, *AdminConversationTeamsRequest) (*MutationResponse, error)
 }
@@ -393,6 +406,9 @@ func (UnimplementedConversationMutationsServiceServer) AdminInviteConversationMe
 }
 func (UnimplementedConversationMutationsServiceServer) AdminConvertConversationToPrivate(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminConvertConversationToPrivate not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminConvertConversationToPublic(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminConvertConversationToPublic not implemented")
 }
 func (UnimplementedConversationMutationsServiceServer) AdminConversationTeams(context.Context, *AdminConversationTeamsRequest) (*AdminConversationTeamsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminConversationTeams not implemented")
@@ -780,6 +796,24 @@ func _ConversationMutationsService_AdminConvertConversationToPrivate_Handler(srv
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConversationMutationsService_AdminConvertConversationToPublic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConvertConversationToPrivateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminConvertConversationToPublic(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminConvertConversationToPublic_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminConvertConversationToPublic(ctx, req.(*ConvertConversationToPrivateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConversationMutationsService_AdminConversationTeams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminConversationTeamsRequest)
 	if err := dec(in); err != nil {
@@ -902,6 +936,10 @@ var ConversationMutationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminConvertConversationToPrivate",
 			Handler:    _ConversationMutationsService_AdminConvertConversationToPrivate_Handler,
+		},
+		{
+			MethodName: "AdminConvertConversationToPublic",
+			Handler:    _ConversationMutationsService_AdminConvertConversationToPublic_Handler,
 		},
 		{
 			MethodName: "AdminConversationTeams",

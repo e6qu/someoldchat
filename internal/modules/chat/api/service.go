@@ -234,6 +234,7 @@ type Service interface {
 	ReleaseSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Time) error
 	AdminInviteConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.UserID) (domain.Conversation, error)
 	AdminConvertConversationToPrivate(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Conversation, error)
+	AdminConvertConversationToPublic(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Conversation, error)
 	AdminGetConversationPrefs(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationPrefs, error)
 	AdminSetConversationPrefs(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ConversationPrefs) (domain.ConversationPrefs, error)
 	AdminSearchConversations(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.ConversationPage, error)

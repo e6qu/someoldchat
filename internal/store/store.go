@@ -549,6 +549,12 @@ type Store interface {
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	SetConversationPrivate(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)
+	// SetConversationPublic is the reverse. It is a separate method rather than
+	// a flag on the first because the two are not symmetrical in what they
+	// expose: making a channel private hides what was said from people who
+	// could already read it, while making it public shows what was said to
+	// people who never could.
+	SetConversationPublic(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)
 	GetConversationPrefs(context.Context, domain.ConversationID) (domain.ConversationPrefs, error)
 	SetConversationPrefs(context.Context, domain.ConversationID, domain.ConversationPrefs, events.Event) (domain.ConversationPrefs, error)
 	// GetConversationRetention returns a channel's message-retention override,

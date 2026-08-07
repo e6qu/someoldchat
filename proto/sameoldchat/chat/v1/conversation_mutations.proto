@@ -146,6 +146,7 @@ service ConversationMutationsService {
   rpc AdminListConversationAccessGroups(ConversationRequest) returns (ConversationAccessGroupsResponse);
   rpc AdminInviteConversationMembers(InviteConversationMembersRequest) returns (Conversation);
   rpc AdminConvertConversationToPrivate(ConvertConversationToPrivateRequest) returns (Conversation);
+  rpc AdminConvertConversationToPublic(ConvertConversationToPrivateRequest) returns (Conversation);
   rpc AdminConversationTeams(AdminConversationTeamsRequest) returns (AdminConversationTeamsResponse);
   rpc AdminSetConversationTeams(AdminConversationTeamsRequest) returns (MutationResponse);
 }
