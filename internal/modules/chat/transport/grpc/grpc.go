@@ -1630,6 +1630,29 @@ func (r Remote) SetUserExpiration(ctx context.Context, workspaceID domain.Worksp
 	return nil
 }
 
+func (r Remote) UserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) ([]domain.WorkspaceSession, error) {
+	out, err := r.directory.UserSessions(ctx, &chatv1.ResetUserSessionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoWorkspaceSessions(out.GetSessions()), nil
+}
+
+func (r Remote) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) error {
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, string(target))
+	}
+	out, err := r.directory.ResetUserSessionsBulk(ctx, &chatv1.ResetUserSessionsBulkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserIds: ids})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed bulk session reset was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) ResetUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) error {
 	out, err := r.directory.ResetUserSessions(ctx, &chatv1.ResetUserSessionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
 	if err != nil {
@@ -5156,6 +5179,58 @@ func (s *Server) ResetUserSessions(ctx context.Context, input *chatv1.ResetUserS
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) UserSessions(ctx context.Context, input *chatv1.ResetUserSessionsRequest) (*chatv1.UserSessionsResponse, error) {
+	sessions, err := s.implementation.UserSessions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.UserSessionsResponse{Sessions: encodeProtoWorkspaceSessions(sessions)}, nil
+}
+
+func (s *Server) ResetUserSessionsBulk(ctx context.Context, input *chatv1.ResetUserSessionsBulkRequest) (*chatv1.MutationResponse, error) {
+	targets := make([]domain.UserID, 0, len(input.GetTargetUserIds()))
+	for _, target := range input.GetTargetUserIds() {
+		targets = append(targets, domain.UserID(target))
+	}
+	if err := s.implementation.ResetUserSessionsBulk(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), targets); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func encodeProtoWorkspaceSession(value domain.WorkspaceSession) *chatv1.WorkspaceSession {
+	return &chatv1.WorkspaceSession{
+		Id: value.ID, UserId: string(value.UserID),
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), ExpiresAtUnixNano: optionalUnixNano(value.ExpiresAt),
+	}
+}
+
+func decodeProtoWorkspaceSession(value *chatv1.WorkspaceSession) domain.WorkspaceSession {
+	if value == nil {
+		return domain.WorkspaceSession{}
+	}
+	return domain.WorkspaceSession{
+		ID: value.GetId(), UserID: domain.UserID(value.GetUserId()),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), ExpiresAt: optionalTimeFromUnixNano(value.GetExpiresAtUnixNano()),
+	}
+}
+
+func encodeProtoWorkspaceSessions(values []domain.WorkspaceSession) []*chatv1.WorkspaceSession {
+	sessions := make([]*chatv1.WorkspaceSession, 0, len(values))
+	for _, value := range values {
+		sessions = append(sessions, encodeProtoWorkspaceSession(value))
+	}
+	return sessions
+}
+
+func decodeProtoWorkspaceSessions(values []*chatv1.WorkspaceSession) []domain.WorkspaceSession {
+	sessions := make([]domain.WorkspaceSession, 0, len(values))
+	for _, value := range values {
+		sessions = append(sessions, decodeProtoWorkspaceSession(value))
+	}
+	return sessions
 }
 
 func (s *Server) AdminRenameConversation(ctx context.Context, input *chatv1.RenameConversationRequest) (*chatv1.Conversation, error) {
@@ -9770,7 +9845,7 @@ func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
 }
 
 func encodeProtoSession(value domain.SessionRecord) *chatv1.SessionRecord {
-	return &chatv1.SessionRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: domain.NormalizeScopes(value.Scopes), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), Revoked: value.Revoked, OidcProvider: value.OIDCProvider, OidcIdToken: value.OIDCIDToken, OidcSubject: value.OIDCSubject, OidcSid: value.OIDCSID}
+	return &chatv1.SessionRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: domain.NormalizeScopes(value.Scopes), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), Revoked: value.Revoked, OidcProvider: value.OIDCProvider, OidcIdToken: value.OIDCIDToken, OidcSubject: value.OIDCSubject, OidcSid: value.OIDCSID}
 }
 
 func decodeProtoSession(value *chatv1.SessionRecord) (domain.SessionRecord, error) {
@@ -9781,7 +9856,7 @@ func decodeProtoSession(value *chatv1.SessionRecord) (domain.SessionRecord, erro
 	if err != nil {
 		return domain.SessionRecord{}, errors.New("typed session expires_at is invalid")
 	}
-	return domain.SessionRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Scopes: domain.NormalizeScopes(value.GetScopes()), ExpiresAt: expires.UTC(), Revoked: value.GetRevoked(), OIDCProvider: value.GetOidcProvider(), OIDCIDToken: value.GetOidcIdToken(), OIDCSubject: value.GetOidcSubject(), OIDCSID: value.GetOidcSid()}, nil
+	return domain.SessionRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Scopes: domain.NormalizeScopes(value.GetScopes()), ExpiresAt: expires.UTC(), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), Revoked: value.GetRevoked(), OIDCProvider: value.GetOidcProvider(), OIDCIDToken: value.GetOidcIdToken(), OIDCSubject: value.GetOidcSubject(), OIDCSID: value.GetOidcSid()}, nil
 }
 
 func encodeProtoEvents(records []events.Record) *chatv1.EventsResponse {

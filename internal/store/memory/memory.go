@@ -1234,6 +1234,31 @@ func (s *Store) RevokeOIDCSessions(_ context.Context, workspaceID domain.Workspa
 	return nil
 }
 
+// ListUserSessions mirrors the SQL profile: live sessions only, newest first,
+// identified by the stored hash rather than the token.
+func (s *Store) ListUserSessions(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.WorkspaceSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	sessions := make([]domain.WorkspaceSession, 0, 8)
+	for key, record := range s.sessions {
+		if record.WorkspaceID != workspace || record.UserID != user || record.Revoked {
+			continue
+		}
+		if !record.ExpiresAt.After(now) {
+			continue
+		}
+		sessions = append(sessions, domain.WorkspaceSession{ID: key, UserID: record.UserID, CreatedAt: record.CreatedAt, ExpiresAt: record.ExpiresAt})
+	}
+	sort.Slice(sessions, func(left, right int) bool {
+		if !sessions[left].CreatedAt.Equal(sessions[right].CreatedAt) {
+			return sessions[left].CreatedAt.After(sessions[right].CreatedAt)
+		}
+		return sessions[left].ID < sessions[right].ID
+	})
+	return sessions, nil
+}
+
 func (s *Store) RevokeUserSessions(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

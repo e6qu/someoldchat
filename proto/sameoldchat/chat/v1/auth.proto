@@ -72,6 +72,7 @@ message SessionRecord {
   string oidc_id_token = 7;
   string oidc_subject = 8;
   string oidc_sid = 9;
+  int64 created_at_unix_nano = 10;
 }
 
 message TokenRequest {

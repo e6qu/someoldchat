@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE TABLE IF NOT EXISTS sessions (
  session_hash TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
 	user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0,
-	oidc_provider TEXT NOT NULL DEFAULT '', oidc_id_token TEXT NOT NULL DEFAULT '', oidc_subject TEXT NOT NULL DEFAULT '', oidc_sid TEXT NOT NULL DEFAULT ''
+	oidc_provider TEXT NOT NULL DEFAULT '', oidc_id_token TEXT NOT NULL DEFAULT '', oidc_subject TEXT NOT NULL DEFAULT '', oidc_sid TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS oidc_logout_tokens (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, token_id TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (workspace_id, provider, token_id));
 CREATE TABLE IF NOT EXISTS auth_methods (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, enabled INTEGER NOT NULL, PRIMARY KEY(workspace_id, provider));
@@ -554,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 148
+const schemaVersion = 149
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3149,6 +3150,23 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 149 {
+		// When a session began. An administrator judging whether a session is
+		// one the member still recognises needs to know when it started; an
+		// expiry says only when it will lapse. Sessions that predate this
+		// column keep the zero time, which reads as unknown rather than as the
+		// beginning of 1970 — inventing a start for them would be worse than
+		// admitting it was never recorded.
+		columns, err := s.tableColumns(ctx, db, "sessions")
+		if err != nil {
+			return err
+		}
+		if !columns["created_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate session creation: %w", err)
+			}
+		}
+	}
 	if version < 148 {
 		// A decision on a Slack Connect invitation is news to whoever asked for
 		// it. The identifier is its own column beside conversation_id: the row
@@ -5142,7 +5160,7 @@ func (s *Store) SeedSession(ctx context.Context, token string, record domain.Ses
 	if record.Revoked {
 		revoked = 1
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), domain.NewStoredTime(record.ExpiresAt), revoked, record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), domain.NewStoredTime(record.ExpiresAt), revoked, record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID, unixNanoOrZeroTime(record.CreatedAt))
 	return err
 }
 
@@ -5150,7 +5168,7 @@ func (s *Store) CreateSession(ctx context.Context, token string, record domain.S
 	if strings.TrimSpace(token) == "" || record.WorkspaceID == "" || record.UserID == "" || record.ExpiresAt.IsZero() || !record.ExpiresAt.After(time.Now().UTC()) || len(domain.NormalizeScopes(record.Scopes)) == 0 {
 		return store.InvalidArgument("invalid session")
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), domain.NewStoredTime(record.ExpiresAt), boolInt(record.Revoked), record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
+	result, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), domain.NewStoredTime(record.ExpiresAt), boolInt(record.Revoked), record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID, unixNanoOrZeroTime(record.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -5162,6 +5180,40 @@ func (s *Store) CreateSession(ctx context.Context, token string, record domain.S
 		return store.ErrAlreadyExists
 	}
 	return nil
+}
+
+// ListUserSessions reports one member's live sessions, newest first. Revoked
+// and expired rows are left out: an administrator reviewing who is signed in is
+// asking who can act right now, and a list padded with sessions that cannot be
+// used would hide the ones that can.
+func (s *Store) ListUserSessions(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.WorkspaceSession, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT session_hash, user_id, created_at, expires_at
+		FROM sessions WHERE workspace_id = ? AND user_id = ? AND revoked = 0
+		ORDER BY created_at DESC, session_hash`, workspace, user)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	now := time.Now().UTC()
+	sessions := make([]domain.WorkspaceSession, 0, 8)
+	for rows.Next() {
+		var session domain.WorkspaceSession
+		var created int64
+		var expires string
+		if err := rows.Scan(&session.ID, &session.UserID, &created, &expires); err != nil {
+			return nil, err
+		}
+		session.ExpiresAt, err = domain.ParseStoredTime(expires)
+		if err != nil {
+			return nil, err
+		}
+		if !session.ExpiresAt.After(now) {
+			continue
+		}
+		session.CreatedAt = timeFromUnixNanoOrZero(created)
+		sessions = append(sessions, session)
+	}
+	return sessions, rows.Err()
 }
 
 func (s *Store) LookupSession(ctx context.Context, token string) (domain.SessionRecord, error) {

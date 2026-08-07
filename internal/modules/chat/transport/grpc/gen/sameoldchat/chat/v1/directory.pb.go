@@ -1393,6 +1393,178 @@ func (x *ResetUserSessionsRequest) GetTargetUserId() string {
 	return ""
 }
 
+type WorkspaceSession struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CreatedAtUnixNano int64                  `protobuf:"varint,3,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	ExpiresAtUnixNano int64                  `protobuf:"varint,4,opt,name=expires_at_unix_nano,json=expiresAtUnixNano,proto3" json:"expires_at_unix_nano,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *WorkspaceSession) Reset() {
+	*x = WorkspaceSession{}
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceSession) ProtoMessage() {}
+
+func (x *WorkspaceSession) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceSession.ProtoReflect.Descriptor instead.
+func (*WorkspaceSession) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *WorkspaceSession) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *WorkspaceSession) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkspaceSession) GetCreatedAtUnixNano() int64 {
+	if x != nil {
+		return x.CreatedAtUnixNano
+	}
+	return 0
+}
+
+func (x *WorkspaceSession) GetExpiresAtUnixNano() int64 {
+	if x != nil {
+		return x.ExpiresAtUnixNano
+	}
+	return 0
+}
+
+type UserSessionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sessions      []*WorkspaceSession    `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserSessionsResponse) Reset() {
+	*x = UserSessionsResponse{}
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserSessionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserSessionsResponse) ProtoMessage() {}
+
+func (x *UserSessionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserSessionsResponse.ProtoReflect.Descriptor instead.
+func (*UserSessionsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *UserSessionsResponse) GetSessions() []*WorkspaceSession {
+	if x != nil {
+		return x.Sessions
+	}
+	return nil
+}
+
+type ResetUserSessionsBulkRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TargetUserIds []string               `protobuf:"bytes,3,rep,name=target_user_ids,json=targetUserIds,proto3" json:"target_user_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetUserSessionsBulkRequest) Reset() {
+	*x = ResetUserSessionsBulkRequest{}
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetUserSessionsBulkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetUserSessionsBulkRequest) ProtoMessage() {}
+
+func (x *ResetUserSessionsBulkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetUserSessionsBulkRequest.ProtoReflect.Descriptor instead.
+func (*ResetUserSessionsBulkRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ResetUserSessionsBulkRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ResetUserSessionsBulkRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ResetUserSessionsBulkRequest) GetTargetUserIds() []string {
+	if x != nil {
+		return x.TargetUserIds
+	}
+	return nil
+}
+
 type Emoji struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1404,7 +1576,7 @@ type Emoji struct {
 
 func (x *Emoji) Reset() {
 	*x = Emoji{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1416,7 +1588,7 @@ func (x *Emoji) String() string {
 func (*Emoji) ProtoMessage() {}
 
 func (x *Emoji) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1429,7 +1601,7 @@ func (x *Emoji) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Emoji.ProtoReflect.Descriptor instead.
 func (*Emoji) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{21}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *Emoji) GetName() string {
@@ -1463,7 +1635,7 @@ type EmojiListRequest struct {
 
 func (x *EmojiListRequest) Reset() {
 	*x = EmojiListRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1475,7 +1647,7 @@ func (x *EmojiListRequest) String() string {
 func (*EmojiListRequest) ProtoMessage() {}
 
 func (x *EmojiListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1488,7 +1660,7 @@ func (x *EmojiListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmojiListRequest.ProtoReflect.Descriptor instead.
 func (*EmojiListRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{22}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *EmojiListRequest) GetWorkspaceId() string {
@@ -1517,7 +1689,7 @@ type EmojiMutationRequest struct {
 
 func (x *EmojiMutationRequest) Reset() {
 	*x = EmojiMutationRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1529,7 +1701,7 @@ func (x *EmojiMutationRequest) String() string {
 func (*EmojiMutationRequest) ProtoMessage() {}
 
 func (x *EmojiMutationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1542,7 +1714,7 @@ func (x *EmojiMutationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmojiMutationRequest.ProtoReflect.Descriptor instead.
 func (*EmojiMutationRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{23}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *EmojiMutationRequest) GetWorkspaceId() string {
@@ -1582,7 +1754,7 @@ type EmojiListResponse struct {
 
 func (x *EmojiListResponse) Reset() {
 	*x = EmojiListResponse{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1594,7 +1766,7 @@ func (x *EmojiListResponse) String() string {
 func (*EmojiListResponse) ProtoMessage() {}
 
 func (x *EmojiListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1607,7 +1779,7 @@ func (x *EmojiListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmojiListResponse.ProtoReflect.Descriptor instead.
 func (*EmojiListResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{24}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *EmojiListResponse) GetEmojis() []*Emoji {
@@ -1630,7 +1802,7 @@ type SearchConversationsRequest struct {
 
 func (x *SearchConversationsRequest) Reset() {
 	*x = SearchConversationsRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1642,7 +1814,7 @@ func (x *SearchConversationsRequest) String() string {
 func (*SearchConversationsRequest) ProtoMessage() {}
 
 func (x *SearchConversationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1655,7 +1827,7 @@ func (x *SearchConversationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchConversationsRequest.ProtoReflect.Descriptor instead.
 func (*SearchConversationsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{25}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SearchConversationsRequest) GetWorkspaceId() string {
@@ -1706,7 +1878,7 @@ type SearchPeopleRequest struct {
 
 func (x *SearchPeopleRequest) Reset() {
 	*x = SearchPeopleRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1718,7 +1890,7 @@ func (x *SearchPeopleRequest) String() string {
 func (*SearchPeopleRequest) ProtoMessage() {}
 
 func (x *SearchPeopleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1731,7 +1903,7 @@ func (x *SearchPeopleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchPeopleRequest.ProtoReflect.Descriptor instead.
 func (*SearchPeopleRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{26}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SearchPeopleRequest) GetWorkspaceId() string {
@@ -1780,7 +1952,7 @@ type SetWorkspaceNameRequest struct {
 
 func (x *SetWorkspaceNameRequest) Reset() {
 	*x = SetWorkspaceNameRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[27]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1792,7 +1964,7 @@ func (x *SetWorkspaceNameRequest) String() string {
 func (*SetWorkspaceNameRequest) ProtoMessage() {}
 
 func (x *SetWorkspaceNameRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[27]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1805,7 +1977,7 @@ func (x *SetWorkspaceNameRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameRequest.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{27}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SetWorkspaceNameRequest) GetWorkspaceId() string {
@@ -1840,7 +2012,7 @@ type SetWorkspaceDescriptionRequest struct {
 
 func (x *SetWorkspaceDescriptionRequest) Reset() {
 	*x = SetWorkspaceDescriptionRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[28]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1852,7 +2024,7 @@ func (x *SetWorkspaceDescriptionRequest) String() string {
 func (*SetWorkspaceDescriptionRequest) ProtoMessage() {}
 
 func (x *SetWorkspaceDescriptionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[28]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1865,7 +2037,7 @@ func (x *SetWorkspaceDescriptionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceDescriptionRequest.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceDescriptionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{28}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SetWorkspaceDescriptionRequest) GetWorkspaceId() string {
@@ -1900,7 +2072,7 @@ type SetWorkspaceDiscoverabilityRequest struct {
 
 func (x *SetWorkspaceDiscoverabilityRequest) Reset() {
 	*x = SetWorkspaceDiscoverabilityRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[29]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1912,7 +2084,7 @@ func (x *SetWorkspaceDiscoverabilityRequest) String() string {
 func (*SetWorkspaceDiscoverabilityRequest) ProtoMessage() {}
 
 func (x *SetWorkspaceDiscoverabilityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[29]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1925,7 +2097,7 @@ func (x *SetWorkspaceDiscoverabilityRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SetWorkspaceDiscoverabilityRequest.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceDiscoverabilityRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{29}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SetWorkspaceDiscoverabilityRequest) GetWorkspaceId() string {
@@ -1960,7 +2132,7 @@ type SetWorkspaceIconRequest struct {
 
 func (x *SetWorkspaceIconRequest) Reset() {
 	*x = SetWorkspaceIconRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[30]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1972,7 +2144,7 @@ func (x *SetWorkspaceIconRequest) String() string {
 func (*SetWorkspaceIconRequest) ProtoMessage() {}
 
 func (x *SetWorkspaceIconRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[30]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1985,7 +2157,7 @@ func (x *SetWorkspaceIconRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceIconRequest.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceIconRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{30}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *SetWorkspaceIconRequest) GetWorkspaceId() string {
@@ -2020,7 +2192,7 @@ type SetWorkspaceDefaultChannelsRequest struct {
 
 func (x *SetWorkspaceDefaultChannelsRequest) Reset() {
 	*x = SetWorkspaceDefaultChannelsRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[31]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2032,7 +2204,7 @@ func (x *SetWorkspaceDefaultChannelsRequest) String() string {
 func (*SetWorkspaceDefaultChannelsRequest) ProtoMessage() {}
 
 func (x *SetWorkspaceDefaultChannelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[31]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2045,7 +2217,7 @@ func (x *SetWorkspaceDefaultChannelsRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SetWorkspaceDefaultChannelsRequest.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceDefaultChannelsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{31}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SetWorkspaceDefaultChannelsRequest) GetWorkspaceId() string {
@@ -2079,7 +2251,7 @@ type ConversationPreferenceList struct {
 
 func (x *ConversationPreferenceList) Reset() {
 	*x = ConversationPreferenceList{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[32]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2091,7 +2263,7 @@ func (x *ConversationPreferenceList) String() string {
 func (*ConversationPreferenceList) ProtoMessage() {}
 
 func (x *ConversationPreferenceList) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[32]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2104,7 +2276,7 @@ func (x *ConversationPreferenceList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPreferenceList.ProtoReflect.Descriptor instead.
 func (*ConversationPreferenceList) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{32}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ConversationPreferenceList) GetTypes() []string {
@@ -2132,7 +2304,7 @@ type ConversationPrefs struct {
 
 func (x *ConversationPrefs) Reset() {
 	*x = ConversationPrefs{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[33]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2144,7 +2316,7 @@ func (x *ConversationPrefs) String() string {
 func (*ConversationPrefs) ProtoMessage() {}
 
 func (x *ConversationPrefs) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[33]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2157,7 +2329,7 @@ func (x *ConversationPrefs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPrefs.ProtoReflect.Descriptor instead.
 func (*ConversationPrefs) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{33}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ConversationPrefs) GetConversationId() string {
@@ -2192,7 +2364,7 @@ type ConversationPrefsRequest struct {
 
 func (x *ConversationPrefsRequest) Reset() {
 	*x = ConversationPrefsRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2204,7 +2376,7 @@ func (x *ConversationPrefsRequest) String() string {
 func (*ConversationPrefsRequest) ProtoMessage() {}
 
 func (x *ConversationPrefsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2217,7 +2389,7 @@ func (x *ConversationPrefsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationPrefsRequest.ProtoReflect.Descriptor instead.
 func (*ConversationPrefsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{34}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ConversationPrefsRequest) GetWorkspaceId() string {
@@ -2261,7 +2433,7 @@ type SetConversationPrefsRequest struct {
 
 func (x *SetConversationPrefsRequest) Reset() {
 	*x = SetConversationPrefsRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[35]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2273,7 +2445,7 @@ func (x *SetConversationPrefsRequest) String() string {
 func (*SetConversationPrefsRequest) ProtoMessage() {}
 
 func (x *SetConversationPrefsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[35]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2286,7 +2458,7 @@ func (x *SetConversationPrefsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetConversationPrefsRequest.ProtoReflect.Descriptor instead.
 func (*SetConversationPrefsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{35}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SetConversationPrefsRequest) GetWorkspaceId() string {
@@ -2330,7 +2502,7 @@ type AdminTeamUsersRequest struct {
 
 func (x *AdminTeamUsersRequest) Reset() {
 	*x = AdminTeamUsersRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[36]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2342,7 +2514,7 @@ func (x *AdminTeamUsersRequest) String() string {
 func (*AdminTeamUsersRequest) ProtoMessage() {}
 
 func (x *AdminTeamUsersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[36]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2355,7 +2527,7 @@ func (x *AdminTeamUsersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminTeamUsersRequest.ProtoReflect.Descriptor instead.
 func (*AdminTeamUsersRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{36}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *AdminTeamUsersRequest) GetWorkspaceId() string {
@@ -2411,7 +2583,7 @@ type AdminInviteUserRequest struct {
 
 func (x *AdminInviteUserRequest) Reset() {
 	*x = AdminInviteUserRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[37]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2423,7 +2595,7 @@ func (x *AdminInviteUserRequest) String() string {
 func (*AdminInviteUserRequest) ProtoMessage() {}
 
 func (x *AdminInviteUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[37]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2436,7 +2608,7 @@ func (x *AdminInviteUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminInviteUserRequest.ProtoReflect.Descriptor instead.
 func (*AdminInviteUserRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{37}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *AdminInviteUserRequest) GetWorkspaceId() string {
@@ -2522,7 +2694,7 @@ type AdminCreateUserRequest struct {
 
 func (x *AdminCreateUserRequest) Reset() {
 	*x = AdminCreateUserRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[38]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2534,7 +2706,7 @@ func (x *AdminCreateUserRequest) String() string {
 func (*AdminCreateUserRequest) ProtoMessage() {}
 
 func (x *AdminCreateUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[38]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2547,7 +2719,7 @@ func (x *AdminCreateUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminCreateUserRequest.ProtoReflect.Descriptor instead.
 func (*AdminCreateUserRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{38}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *AdminCreateUserRequest) GetWorkspaceId() string {
@@ -2599,7 +2771,7 @@ type WorkspaceMembershipRequest struct {
 
 func (x *WorkspaceMembershipRequest) Reset() {
 	*x = WorkspaceMembershipRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[39]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2611,7 +2783,7 @@ func (x *WorkspaceMembershipRequest) String() string {
 func (*WorkspaceMembershipRequest) ProtoMessage() {}
 
 func (x *WorkspaceMembershipRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[39]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2624,7 +2796,7 @@ func (x *WorkspaceMembershipRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceMembershipRequest.ProtoReflect.Descriptor instead.
 func (*WorkspaceMembershipRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{39}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *WorkspaceMembershipRequest) GetWorkspaceId() string {
@@ -2662,7 +2834,7 @@ type WorkspaceMembership struct {
 
 func (x *WorkspaceMembership) Reset() {
 	*x = WorkspaceMembership{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[40]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2674,7 +2846,7 @@ func (x *WorkspaceMembership) String() string {
 func (*WorkspaceMembership) ProtoMessage() {}
 
 func (x *WorkspaceMembership) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[40]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2687,7 +2859,7 @@ func (x *WorkspaceMembership) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceMembership.ProtoReflect.Descriptor instead.
 func (*WorkspaceMembership) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{40}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *WorkspaceMembership) GetWorkspaceId() string {
@@ -2748,7 +2920,7 @@ type ProvisionExternalUserRequest struct {
 
 func (x *ProvisionExternalUserRequest) Reset() {
 	*x = ProvisionExternalUserRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[41]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2760,7 +2932,7 @@ func (x *ProvisionExternalUserRequest) String() string {
 func (*ProvisionExternalUserRequest) ProtoMessage() {}
 
 func (x *ProvisionExternalUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[41]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2773,7 +2945,7 @@ func (x *ProvisionExternalUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProvisionExternalUserRequest.ProtoReflect.Descriptor instead.
 func (*ProvisionExternalUserRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{41}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ProvisionExternalUserRequest) GetWorkspaceId() string {
@@ -2818,7 +2990,7 @@ type SynchronizeExternalUserRoleRequest struct {
 
 func (x *SynchronizeExternalUserRoleRequest) Reset() {
 	*x = SynchronizeExternalUserRoleRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[42]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2830,7 +3002,7 @@ func (x *SynchronizeExternalUserRoleRequest) String() string {
 func (*SynchronizeExternalUserRoleRequest) ProtoMessage() {}
 
 func (x *SynchronizeExternalUserRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[42]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2843,7 +3015,7 @@ func (x *SynchronizeExternalUserRoleRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SynchronizeExternalUserRoleRequest.ProtoReflect.Descriptor instead.
 func (*SynchronizeExternalUserRoleRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{42}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *SynchronizeExternalUserRoleRequest) GetWorkspaceId() string {
@@ -2879,7 +3051,7 @@ type AdminAssignUserRequest struct {
 
 func (x *AdminAssignUserRequest) Reset() {
 	*x = AdminAssignUserRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[43]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2891,7 +3063,7 @@ func (x *AdminAssignUserRequest) String() string {
 func (*AdminAssignUserRequest) ProtoMessage() {}
 
 func (x *AdminAssignUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[43]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2904,7 +3076,7 @@ func (x *AdminAssignUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminAssignUserRequest.ProtoReflect.Descriptor instead.
 func (*AdminAssignUserRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{43}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *AdminAssignUserRequest) GetWorkspaceId() string {
@@ -2960,7 +3132,7 @@ type InviteRequest struct {
 
 func (x *InviteRequest) Reset() {
 	*x = InviteRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[44]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2972,7 +3144,7 @@ func (x *InviteRequest) String() string {
 func (*InviteRequest) ProtoMessage() {}
 
 func (x *InviteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[44]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2985,7 +3157,7 @@ func (x *InviteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteRequest.ProtoReflect.Descriptor instead.
 func (*InviteRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{44}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *InviteRequest) GetId() string {
@@ -3122,7 +3294,7 @@ type InvitationPreviewRequest struct {
 
 func (x *InvitationPreviewRequest) Reset() {
 	*x = InvitationPreviewRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[45]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3134,7 +3306,7 @@ func (x *InvitationPreviewRequest) String() string {
 func (*InvitationPreviewRequest) ProtoMessage() {}
 
 func (x *InvitationPreviewRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[45]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3147,7 +3319,7 @@ func (x *InvitationPreviewRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvitationPreviewRequest.ProtoReflect.Descriptor instead.
 func (*InvitationPreviewRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{45}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *InvitationPreviewRequest) GetWorkspaceId() string {
@@ -3175,7 +3347,7 @@ type AcceptInvitationRequest struct {
 
 func (x *AcceptInvitationRequest) Reset() {
 	*x = AcceptInvitationRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[46]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3187,7 +3359,7 @@ func (x *AcceptInvitationRequest) String() string {
 func (*AcceptInvitationRequest) ProtoMessage() {}
 
 func (x *AcceptInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[46]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3200,7 +3372,7 @@ func (x *AcceptInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptInvitationRequest.ProtoReflect.Descriptor instead.
 func (*AcceptInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{46}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *AcceptInvitationRequest) GetWorkspaceId() string {
@@ -3237,7 +3409,7 @@ type InviteRequestsRequest struct {
 
 func (x *InviteRequestsRequest) Reset() {
 	*x = InviteRequestsRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[47]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3249,7 +3421,7 @@ func (x *InviteRequestsRequest) String() string {
 func (*InviteRequestsRequest) ProtoMessage() {}
 
 func (x *InviteRequestsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[47]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3262,7 +3434,7 @@ func (x *InviteRequestsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteRequestsRequest.ProtoReflect.Descriptor instead.
 func (*InviteRequestsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{47}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *InviteRequestsRequest) GetWorkspaceId() string {
@@ -3311,7 +3483,7 @@ type InviteRequestMutationRequest struct {
 
 func (x *InviteRequestMutationRequest) Reset() {
 	*x = InviteRequestMutationRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[48]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3323,7 +3495,7 @@ func (x *InviteRequestMutationRequest) String() string {
 func (*InviteRequestMutationRequest) ProtoMessage() {}
 
 func (x *InviteRequestMutationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[48]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3336,7 +3508,7 @@ func (x *InviteRequestMutationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteRequestMutationRequest.ProtoReflect.Descriptor instead.
 func (*InviteRequestMutationRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{48}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *InviteRequestMutationRequest) GetWorkspaceId() string {
@@ -3371,7 +3543,7 @@ type InviteRequestPage struct {
 
 func (x *InviteRequestPage) Reset() {
 	*x = InviteRequestPage{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[49]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3383,7 +3555,7 @@ func (x *InviteRequestPage) String() string {
 func (*InviteRequestPage) ProtoMessage() {}
 
 func (x *InviteRequestPage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[49]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3396,7 +3568,7 @@ func (x *InviteRequestPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteRequestPage.ProtoReflect.Descriptor instead.
 func (*InviteRequestPage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{49}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *InviteRequestPage) GetRequests() []*InviteRequest {
@@ -3434,7 +3606,7 @@ type AppApproval struct {
 
 func (x *AppApproval) Reset() {
 	*x = AppApproval{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[50]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3446,7 +3618,7 @@ func (x *AppApproval) String() string {
 func (*AppApproval) ProtoMessage() {}
 
 func (x *AppApproval) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[50]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3459,7 +3631,7 @@ func (x *AppApproval) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppApproval.ProtoReflect.Descriptor instead.
 func (*AppApproval) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{50}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *AppApproval) GetAppId() string {
@@ -3517,7 +3689,7 @@ type AppApprovalsRequest struct {
 
 func (x *AppApprovalsRequest) Reset() {
 	*x = AppApprovalsRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[51]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3529,7 +3701,7 @@ func (x *AppApprovalsRequest) String() string {
 func (*AppApprovalsRequest) ProtoMessage() {}
 
 func (x *AppApprovalsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[51]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3542,7 +3714,7 @@ func (x *AppApprovalsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppApprovalsRequest.ProtoReflect.Descriptor instead.
 func (*AppApprovalsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{51}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *AppApprovalsRequest) GetWorkspaceId() string {
@@ -3592,7 +3764,7 @@ type AppApprovalMutationRequest struct {
 
 func (x *AppApprovalMutationRequest) Reset() {
 	*x = AppApprovalMutationRequest{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[52]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3604,7 +3776,7 @@ func (x *AppApprovalMutationRequest) String() string {
 func (*AppApprovalMutationRequest) ProtoMessage() {}
 
 func (x *AppApprovalMutationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[52]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3617,7 +3789,7 @@ func (x *AppApprovalMutationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppApprovalMutationRequest.ProtoReflect.Descriptor instead.
 func (*AppApprovalMutationRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{52}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *AppApprovalMutationRequest) GetWorkspaceId() string {
@@ -3659,7 +3831,7 @@ type AppApprovalPage struct {
 
 func (x *AppApprovalPage) Reset() {
 	*x = AppApprovalPage{}
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[53]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3671,7 +3843,7 @@ func (x *AppApprovalPage) String() string {
 func (*AppApprovalPage) ProtoMessage() {}
 
 func (x *AppApprovalPage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[53]
+	mi := &file_sameoldchat_chat_v1_directory_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3684,7 +3856,7 @@ func (x *AppApprovalPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppApprovalPage.ProtoReflect.Descriptor instead.
 func (*AppApprovalPage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{53}
+	return file_sameoldchat_chat_v1_directory_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *AppApprovalPage) GetApps() []*AppApproval {
@@ -3823,7 +3995,18 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\x18ResetUserSessionsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
-	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\"J\n" +
+	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\"\x9d\x01\n" +
+	"\x10WorkspaceSession\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12/\n" +
+	"\x14created_at_unix_nano\x18\x03 \x01(\x03R\x11createdAtUnixNano\x12/\n" +
+	"\x14expires_at_unix_nano\x18\x04 \x01(\x03R\x11expiresAtUnixNano\"Y\n" +
+	"\x14UserSessionsResponse\x12A\n" +
+	"\bsessions\x18\x01 \x03(\v2%.sameoldchat.chat.v1.WorkspaceSessionR\bsessions\"\x82\x01\n" +
+	"\x1cResetUserSessionsBulkRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12&\n" +
+	"\x0ftarget_user_ids\x18\x03 \x03(\tR\rtargetUserIds\"J\n" +
 	"\x05Emoji\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x1b\n" +
@@ -4019,7 +4202,7 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\x04apps\x18\x01 \x03(\v2 .sameoldchat.chat.v1.AppApprovalR\x04apps\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xef\"\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xcc$\n" +
 	"\x10DirectoryService\x12I\n" +
 	"\x05Users\x12!.sameoldchat.chat.v1.UsersRequest\x1a\x1d.sameoldchat.chat.v1.UserPage\x12e\n" +
 	"\x13ConversationMembers\x12/.sameoldchat.chat.v1.ConversationMembersRequest\x1a\x1d.sameoldchat.chat.v1.UserPage\x12V\n" +
@@ -4030,7 +4213,9 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"RemoveUser\x12&.sameoldchat.chat.v1.RemoveUserRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12]\n" +
 	"\vSetUserRole\x12'.sameoldchat.chat.v1.SetUserRoleRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12i\n" +
 	"\x11SetUserExpiration\x12-.sameoldchat.chat.v1.SetUserExpirationRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12i\n" +
-	"\x11ResetUserSessions\x12-.sameoldchat.chat.v1.ResetUserSessionsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12W\n" +
+	"\x11ResetUserSessions\x12-.sameoldchat.chat.v1.ResetUserSessionsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12h\n" +
+	"\fUserSessions\x12-.sameoldchat.chat.v1.ResetUserSessionsRequest\x1a).sameoldchat.chat.v1.UserSessionsResponse\x12q\n" +
+	"\x15ResetUserSessionsBulk\x121.sameoldchat.chat.v1.ResetUserSessionsBulkRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12W\n" +
 	"\x06Emojis\x12%.sameoldchat.chat.v1.EmojiListRequest\x1a&.sameoldchat.chat.v1.EmojiListResponse\x12\\\n" +
 	"\bAddEmoji\x12).sameoldchat.chat.v1.EmojiMutationRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12a\n" +
 	"\rAddEmojiAlias\x12).sameoldchat.chat.v1.EmojiMutationRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12_\n" +
@@ -4078,7 +4263,7 @@ func file_sameoldchat_chat_v1_directory_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_directory_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_directory_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
+var file_sameoldchat_chat_v1_directory_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
 var file_sameoldchat_chat_v1_directory_proto_goTypes = []any{
 	(*UserPage)(nil),                           // 0: sameoldchat.chat.v1.UserPage
 	(*AdminUser)(nil),                          // 1: sameoldchat.chat.v1.AdminUser
@@ -4101,148 +4286,156 @@ var file_sameoldchat_chat_v1_directory_proto_goTypes = []any{
 	(*SetUserRoleRequest)(nil),                 // 18: sameoldchat.chat.v1.SetUserRoleRequest
 	(*SetUserExpirationRequest)(nil),           // 19: sameoldchat.chat.v1.SetUserExpirationRequest
 	(*ResetUserSessionsRequest)(nil),           // 20: sameoldchat.chat.v1.ResetUserSessionsRequest
-	(*Emoji)(nil),                              // 21: sameoldchat.chat.v1.Emoji
-	(*EmojiListRequest)(nil),                   // 22: sameoldchat.chat.v1.EmojiListRequest
-	(*EmojiMutationRequest)(nil),               // 23: sameoldchat.chat.v1.EmojiMutationRequest
-	(*EmojiListResponse)(nil),                  // 24: sameoldchat.chat.v1.EmojiListResponse
-	(*SearchConversationsRequest)(nil),         // 25: sameoldchat.chat.v1.SearchConversationsRequest
-	(*SearchPeopleRequest)(nil),                // 26: sameoldchat.chat.v1.SearchPeopleRequest
-	(*SetWorkspaceNameRequest)(nil),            // 27: sameoldchat.chat.v1.SetWorkspaceNameRequest
-	(*SetWorkspaceDescriptionRequest)(nil),     // 28: sameoldchat.chat.v1.SetWorkspaceDescriptionRequest
-	(*SetWorkspaceDiscoverabilityRequest)(nil), // 29: sameoldchat.chat.v1.SetWorkspaceDiscoverabilityRequest
-	(*SetWorkspaceIconRequest)(nil),            // 30: sameoldchat.chat.v1.SetWorkspaceIconRequest
-	(*SetWorkspaceDefaultChannelsRequest)(nil), // 31: sameoldchat.chat.v1.SetWorkspaceDefaultChannelsRequest
-	(*ConversationPreferenceList)(nil),         // 32: sameoldchat.chat.v1.ConversationPreferenceList
-	(*ConversationPrefs)(nil),                  // 33: sameoldchat.chat.v1.ConversationPrefs
-	(*ConversationPrefsRequest)(nil),           // 34: sameoldchat.chat.v1.ConversationPrefsRequest
-	(*SetConversationPrefsRequest)(nil),        // 35: sameoldchat.chat.v1.SetConversationPrefsRequest
-	(*AdminTeamUsersRequest)(nil),              // 36: sameoldchat.chat.v1.AdminTeamUsersRequest
-	(*AdminInviteUserRequest)(nil),             // 37: sameoldchat.chat.v1.AdminInviteUserRequest
-	(*AdminCreateUserRequest)(nil),             // 38: sameoldchat.chat.v1.AdminCreateUserRequest
-	(*WorkspaceMembershipRequest)(nil),         // 39: sameoldchat.chat.v1.WorkspaceMembershipRequest
-	(*WorkspaceMembership)(nil),                // 40: sameoldchat.chat.v1.WorkspaceMembership
-	(*ProvisionExternalUserRequest)(nil),       // 41: sameoldchat.chat.v1.ProvisionExternalUserRequest
-	(*SynchronizeExternalUserRoleRequest)(nil), // 42: sameoldchat.chat.v1.SynchronizeExternalUserRoleRequest
-	(*AdminAssignUserRequest)(nil),             // 43: sameoldchat.chat.v1.AdminAssignUserRequest
-	(*InviteRequest)(nil),                      // 44: sameoldchat.chat.v1.InviteRequest
-	(*InvitationPreviewRequest)(nil),           // 45: sameoldchat.chat.v1.InvitationPreviewRequest
-	(*AcceptInvitationRequest)(nil),            // 46: sameoldchat.chat.v1.AcceptInvitationRequest
-	(*InviteRequestsRequest)(nil),              // 47: sameoldchat.chat.v1.InviteRequestsRequest
-	(*InviteRequestMutationRequest)(nil),       // 48: sameoldchat.chat.v1.InviteRequestMutationRequest
-	(*InviteRequestPage)(nil),                  // 49: sameoldchat.chat.v1.InviteRequestPage
-	(*AppApproval)(nil),                        // 50: sameoldchat.chat.v1.AppApproval
-	(*AppApprovalsRequest)(nil),                // 51: sameoldchat.chat.v1.AppApprovalsRequest
-	(*AppApprovalMutationRequest)(nil),         // 52: sameoldchat.chat.v1.AppApprovalMutationRequest
-	(*AppApprovalPage)(nil),                    // 53: sameoldchat.chat.v1.AppApprovalPage
-	(*User)(nil),                               // 54: sameoldchat.chat.v1.User
-	(*MutationResponse)(nil),                   // 55: sameoldchat.chat.v1.MutationResponse
-	(*ConversationPage)(nil),                   // 56: sameoldchat.chat.v1.ConversationPage
+	(*WorkspaceSession)(nil),                   // 21: sameoldchat.chat.v1.WorkspaceSession
+	(*UserSessionsResponse)(nil),               // 22: sameoldchat.chat.v1.UserSessionsResponse
+	(*ResetUserSessionsBulkRequest)(nil),       // 23: sameoldchat.chat.v1.ResetUserSessionsBulkRequest
+	(*Emoji)(nil),                              // 24: sameoldchat.chat.v1.Emoji
+	(*EmojiListRequest)(nil),                   // 25: sameoldchat.chat.v1.EmojiListRequest
+	(*EmojiMutationRequest)(nil),               // 26: sameoldchat.chat.v1.EmojiMutationRequest
+	(*EmojiListResponse)(nil),                  // 27: sameoldchat.chat.v1.EmojiListResponse
+	(*SearchConversationsRequest)(nil),         // 28: sameoldchat.chat.v1.SearchConversationsRequest
+	(*SearchPeopleRequest)(nil),                // 29: sameoldchat.chat.v1.SearchPeopleRequest
+	(*SetWorkspaceNameRequest)(nil),            // 30: sameoldchat.chat.v1.SetWorkspaceNameRequest
+	(*SetWorkspaceDescriptionRequest)(nil),     // 31: sameoldchat.chat.v1.SetWorkspaceDescriptionRequest
+	(*SetWorkspaceDiscoverabilityRequest)(nil), // 32: sameoldchat.chat.v1.SetWorkspaceDiscoverabilityRequest
+	(*SetWorkspaceIconRequest)(nil),            // 33: sameoldchat.chat.v1.SetWorkspaceIconRequest
+	(*SetWorkspaceDefaultChannelsRequest)(nil), // 34: sameoldchat.chat.v1.SetWorkspaceDefaultChannelsRequest
+	(*ConversationPreferenceList)(nil),         // 35: sameoldchat.chat.v1.ConversationPreferenceList
+	(*ConversationPrefs)(nil),                  // 36: sameoldchat.chat.v1.ConversationPrefs
+	(*ConversationPrefsRequest)(nil),           // 37: sameoldchat.chat.v1.ConversationPrefsRequest
+	(*SetConversationPrefsRequest)(nil),        // 38: sameoldchat.chat.v1.SetConversationPrefsRequest
+	(*AdminTeamUsersRequest)(nil),              // 39: sameoldchat.chat.v1.AdminTeamUsersRequest
+	(*AdminInviteUserRequest)(nil),             // 40: sameoldchat.chat.v1.AdminInviteUserRequest
+	(*AdminCreateUserRequest)(nil),             // 41: sameoldchat.chat.v1.AdminCreateUserRequest
+	(*WorkspaceMembershipRequest)(nil),         // 42: sameoldchat.chat.v1.WorkspaceMembershipRequest
+	(*WorkspaceMembership)(nil),                // 43: sameoldchat.chat.v1.WorkspaceMembership
+	(*ProvisionExternalUserRequest)(nil),       // 44: sameoldchat.chat.v1.ProvisionExternalUserRequest
+	(*SynchronizeExternalUserRoleRequest)(nil), // 45: sameoldchat.chat.v1.SynchronizeExternalUserRoleRequest
+	(*AdminAssignUserRequest)(nil),             // 46: sameoldchat.chat.v1.AdminAssignUserRequest
+	(*InviteRequest)(nil),                      // 47: sameoldchat.chat.v1.InviteRequest
+	(*InvitationPreviewRequest)(nil),           // 48: sameoldchat.chat.v1.InvitationPreviewRequest
+	(*AcceptInvitationRequest)(nil),            // 49: sameoldchat.chat.v1.AcceptInvitationRequest
+	(*InviteRequestsRequest)(nil),              // 50: sameoldchat.chat.v1.InviteRequestsRequest
+	(*InviteRequestMutationRequest)(nil),       // 51: sameoldchat.chat.v1.InviteRequestMutationRequest
+	(*InviteRequestPage)(nil),                  // 52: sameoldchat.chat.v1.InviteRequestPage
+	(*AppApproval)(nil),                        // 53: sameoldchat.chat.v1.AppApproval
+	(*AppApprovalsRequest)(nil),                // 54: sameoldchat.chat.v1.AppApprovalsRequest
+	(*AppApprovalMutationRequest)(nil),         // 55: sameoldchat.chat.v1.AppApprovalMutationRequest
+	(*AppApprovalPage)(nil),                    // 56: sameoldchat.chat.v1.AppApprovalPage
+	(*User)(nil),                               // 57: sameoldchat.chat.v1.User
+	(*MutationResponse)(nil),                   // 58: sameoldchat.chat.v1.MutationResponse
+	(*ConversationPage)(nil),                   // 59: sameoldchat.chat.v1.ConversationPage
 }
 var file_sameoldchat_chat_v1_directory_proto_depIdxs = []int32{
-	54, // 0: sameoldchat.chat.v1.UserPage.users:type_name -> sameoldchat.chat.v1.User
-	54, // 1: sameoldchat.chat.v1.AdminUser.user:type_name -> sameoldchat.chat.v1.User
+	57, // 0: sameoldchat.chat.v1.UserPage.users:type_name -> sameoldchat.chat.v1.User
+	57, // 1: sameoldchat.chat.v1.AdminUser.user:type_name -> sameoldchat.chat.v1.User
 	1,  // 2: sameoldchat.chat.v1.AdminUserPage.users:type_name -> sameoldchat.chat.v1.AdminUser
 	6,  // 3: sameoldchat.chat.v1.WorkspaceMembershipSummary.workspace:type_name -> sameoldchat.chat.v1.Workspace
 	9,  // 4: sameoldchat.chat.v1.UserWorkspacesResponse.workspaces:type_name -> sameoldchat.chat.v1.WorkspaceMembershipSummary
 	6,  // 5: sameoldchat.chat.v1.WorkspacePage.workspaces:type_name -> sameoldchat.chat.v1.Workspace
 	15, // 6: sameoldchat.chat.v1.BillableInfo.users:type_name -> sameoldchat.chat.v1.BillableUser
-	21, // 7: sameoldchat.chat.v1.EmojiListResponse.emojis:type_name -> sameoldchat.chat.v1.Emoji
-	32, // 8: sameoldchat.chat.v1.ConversationPrefs.can_thread:type_name -> sameoldchat.chat.v1.ConversationPreferenceList
-	32, // 9: sameoldchat.chat.v1.ConversationPrefs.who_can_post:type_name -> sameoldchat.chat.v1.ConversationPreferenceList
-	33, // 10: sameoldchat.chat.v1.SetConversationPrefsRequest.prefs:type_name -> sameoldchat.chat.v1.ConversationPrefs
-	44, // 11: sameoldchat.chat.v1.InviteRequestPage.requests:type_name -> sameoldchat.chat.v1.InviteRequest
-	50, // 12: sameoldchat.chat.v1.AppApprovalPage.apps:type_name -> sameoldchat.chat.v1.AppApproval
-	4,  // 13: sameoldchat.chat.v1.DirectoryService.Users:input_type -> sameoldchat.chat.v1.UsersRequest
-	5,  // 14: sameoldchat.chat.v1.DirectoryService.ConversationMembers:input_type -> sameoldchat.chat.v1.ConversationMembersRequest
-	7,  // 15: sameoldchat.chat.v1.DirectoryService.WorkspaceInfo:input_type -> sameoldchat.chat.v1.WorkspaceRequest
-	8,  // 16: sameoldchat.chat.v1.DirectoryService.AuthorizedAppWorkspaces:input_type -> sameoldchat.chat.v1.AuthorizedAppWorkspacesRequest
-	14, // 17: sameoldchat.chat.v1.DirectoryService.TeamBillableInfo:input_type -> sameoldchat.chat.v1.BillableInfoRequest
-	17, // 18: sameoldchat.chat.v1.DirectoryService.RemoveUser:input_type -> sameoldchat.chat.v1.RemoveUserRequest
-	18, // 19: sameoldchat.chat.v1.DirectoryService.SetUserRole:input_type -> sameoldchat.chat.v1.SetUserRoleRequest
-	19, // 20: sameoldchat.chat.v1.DirectoryService.SetUserExpiration:input_type -> sameoldchat.chat.v1.SetUserExpirationRequest
-	20, // 21: sameoldchat.chat.v1.DirectoryService.ResetUserSessions:input_type -> sameoldchat.chat.v1.ResetUserSessionsRequest
-	22, // 22: sameoldchat.chat.v1.DirectoryService.Emojis:input_type -> sameoldchat.chat.v1.EmojiListRequest
-	23, // 23: sameoldchat.chat.v1.DirectoryService.AddEmoji:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
-	23, // 24: sameoldchat.chat.v1.DirectoryService.AddEmojiAlias:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
-	23, // 25: sameoldchat.chat.v1.DirectoryService.RemoveEmoji:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
-	23, // 26: sameoldchat.chat.v1.DirectoryService.RenameEmoji:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
-	25, // 27: sameoldchat.chat.v1.DirectoryService.SearchConversations:input_type -> sameoldchat.chat.v1.SearchConversationsRequest
-	26, // 28: sameoldchat.chat.v1.DirectoryService.SearchPeople:input_type -> sameoldchat.chat.v1.SearchPeopleRequest
-	25, // 29: sameoldchat.chat.v1.DirectoryService.SearchChannels:input_type -> sameoldchat.chat.v1.SearchConversationsRequest
-	27, // 30: sameoldchat.chat.v1.DirectoryService.SetWorkspaceName:input_type -> sameoldchat.chat.v1.SetWorkspaceNameRequest
-	12, // 31: sameoldchat.chat.v1.DirectoryService.AdminCreateWorkspace:input_type -> sameoldchat.chat.v1.AdminCreateWorkspaceRequest
-	13, // 32: sameoldchat.chat.v1.DirectoryService.RequestAppPermissions:input_type -> sameoldchat.chat.v1.AppPermissionRequest
-	28, // 33: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDescription:input_type -> sameoldchat.chat.v1.SetWorkspaceDescriptionRequest
-	29, // 34: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDiscoverability:input_type -> sameoldchat.chat.v1.SetWorkspaceDiscoverabilityRequest
-	30, // 35: sameoldchat.chat.v1.DirectoryService.SetWorkspaceIcon:input_type -> sameoldchat.chat.v1.SetWorkspaceIconRequest
-	31, // 36: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDefaultChannels:input_type -> sameoldchat.chat.v1.SetWorkspaceDefaultChannelsRequest
-	34, // 37: sameoldchat.chat.v1.DirectoryService.GetConversationPrefs:input_type -> sameoldchat.chat.v1.ConversationPrefsRequest
-	35, // 38: sameoldchat.chat.v1.DirectoryService.SetConversationPrefs:input_type -> sameoldchat.chat.v1.SetConversationPrefsRequest
-	36, // 39: sameoldchat.chat.v1.DirectoryService.AdminTeamUsers:input_type -> sameoldchat.chat.v1.AdminTeamUsersRequest
-	37, // 40: sameoldchat.chat.v1.DirectoryService.AdminInviteUser:input_type -> sameoldchat.chat.v1.AdminInviteUserRequest
-	38, // 41: sameoldchat.chat.v1.DirectoryService.AdminCreateUser:input_type -> sameoldchat.chat.v1.AdminCreateUserRequest
-	3,  // 42: sameoldchat.chat.v1.DirectoryService.AdminListUsers:input_type -> sameoldchat.chat.v1.AdminUsersRequest
-	43, // 43: sameoldchat.chat.v1.DirectoryService.AdminAssignUser:input_type -> sameoldchat.chat.v1.AdminAssignUserRequest
-	48, // 44: sameoldchat.chat.v1.DirectoryService.AdminApproveInviteRequest:input_type -> sameoldchat.chat.v1.InviteRequestMutationRequest
-	48, // 45: sameoldchat.chat.v1.DirectoryService.AdminDenyInviteRequest:input_type -> sameoldchat.chat.v1.InviteRequestMutationRequest
-	47, // 46: sameoldchat.chat.v1.DirectoryService.AdminListInviteRequests:input_type -> sameoldchat.chat.v1.InviteRequestsRequest
-	7,  // 47: sameoldchat.chat.v1.DirectoryService.UserWorkspaces:input_type -> sameoldchat.chat.v1.WorkspaceRequest
-	45, // 48: sameoldchat.chat.v1.DirectoryService.InvitationPreview:input_type -> sameoldchat.chat.v1.InvitationPreviewRequest
-	46, // 49: sameoldchat.chat.v1.DirectoryService.AcceptInvitationForEmail:input_type -> sameoldchat.chat.v1.AcceptInvitationRequest
-	52, // 50: sameoldchat.chat.v1.DirectoryService.AdminApproveApp:input_type -> sameoldchat.chat.v1.AppApprovalMutationRequest
-	52, // 51: sameoldchat.chat.v1.DirectoryService.AdminRestrictApp:input_type -> sameoldchat.chat.v1.AppApprovalMutationRequest
-	51, // 52: sameoldchat.chat.v1.DirectoryService.AdminListApps:input_type -> sameoldchat.chat.v1.AppApprovalsRequest
-	39, // 53: sameoldchat.chat.v1.DirectoryService.GetWorkspaceMembership:input_type -> sameoldchat.chat.v1.WorkspaceMembershipRequest
-	41, // 54: sameoldchat.chat.v1.DirectoryService.ProvisionExternalUser:input_type -> sameoldchat.chat.v1.ProvisionExternalUserRequest
-	42, // 55: sameoldchat.chat.v1.DirectoryService.SynchronizeExternalUserRole:input_type -> sameoldchat.chat.v1.SynchronizeExternalUserRoleRequest
-	0,  // 56: sameoldchat.chat.v1.DirectoryService.Users:output_type -> sameoldchat.chat.v1.UserPage
-	0,  // 57: sameoldchat.chat.v1.DirectoryService.ConversationMembers:output_type -> sameoldchat.chat.v1.UserPage
-	6,  // 58: sameoldchat.chat.v1.DirectoryService.WorkspaceInfo:output_type -> sameoldchat.chat.v1.Workspace
-	11, // 59: sameoldchat.chat.v1.DirectoryService.AuthorizedAppWorkspaces:output_type -> sameoldchat.chat.v1.WorkspacePage
-	16, // 60: sameoldchat.chat.v1.DirectoryService.TeamBillableInfo:output_type -> sameoldchat.chat.v1.BillableInfo
-	55, // 61: sameoldchat.chat.v1.DirectoryService.RemoveUser:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 62: sameoldchat.chat.v1.DirectoryService.SetUserRole:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 63: sameoldchat.chat.v1.DirectoryService.SetUserExpiration:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 64: sameoldchat.chat.v1.DirectoryService.ResetUserSessions:output_type -> sameoldchat.chat.v1.MutationResponse
-	24, // 65: sameoldchat.chat.v1.DirectoryService.Emojis:output_type -> sameoldchat.chat.v1.EmojiListResponse
-	55, // 66: sameoldchat.chat.v1.DirectoryService.AddEmoji:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 67: sameoldchat.chat.v1.DirectoryService.AddEmojiAlias:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 68: sameoldchat.chat.v1.DirectoryService.RemoveEmoji:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 69: sameoldchat.chat.v1.DirectoryService.RenameEmoji:output_type -> sameoldchat.chat.v1.MutationResponse
-	56, // 70: sameoldchat.chat.v1.DirectoryService.SearchConversations:output_type -> sameoldchat.chat.v1.ConversationPage
-	0,  // 71: sameoldchat.chat.v1.DirectoryService.SearchPeople:output_type -> sameoldchat.chat.v1.UserPage
-	56, // 72: sameoldchat.chat.v1.DirectoryService.SearchChannels:output_type -> sameoldchat.chat.v1.ConversationPage
-	6,  // 73: sameoldchat.chat.v1.DirectoryService.SetWorkspaceName:output_type -> sameoldchat.chat.v1.Workspace
-	6,  // 74: sameoldchat.chat.v1.DirectoryService.AdminCreateWorkspace:output_type -> sameoldchat.chat.v1.Workspace
-	55, // 75: sameoldchat.chat.v1.DirectoryService.RequestAppPermissions:output_type -> sameoldchat.chat.v1.MutationResponse
-	6,  // 76: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDescription:output_type -> sameoldchat.chat.v1.Workspace
-	6,  // 77: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDiscoverability:output_type -> sameoldchat.chat.v1.Workspace
-	6,  // 78: sameoldchat.chat.v1.DirectoryService.SetWorkspaceIcon:output_type -> sameoldchat.chat.v1.Workspace
-	6,  // 79: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDefaultChannels:output_type -> sameoldchat.chat.v1.Workspace
-	33, // 80: sameoldchat.chat.v1.DirectoryService.GetConversationPrefs:output_type -> sameoldchat.chat.v1.ConversationPrefs
-	33, // 81: sameoldchat.chat.v1.DirectoryService.SetConversationPrefs:output_type -> sameoldchat.chat.v1.ConversationPrefs
-	0,  // 82: sameoldchat.chat.v1.DirectoryService.AdminTeamUsers:output_type -> sameoldchat.chat.v1.UserPage
-	55, // 83: sameoldchat.chat.v1.DirectoryService.AdminInviteUser:output_type -> sameoldchat.chat.v1.MutationResponse
-	54, // 84: sameoldchat.chat.v1.DirectoryService.AdminCreateUser:output_type -> sameoldchat.chat.v1.User
-	2,  // 85: sameoldchat.chat.v1.DirectoryService.AdminListUsers:output_type -> sameoldchat.chat.v1.AdminUserPage
-	55, // 86: sameoldchat.chat.v1.DirectoryService.AdminAssignUser:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 87: sameoldchat.chat.v1.DirectoryService.AdminApproveInviteRequest:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 88: sameoldchat.chat.v1.DirectoryService.AdminDenyInviteRequest:output_type -> sameoldchat.chat.v1.MutationResponse
-	49, // 89: sameoldchat.chat.v1.DirectoryService.AdminListInviteRequests:output_type -> sameoldchat.chat.v1.InviteRequestPage
-	10, // 90: sameoldchat.chat.v1.DirectoryService.UserWorkspaces:output_type -> sameoldchat.chat.v1.UserWorkspacesResponse
-	44, // 91: sameoldchat.chat.v1.DirectoryService.InvitationPreview:output_type -> sameoldchat.chat.v1.InviteRequest
-	54, // 92: sameoldchat.chat.v1.DirectoryService.AcceptInvitationForEmail:output_type -> sameoldchat.chat.v1.User
-	55, // 93: sameoldchat.chat.v1.DirectoryService.AdminApproveApp:output_type -> sameoldchat.chat.v1.MutationResponse
-	55, // 94: sameoldchat.chat.v1.DirectoryService.AdminRestrictApp:output_type -> sameoldchat.chat.v1.MutationResponse
-	53, // 95: sameoldchat.chat.v1.DirectoryService.AdminListApps:output_type -> sameoldchat.chat.v1.AppApprovalPage
-	40, // 96: sameoldchat.chat.v1.DirectoryService.GetWorkspaceMembership:output_type -> sameoldchat.chat.v1.WorkspaceMembership
-	54, // 97: sameoldchat.chat.v1.DirectoryService.ProvisionExternalUser:output_type -> sameoldchat.chat.v1.User
-	55, // 98: sameoldchat.chat.v1.DirectoryService.SynchronizeExternalUserRole:output_type -> sameoldchat.chat.v1.MutationResponse
-	56, // [56:99] is the sub-list for method output_type
-	13, // [13:56] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	21, // 7: sameoldchat.chat.v1.UserSessionsResponse.sessions:type_name -> sameoldchat.chat.v1.WorkspaceSession
+	24, // 8: sameoldchat.chat.v1.EmojiListResponse.emojis:type_name -> sameoldchat.chat.v1.Emoji
+	35, // 9: sameoldchat.chat.v1.ConversationPrefs.can_thread:type_name -> sameoldchat.chat.v1.ConversationPreferenceList
+	35, // 10: sameoldchat.chat.v1.ConversationPrefs.who_can_post:type_name -> sameoldchat.chat.v1.ConversationPreferenceList
+	36, // 11: sameoldchat.chat.v1.SetConversationPrefsRequest.prefs:type_name -> sameoldchat.chat.v1.ConversationPrefs
+	47, // 12: sameoldchat.chat.v1.InviteRequestPage.requests:type_name -> sameoldchat.chat.v1.InviteRequest
+	53, // 13: sameoldchat.chat.v1.AppApprovalPage.apps:type_name -> sameoldchat.chat.v1.AppApproval
+	4,  // 14: sameoldchat.chat.v1.DirectoryService.Users:input_type -> sameoldchat.chat.v1.UsersRequest
+	5,  // 15: sameoldchat.chat.v1.DirectoryService.ConversationMembers:input_type -> sameoldchat.chat.v1.ConversationMembersRequest
+	7,  // 16: sameoldchat.chat.v1.DirectoryService.WorkspaceInfo:input_type -> sameoldchat.chat.v1.WorkspaceRequest
+	8,  // 17: sameoldchat.chat.v1.DirectoryService.AuthorizedAppWorkspaces:input_type -> sameoldchat.chat.v1.AuthorizedAppWorkspacesRequest
+	14, // 18: sameoldchat.chat.v1.DirectoryService.TeamBillableInfo:input_type -> sameoldchat.chat.v1.BillableInfoRequest
+	17, // 19: sameoldchat.chat.v1.DirectoryService.RemoveUser:input_type -> sameoldchat.chat.v1.RemoveUserRequest
+	18, // 20: sameoldchat.chat.v1.DirectoryService.SetUserRole:input_type -> sameoldchat.chat.v1.SetUserRoleRequest
+	19, // 21: sameoldchat.chat.v1.DirectoryService.SetUserExpiration:input_type -> sameoldchat.chat.v1.SetUserExpirationRequest
+	20, // 22: sameoldchat.chat.v1.DirectoryService.ResetUserSessions:input_type -> sameoldchat.chat.v1.ResetUserSessionsRequest
+	20, // 23: sameoldchat.chat.v1.DirectoryService.UserSessions:input_type -> sameoldchat.chat.v1.ResetUserSessionsRequest
+	23, // 24: sameoldchat.chat.v1.DirectoryService.ResetUserSessionsBulk:input_type -> sameoldchat.chat.v1.ResetUserSessionsBulkRequest
+	25, // 25: sameoldchat.chat.v1.DirectoryService.Emojis:input_type -> sameoldchat.chat.v1.EmojiListRequest
+	26, // 26: sameoldchat.chat.v1.DirectoryService.AddEmoji:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
+	26, // 27: sameoldchat.chat.v1.DirectoryService.AddEmojiAlias:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
+	26, // 28: sameoldchat.chat.v1.DirectoryService.RemoveEmoji:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
+	26, // 29: sameoldchat.chat.v1.DirectoryService.RenameEmoji:input_type -> sameoldchat.chat.v1.EmojiMutationRequest
+	28, // 30: sameoldchat.chat.v1.DirectoryService.SearchConversations:input_type -> sameoldchat.chat.v1.SearchConversationsRequest
+	29, // 31: sameoldchat.chat.v1.DirectoryService.SearchPeople:input_type -> sameoldchat.chat.v1.SearchPeopleRequest
+	28, // 32: sameoldchat.chat.v1.DirectoryService.SearchChannels:input_type -> sameoldchat.chat.v1.SearchConversationsRequest
+	30, // 33: sameoldchat.chat.v1.DirectoryService.SetWorkspaceName:input_type -> sameoldchat.chat.v1.SetWorkspaceNameRequest
+	12, // 34: sameoldchat.chat.v1.DirectoryService.AdminCreateWorkspace:input_type -> sameoldchat.chat.v1.AdminCreateWorkspaceRequest
+	13, // 35: sameoldchat.chat.v1.DirectoryService.RequestAppPermissions:input_type -> sameoldchat.chat.v1.AppPermissionRequest
+	31, // 36: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDescription:input_type -> sameoldchat.chat.v1.SetWorkspaceDescriptionRequest
+	32, // 37: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDiscoverability:input_type -> sameoldchat.chat.v1.SetWorkspaceDiscoverabilityRequest
+	33, // 38: sameoldchat.chat.v1.DirectoryService.SetWorkspaceIcon:input_type -> sameoldchat.chat.v1.SetWorkspaceIconRequest
+	34, // 39: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDefaultChannels:input_type -> sameoldchat.chat.v1.SetWorkspaceDefaultChannelsRequest
+	37, // 40: sameoldchat.chat.v1.DirectoryService.GetConversationPrefs:input_type -> sameoldchat.chat.v1.ConversationPrefsRequest
+	38, // 41: sameoldchat.chat.v1.DirectoryService.SetConversationPrefs:input_type -> sameoldchat.chat.v1.SetConversationPrefsRequest
+	39, // 42: sameoldchat.chat.v1.DirectoryService.AdminTeamUsers:input_type -> sameoldchat.chat.v1.AdminTeamUsersRequest
+	40, // 43: sameoldchat.chat.v1.DirectoryService.AdminInviteUser:input_type -> sameoldchat.chat.v1.AdminInviteUserRequest
+	41, // 44: sameoldchat.chat.v1.DirectoryService.AdminCreateUser:input_type -> sameoldchat.chat.v1.AdminCreateUserRequest
+	3,  // 45: sameoldchat.chat.v1.DirectoryService.AdminListUsers:input_type -> sameoldchat.chat.v1.AdminUsersRequest
+	46, // 46: sameoldchat.chat.v1.DirectoryService.AdminAssignUser:input_type -> sameoldchat.chat.v1.AdminAssignUserRequest
+	51, // 47: sameoldchat.chat.v1.DirectoryService.AdminApproveInviteRequest:input_type -> sameoldchat.chat.v1.InviteRequestMutationRequest
+	51, // 48: sameoldchat.chat.v1.DirectoryService.AdminDenyInviteRequest:input_type -> sameoldchat.chat.v1.InviteRequestMutationRequest
+	50, // 49: sameoldchat.chat.v1.DirectoryService.AdminListInviteRequests:input_type -> sameoldchat.chat.v1.InviteRequestsRequest
+	7,  // 50: sameoldchat.chat.v1.DirectoryService.UserWorkspaces:input_type -> sameoldchat.chat.v1.WorkspaceRequest
+	48, // 51: sameoldchat.chat.v1.DirectoryService.InvitationPreview:input_type -> sameoldchat.chat.v1.InvitationPreviewRequest
+	49, // 52: sameoldchat.chat.v1.DirectoryService.AcceptInvitationForEmail:input_type -> sameoldchat.chat.v1.AcceptInvitationRequest
+	55, // 53: sameoldchat.chat.v1.DirectoryService.AdminApproveApp:input_type -> sameoldchat.chat.v1.AppApprovalMutationRequest
+	55, // 54: sameoldchat.chat.v1.DirectoryService.AdminRestrictApp:input_type -> sameoldchat.chat.v1.AppApprovalMutationRequest
+	54, // 55: sameoldchat.chat.v1.DirectoryService.AdminListApps:input_type -> sameoldchat.chat.v1.AppApprovalsRequest
+	42, // 56: sameoldchat.chat.v1.DirectoryService.GetWorkspaceMembership:input_type -> sameoldchat.chat.v1.WorkspaceMembershipRequest
+	44, // 57: sameoldchat.chat.v1.DirectoryService.ProvisionExternalUser:input_type -> sameoldchat.chat.v1.ProvisionExternalUserRequest
+	45, // 58: sameoldchat.chat.v1.DirectoryService.SynchronizeExternalUserRole:input_type -> sameoldchat.chat.v1.SynchronizeExternalUserRoleRequest
+	0,  // 59: sameoldchat.chat.v1.DirectoryService.Users:output_type -> sameoldchat.chat.v1.UserPage
+	0,  // 60: sameoldchat.chat.v1.DirectoryService.ConversationMembers:output_type -> sameoldchat.chat.v1.UserPage
+	6,  // 61: sameoldchat.chat.v1.DirectoryService.WorkspaceInfo:output_type -> sameoldchat.chat.v1.Workspace
+	11, // 62: sameoldchat.chat.v1.DirectoryService.AuthorizedAppWorkspaces:output_type -> sameoldchat.chat.v1.WorkspacePage
+	16, // 63: sameoldchat.chat.v1.DirectoryService.TeamBillableInfo:output_type -> sameoldchat.chat.v1.BillableInfo
+	58, // 64: sameoldchat.chat.v1.DirectoryService.RemoveUser:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 65: sameoldchat.chat.v1.DirectoryService.SetUserRole:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 66: sameoldchat.chat.v1.DirectoryService.SetUserExpiration:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 67: sameoldchat.chat.v1.DirectoryService.ResetUserSessions:output_type -> sameoldchat.chat.v1.MutationResponse
+	22, // 68: sameoldchat.chat.v1.DirectoryService.UserSessions:output_type -> sameoldchat.chat.v1.UserSessionsResponse
+	58, // 69: sameoldchat.chat.v1.DirectoryService.ResetUserSessionsBulk:output_type -> sameoldchat.chat.v1.MutationResponse
+	27, // 70: sameoldchat.chat.v1.DirectoryService.Emojis:output_type -> sameoldchat.chat.v1.EmojiListResponse
+	58, // 71: sameoldchat.chat.v1.DirectoryService.AddEmoji:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 72: sameoldchat.chat.v1.DirectoryService.AddEmojiAlias:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 73: sameoldchat.chat.v1.DirectoryService.RemoveEmoji:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 74: sameoldchat.chat.v1.DirectoryService.RenameEmoji:output_type -> sameoldchat.chat.v1.MutationResponse
+	59, // 75: sameoldchat.chat.v1.DirectoryService.SearchConversations:output_type -> sameoldchat.chat.v1.ConversationPage
+	0,  // 76: sameoldchat.chat.v1.DirectoryService.SearchPeople:output_type -> sameoldchat.chat.v1.UserPage
+	59, // 77: sameoldchat.chat.v1.DirectoryService.SearchChannels:output_type -> sameoldchat.chat.v1.ConversationPage
+	6,  // 78: sameoldchat.chat.v1.DirectoryService.SetWorkspaceName:output_type -> sameoldchat.chat.v1.Workspace
+	6,  // 79: sameoldchat.chat.v1.DirectoryService.AdminCreateWorkspace:output_type -> sameoldchat.chat.v1.Workspace
+	58, // 80: sameoldchat.chat.v1.DirectoryService.RequestAppPermissions:output_type -> sameoldchat.chat.v1.MutationResponse
+	6,  // 81: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDescription:output_type -> sameoldchat.chat.v1.Workspace
+	6,  // 82: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDiscoverability:output_type -> sameoldchat.chat.v1.Workspace
+	6,  // 83: sameoldchat.chat.v1.DirectoryService.SetWorkspaceIcon:output_type -> sameoldchat.chat.v1.Workspace
+	6,  // 84: sameoldchat.chat.v1.DirectoryService.SetWorkspaceDefaultChannels:output_type -> sameoldchat.chat.v1.Workspace
+	36, // 85: sameoldchat.chat.v1.DirectoryService.GetConversationPrefs:output_type -> sameoldchat.chat.v1.ConversationPrefs
+	36, // 86: sameoldchat.chat.v1.DirectoryService.SetConversationPrefs:output_type -> sameoldchat.chat.v1.ConversationPrefs
+	0,  // 87: sameoldchat.chat.v1.DirectoryService.AdminTeamUsers:output_type -> sameoldchat.chat.v1.UserPage
+	58, // 88: sameoldchat.chat.v1.DirectoryService.AdminInviteUser:output_type -> sameoldchat.chat.v1.MutationResponse
+	57, // 89: sameoldchat.chat.v1.DirectoryService.AdminCreateUser:output_type -> sameoldchat.chat.v1.User
+	2,  // 90: sameoldchat.chat.v1.DirectoryService.AdminListUsers:output_type -> sameoldchat.chat.v1.AdminUserPage
+	58, // 91: sameoldchat.chat.v1.DirectoryService.AdminAssignUser:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 92: sameoldchat.chat.v1.DirectoryService.AdminApproveInviteRequest:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 93: sameoldchat.chat.v1.DirectoryService.AdminDenyInviteRequest:output_type -> sameoldchat.chat.v1.MutationResponse
+	52, // 94: sameoldchat.chat.v1.DirectoryService.AdminListInviteRequests:output_type -> sameoldchat.chat.v1.InviteRequestPage
+	10, // 95: sameoldchat.chat.v1.DirectoryService.UserWorkspaces:output_type -> sameoldchat.chat.v1.UserWorkspacesResponse
+	47, // 96: sameoldchat.chat.v1.DirectoryService.InvitationPreview:output_type -> sameoldchat.chat.v1.InviteRequest
+	57, // 97: sameoldchat.chat.v1.DirectoryService.AcceptInvitationForEmail:output_type -> sameoldchat.chat.v1.User
+	58, // 98: sameoldchat.chat.v1.DirectoryService.AdminApproveApp:output_type -> sameoldchat.chat.v1.MutationResponse
+	58, // 99: sameoldchat.chat.v1.DirectoryService.AdminRestrictApp:output_type -> sameoldchat.chat.v1.MutationResponse
+	56, // 100: sameoldchat.chat.v1.DirectoryService.AdminListApps:output_type -> sameoldchat.chat.v1.AppApprovalPage
+	43, // 101: sameoldchat.chat.v1.DirectoryService.GetWorkspaceMembership:output_type -> sameoldchat.chat.v1.WorkspaceMembership
+	57, // 102: sameoldchat.chat.v1.DirectoryService.ProvisionExternalUser:output_type -> sameoldchat.chat.v1.User
+	58, // 103: sameoldchat.chat.v1.DirectoryService.SynchronizeExternalUserRole:output_type -> sameoldchat.chat.v1.MutationResponse
+	59, // [59:104] is the sub-list for method output_type
+	14, // [14:59] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_directory_proto_init() }
@@ -4259,7 +4452,7 @@ func file_sameoldchat_chat_v1_directory_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_directory_proto_rawDesc), len(file_sameoldchat_chat_v1_directory_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   54,
+			NumMessages:   57,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

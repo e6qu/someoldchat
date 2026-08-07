@@ -183,6 +183,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.remove", h.adminUsersRemove)
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
+	mux.HandleFunc("GET /api/admin.users.session.list", h.adminUsersSessionList)
+	mux.HandleFunc("POST /api/admin.users.session.list", h.adminUsersSessionList)
+	mux.HandleFunc("POST /api/admin.users.session.resetBulk", h.adminUsersSessionResetBulk)
 	mux.HandleFunc("POST /api/admin.users.setAdmin", h.adminUsersSetAdmin)
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
@@ -2975,6 +2978,80 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := h.Messages.ResetUserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.users.session.list reports one member's live sessions. Each session is
+// identified by the stored hash of its token and never by the token: an
+// administrator reviewing who is signed in needs to tell sessions apart and end
+// one, and neither needs the credential.
+func (h Handler) adminUsersSessionList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	teamID, targetID := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"]))
+	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	sessions, err := h.Messages.UserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	payload := make([]map[string]any, 0, len(sessions))
+	for _, session := range sessions {
+		row := map[string]any{
+			"session_id": session.ID, "user_id": string(session.UserID),
+			"team_id": string(principal.WorkspaceID), "expires_at": session.ExpiresAt.UTC().Unix(),
+		}
+		// A session whose start was never recorded says so by omitting the
+		// field rather than by claiming it began at the epoch.
+		if !session.CreatedAt.IsZero() {
+			row["created"] = session.CreatedAt.UTC().Unix()
+		}
+		payload = append(payload, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "active_sessions": payload,
+		"response_metadata": map[string]any{"next_cursor": ""},
+	})
+}
+
+// admin.users.session.resetBulk signs several members out at once. A member
+// named in the request who is not a member of this workspace stops the whole
+// thing before anything is revoked.
+func (h Handler) adminUsersSessionResetBulk(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if teamID := strings.TrimSpace(fields["team_id"]); teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	targets := parseIDList[domain.UserID](fields["user_ids"])
+	if len(targets) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if err := h.Messages.ResetUserSessionsBulk(r.Context(), principal.WorkspaceID, principal.UserID, targets); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}

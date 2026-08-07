@@ -1051,6 +1051,70 @@ func TestWorkspaceSettingsWriteThroughAndNameWhatIsAbsent(t *testing.T) {
 // A value the workspace does not accept is a caller mistake, not an outage:
 // reporting it as "temporarily unavailable" tells an administrator to retry
 // something that can never succeed.
+// The page could end a member's sessions and never show them, so an
+// administrator decided whether to sign somebody out without seeing what they
+// would be ending — and signing out was only reachable as a side effect of
+// deactivating the account, which is a much larger act.
+func TestAuthAdminShowsSessionCountsAndSignsAMemberOut(t *testing.T) {
+	handler, repository := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "member@example.com", Name: "member"})
+	for _, token := range []string{"member-desktop", "member-phone"} {
+		if err := repository.SeedSession(ctx, token, domain.SessionRecord{
+			WorkspaceID: "T1", UserID: "U2", Scopes: []string{string(auth.ScopeChatWrite)},
+			CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app/admin/auth", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	before := page()
+	if !strings.Contains(before, `<span class="session-count">2</span>`) {
+		t.Fatalf("the session count is missing: %s", before)
+	}
+	// The count is what makes the control meaningful, so a member with none is
+	// not offered a sign-out that would do nothing.
+	// Two rows have sessions here — the administrator's own and the member's —
+	// so what this asserts is that the control tracks the count rather than
+	// appearing on every row.
+	if strings.Count(before, "Sign out everywhere") != 2 {
+		t.Fatalf("the sign-out control does not follow the session count: %s", before)
+	}
+	// The token never reaches the page.
+	if strings.Contains(before, "member-desktop") || strings.Contains(before, "member-phone") {
+		t.Fatalf("a session token reached the administration page: %s", before)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.set", strings.NewReader("_csrf="+auth.CSRFToken("session")+"&user_id=U2&action=sessions"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set(auth.CSRFTokenHeaderName, auth.CSRFToken("session"))
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("sign out status=%d body=%s", response.Code, response.Body.String())
+	}
+	if after := page(); strings.Contains(after, `<span class="session-count">2</span>`) {
+		t.Fatalf("the sessions were not ended: %s", after)
+	}
+	// Ending sessions is not deactivation: the account stays active.
+	if after := page(); !strings.Contains(after, ">active<") {
+		t.Fatalf("signing out deactivated the member: %s", after)
+	}
+}
+
 // Slack Connect had a per-channel disconnection and no answer to "who are we
 // connected to". An administrator could not see the relationships their
 // workspace was in, let alone end one, without walking every channel.

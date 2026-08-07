@@ -148,6 +148,23 @@ message ResetUserSessionsRequest {
   string target_user_id = 3;
 }
 
+message WorkspaceSession {
+  string id = 1;
+  string user_id = 2;
+  int64 created_at_unix_nano = 3;
+  int64 expires_at_unix_nano = 4;
+}
+
+message UserSessionsResponse {
+  repeated WorkspaceSession sessions = 1;
+}
+
+message ResetUserSessionsBulkRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string target_user_ids = 3;
+}
+
 message Emoji {
   string name = 1;
   string url = 2;
@@ -418,6 +435,8 @@ service DirectoryService {
   rpc SetUserRole(SetUserRoleRequest) returns (MutationResponse);
   rpc SetUserExpiration(SetUserExpirationRequest) returns (MutationResponse);
   rpc ResetUserSessions(ResetUserSessionsRequest) returns (MutationResponse);
+  rpc UserSessions(ResetUserSessionsRequest) returns (UserSessionsResponse);
+  rpc ResetUserSessionsBulk(ResetUserSessionsBulkRequest) returns (MutationResponse);
   rpc Emojis(EmojiListRequest) returns (EmojiListResponse);
   rpc AddEmoji(EmojiMutationRequest) returns (MutationResponse);
   rpc AddEmojiAlias(EmojiMutationRequest) returns (MutationResponse);

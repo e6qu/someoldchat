@@ -651,15 +651,31 @@ type AppTokenCredentials struct {
 }
 
 type SessionRecord struct {
-	WorkspaceID  WorkspaceID
-	UserID       UserID
-	Scopes       []string
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Scopes      []string
+	// CreatedAt is when the session began. Sessions written before this was
+	// recorded carry the zero time, which reads as unknown; inventing a start
+	// for them would be worse than admitting it was never recorded.
+	CreatedAt    time.Time
 	ExpiresAt    time.Time
 	Revoked      bool
 	OIDCProvider string
 	OIDCIDToken  string
 	OIDCSubject  string
 	OIDCSID      string
+}
+
+// WorkspaceSession is one session as an administrator sees it. The identifier
+// is the stored hash of the token, never the token: an administrator needs to
+// tell two sessions apart and end one, and neither needs the credential. A list
+// that handed out session tokens would turn "review who is signed in" into a
+// way to become them.
+type WorkspaceSession struct {
+	ID        string
+	UserID    UserID
+	CreatedAt time.Time
+	ExpiresAt time.Time
 }
 
 func HashToken(token string) string {

@@ -128,6 +128,7 @@ func runQualification(t *testing.T, open opener) {
 		{"deleting a list item is all or nothing and survives in Activity", deletingAListItemIsAllOrNothingAndSurvivesInActivity},
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},
 		{"external connections are derived and end everywhere", externalConnectionsAreDerivedAndEndEverywhere},
+		{"sessions are listed without their tokens", sessionsAreListedWithoutTheirTokens},
 		{"search modifiers mean the same on every profile", searchModifiersMeanTheSame},
 		{"canvas revisions record what was replaced", canvasRevisionsRecordWhatWasReplaced},
 		{"canvas comments outlive the section they annotate", canvasCommentsOutliveTheirSection},
@@ -399,6 +400,10 @@ type qualificationStore interface {
 	SeedUser(context.Context, domain.User) error
 	SeedConversation(context.Context, domain.Conversation) error
 	SeedConversationMember(context.Context, domain.ConversationID, domain.UserID) error
+	// SeedSession writes a session as stored rather than as created, which is
+	// the only way to arrange the states a session administrator has to be able
+	// to see through: one already expired, and one revoked.
+	SeedSession(context.Context, string, domain.SessionRecord) error
 }
 
 func workflowAutomationRepositoryContract(t *testing.T, open opener) {

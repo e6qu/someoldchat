@@ -92,7 +92,7 @@ const authAdminMarkup = `{{define "title"}}Workspace administration · SameOldCh
 <div class="heading"><h1>Workspace administration</h1><p>Manage access without leaving the workspace.</p><p><a href="/app/admin/settings">Workspace settings</a> · <a href="/app/admin/analytics">Analytics</a> · <a href="/app/admin/audit">Audit</a></p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .CanReadApps}}<section class="card" aria-labelledby="authorization-heading"><div class="section-head"><h2 id="authorization-heading">Authorization methods</h2><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p></div>{{range .Methods}}<div class="row"><span><strong>{{.Label}}</strong><br><span class="status{{if .Enabled}} active{{end}}">{{.State}}</span></span>{{if $.CanWriteApps}}<form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="provider" value="{{.Name}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="toggle{{if .Enabled}} danger{{end}}" type="submit" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Label}} authorization">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div>{{end}}</section>{{end}}
-{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Deactivating a user revokes their sessions and access tokens.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{.Role}}</td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{if .RoleOptions}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}
+{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Signing a member out ends every session they hold without touching their account; deactivating them revokes their sessions and access tokens as well.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Sessions</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{.Role}}</td><td><span class="session-count">{{.Sessions}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{if .Sessions}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="sessions"><button class="toggle secondary" type="submit" aria-label="Sign {{.Name}} out of every session">Sign out everywhere</button></form>{{end}}{{if .RoleOptions}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}
 {{if .CanReadUsers}}<section class="card" aria-labelledby="invitations-heading"><div class="section-head"><h2 id="invitations-heading">Invitations</h2><p>An invitation records who may join, at what tier, and into which channels. It becomes an account when the person accepts it.</p></div>
 {{if .CanWriteUsers}}<form class="setup" method="post" action="/api/admin.auth.users.invite">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -224,6 +224,10 @@ type authAdminUserView struct {
 	// page presented a workspace owner with a pre-loaded demotion — one click,
 	// no field to change — that the handler then refused to reverse.
 	RoleOptions []authAdminRoleOption
+	// Sessions is how many live sessions this member holds. It is what makes
+	// the sign-out control meaningful: ending nothing and ending five devices
+	// are different acts, and the page should not present them identically.
+	Sessions int
 }
 
 type authAdminRoleOption struct {
@@ -399,7 +403,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 			if active {
 				status = "active"
 			}
-			data.Users = append(data.Users, authAdminUserView{
+			row := authAdminUserView{
 				ID:          item.User.ID,
 				Name:        name,
 				Email:       item.User.Email,
@@ -407,7 +411,15 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 				Role:        item.Membership.Role,
 				Active:      active,
 				RoleOptions: assignableRoles(actorRole, item.Membership.Role),
-			})
+			}
+			// A failed read leaves the count at zero, which hides the control
+			// rather than offering one whose effect nobody can see. The page is
+			// about membership first; sessions not answering must not take it
+			// down.
+			if sessions, sessionErr := h.Login.service.UserSessions(r.Context(), h.Login.workspace, principal.UserID, item.User.ID); sessionErr == nil {
+				row.Sessions = len(sessions)
+			}
+			data.Users = append(data.Users, row)
 		}
 		if page.NextCursor != "" {
 			data.NextPageURL = "/app/admin/auth?limit=" + strconv.Itoa(request.Limit) + "&cursor=" + url.QueryEscape(string(page.NextCursor))
@@ -573,6 +585,12 @@ func (h Handler) authUserSet(w http.ResponseWriter, r *http.Request) {
 		operationErr = h.Login.service.RemoveUser(r.Context(), h.Login.workspace, principal.UserID, target)
 	case "enable":
 		operationErr = h.Login.service.AdminAssignUser(r.Context(), h.Login.workspace, principal.UserID, target, []domain.ConversationID{})
+	case "sessions":
+		// Ending sessions is not deactivation: the member keeps their account
+		// and can sign in again. Slack separates them, and so does this page,
+		// because "sign them out" is the safe first move when a device is lost
+		// and disabling the account is not.
+		operationErr = h.Login.service.ResetUserSessionsBulk(r.Context(), h.Login.workspace, principal.UserID, []domain.UserID{target})
 	case "role":
 		role := domain.WorkspaceRole(strings.ToLower(strings.TrimSpace(fields["role"])))
 		// owner is a real, reachable workspace role. Refusing it here left the

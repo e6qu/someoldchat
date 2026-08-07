@@ -1987,6 +1987,37 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Sessions are what an administrator reviews before deciding to end
+			// one, and the review must not hand out the credential it is
+			// describing. Both compositions have to agree on that and on who
+			// may ask.
+			name: "sessions are listed for an administrator without their tokens and can be ended in bulk",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				before, err := chat.UserSessions(ctx, "T1", "UA", "U1")
+				if err != nil {
+					return nil, err
+				}
+				identifiers := make([]string, 0, len(before))
+				for _, session := range before {
+					identifiers = append(identifiers, string(session.UserID)+":"+strconv.Itoa(len(session.ID)))
+				}
+				// A member cannot read another member's sessions, nor end them.
+				_, memberErr := chat.UserSessions(ctx, "T1", "U1", "U1")
+				memberBulk := chat.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U1"}) != nil
+				// A stranger in the list stops the whole request, so an
+				// administrator acting on a pasted list finds out they were
+				// wrong instead of signing out an arbitrary prefix of it.
+				mixed := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U-not-here"}) != nil
+				empty := chat.ResetUserSessionsBulk(ctx, "T1", "UA", nil) != nil
+				bulk := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U2"})
+				after, err := chat.UserSessions(ctx, "T1", "UA", "U1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{identifiers, memberErr != nil, memberBulk, mixed, empty, bulk == nil, len(after)}, nil
+			},
+		},
+		{
 			// A connection is derived from the channels that carry it, and
 			// ending one has to end it everywhere. Both compositions must
 			// agree, because an administrator told an organization is

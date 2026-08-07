@@ -1599,6 +1599,58 @@ func TestAdminConversationSharedDisconnectAndEKMInfo(t *testing.T) {
 	}
 }
 
+// Session administration could end sessions and never show them: an
+// administrator had to decide whether to sign somebody out without being able
+// to see what they would be ending.
+func TestAdminSessionListShowsSessionsWithoutTheirTokens(t *testing.T) {
+	handler, s := testHandlerWithStore()
+	now := time.Now().UTC()
+	if err := s.SeedSession(context.Background(), "member-token", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U2", Scopes: []string{string(auth.ScopeChatWrite)},
+		CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	listed := post("/api/admin.users.session.list", "user_id=U2")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"user_id":"U2"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body)
+	}
+	// The credential must never appear: a review that handed out tokens would
+	// be a way to become the member rather than a way to see them.
+	if strings.Contains(listed.Body.String(), "member-token") {
+		t.Fatalf("the session list carried the token: %s", listed.Body)
+	}
+	if !strings.Contains(listed.Body.String(), `"session_id":"`+domain.HashToken("member-token")+`"`) {
+		t.Fatalf("the session is not identified by its stored hash: %s", listed.Body)
+	}
+
+	// A member named in a bulk reset who is not here stops the whole request.
+	if mixed := post("/api/admin.users.session.resetBulk", "user_ids=U2,U-absent"); !strings.Contains(mixed.Body.String(), `"ok":false`) {
+		t.Fatalf("a bulk reset naming a stranger succeeded: %s", mixed.Body)
+	}
+	if still := post("/api/admin.users.session.list", "user_id=U2"); !strings.Contains(still.Body.String(), `"session_id"`) {
+		t.Fatalf("the refused bulk reset ended a session anyway: %s", still.Body)
+	}
+
+	if reset := post("/api/admin.users.session.resetBulk", "user_ids=U1,U2"); reset.Code != http.StatusOK || !strings.Contains(reset.Body.String(), `"ok":true`) {
+		t.Fatalf("bulk reset status=%d body=%s", reset.Code, reset.Body)
+	}
+	after := post("/api/admin.users.session.list", "user_id=U2")
+	if strings.Contains(after.Body.String(), `"session_id"`) {
+		t.Fatalf("a revoked session is still listed: %s", after.Body)
+	}
+}
+
 // team.externalTeams.* is the whole-organization half of Slack Connect. The
 // per-channel form already existed; the question "who are we connected to, and
 // end it everywhere" had no answer at all.

@@ -95,6 +95,28 @@ events include current shared-channel identity fields. Removing an organization
 follows Slack's history/copy/disconnect behavior and does not corrupt the
 remaining channel.
 
+An administrator can see a member's live sessions and end them without touching
+the account. Signing out and deactivating are different acts — losing a device
+is a reason for the first and not the second — and the product used to offer
+only the second. Each session is identified by the stored hash of its token and
+never by the token: telling two sessions apart and ending one need no
+credential, and a review that handed out tokens would be a way to become the
+member rather than a way to see them. Revoked and expired sessions are left out,
+because an administrator asking who is signed in is asking who can act right
+now, and a session whose start was never recorded says so rather than claiming
+to have begun at the epoch. A bulk sign-out naming a member who is not in the
+workspace stops before anything is revoked, so an administrator acting on a
+pasted list finds out they were wrong instead of signing out an arbitrary prefix
+of it. Session *policy* — Slack's per-member duration and mobile settings behind
+`admin.users.session.{get,set,clear}Settings` — is not implemented and is
+recorded as absent rather than approximated. The surface has no browser
+citation, and the reason is structural rather than an unwritten test: it lives
+on the identity-provider administration page, whose routes are registered only
+where a provider is configured, and the browser servers run without one. That is
+the same reason already recorded for AUTH-02 and AUTH-05. The web tests and the
+cross-profile contract carry it instead, and they can arrange a second member,
+which this suite's single signed-in member cannot.
+
 An administrator can also see the whole picture rather than one channel of it:
 the workspace settings page lists every organization this workspace shares
 channels with, and how many channels each is in, because that count is what a

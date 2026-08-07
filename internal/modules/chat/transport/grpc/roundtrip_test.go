@@ -348,6 +348,15 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
 		},
+		"WorkspaceSession": {sample: &domain.WorkspaceSession{}, through: throughInfallible(encodeProtoWorkspaceSession, decodeProtoWorkspaceSession)},
+		"WorkspaceSessions": {
+			sample: &workspaceSessionsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				value := filled.(*workspaceSessionsRoundTrip)
+				wire := &chatv1.UserSessionsResponse{Sessions: encodeProtoWorkspaceSessions(value.Sessions)}
+				return &workspaceSessionsRoundTrip{Sessions: decodeProtoWorkspaceSessions(wire.GetSessions())}, wire, nil
+			},
+		},
 		"ExternalTeam":     {sample: &domain.ExternalTeam{}, through: throughInfallible(encodeProtoExternalTeam, decodeProtoExternalTeam)},
 		"ExternalTeamPage": {sample: &domain.ExternalTeamPage{Teams: []domain.ExternalTeam{{}}}, through: throughInfallible(encodeProtoExternalTeamPage, decodeProtoExternalTeamPage)},
 		"CanvasGrant":      {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
@@ -658,6 +667,14 @@ type typingSignalsRoundTrip struct {
 // canvasGrantsRoundTrip wraps the slice because a grant only ever crosses the
 // wire inside one: a sharing surface asks who a canvas is shared with, never
 // about one grant on its own.
+// workspaceSessionsRoundTrip wraps the slice because a session only ever
+// crosses the wire inside one. The zero-time pass matters here: a session whose
+// start was never recorded must stay unknown rather than decode to 1754, which
+// would read as a session opened before the workspace existed.
+type workspaceSessionsRoundTrip struct {
+	Sessions []domain.WorkspaceSession
+}
+
 type canvasGrantsRoundTrip struct {
 	Grants []domain.CanvasAccess
 }
