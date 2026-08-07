@@ -923,6 +923,14 @@ type Store interface {
 	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
 	ListLists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
 	UpdateList(context.Context, domain.List, events.Event) error
+	// RemoveListColumn drops one column from a list and the cells under it, in
+	// one transaction. A schema that no longer declares a column while items
+	// still carry values under it is a list nobody can read correctly: the
+	// values are invisible, every later edit carries them, and a new column
+	// minting the same key would bring them back to life. The list is passed
+	// with its schema already rewritten, which is the same shape UpdateList
+	// takes, and its version guards the write.
+	RemoveListColumn(context.Context, domain.List, string, events.Event) error
 	CreateListItem(context.Context, domain.ListItem, events.Event) error
 	GetListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID) (domain.ListItem, error)
 	ListItems(context.Context, domain.WorkspaceID, domain.ListID, domain.PageRequest, bool) (domain.ListItemPage, error)

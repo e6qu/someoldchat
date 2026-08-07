@@ -167,6 +167,23 @@ for later steps and conditions to read.
   removal: revoking it would leave the channel with a tab pointing at a document
   nobody in it may open. A canvas that is not this workspace's canvas answers
   the sharing read as missing rather than as unshared, on both storage profiles.
+- An item is named by its own primary column. It used to be looked up under
+  "title", which is the column this client substitutes for a list created
+  without a schema, so every list that declared its own primary column — which
+  is every list built through the column editor or through the API — rendered
+  its items blank the moment the row was not drawn as cells. Removing a column
+  exposed it; the defect needed no removal to reach.
+- A list item can be deleted, separately from being completed. Completing hides
+  an item and can be undone; deleting cannot, so it is its own control saying so
+  rather than a second meaning for the same button, and an item added by mistake
+  no longer has to stay in the list forever with a line through it. Deleting a
+  batch is all or nothing on every profile: a batch naming one item that is not
+  there removes none of them, because a half-applied delete would leave a member
+  unable to say what they had removed. An assignment already announced in
+  Activity survives the item it pointed at and reports that its source has gone
+  — the news that somebody gave you work is still true after the work is
+  deleted, and a row that vanished would leave the member wondering what they
+  had been told.
 - A conversation's own canvas is reachable from the conversation. It is a
   different thing from a canvas shared into the channel: a conversation has
   exactly one, membership is what grants access to it, and leaving takes that
@@ -224,9 +241,16 @@ for later steps and conditions to read.
   collision. Declaring a column on a list already used free-form does not
   strand its items: a cell the item already held is accepted, because the member
   did not introduce an invisible cell but merely did not delete one, while a
-  newly invented column is still refused. Removing a column is not offered — it
-  would have to remove that value from every item, which is a deletion worth
-  asking for deliberately — and is recorded as absent.
+  newly invented column is still refused. A column can also be removed, which is the deletion
+  that claim was deferring: it takes what every item recorded under that column
+  with it, in the same transaction as the schema change, because a schema that
+  no longer declares a column while items still carry values under it is a list
+  nobody can read correctly — the values are invisible, every later edit carries
+  them, and a new column minting the same key would bring them back. The control
+  says what goes. The column that names the item stays, because a list without
+  one renders as unlabelled cells, and the row says why rather than offering a
+  control that would be refused. An item that never held the removed cell is
+  left byte-identical, so reshaping a list does not rewrite every row in it.
 - A list item carries an assignee and a due date as columns of their own rather
   than cells inside the free-form fields, because the product asks both
   questions itself — who is this for, is it late — and a value buried in JSON
@@ -284,9 +308,9 @@ and full rich block editing remain gaps.
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,
 assignments, due dates, and sharing review are now built — a list carries the
-same grants a canvas does, so it reaches the same sharing surface. Templates,
-views, filters, sorting, comments, attachments, item deletion, and full
-notification/workflow effects remain gaps.
+same grants a canvas does, so it reaches the same sharing surface. An item can be deleted for good, which
+completing it deliberately does not do. Templates, views, filters, sorting,
+comments, attachments, and full notification/workflow effects remain gaps.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered

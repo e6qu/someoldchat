@@ -358,6 +358,139 @@ func TestListSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt(t *testing.T) {
 // A conversation's own canvas existed in the API and nowhere else: the store,
 // the service and conversations.canvases.create have carried it since canvases
 // were built, and no first-party surface offered or opened one.
+// A list whose primary column is named anything but "title" rendered every item
+// blank whenever the row was not drawn as cells. That is every list built
+// through AddListColumn or through the API, and it needed no removal to reach:
+// one declared column is not a structure, so the row falls back to the item's
+// name, and the name was looked up under a column that list does not have.
+func TestListItemIsNamedByItsPrimaryColumn(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(context.Background(), "T1", "U1", "Launch", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(context.Background(), "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.CreateListItem(context.Background(), "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`); err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, "list", get(t, mux, "/app/lists/"+string(value.ID)).Body.String(), "ship it")
+}
+
+// Declaring a column was offered and removing one was not, which left a list
+// stuck with any column anybody had ever added. Removing one deletes what every
+// item recorded under it, so it says so, and the column that names the item
+// stays because a list without one renders as unlabelled cells.
+func TestListColumnCanBeRemovedAndTakesItsCellsWithIt(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(context.Background(), "T1", "U1", "Launch", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/lists/" + string(value.ID)
+	csrf := auth.CSRFToken("session")
+	for _, column := range []url.Values{
+		{"_csrf": {csrf}, "name": {"Task"}, "type": {"text"}},
+		{"_csrf": {csrf}, "name": {"Status"}, "type": {"select"}, "options": {"open, done"}},
+	} {
+		if added := postForm(t, mux, target+"/columns", column.Encode(), false); added.Code != http.StatusSeeOther {
+			t.Fatalf("add column = %d: %s", added.Code, added.Body)
+		}
+	}
+	item, err := messages.CreateListItem(context.Background(), "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page := get(t, mux, target)
+	requireContains(t, "list", page.Body.String(), "Remove a column", "Remove Status", "names the item", "ship it")
+	// The column that names the item is not offered for removal.
+	requireMissing(t, "list", page.Body.String(), "Remove Task")
+
+	removed := postForm(t, mux, target+"/columns/remove", url.Values{"_csrf": {csrf}, "key": {"status"}}.Encode(), false)
+	if removed.Code != http.StatusSeeOther {
+		t.Fatalf("remove column = %d: %s", removed.Code, removed.Body)
+	}
+	// What is left is one column naming the item, which is what a list without
+	// a declared structure is, so the row goes back to showing its name rather
+	// than a one-cell table.
+	after := get(t, mux, target)
+	requireContains(t, "list after removal", after.Body.String(), "ship it")
+	requireMissing(t, "list after removal", after.Body.String(), "Status (select)", "Remove Status")
+
+	// The values go with the column. A cell under no column is invisible, is
+	// carried by every later edit, and would come back the day a new column
+	// minted the same key.
+	stored, err := s.GetListItem(context.Background(), "T1", value.ID, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stored.Fields, "status") {
+		t.Fatalf("the removed column's cell survived: %s", stored.Fields)
+	}
+	if !strings.Contains(stored.Fields, "ship it") {
+		t.Fatalf("removing one column took another column's value: %s", stored.Fields)
+	}
+
+	// Removing it again is refused, and so is the primary column.
+	if repeat := postForm(t, mux, target+"/columns/remove", url.Values{"_csrf": {csrf}, "key": {"status"}}.Encode(), false); repeat.Code != http.StatusBadRequest {
+		t.Fatalf("second removal = %d: %s", repeat.Code, repeat.Body)
+	}
+	if primary := postForm(t, mux, target+"/columns/remove", url.Values{"_csrf": {csrf}, "key": {"task"}}.Encode(), false); primary.Code != http.StatusBadRequest {
+		t.Fatalf("primary removal = %d: %s", primary.Code, primary.Body)
+	}
+}
+
+// Completing an item hides it and can be undone; deleting one cannot. The
+// client only ever offered the first, so an item added by mistake stayed in the
+// list forever with a line through it. slackLists.items.delete has existed
+// throughout.
+func TestListItemCanBeDeletedForGoodAndCompletionStillCannot(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(context.Background(), "T1", "U1", "Launch", "", "[]", "", false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/lists/" + string(value.ID)
+	csrf := auth.CSRFToken("session")
+
+	if created := postForm(t, mux, target+"/items/create", url.Values{"_csrf": {csrf}, "title": {"added by mistake"}}.Encode(), false); created.Code != http.StatusSeeOther {
+		t.Fatalf("create item = %d: %s", created.Code, created.Body)
+	}
+	page := get(t, mux, target)
+	requireContains(t, "list", page.Body.String(), "added by mistake", "Delete this item", "for good")
+	match := regexp.MustCompile(`/items/([^/]+)/delete`).FindStringSubmatch(page.Body.String())
+	if len(match) != 2 {
+		t.Fatalf("no delete control: %s", page.Body)
+	}
+
+	// Completing it keeps it, which is the distinction the two controls exist
+	// to draw.
+	if done := postForm(t, mux, target+"/items/"+match[1]+"/toggle", url.Values{"_csrf": {csrf}, "archived": {"true"}}.Encode(), false); done.Code != http.StatusSeeOther {
+		t.Fatalf("complete item = %d: %s", done.Code, done.Body)
+	}
+	requireContains(t, "completed list", get(t, mux, target).Body.String(), "added by mistake", "Restore")
+
+	deleted := postForm(t, mux, target+"/items/"+match[1]+"/delete", url.Values{"_csrf": {csrf}}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete item = %d: %s", deleted.Code, deleted.Body)
+	}
+	after := get(t, mux, target)
+	requireMissing(t, "list after deletion", after.Body.String(), "added by mistake")
+	requireContains(t, "list after deletion", after.Body.String(), "No items yet.")
+
+	// Deleting it again answers as it would for an item somebody else has
+	// already deleted, rather than reporting a failure the member caused.
+	repeat := postForm(t, mux, target+"/items/"+match[1]+"/delete", url.Values{"_csrf": {csrf}}.Encode(), false)
+	if repeat.Code != http.StatusNotFound {
+		t.Fatalf("second delete = %d: %s", repeat.Code, repeat.Body)
+	}
+}
+
 func TestChannelCanvasIsOfferedToMembersAndCreatedOnPurpose(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 

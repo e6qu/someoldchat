@@ -3387,6 +3387,75 @@ test('[CANVAS-01 A11Y-01] a canvas says who it is shared with and the owner can 
   await expect(page.locator('#share-target option', { hasText: 'Channel: #general' })).toHaveCount(1);
 });
 
+// Declaring a column was offered and removing one was not, so a list was stuck
+// with every column anybody had ever added. Removing one deletes what each item
+// recorded under it, and the column that names the item stays.
+test('[LIST-01 A11Y-01] a list column can be removed and takes its values with it', async ({ page, context }) => {
+  await signIn(context);
+  const name = `Reshaped ${Date.now()}`;
+  await page.goto('/app/lists');
+  await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  await page.getByRole('group').filter({ hasText: 'Add a column' }).locator('summary').click();
+  await page.locator('#column-name').fill('Status');
+  await page.locator('#column-type').selectOption('select');
+  await page.locator('#column-options').fill('open, done');
+  await page.getByRole('button', { name: 'Add column' }).click();
+  await expect(page.getByText('Columns: Title (text), Status (select)')).toBeVisible();
+
+  await page.getByPlaceholder('Add an item').fill('ship it');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByText('ship it')).toBeVisible();
+
+  await page.getByRole('group').filter({ hasText: 'Remove a column' }).locator('summary').click();
+  // The column that names the item is not offered for removal, and says why.
+  const primary = page.locator('.column-row', { hasText: 'Title' });
+  await expect(primary).toContainText('names the item');
+  await expect(primary.getByRole('button')).toHaveCount(0);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('button', { name: 'Remove Status' }).click();
+  // One column naming the item is what a list without a declared structure is,
+  // so the columns line goes and the row shows its name again.
+  await expect(page.getByText('Columns: Title (text), Status (select)')).toHaveCount(0);
+  await expect(page.getByText('ship it')).toBeVisible();
+});
+
+// Completing an item hides it and can be undone; deleting one cannot. The
+// client only ever offered the first, so an item added by mistake stayed in the
+// list forever with a line through it. The journey drives both so the
+// distinction is asserted rather than described.
+test('[LIST-01 A11Y-01] a list item can be completed reversibly or deleted for good', async ({ page, context }) => {
+  await signIn(context);
+  const name = `Deletable ${Date.now()}`;
+  await page.goto('/app/lists');
+  await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  await page.getByPlaceholder('Add an item').fill('added by mistake');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByText('added by mistake')).toBeVisible();
+
+  // Completing keeps it, which is the distinction the two controls exist to
+  // draw.
+  await page.getByRole('button', { name: 'Complete' }).click();
+  await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
+  await expect(page.getByText('added by mistake')).toBeVisible();
+
+  await page.getByRole('group').filter({ hasText: 'Delete' }).first().locator('summary').click();
+  await expect(page.getByText('for good')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.getByRole('button', { name: 'Delete this item' }).click();
+
+  await expect(page.getByText('added by mistake')).toHaveCount(0);
+  await expect(page.getByText('No items yet.')).toBeVisible();
+});
+
 // A list carries the same grants as a canvas and had the same hole. The surface
 // is now one surface, so this drives the list half of it end to end — including
 // that revoking puts the channel back in the picker, which is the state the
