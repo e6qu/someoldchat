@@ -171,6 +171,14 @@ message AdminWorkflowListRequest {
   string query = 6;
 }
 
+message WorkflowCollaboratorsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string workflow_ids = 3;
+  repeated string collaborator_ids = 4;
+  bool adding = 5;
+}
+
 message AdminUnpublishWorkflowsRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -399,6 +407,7 @@ service WorkflowsService {
   rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
   rpc AdminWorkflows(AdminWorkflowListRequest) returns (WorkflowListResponse);
   rpc AdminUnpublishWorkflows(AdminUnpublishWorkflowsRequest) returns (AdminUnpublishWorkflowsResponse);
+  rpc ChangeWorkflowCollaborators(WorkflowCollaboratorsRequest) returns (AdminUnpublishWorkflowsResponse);
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);
   rpc ListWorkflowTriggers(WorkflowTriggerListRequest) returns (WorkflowTriggerListResponse);
   rpc RunWorkflow(WorkflowRunRequest) returns (WorkflowRun);

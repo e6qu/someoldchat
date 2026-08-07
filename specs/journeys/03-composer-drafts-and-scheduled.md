@@ -202,6 +202,14 @@ outcomes are not HTTP 500 responses.
 
 ## Evidence
 
+- A file staged on a draft is announced as saved only once the draft that names
+  it has been written. It used to be announced immediately while the write sat
+  on a 450 ms debounce, so a member who saw "One file is saved with this draft"
+  and closed the tab within half a second lost the attachment. The debounce is
+  there so typing does not post per keystroke; attaching or removing a file is a
+  discrete deliberate act and writes at once.
+
+
 - Typing: a real RTM client announces composition and the browser client shows
   it, which is both halves of the journey over the transport Slack uses. The
   signal is stored as a short-lived row rather than journalled, and a service

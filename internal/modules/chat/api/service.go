@@ -189,6 +189,8 @@ type Service interface {
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	AdminWorkflows(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	AdminUnpublishWorkflows(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID) error
+	AddWorkflowCollaborators(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID, []domain.UserID) error
+	RemoveWorkflowCollaborators(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID, []domain.UserID) error
 	SetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTrigger, uint64) (domain.WorkflowTrigger, error)
 	ListWorkflowTriggers(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) ([]domain.WorkflowTrigger, error)
 	RunWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerID, domain.ConversationID, string, string) (domain.WorkflowRun, error)

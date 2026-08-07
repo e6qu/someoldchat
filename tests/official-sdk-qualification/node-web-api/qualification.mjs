@@ -272,6 +272,15 @@ await assert.rejects(
   (error) => String(error).includes("workflow_not_found"),
 );
 
+await assert.rejects(
+  () => client.admin.workflows.collaborators.add({ workflow_ids: ["Wf-not-here"], collaborator_ids: ["U1"] }),
+  (error) => String(error).includes("workflow_not_found"),
+);
+await assert.rejects(
+  () => client.admin.workflows.collaborators.remove({ workflow_ids: ["Wf-not-here"], collaborator_ids: ["U1"] }),
+  (error) => String(error).includes("workflow_not_found"),
+);
+
 // Session administration: the list must describe sessions without carrying the
 // credential it describes, so the walk asserts the token is absent rather than
 // merely that the call succeeded.

@@ -656,6 +656,51 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Handing a workflow over is a change to the list as it stands, not
+			// a replacement of it, and both compositions have to agree on that
+			// and on the order the list keeps.
+			name: "an administrator adds and removes workflow collaborators one name at a time",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+					AppID: "A1", CallbackID: "handover", Title: "Handover", InputSchema: `{}`,
+					Steps: `[{"function_id":"triage","title":"Triage request"}]`,
+				})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AddWorkflowCollaborators(ctx, "T1", "UA", []domain.WorkflowID{created.ID}, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				// Adding somebody who already manages it changes nothing rather
+				// than duplicating them.
+				if err := chat.AddWorkflowCollaborators(ctx, "T1", "UA", []domain.WorkflowID{created.ID}, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				afterAdd, err := chat.GetWorkflow(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				// Somebody who is not a member cannot manage it, and a member
+				// cannot hand out management at all.
+				stranger := chat.AddWorkflowCollaborators(ctx, "T1", "UA", []domain.WorkflowID{created.ID}, []domain.UserID{"U-not-here"}) != nil
+				member := chat.AddWorkflowCollaborators(ctx, "T1", "U2", []domain.WorkflowID{created.ID}, []domain.UserID{"U3"}) != nil
+				empty := chat.AddWorkflowCollaborators(ctx, "T1", "UA", []domain.WorkflowID{created.ID}, nil) != nil
+				// Removing somebody who never managed it is the state asked for.
+				if err := chat.RemoveWorkflowCollaborators(ctx, "T1", "UA", []domain.WorkflowID{created.ID}, []domain.UserID{"U3"}); err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveWorkflowCollaborators(ctx, "T1", "UA", []domain.WorkflowID{created.ID}, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				afterRemove, err := chat.GetWorkflow(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				return []any{afterAdd.ManagerIDs, stranger, member, empty, afterRemove.ManagerIDs}, nil
+			},
+		},
+		{
 			// An administrator has to be able to find a workflow they do not own
 			// and take it out of service. Both compositions must agree, because
 			// an administrator told a workflow is stopped while it still runs
