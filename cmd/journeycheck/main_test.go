@@ -37,7 +37,7 @@ Sources checked 2026-07-29:
 	if err := os.WriteFile(filepath.Join(browser, "area.spec.mjs"), []byte("test('[FAKE-01] behavior', () => {});"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := verifyCatalog(catalog, browser)
+	err := verifyCatalog(catalog, browser, -1)
 	if err == nil || !strings.Contains(err.Error(), "unknown journey ID FAKE-01") {
 		t.Fatalf("error = %v, want unknown journey evidence", err)
 	}
@@ -59,7 +59,7 @@ func TestVerifyCatalogRequiresDatedOfficialSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(browser, "area.spec.mjs"), []byte("test('[REAL-01] behavior', () => {});"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := verifyCatalog(catalog, browser)
+	err := verifyCatalog(catalog, browser, -1)
 	if err == nil || !strings.Contains(err.Error(), "Sources checked") {
 		t.Fatalf("error = %v, want missing source date", err)
 	}
@@ -82,7 +82,7 @@ func TestVerifyCatalogRequiresPerJourneyOfficialSourceMapping(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(browser, "area.spec.mjs"), []byte("test('[REAL-01] behavior', () => {});"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := verifyCatalog(catalog, browser)
+	err := verifyCatalog(catalog, browser, -1)
 	if err == nil || !strings.Contains(err.Error(), "no journey-source map row for REAL-01") {
 		t.Fatalf("error = %v, want missing per-journey source mapping", err)
 	}
@@ -108,6 +108,27 @@ func TestOfficialSlackURLRejectsLookalikeAndEmbeddedHosts(t *testing.T) {
 		if isOfficialSlackURL(raw) {
 			t.Errorf("non-official URL accepted: %s", raw)
 		}
+	}
+}
+
+// The ceiling is the whole point of the change that added it, so it is checked
+// in both directions rather than trusted: a gap that grows is a journey that
+// lost its citation, and a gap that shrinks without the ceiling moving is
+// coverage left as slack for whoever next needs room.
+func TestBrowserGapCeilingHoldsInBothDirections(t *testing.T) {
+	if err := checkBrowserGapCeiling(9, 9); err != nil {
+		t.Fatalf("a backlog at its ceiling failed: %v", err)
+	}
+	if err := checkBrowserGapCeiling(10, 9); err == nil {
+		t.Fatal("a backlog above its ceiling passed")
+	}
+	if err := checkBrowserGapCeiling(8, 9); err == nil {
+		t.Fatal("a backlog below its ceiling passed, so ground gained can be given back")
+	}
+	// A negative ceiling is how the unit tests build small catalogs without
+	// asserting a number that only means something for the real one.
+	if err := checkBrowserGapCeiling(3, -1); err != nil {
+		t.Fatalf("an unasserted ceiling failed: %v", err)
 	}
 }
 
@@ -143,7 +164,7 @@ Sources checked 2026-07-29:
 	if err := os.WriteFile(external, []byte("assert '[FAKE-01] unsupported claim'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := verifyCatalog(catalog, browser, external)
+	err := verifyCatalog(catalog, browser, -1, external)
 	if err == nil || !strings.Contains(err.Error(), "unknown journey ID FAKE-01") {
 		t.Fatalf("error = %v, want unknown external journey evidence", err)
 	}
