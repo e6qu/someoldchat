@@ -3023,6 +3023,65 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 	}
 }
 
+// stoppingAWorkflowIsNotAnEdit pins the one workflow write that changes status
+// without changing content. An administrator stopping a workflow is not
+// authoring it: the steps must not move, and neither must the version, because
+// runs pin the published version and a bumped version would make a stop look
+// like a revision nobody wrote. Both profiles implement it separately, so this
+// is the only place that says they agree.
+func stoppingAWorkflowIsNotAnEdit(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	workflow := domain.WorkflowDefinition{
+		ID: domain.WorkflowID("Wf-stop-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		// app_id carries no foreign key: a workflow outlives the app that owned
+		// it, which is one of the states an administrator most needs to stop.
+		AppID:      domain.AppID("A-stop-" + f.suffix),
+		CallbackID: "nightly", Title: "Nightly triage", Description: "unchanged", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","title":"Triage"}]`, Status: domain.WorkflowPublished,
+		Version: 3, PublishedVersion: 3, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.repository.CreateWorkflow(ctx, workflow, f.event("workflow", "workflow.created", string(workflow.ID))); err != nil {
+		t.Fatal(err)
+	}
+	created, err := f.repository.GetWorkflow(ctx, f.workspaceID, workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stoppedAt := now.Add(time.Hour)
+	if err := f.repository.SetWorkflowStatus(ctx, f.workspaceID, workflow.ID, domain.WorkflowDisabled, stoppedAt, f.event("stop", "workflow.unpublished", string(workflow.ID))); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := f.repository.GetWorkflow(ctx, f.workspaceID, workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped.Status != domain.WorkflowDisabled {
+		t.Fatalf("status = %q, want disabled", stopped.Status)
+	}
+	if stopped.Version != created.Version || stopped.PublishedVersion != created.PublishedVersion {
+		t.Fatalf("stopping moved a version: got %d/%d want %d/%d", stopped.Version, stopped.PublishedVersion, created.Version, created.PublishedVersion)
+	}
+	if stopped.Title != created.Title || stopped.Steps != created.Steps || stopped.Description != created.Description {
+		t.Fatalf("stopping rewrote the workflow: %+v", stopped)
+	}
+	if !stopped.UpdatedAt.Equal(stoppedAt) {
+		t.Fatalf("updated at = %s, want %s", stopped.UpdatedAt, stoppedAt)
+	}
+
+	// A workflow in another workspace is not this workspace's to stop.
+	if err := f.repository.SetWorkflowStatus(ctx, domain.WorkspaceID("T-other-"+f.suffix), workflow.ID, domain.WorkflowDisabled, stoppedAt, f.event("stop-foreign", "workflow.unpublished", string(workflow.ID))); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a foreign workspace stopped the workflow: %v", err)
+	}
+	if err := f.repository.SetWorkflowStatus(ctx, f.workspaceID, domain.WorkflowID("Wf-absent-"+f.suffix), domain.WorkflowDisabled, stoppedAt, f.event("stop-absent", "workflow.unpublished", "absent")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("stopping a workflow that is not there: %v", err)
+	}
+}
+
 // sessionsAreListedWithoutTheirTokens pins what an administrator may see and
 // what they may never see. The identifier both profiles answer with is the
 // stored hash of the token, so the listing can tell two sessions apart and end

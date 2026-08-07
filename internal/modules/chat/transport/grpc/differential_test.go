@@ -656,6 +656,62 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An administrator has to be able to find a workflow they do not own
+			// and take it out of service. Both compositions must agree, because
+			// an administrator told a workflow is stopped while it still runs
+			// has been told something false about what their workspace does.
+			name: "an administrator finds every workflow and takes one out of service",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+					AppID: "A1", CallbackID: "admin-workflow", Title: "Nightly triage",
+					Description: "Owned by somebody else", InputSchema: `{}`,
+					Steps: `[{"function_id":"triage","title":"Triage request"}]`,
+				})
+				if err != nil {
+					return nil, err
+				}
+				published, err := chat.UpdateWorkflow(ctx, "T1", "U1", created, created.Version, true)
+				if err != nil {
+					return nil, err
+				}
+				// The administrator does not own it and is not a manager.
+				found, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", "nightly", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				titles := make([]string, 0, len(found))
+				for _, value := range found {
+					titles = append(titles, value.Title+":"+string(value.Status))
+				}
+				// A query nobody matches is an empty answer rather than everything.
+				missing, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", "nothing-is-called-this", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				// A member cannot search the workspace or stop anything.
+				_, _, _, memberErr := chat.AdminWorkflows(ctx, "T1", "U2", "", domain.PageRequest{Limit: 10})
+				memberStop := chat.AdminUnpublishWorkflows(ctx, "T1", "U2", []domain.WorkflowID{published.ID}) != nil
+				// A workflow that is not here stops the whole request.
+				strangerStop := chat.AdminUnpublishWorkflows(ctx, "T1", "UA", []domain.WorkflowID{published.ID, "Wf-not-here"}) != nil
+				beforeStop, err := chat.GetWorkflow(ctx, "T1", "U1", published.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminUnpublishWorkflows(ctx, "T1", "UA", []domain.WorkflowID{published.ID}); err != nil {
+					return nil, err
+				}
+				stopped, err := chat.GetWorkflow(ctx, "T1", "U1", published.ID)
+				if err != nil {
+					return nil, err
+				}
+				// Stopping twice is the state that was asked for, not an error.
+				again := chat.AdminUnpublishWorkflows(ctx, "T1", "UA", []domain.WorkflowID{published.ID}) == nil
+				return []any{titles, len(missing), memberErr != nil, memberStop, strangerStop,
+					string(beforeStop.Status), string(stopped.Status), stopped.Version, stopped.Title, again}, nil
+			},
+		},
+		{
 			name: "workflow permissions discovery and completion survive the composition seam",
 			seed: seedWorkflowParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {

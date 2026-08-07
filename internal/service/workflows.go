@@ -1153,6 +1153,109 @@ func decodeWorkflowStepFunctions(raw string) []workflowFunctionDefinition {
 	return steps
 }
 
+// AdminWorkflows lists every workflow in the workspace, including drafts nobody
+// has published and workflows whose owning app has been uninstalled.
+//
+// It is the administrative counterpart of ListWorkflows, which answers what one
+// member may see. An administrator asked to stop a workflow needs to find it
+// first, and the ones most worth finding are exactly the ones no ordinary
+// directory shows: somebody else's draft, an abandoned owner's, an app nobody
+// maintains.
+//
+// The query is a case-insensitive substring of the title. Filtering is done
+// with the same look-ahead the visibility filter uses, because filtering one
+// store page could otherwise answer an empty page with more=true, or under-fill
+// every page when unmatched workflows sit between matches.
+func (m Messages) AdminWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, query string, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
+		return nil, false, "", err
+	}
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	needle := strings.ToLower(strings.TrimSpace(query))
+	matched := make([]domain.WorkflowDefinition, 0, request.Limit+1)
+	cursor := request.Cursor
+	batchSize := max(100, request.Limit+1)
+	for len(matched) <= request.Limit {
+		values, more, next, err := m.Store.ListWorkflows(ctx, workspaceID, domain.PageRequest{Limit: batchSize, Cursor: cursor})
+		if err != nil {
+			return nil, false, "", err
+		}
+		for _, value := range values {
+			if needle != "" && !strings.Contains(strings.ToLower(value.Title), needle) {
+				continue
+			}
+			matched = append(matched, value)
+			if len(matched) > request.Limit {
+				break
+			}
+		}
+		if len(matched) > request.Limit || !more || next == "" || next == cursor {
+			break
+		}
+		cursor = next
+	}
+	hasMore := len(matched) > request.Limit
+	if hasMore {
+		matched = matched[:request.Limit]
+	}
+	nextCursor := domain.Cursor("")
+	if hasMore && len(matched) > 0 {
+		nextCursor, _ = domain.NewListCursor(string(matched[len(matched)-1].ID))
+	}
+	return matched, hasMore, nextCursor, nil
+}
+
+// AdminUnpublishWorkflows takes workflows out of service.
+//
+// It is not the owner's unpublish with a different caller: that path is an edit
+// — it revalidates the steps, requires the owning app to still be installed,
+// and bumps the version. An administrator stopping a workflow most needs to
+// stop exactly the ones that would fail those checks, and stopping something is
+// not authoring it, so this changes the status and nothing else.
+//
+// A workflow named in the request that is not in this workspace stops the whole
+// thing before anything is stopped, for the reason a bulk sign-out does: an
+// administrator acting on a list finds out they were wrong rather than
+// discovering later that an arbitrary prefix of it was applied.
+func (m Messages) AdminUnpublishWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, ids []domain.WorkflowID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidWorkflowStep
+	}
+	current := make([]domain.WorkflowDefinition, 0, len(ids))
+	for _, id := range ids {
+		value, err := m.Store.GetWorkflow(ctx, workspaceID, id)
+		if err != nil {
+			return err
+		}
+		current = append(current, value)
+	}
+	now := time.Now().UTC()
+	for _, value := range current {
+		// A workflow that is already out of service is not an error: it is the
+		// state that was asked for.
+		if value.Status == domain.WorkflowDisabled {
+			continue
+		}
+		event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.unpublished",
+			events.String("workflow_id", string(value.ID)),
+			events.String("app_id", string(value.AppID)),
+			events.Int("version", int64(value.Version)),
+		), now)
+		if err != nil {
+			return err
+		}
+		if err := m.Store.SetWorkflowStatus(ctx, workspaceID, value.ID, domain.WorkflowDisabled, now, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m Messages) ListWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return nil, false, "", err

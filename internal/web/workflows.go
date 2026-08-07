@@ -42,6 +42,10 @@ type workflowCardView struct {
 	Version     uint64
 	Owned       bool
 	UpdatedAt   string
+	// CanStop marks a workflow an administrator may take out of service from
+	// this page. It is false outside the administrative view, and false for a
+	// workflow that is not running.
+	CanStop bool
 }
 
 type workflowStepSlot struct {
@@ -243,6 +247,11 @@ type workflowsData struct {
 	Functions []workflowFunctionOption
 	Workflows []workflowCardView
 	MoreURL   string
+	// Everything marks the administrative view: every workflow in the
+	// workspace rather than the ones this member may see. Query is what is
+	// being searched for, so the box keeps what was typed.
+	Everything bool
+	Query      string
 }
 
 type workflowData struct {
@@ -330,8 +339,11 @@ const workflowsMarkup = `{{define "title"}}Workflows · SameOldChat{{end}}
 {{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><h1>Workflows</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
 <div class="heading"><div><h2>Workflows</h2><p>Build, publish, and run durable automations backed by installed app functions.</p></div></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if .Everything}}<form class="admin-search" method="get" action="/app/workflows"><input type="hidden" name="scope" value="all"><label for="workflow-query">Search every workflow</label><input id="workflow-query" name="q" value="{{.Query}}" maxlength="255" placeholder="Title contains…"><button type="submit">Search</button></form>
+<p class="read-only">Every workflow in this workspace, including drafts nobody has published and workflows whose app is gone. Stopping one takes it out of service without changing what it says. <a href="/app/workflows">Back to your workflows</a></p>
+{{else}}<p class="read-only"><a href="/app/workflows?scope=all">See every workflow in the workspace</a> — workspace administrators only.</p>{{end}}
 {{if .Functions}}<details class="create"><summary>Create a workflow</summary><form class="fields" method="post" action="/app/workflows/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input name="title" maxlength="255" required></label><label>Owning app<select id="workflow-app" name="app_id" required><option value="">Choose an app</option>{{range .Apps}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label class="wide">Description<textarea name="description" maxlength="2000"></textarea></label><label>Icon (emoji or short text)<input name="icon" maxlength="64" placeholder="🚀"></label><label class="wide">First step<select id="workflow-function" name="function_callback" required><option value="">Choose a function</option>{{range .Functions}}<option value="{{.CallbackID}}" data-app="{{.AppID}}">{{.AppName}} · {{.Title}}</option>{{end}}</select></label><label>Workflow reference<input name="callback_id" maxlength="255" placeholder="triage-request"></label><button type="submit">Create workflow</button></form></details>{{else}}<p class="problem">Workflow Builder needs a developer app with at least one manifest function. <a href="/app/developer/apps">Create or update an app manifest</a>, then return here.</p>{{end}}
-<div class="grid">{{range .Workflows}}<a class="card" href="/app/workflows/{{.ID}}">{{if .Icon}}<span class="wf-icon" aria-hidden="true">{{.Icon}}</span>{{end}}<h3>{{.Title}}</h3><p>{{if .Description}}{{.Description}}{{else}}No description{{end}}</p><div class="meta"><span class="pill">{{.Status}}</span><span>v{{.Version}}</span>{{if .Owned}}<span>Owned by you</span>{{end}}<time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></div></a>{{else}}<p class="empty">No workflows are available yet.</p>{{end}}</div>{{if .MoreURL}}<p><a href="{{.MoreURL}}">Show more workflows</a></p>{{end}}</main>{{end}}`
+<div class="grid">{{range .Workflows}}<a class="card" href="/app/workflows/{{.ID}}">{{if .Icon}}<span class="wf-icon" aria-hidden="true">{{.Icon}}</span>{{end}}<h3>{{.Title}}</h3><p>{{if .Description}}{{.Description}}{{else}}No description{{end}}</p><div class="meta"><span class="pill">{{.Status}}</span><span>v{{.Version}}</span>{{if .Owned}}<span>Owned by you</span>{{end}}<time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></div></a>{{if .CanStop}}<form class="stop-workflow" method="post" action="/app/workflows/{{.ID}}/stop"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Stop {{.Title}}</button></form>{{end}}{{else}}<p class="empty">No workflows are available yet.</p>{{end}}</div>{{if .MoreURL}}<p><a href="{{.MoreURL}}">Show more workflows</a></p>{{end}}</main>{{end}}`
 
 var workflowsTemplate = mustPage(workflowsMarkup)
 
@@ -443,7 +455,27 @@ func (h Handler) workflows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := domain.PageRequest{Limit: 48, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))}
-	values, more, next, err := h.Messages.ListWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	// The administrative view is opt-in rather than the default even for an
+	// administrator: most of the time they are looking at their own workflows
+	// like anyone else, and a directory that silently showed every draft in the
+	// workspace would make somebody else's unfinished work look like theirs.
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	everything := strings.TrimSpace(r.URL.Query().Get("scope")) == "all"
+	var values []domain.WorkflowDefinition
+	var more bool
+	var next domain.Cursor
+	var err error
+	if everything {
+		values, more, next, err = h.Messages.AdminWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, query, request)
+		if errors.Is(err, store.ErrNotFound) {
+			// Not an administrator. The page says so rather than pretending the
+			// workspace has no workflows.
+			h.writeStoreError(w, err, "Only a workspace administrator can see every workflow.")
+			return
+		}
+	} else {
+		values, more, next, err = h.Messages.ListWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	}
 	if err != nil {
 		h.writeStoreError(w, err, "Workflows are temporarily unavailable.")
 		return
@@ -455,20 +487,46 @@ func (h Handler) workflows(w http.ResponseWriter, r *http.Request) {
 	}
 	cards := make([]workflowCardView, 0, len(values))
 	for _, value := range values {
-		cards = append(cards, workflowCardView{
+		card := workflowCardView{
 			ID: string(value.ID), Title: value.Title, Description: value.Description, Icon: value.Icon,
 			Status: string(value.Status), Version: value.Version, Owned: value.OwnerID == principal.UserID,
 			UpdatedAt: value.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
-		})
+		}
+		// The stop control appears only in the administrative view and only for
+		// a workflow that is running: offering it for a draft would be a button
+		// whose only effect is to say it did nothing.
+		card.CanStop = everything && value.Status == domain.WorkflowPublished
+		cards = append(cards, card)
 	}
 	moreURL := ""
 	if more {
 		moreURL = "/app/workflows?cursor=" + url.QueryEscape(string(next))
+		if everything {
+			moreURL += "&scope=all&q=" + url.QueryEscape(query)
+		}
 	}
 	h.writeHTML(w, workflowsTemplate, workflowsData{
 		CSRFToken: csrf, Notice: strings.TrimSpace(r.URL.Query().Get("notice")),
 		Apps: apps, Functions: functions, Workflows: cards, MoreURL: moreURL,
+		Everything: everything, Query: query,
 	}, http.StatusOK, "workflow rendering unavailable")
+}
+
+// stopWorkflow takes a workflow out of service from the administrative view.
+func (h Handler) stopWorkflow(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.workflowPrincipal(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the workflows and try again."); !ok {
+		return
+	}
+	id := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
+	if err := h.Messages.AdminUnpublishWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, []domain.WorkflowID{id}); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The workflow was not stopped", "Only a workspace administrator can stop a workflow they do not own.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/workflows?scope=all")
 }
 
 func (h Handler) createWorkflow(w http.ResponseWriter, r *http.Request) {

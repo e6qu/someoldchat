@@ -3174,6 +3174,25 @@ func (s *Store) CreateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 	return nil
 }
 
+// SetWorkflowStatus mirrors the SQL profile: the status and the moment change,
+// and nothing else does.
+func (s *Store) SetWorkflowStatus(_ context.Context, workspace domain.WorkspaceID, id domain.WorkflowID, status domain.WorkflowStatus, at time.Time, event events.Event) error {
+	if id == "" || workspace == "" || status == "" {
+		return store.InvalidArgument("invalid workflow status")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.workflows[id]
+	if !exists || current.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	current.Status = status
+	current.UpdatedAt = at.UTC()
+	s.workflows[id] = current
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinition, expectedVersion uint64, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || expectedVersion == 0 {
 		return store.InvalidArgument("invalid workflow update")

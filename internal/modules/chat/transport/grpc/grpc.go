@@ -3012,6 +3012,38 @@ func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspace
 	return decodeWorkflowDefinition(out), err
 }
 
+func (r Remote) AdminWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+	out, err := r.workflows.AdminWorkflows(ctx, &chatv1.AdminWorkflowListRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit),
+		Cursor: string(request.Cursor), Descending: request.Descending, Query: query,
+	})
+	if err != nil {
+		return nil, false, "", err
+	}
+	values := make([]domain.WorkflowDefinition, 0, len(out.GetWorkflows()))
+	for _, value := range out.GetWorkflows() {
+		values = append(values, decodeWorkflowDefinition(value))
+	}
+	return values, out.GetHasMore(), domain.Cursor(out.GetNextCursor()), nil
+}
+
+func (r Remote) AdminUnpublishWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.WorkflowID) error {
+	values := make([]string, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, string(id))
+	}
+	out, err := r.workflows.AdminUnpublishWorkflows(ctx, &chatv1.AdminUnpublishWorkflowsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowIds: values,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed workflow unpublish was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) ListWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
 	out, err := r.workflows.ListWorkflows(ctx, &chatv1.WorkflowListRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit),
@@ -6306,6 +6338,32 @@ func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutat
 		return nil, mapError(err)
 	}
 	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) AdminWorkflows(ctx context.Context, input *chatv1.AdminWorkflowListRequest) (*chatv1.WorkflowListResponse, error) {
+	values, more, next, err := s.implementation.AdminWorkflows(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(),
+		domain.PageRequest{Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor()), Descending: input.GetDescending()},
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.WorkflowListResponse{HasMore: more, NextCursor: string(next), Workflows: make([]*chatv1.WorkflowDefinition, 0, len(values))}
+	for _, value := range values {
+		out.Workflows = append(out.Workflows, encodeWorkflowDefinition(value))
+	}
+	return out, nil
+}
+
+func (s *Server) AdminUnpublishWorkflows(ctx context.Context, input *chatv1.AdminUnpublishWorkflowsRequest) (*chatv1.AdminUnpublishWorkflowsResponse, error) {
+	ids := make([]domain.WorkflowID, 0, len(input.GetWorkflowIds()))
+	for _, id := range input.GetWorkflowIds() {
+		ids = append(ids, domain.WorkflowID(id))
+	}
+	if err := s.implementation.AdminUnpublishWorkflows(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AdminUnpublishWorkflowsResponse{Ok: true}, nil
 }
 
 func (s *Server) ListWorkflows(ctx context.Context, input *chatv1.WorkflowListRequest) (*chatv1.WorkflowListResponse, error) {

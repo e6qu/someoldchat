@@ -38,6 +38,8 @@ const (
 	WorkflowsService_CanManageWorkflow_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/CanManageWorkflow"
 	WorkflowsService_UpdateWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/UpdateWorkflow"
 	WorkflowsService_ListWorkflows_FullMethodName                 = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflows"
+	WorkflowsService_AdminWorkflows_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/AdminWorkflows"
+	WorkflowsService_AdminUnpublishWorkflows_FullMethodName       = "/sameoldchat.chat.v1.WorkflowsService/AdminUnpublishWorkflows"
 	WorkflowsService_SetWorkflowTrigger_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowTrigger"
 	WorkflowsService_ListWorkflowTriggers_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflowTriggers"
 	WorkflowsService_RunWorkflow_FullMethodName                   = "/sameoldchat.chat.v1.WorkflowsService/RunWorkflow"
@@ -81,6 +83,8 @@ type WorkflowsServiceClient interface {
 	CanManageWorkflow(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowManagePermissionResponse, error)
 	UpdateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
 	ListWorkflows(ctx context.Context, in *WorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error)
+	AdminWorkflows(ctx context.Context, in *AdminWorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error)
+	AdminUnpublishWorkflows(ctx context.Context, in *AdminUnpublishWorkflowsRequest, opts ...grpc.CallOption) (*AdminUnpublishWorkflowsResponse, error)
 	SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error)
 	ListWorkflowTriggers(ctx context.Context, in *WorkflowTriggerListRequest, opts ...grpc.CallOption) (*WorkflowTriggerListResponse, error)
 	RunWorkflow(ctx context.Context, in *WorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
@@ -299,6 +303,26 @@ func (c *workflowsServiceClient) ListWorkflows(ctx context.Context, in *Workflow
 	return out, nil
 }
 
+func (c *workflowsServiceClient) AdminWorkflows(ctx context.Context, in *AdminWorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowListResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_AdminWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) AdminUnpublishWorkflows(ctx context.Context, in *AdminUnpublishWorkflowsRequest, opts ...grpc.CallOption) (*AdminUnpublishWorkflowsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminUnpublishWorkflowsResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_AdminUnpublishWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *workflowsServiceClient) SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkflowTrigger)
@@ -502,6 +526,8 @@ type WorkflowsServiceServer interface {
 	CanManageWorkflow(context.Context, *WorkflowGetRequest) (*WorkflowManagePermissionResponse, error)
 	UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error)
 	ListWorkflows(context.Context, *WorkflowListRequest) (*WorkflowListResponse, error)
+	AdminWorkflows(context.Context, *AdminWorkflowListRequest) (*WorkflowListResponse, error)
+	AdminUnpublishWorkflows(context.Context, *AdminUnpublishWorkflowsRequest) (*AdminUnpublishWorkflowsResponse, error)
 	SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error)
 	ListWorkflowTriggers(context.Context, *WorkflowTriggerListRequest) (*WorkflowTriggerListResponse, error)
 	RunWorkflow(context.Context, *WorkflowRunRequest) (*WorkflowRun, error)
@@ -585,6 +611,12 @@ func (UnimplementedWorkflowsServiceServer) UpdateWorkflow(context.Context, *Work
 }
 func (UnimplementedWorkflowsServiceServer) ListWorkflows(context.Context, *WorkflowListRequest) (*WorkflowListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListWorkflows not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) AdminWorkflows(context.Context, *AdminWorkflowListRequest) (*WorkflowListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminWorkflows not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) AdminUnpublishWorkflows(context.Context, *AdminUnpublishWorkflowsRequest) (*AdminUnpublishWorkflowsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminUnpublishWorkflows not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetWorkflowTrigger not implemented")
@@ -1002,6 +1034,42 @@ func _WorkflowsService_ListWorkflows_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkflowsService_AdminWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminWorkflowListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).AdminWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_AdminWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).AdminWorkflows(ctx, req.(*AdminWorkflowListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_AdminUnpublishWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUnpublishWorkflowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).AdminUnpublishWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_AdminUnpublishWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).AdminUnpublishWorkflows(ctx, req.(*AdminUnpublishWorkflowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorkflowsService_SetWorkflowTrigger_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WorkflowTriggerMutationRequest)
 	if err := dec(in); err != nil {
@@ -1408,6 +1476,14 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorkflows",
 			Handler:    _WorkflowsService_ListWorkflows_Handler,
+		},
+		{
+			MethodName: "AdminWorkflows",
+			Handler:    _WorkflowsService_AdminWorkflows_Handler,
+		},
+		{
+			MethodName: "AdminUnpublishWorkflows",
+			Handler:    _WorkflowsService_AdminUnpublishWorkflows_Handler,
 		},
 		{
 			MethodName: "SetWorkflowTrigger",
