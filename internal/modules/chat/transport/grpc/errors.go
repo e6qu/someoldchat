@@ -19,32 +19,26 @@ import (
 // errorClass binds one domain sentinel to the gRPC status code that carries it
 // and to the stable key that identifies it exactly.
 //
-// errorClasses below is the only place the mapping exists. Both directions read
-// it: the server classifies an implementation error with classifyError and the
-// client restores the sentinel with restoreSentinel, so a sentinel cannot be
-// added to one direction and forgotten in the other. The previous design was a
-// pair of hand-maintained switch statements — the server produced ten status
-// classes and the client reversed five — and every sentinel outside that
-// intersection was a one-way trip: errors.Is(err, service.ErrInvalidMessage) was
-// always false in -chat-mode grpc, which turned an HTTP 400 in the monolith into
-// an HTTP 503 in the split deployment.
+// errorClasses below is the only place the mapping exists, and both directions
+// read it, so a sentinel cannot be added to one and forgotten in the other. The
+// hand-maintained pair of switches it replaced classified ten codes and reversed
+// five, which turned an HTTP 400 in the monolith into an HTTP 503 in the split
+// deployment for every sentinel outside the intersection.
 //
-// Invariants, all asserted by TestErrorClassTableIsConsistent and enforced at
-// package initialisation:
+// Invariants, asserted by TestErrorClassTableIsConsistent and at package
+// initialisation:
 //
-//   - key is unique, and it is wire contract: renaming one breaks a rolling
-//     deployment where the two processes run different versions.
-//   - sentinel is unique. Two sentinels that share a code (store.ErrAlreadyExists
-//     and service.ErrEmojiAlreadyExists) stay distinguishable because the key,
-//     not the code, restores them.
-//   - at most one class per code sets restoresCode, and no class whose code
-//     appears in libraryProducedCodes sets it at all. That class is the fallback
-//     for a peer old enough to send no DomainError detail; a code with no such
-//     class stays unmapped rather than restoring a sentinel that may be wrong.
+//   - key is unique and is wire contract: renaming one breaks a rolling
+//     deployment.
+//   - sentinel is unique. Two sentinels sharing a code stay distinguishable
+//     because the key, not the code, restores them.
+//   - at most one class per code sets restoresCode, and none whose code appears
+//     in libraryProducedCodes sets it. That class is the fallback for a peer old
+//     enough to send no DomainError detail; a code with no such class stays
+//     unmapped rather than restoring a sentinel that may be wrong.
 //   - every exported sentinel of internal/store, internal/service and
-//     internal/domain appears here or in unclassifiedSentinels with a reason
-//     (TestEveryDomainSentinelIsClassified), so a newly declared sentinel fails
-//     the suite instead of silently degrading to codes.Unavailable.
+//     internal/domain appears here or in unclassifiedSentinels with a reason, so
+//     a new sentinel fails the suite instead of degrading to codes.Unavailable.
 type errorClass struct {
 	key      string
 	code     codes.Code

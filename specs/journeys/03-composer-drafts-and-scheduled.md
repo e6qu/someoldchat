@@ -202,20 +202,18 @@ outcomes are not HTTP 500 responses.
 
 ## Evidence
 
-- A file staged on a draft is announced as saved only once the draft that names
-  it has been written. It used to be announced immediately while the write sat
-  on a 450 ms debounce, so a member who saw "One file is saved with this draft"
-  and closed the tab within half a second lost the attachment. The debounce is
-  there so typing does not post per keystroke; attaching or removing a file is a
-  discrete deliberate act and writes at once.
-
-
+- A file staged on a draft is announced as saved only once the draft that
+  names it has been written. It used to be announced immediately while the
+  write sat on a 450 ms debounce, so a member who saw "One file is saved with
+  this draft" and closed the tab within half a second lost the attachment. The
+  debounce is there so typing does not post per keystroke; attaching or
+  removing a file is a discrete deliberate act and writes at once.
 - Typing: a real RTM client announces composition and the browser client shows
   it, which is both halves of the journey over the transport Slack uses. The
   signal is stored as a short-lived row rather than journalled, and a service
   test asserts the outbox does not grow; cross-profile qualification asserts
-  memory and SQL agree on expiry, on renewal replacing rather than accumulating,
-  and on a non-member seeing nothing.
+  memory and SQL agree on expiry, on renewal replacing rather than
+  accumulating, and on a non-member seeing nothing.
 - Browser: rich/plain composition, all suggestion types, keyboard formatting,
   pasted/dropped/selected file staging, permission-denied/cancelled/completed
   audio and video clip recording, draft switching/reload, all Drafts & sent
@@ -230,39 +228,27 @@ outcomes are not HTTP 500 responses.
   by Slack's formatting guide, with source and license checksums enforced by
   the repository updater. Workspace custom emoji remain durable store data and
   are tested through browser, memory, SQL, and Slack API paths.
-- User groups: the composer combines enabled workspace user groups with visible
-  people under the `@` trigger, filters by handle/name/description, exposes
-  identity-disambiguating type and member-count detail, and accepts the same
-  keyboard controls as person mentions. Selection stores Slack's
-  `<!subteam^ID>` transport form; timelines and Activity resolve the durable ID
-  back to the current handle without rewriting message history. Shared
-  memory/SQLite/dqlite/PostgreSQL qualification proves enabled-group expansion,
-  disabled-group suppression, public-channel non-member delivery, and private
-  conversation fencing. Current official Node, Python, and Java SDK
-  qualification continues to create/list/update group membership through
-  Slack's published user-group methods.
-- Boundary: the first-party Drafts & sent RPCs are covered by
-  local-versus-gRPC differential and converter-property tests, while the
-  official Node, Python, and Java SDKs continue to exercise only Slack's
-  published schedule/list/delete Web API surface.
+- User groups: the composer combines enabled workspace user groups with
+  visible people under the `@` trigger, filters by handle/name/description,
+  exposes identity-disambiguating type and member-count detail, and accepts
+  the same keyboard controls as person mentions. Selection stores Slack's
+  `<!subteam^ID>` transport form;
+- Boundary: the first-party Drafts & sent RPCs are covered by local-versus-
+  gRPC differential and converter-property tests, while the official Node,
+  Python, and Java SDKs continue to exercise only Slack's published
+  schedule/list/delete Web API surface.
 - Draft attachment persistence: selected, pasted, dropped, and recorded files
   are uploaded into a private draft-owned reference without posting a message;
   memory and portable SQL preserve the exact conversation/thread coordinate
   and blob reference across reopen; the generated gRPC converter carries every
-  attachment field; the browser reloads the file preview, sidebar indicator,
-  and Drafts & sent count before one send promotes the uploads into one message.
-  Deleting the draft removes the durable references so ordinary blob
-  reconciliation can reclaim the now-orphaned objects.
+  attachment field;
 - Scheduled attachment persistence: browser, memory, SQLite/PostgreSQL,
-  generated-gRPC differential, and worker tests cover file-only and
-  text-plus-file schedules, Drafts & sent projection, ticket expiry, draft
-  cleanup, blob retention, reschedule, cancellation, send now, due delivery,
-  and retry after the file/message commit. The ordinary Slack Web API request
-  remains unchanged and current Node/Python/Java SDK qualification continues
-  to prove only its published text/blocks/structured-attachments surface.
+  generated-gRPC differential, and worker tests cover file-only and text-plus-
+  file schedules, Drafts & sent projection, ticket expiry, draft cleanup, blob
+  retention, reschedule, cancellation, send now, due delivery, and retry after
+  the file/message commit.
 - Differential: capture exact suggestion, draft, schedule-window, quota,
   thread, and failure behavior in a dedicated Slack workspace.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

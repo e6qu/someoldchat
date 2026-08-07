@@ -18,61 +18,40 @@ import (
 // transaction, and they do not belong on the path a process must finish before
 // it can serve.
 //
-// Migration step 78 rewrote every stored timestamp with one UPDATE per distinct
-// value, every rewrite buffered in a Go slice first, all of it inside the single
-// BEGIN IMMEDIATE that holds the schema_migration_lock fence. Measured on SQLite
-// that ran at 790 rows/s, so a workspace with five million messages spent about
-// an hour and three quarters on ONE of twenty-one columns with the fence held,
-// no progress visible, hundreds of megabytes of rewrites resident, and no resume
-// point: a crash at 80 % rolled the whole thing back.
-//
-// The replacement that shipped moved the work out of the fence and then put it
-// back on the startup path, and made it QUADRATIC: every chunk re-ran
-// `SELECT DISTINCT col … WHERE col > ? ORDER BY col LIMIT 500` against a column
-// with no index, so every chunk was a full table scan plus a temp B-tree.
-// Measured at 5k/10k/20k/40k rows it ran in 77 ms / 196 ms / 554 ms / 2.0 s —
-// four times the time for twice the rows — which extrapolates to about 8.7 hours
-// for messages.created_at on the five-million-row example, five times slower
-// than the shape it replaced, repeated on every replica, inside Open.
+// Two earlier shapes are worth remembering because both looked fine in review.
+// One held the schema fence for about an hour and three quarters on a
+// five-million-row column, with no progress visible and no resume point. Its
+// replacement moved the work off the fence but made it quadratic — every chunk
+// re-scanned an unindexed column — which measured four times the time for twice
+// the rows, about five times slower than what it replaced, on every replica,
+// inside Open.
 //
 // What this file does now:
 //
-//   - Every pass is LINEAR. The twenty columns that only need re-encoding get a
-//     transient index on the column for the duration of the pass, so each chunk
-//     is an index range seek over its own 500 values instead of a scan of the
-//     table; the index is dropped when the pass finishes. messages.created_at is
-//     walked through the covering index messages(conversation, created_at, id)
-//     that already exists, one conversation at a time. Folded-search copies are
-//     walked through their table's primary key, which needs no
-//     transient index at all — an index on free text would be as large as the
-//     table it is meant to make cheap. Measured rates are in
+//   - Every pass is linear. Columns that only need re-encoding get a transient
+//     index for the duration of the pass; messages.created_at walks the covering
+//     index that already exists, one conversation at a time; folded-search
+//     copies walk their primary key, because an index on free text would be as
+//     large as the table it is meant to make cheap. Rates are asserted by
 //     TestSQLiteBackfillRateIsLinear and TestSQLiteFoldBackfillRateIsLinear.
-//
-// The machinery is no longer timestamp-shaped. columnBackfill states which
-// column a pass chunks by, which it reads, which it writes and how it derives
-// one from the other, so a new column-wide rewrite is a registry entry rather
-// than a second copy of the driver loop.
-//   - Each chunk commits with its own durable cursor, so a crash resumes where
-//     it stopped instead of starting over, and two replicas cooperate on one
-//     scan rather than duplicating it.
-//   - None of it runs under the migration fence AND none of it runs on the path
-//     Open must complete. Migrate starts the drain on a goroutine and returns;
-//     AwaitBackfills is how a caller that needs the rewrite finished — a test, a
-//     readiness probe, an operator command — waits for it. Close cancels it.
+//   - columnBackfill states which column a pass chunks by, reads, writes, and
+//     how it derives one from the other, so a new rewrite is a registry entry
+//     rather than a second driver loop.
+//   - Each chunk commits with its own durable cursor, so a crash resumes and two
+//     replicas cooperate on one scan.
+//   - None of it runs under the fence or on the path Open must complete. Migrate
+//     starts the drain and returns; AwaitBackfills is how a caller that needs it
+//     finished waits; Close cancels it.
 //   - A value the drain cannot decode is counted in schema_backfills.rejected
-//     and reported by BackfillStatus, so "done" no longer means "done, and also
-//     silently skipped four rows for ever". ResetBackfill re-runs a pass.
+//     and reported by BackfillStatus, so "done" cannot mean "done, and silently
+//     skipped four rows for ever". ResetBackfill re-runs a pass.
 //
-// A row that has not been rewritten yet still DECODES correctly —
-// domain.StoredTime reads the legacy encoding too — but it does not COMPARE
-// correctly against a canonical value, and every read predicate in the
-// repository is such a comparison. While a column is pending, a keyset page
-// boundary, a lease fence or an unread count that straddles a legacy row can be
-// wrong in either direction; the earlier claim in this file that the state was
-// "exactly the state the database was already in before the upgrade" was false,
-// because before the upgrade both sides of those comparisons were legacy and
-// agreed. That window is the price of not holding the fence, and the way to
-// keep it short is to keep every pass linear.
+// A row not yet rewritten still decodes correctly — domain.StoredTime reads the
+// legacy encoding — but it does not compare correctly against a canonical value,
+// and every read predicate is such a comparison. While a column is pending, a
+// keyset page boundary, a lease fence or an unread count that straddles a legacy
+// row can be wrong in either direction. That window is the price of not holding
+// the fence, and keeping every pass linear is what keeps it short.
 
 // backfillChunkSize is the number of rows (for messages.created_at) or distinct
 // column values (for every other column) rewritten per transaction. It bounds

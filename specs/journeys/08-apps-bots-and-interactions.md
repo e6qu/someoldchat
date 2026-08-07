@@ -131,26 +131,22 @@ without deleting user-owned workspace history Slack retains.
 - Current official Bolt/SDK clients perform OAuth, commands, shortcuts, Block
   Kit interactions, modal concurrency, incoming webhooks, signed Events API,
   Socket Mode, streaming, files, token revocation, and uninstall against
-  SameOldChat—without hand-authored callback payloads standing in for delivery.
+  SameOldChat—without hand-authored callback payloads standing in for
+  delivery.
 - Browser tests discover manifest-derived commands/shortcuts, distinguish bot
   identity, exercise all response types, and inspect app administration.
 - APP-04 and APP-06 are qualified through the official-SDK harness, not the
   browser suite, and that is a property of the journeys rather than a missing
   test. Both are observable only at an app endpoint: APP-04 asserts the
   interaction payload an activation delivers, and APP-06 asserts what a
-  `response_url` capability accepts and refuses. The browser harness seeds no
-  app and hosts nothing an app could be reached at, so a browser citation for
-  either would be asserting the button exists rather than that the contract
-  holds. Adding a receiving endpoint to `cmd/server` for the benefit of a test
-  would put test-only surface in the production binary.
-- The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey installs a
-  Socket Mode app and inspects the same payload-redacted durable delivery cursor
-  used by local and generated-gRPC workers. SQL restart tests preserve queued
-  retry time/count/reason, while the console labels unevaluated journal work
+  `response_url` capability accepts and refuses.
+- The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey installs a Socket
+  Mode app and inspects the same payload-redacted durable delivery cursor used
+  by local and generated-gRPC workers. SQL restart tests preserve queued retry
+  time/count/reason, while the console labels unevaluated journal work
   separately from acknowledged callbacks.
 - Live differential tests compare exact form/JSON envelopes after normalizing
   secrets, IDs, and timestamps.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

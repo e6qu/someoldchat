@@ -136,8 +136,8 @@ Implemented evidence:
   SQLite, dqlite, and PostgreSQL through the shared SQL implementation. The
   local and gRPC compositions expose the same typed, paginated contract.
 - Adding a member to a public or private channel creates one Invitations item
-  atomically with the new membership. The item identifies the inviter, links to
-  the real channel, survives restart, and is not duplicated by a repeated
+  atomically with the new membership. The item identifies the inviter, links
+  to the real channel, survives restart, and is not duplicated by a repeated
   invite. Official Slack Help and all three official SDK qualifications cover
   the corresponding product/API boundary.
 - New DMs and MPIM messages, explicit mentions, replies to a thread root
@@ -153,131 +153,89 @@ Implemented evidence:
   access-group-fenced. Disabled groups do not create mention Activity.
 - Browser qualification creates and OAuth-installs a real app, exchanges its
   authorization code, joins the public channel with Slack's current bot
-  `channels:join` scope, and posts overlapping app/mention notifications. It
-  covers typed/cleared/unread filters, persisted layout, empty states,
-  accessibility, source-thread navigation, read-cursor reconciliation, and
-  the documented navigation shortcut in Chromium, Firefox, and WebKit. Web,
-  repository, migration, converter-property, and differential tests cover
-  item hydration, filter overlap, pagination, read/clear/restore, reaction
-  removal, source authorization, and persistence.
+  `channels:join` scope, and posts overlapping app/mention notifications.
 - Activity-local Up/Down, Enter, `X`, `C`, and `R` are exercised against those
   real items; Enter opens the correct thread reply composer. Clearing marks
   read and hides the item, while restore preserves that read state. The UI
   exposes per-item and bulk mark-unread as the inverse durable operation.
   Message-backed items expose the same searchable/category/skin-tone reaction
-  picker as the composer. Live source events refetch the current filtered
-  Activity projection, deduplicate through durable item IDs, preserve selected
-  items, focused controls, scroll position, and the exact active filters, and
-  announce reconnect/update state without moving the item being triaged.
+  picker as the composer.
 - Search parses quoted/excluded terms and current sender, conversation, date,
-  thread, saved, file, pin, reaction, and file-type
-  modifiers into a typed domain request. Message and file search apply
-  conversation visibility before totals and pagination in memory, SQLite,
-  dqlite, and PostgreSQL through the shared store contract; folded persisted
-  columns preserve Unicode-insensitive matching after SQL reopen. File listing,
-  search, metadata, and download use the same public/private visibility rule.
+  thread, saved, file, pin, reaction, and file-type modifiers into a typed
+  domain request. Message and file search apply conversation visibility before
+  totals and pagination in memory, SQLite, dqlite, and PostgreSQL through the
+  shared store contract;
 - The local and generated gRPC compositions carry typed query, ordering,
   pagination, file totals, and viewer identity, with differential coverage for
   message and file results. Slack Web API `search.messages`, `search.files`,
   and legacy combined `search.all` require user tokens, enforce documented
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
-- A decision on a Slack Connect invitation reaches the member who asked for it.
-  Asking is not being told, so nothing lands until somebody decides; the
+- A decision on a Slack Connect invitation reaches the member who asked for
+  it. Asking is not being told, so nothing lands until somebody decides; the
   decider is told nothing, because they already know; and the row keys on the
-  invitation, so a decision later changed replaces the news rather than leaving
-  two rows that disagree. The status is read from the invitation as it stands
-  rather than copied into the row, so history is not rewritten to stay correct.
-  The row carries the conversation as well as the invitation: it links where the
-  member wants to go, and the invitation identifier is what tells "you were
-  added to #general" apart from "your invitation for #general was approved".
+  invitation, so a decision later changed replaces the news rather than
+  leaving two rows that disagree.
 - A canvas shared with a member reaches their Activity. The item is written by
   the transaction that grants the access, so access and the news of it cannot
-  come apart, and it is written only when it is news: re-granting access someone
-  already holds says nothing, and nobody is told about their own share. The row
-  outlives the grant — it records that the share happened, which stays true —
-  and reports the source as unreachable rather than offering a link that would
-  refuse the reader. Reachability is answered by the canvas directory's own
-  visibility predicate rather than a third copy of it.
+  come apart, and it is written only when it is news: re-granting access
+  someone already holds says nothing, and nobody is told about their own
+  share.
 - `has::emoji:` matches the reaction it names. It used to set "has some
-  reaction", which returned messages a member could see were wrong — worse than
-  returning nothing, because it looked like an answer. `has:link` matches a
-  scheme in the stored text rather than parsing a URL, because Slack wraps links
-  on the way in and a second parser here could disagree with the renderer about
-  what a link is. `during:` accepts a month name, a year, and a month with a
-  year; a bare month means the current year, because that is what a member
-  typing it means and reading it as year zero would look like "no results"
-  rather than a misunderstanding.
+  reaction", which returned messages a member could see were wrong — worse
+  than returning nothing, because it looked like an answer. `has:link` matches
+  a scheme in the stored text rather than parsing a URL, because Slack wraps
+  links on the way in and a second parser here could disagree with the
+  renderer about what a link is.
 - Following a result arrives at the message it names. Two mechanisms carry it
-  and neither is obvious: the permalink's window cursor ends just after the hit,
-  so the hit is the last message in the window, and the fragment focuses it
-  because a message carries `tabindex="-1"`. A browser journey pins both, so a
-  change to either is caught rather than silently moving the reader to the wrong
-  end of the right window. The arrival is announced and briefly marked.
+  and neither is obvious: the permalink's window cursor ends just after the
+  hit, so the hit is the last message in the window, and the fragment focuses
+  it because a message carries `tabindex="-1"`. A browser journey pins both,
+  so a change to either is caught rather than silently moving the reader to
+  the wrong end of the right window. The arrival is announced and briefly
+  marked.
 - Results mark the terms that matched. Marking is threaded into the one branch
   of the Slack-markup renderer that emits literal prose rather than applied to
   its output, because a substitution over finished HTML would put tags inside
   attributes, split entities, and mark the `a` in an anchor. A reference's
-  visible label is marked and its target never is. Two consequences are
-  asserted rather than hidden: a term split by a formatting boundary is left
-  unmarked, and a term whose fold changes byte length is left unmarked because
-  the span could no longer be mapped back without corrupting a character.
-  Message results also render their body rather than their raw source, so
-  mentions, emoji and formatting read as they do in the conversation.
+  visible label is marked and its target never is.
 - People and Channels results come from the store with a query and a cursor.
-  They used to be produced by filtering a member directory and channel list the
-  handler paged into memory in full on every search request, including a
+  They used to be produced by filtering a member directory and channel list
+  the handler paged into memory in full on every search request, including a
   Messages search that read neither: correct on a small workspace, unbounded
-  work per request on any other, and unpageable by construction. Channel search
-  is the member conversation listing with a query, so its visibility rule is the
-  sidebar's rather than a second copy that could drift; a browser journey
-  creates a matching public and private channel from an installed app and
-  asserts the session finds one and not the other. The from:/in: pickers are now
-  bounded to one page, with the existing typeahead as the way to reach the rest.
+  work per request on any other, and unpageable by construction.
 - Canvas search is answered from the prose inside the stored document rather
-  than from the JSON it is stored as, so a term matching a structural key finds
-  nothing and a heading a member can see is findable. The SQL profile keeps a
-  folded column written on every canvas write and backfilled on migration; the
-  memory profile folds on read. Cross-profile qualification drives both to the
-  same matches, the same exclusions, and the same silence for a reader with no
-  grant — the visibility rule is the canvas directory's, so a search cannot
-  disclose a title the directory would withhold.
+  than from the JSON it is stored as, so a term matching a structural key
+  finds nothing and a heading a member can see is findable. The SQL profile
+  keeps a folded column written on every canvas write and backfilled on
+  migration; the memory profile folds on read.
 - The first-party search surface provides real Messages, Files, Canvases,
-  People, and Channels results, durable per-member recent searches, and visibility-aware
-  typeahead links to real people, channels, and hosted files. It also provides
-  URL-backed sender/conversation/date/content/order filters, authenticated file
-  links, explicit current-conversation scope, and `Command/Control+F`.
-  Three-engine browser qualification covers the shortcut, recent-search and
-  keyboard typeahead selection, typed tabs, persisted order, real hosted-file
-  search, accessibility automation, and real-object navigation. The shared
-  persistence qualification runs recent-search privacy, ordering, and
-  deduplication against memory, SQLite, dqlite, and PostgreSQL; migration/reopen
-  and local/generated-gRPC tests cover the remaining boundaries.
-
-Known gaps, which MUST NOT be reported as full Activity compatibility:
-
+  People, and Channels results, durable per-member recent searches, and
+  visibility-aware typeahead links to real people, channels, and hosted files.
+  It also provides URL-backed sender/conversation/date/content/order filters,
+  authenticated file links, explicit current-conversation scope, and
+  `Command/Control+F`.
 - Slack Connect and canvas-share invitations, VIP and section notifications,
-  and custom saved views depend on product models not yet implemented. Internal
-  public/private channel additions are implemented in Invitations; unsupported
-  invitation types are not fabricated;
+  and custom saved views depend on product models not yet implemented.
+  Internal public/private channel additions are implemented in Invitations;
+  unsupported invitation types are not fabricated;
 - schema version 107 creates the durable Activity store but does not backfill
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with
   notification-producing mutations committed after the upgrade;
 - search does not yet provide Slack's semantic relevance scoring or
-  highlighting — a canvas result carries a leading snippet rather than a marked
-  match, because a substring search for the term would mark the wrong span
-  whenever the match was in the title — every `to:`/link/specific emoji/`hasmy:` modifier,
-  prefix `*`, section-valued `in:`, Slack's natural month/year date forms,
-  participant-accurate `with:` thread semantics, `to:`, `hasmy:`, prefix `*`,
-  or history on both sides of an
-  opened hit — the result window ends at the message it names, so a reader
-  cannot scroll forward into newer messages without navigating again;
+  highlighting — a canvas result carries a leading snippet rather than a
+  marked match, because a substring search for the term would mark the wrong
+  span whenever the match was in the title — every `to:`/link/specific
+  emoji/`hasmy:` modifier, prefix `*`, section-valued `in:`, Slack's natural
+  month/year date forms, participant-accurate `with:` thread semantics, `to:`,
+  `hasmy:`, prefix `*`, or history on both sides of an opened hit — the result
+  window ends at the message it names, so a reader cannot scroll forward into
+  newer messages without navigating again;
 - the Slack APIs retain documented compatibility deviations for relevance
   scoring, highlight markers, cursor pagination on file/combined legacy
   results, match projection detail, and full tier rate limiting;
 - controlled live-Slack comparison and visual baselines remain required.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

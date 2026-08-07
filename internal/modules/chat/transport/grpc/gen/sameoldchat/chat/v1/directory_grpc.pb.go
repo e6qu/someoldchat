@@ -59,6 +59,7 @@ const (
 	DirectoryService_InvitationPreview_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/InvitationPreview"
 	DirectoryService_AcceptInvitationForEmail_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AcceptInvitationForEmail"
 	DirectoryService_AdminApproveApp_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminApproveApp"
+	DirectoryService_AdminUninstallApps_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminUninstallApps"
 	DirectoryService_AdminRestrictApp_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminRestrictApp"
 	DirectoryService_AdminListApps_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminListApps"
 	DirectoryService_GetWorkspaceMembership_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/GetWorkspaceMembership"
@@ -110,6 +111,7 @@ type DirectoryServiceClient interface {
 	InvitationPreview(ctx context.Context, in *InvitationPreviewRequest, opts ...grpc.CallOption) (*InviteRequest, error)
 	AcceptInvitationForEmail(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*User, error)
 	AdminApproveApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminUninstallApps(ctx context.Context, in *AdminUninstallAppsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRestrictApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListApps(ctx context.Context, in *AppApprovalsRequest, opts ...grpc.CallOption) (*AppApprovalPage, error)
 	GetWorkspaceMembership(ctx context.Context, in *WorkspaceMembershipRequest, opts ...grpc.CallOption) (*WorkspaceMembership, error)
@@ -525,6 +527,16 @@ func (c *directoryServiceClient) AdminApproveApp(ctx context.Context, in *AppApp
 	return out, nil
 }
 
+func (c *directoryServiceClient) AdminUninstallApps(ctx context.Context, in *AdminUninstallAppsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminUninstallApps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *directoryServiceClient) AdminRestrictApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -619,6 +631,7 @@ type DirectoryServiceServer interface {
 	InvitationPreview(context.Context, *InvitationPreviewRequest) (*InviteRequest, error)
 	AcceptInvitationForEmail(context.Context, *AcceptInvitationRequest) (*User, error)
 	AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
+	AdminUninstallApps(context.Context, *AdminUninstallAppsRequest) (*MutationResponse, error)
 	AdminRestrictApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminListApps(context.Context, *AppApprovalsRequest) (*AppApprovalPage, error)
 	GetWorkspaceMembership(context.Context, *WorkspaceMembershipRequest) (*WorkspaceMembership, error)
@@ -752,6 +765,9 @@ func (UnimplementedDirectoryServiceServer) AcceptInvitationForEmail(context.Cont
 }
 func (UnimplementedDirectoryServiceServer) AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminApproveApp not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminUninstallApps(context.Context, *AdminUninstallAppsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminUninstallApps not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminRestrictApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminRestrictApp not implemented")
@@ -1508,6 +1524,24 @@ func _DirectoryService_AdminApproveApp_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DirectoryService_AdminUninstallApps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUninstallAppsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminUninstallApps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminUninstallApps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminUninstallApps(ctx, req.(*AdminUninstallAppsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DirectoryService_AdminRestrictApp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AppApprovalMutationRequest)
 	if err := dec(in); err != nil {
@@ -1764,6 +1798,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminApproveApp",
 			Handler:    _DirectoryService_AdminApproveApp_Handler,
+		},
+		{
+			MethodName: "AdminUninstallApps",
+			Handler:    _DirectoryService_AdminUninstallApps_Handler,
 		},
 		{
 			MethodName: "AdminRestrictApp",

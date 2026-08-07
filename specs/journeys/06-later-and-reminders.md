@@ -104,20 +104,13 @@ claim more.
   reasons. Reminder delivery is performed by `cmd/worker`, which the browser
   harness does not run and could not usefully run: its servers use `-store
   memory`, so a separate worker process would share no state with them.
-  Qualifying delivery in a browser needs the harness moved to a durable store
-  with a worker beside each server, which is a change to the harness, not a
-  test. REMIND-API-01 is a deprecated app-facing contract whose own text
-  restricts it to SDK evidence; a browser citation would be evidence of the
-  wrong kind.
-
-Implemented evidence:
-
 - `make external-contract-qualification` fetches Slack's current official
-  reminder, Later, and developer references and fails when the source no longer
-  supports the journey's entry points, organization, privacy, time-zone,
-  recurrence, editability, guest, retirement, or API-separation assertions.
-- Playwright drives focused-message `A`, save/unsave, source navigation,
-  In progress, Completed, Archived, restore, removal, and automated WCAG checks
+  reminder, Later, and developer references and fails when the source no
+  longer supports the journey's entry points, organization, privacy, time-
+  zone, recurrence, editability, guest, retirement, or API-separation
+  assertions.
+- Playwright drives focused-message `A`, save/unsave, source navigation, In
+  progress, Completed, Archived, restore, removal, and automated WCAG checks
   in Chromium, Firefox, and WebKit. It also drives focused-message `M`,
   reminder presets and custom editing, personal completion/deletion, named
   weekday `/remind` recurrence, private `/remind list`, and channel-reminder
@@ -131,10 +124,7 @@ Implemented evidence:
 - Current official Node, Python, and Java SDK qualification continues to
   exercise deprecated `stars.*` and `reminders.*` as separate app contracts.
   No SDK suite is cited as Later evidence because Slack exposes no current
-  Later Web API.
-
-Still required before claiming live Slack equivalence:
-
+  Later Web API. Still required before claiming live Slack equivalence:
 - controlled live-Slack differential observations for Later organization,
   source loss, live reconciliation, notification presentation, and the broader
   natural-language `/remind` grammar;
@@ -142,7 +132,6 @@ Still required before claiming live Slack equivalence:
   rather than only the real UI plus deterministic service/web tests; and
 - observed decisions for undocumented recurrence edge cases such as a monthly
   reminder anchored on the 29th–31st.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

@@ -183,6 +183,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.remove", h.adminUsersRemove)
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
+	mux.HandleFunc("POST /api/admin.apps.uninstall", h.adminAppsUninstall)
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
@@ -2985,6 +2986,33 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := h.Messages.ResetUserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.apps.uninstall removes apps from the workspace. apps.uninstall is the
+// app's own, proven by its client credentials; an administrator holds no app's
+// secret, so without this a workspace could approve an app and never take it
+// back.
+func (h Handler) adminAppsUninstall(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.AppID](fields["app_ids"])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if err := h.Messages.AdminUninstallApps(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -6773,39 +6801,29 @@ type fileFilterWindow struct {
 // unfinished read.
 var errFileScanIncomplete = decodeFailure("request_timeout", "files.list could not read the whole collection in time")
 
-// scanFiles reads the workspace's files in pages and applies the filter above the
-// repository, which has no filtered read of its own.
+// scanFiles reads the workspace's files in pages and applies the filter above
+// the repository, which has no filtered read of its own.
 //
-// It keeps only the requested page plus a running count, so the memory cost is
-// proportional to `count` rather than to the workspace. That is what makes the
-// answer complete: `paging.total` and `paging.pages` describe the whole filtered
-// collection instead of whichever prefix happened to be scanned, and a file that
-// matches only past the first window is still returned.
+// It keeps only the requested page plus a running count, so memory is
+// proportional to `count` rather than to the workspace, and `paging.total`
+// describes the whole filtered collection instead of whichever prefix was
+// scanned.
 //
-// The scan used to stop after a fixed 20,000 stored rows and answer
-// request_timeout. Because `paging.total` describes the whole collection the scan
-// always ran from row one, so at 20,001 files *every* call failed — a bare
-// files.list, a `count=1` first page, and a filter that legitimately matched
-// nothing alike — for every caller in the workspace, permanently. Any principal
-// holding files:write could put the workspace there by uploading 20,001 one-byte
-// files, and ordinary use reaches it on its own. A ceiling a user can reach is not
-// a budget; it replaced a wrong answer with no answer.
+// The scan used to stop after 20,000 stored rows and answer request_timeout.
+// Because the total describes the whole collection the scan always started at
+// row one, so past that size every call failed, permanently, for everyone — and
+// any principal with files:write could get there by uploading one-byte files. A
+// ceiling a user can reach is not a budget.
 //
-// So the collection is now read to its end, and what is bounded is the resources
-// one call may spend rather than the size of the workspace it may describe:
-//
-//   - fileScanBudget bounds wall-clock time, on top of whatever deadline the
-//     caller's own context carries. Reaching it means the read genuinely did not
-//     finish, which is what request_timeout says, and it degrades with load
-//     instead of failing at a magic row count;
-//   - a repository that reports another page while handing back a cursor it has
-//     already given is stopped rather than followed forever;
-//   - only `count` files are retained, whatever the size of the collection.
+// What is bounded now is what one call may spend, not what it may describe:
+// fileScanBudget bounds wall-clock time on top of the caller's deadline, so
+// reaching it means the read genuinely did not finish; a repository handing back
+// a cursor it has already given is stopped rather than followed forever; and
+// only `count` files are retained.
 //
 // This is the most a transport can do above a repository that cannot narrow the
-// read. The repair that removes the traversal is a filtered, counted read in the
-// store — ListFiles with user/channel/created-range/type predicates plus a
-// COUNT — recorded as the follow-up this method is waiting on.
+// read. The repair is a filtered, counted read in the store, recorded as the
+// follow-up this method waits on.
 func (h Handler) scanFiles(ctx context.Context, principal auth.Principal, filter fileFilter) (fileFilterWindow, error) {
 	first := (filter.page - 1) * filter.count
 	last := first + filter.count

@@ -114,7 +114,6 @@ truncated list as complete.
 - Test full-page and enhanced navigation, browser history, deep links, narrow
   navigation, section collapse, unread ordering, and focus announcements.
 - Keep desktop and narrow visual baselines for every shell region and theme.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

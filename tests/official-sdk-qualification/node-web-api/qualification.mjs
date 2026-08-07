@@ -272,6 +272,14 @@ await assert.rejects(
   (error) => String(error).includes("workflow_not_found"),
 );
 
+// An administrator removes an app without holding its client secret. The walk
+// pins the refusal for an app nobody has heard of; uninstalling the fixture's
+// own app would take the rest of the walk's app calls with it.
+await assert.rejects(
+  () => client.admin.apps.uninstall({ app_ids: ["A-not-here"] }),
+  (error) => String(error).includes("app_not_found"),
+);
+
 await assert.rejects(
   () => client.admin.workflows.collaborators.add({ workflow_ids: ["Wf-not-here"], collaborator_ids: ["U1"] }),
   (error) => String(error).includes("workflow_not_found"),

@@ -12,63 +12,13 @@ not call the Slack-compatible interface over HTTP.
 
 ## Implementation principles
 
-The program fails fast and fails loudly. Missing, invalid, or contradictory
-configuration is an error; it is never silently replaced with a default
-backend, empty value, alternate algorithm, or no-op implementation.
-
-When multiple implementations are genuinely supported, the caller selects one
-explicitly (for example `memory`, `sqlite`, `postgresql`, or `dqlite`). Those are distinct
-operating modes, not fallbacks. An unavailable selected mode fails at startup.
-Retries, bounded backoff, and protocol negotiation are explicit protocol
-behaviors and are not fallback mechanisms.
-
-Required values are represented as explicit parameters or configuration fields.
-Optional parameters are not used to smuggle mode selection or behavior changes
-through zero values. Nil is avoided where a concrete value or a required
-interface can be used; where Go APIs require a nil-capable value, nil has one
-documented meaning and is rejected or handled at the boundary rather than
-propagated inward.
-
-Inputs containing lists or repeated alternatives are normalized once at the
-boundary into one canonical representation. Downstream logic consumes that
-representation through one path. Invalid input is rejected during
-normalization. Duplicate logic is removed when it is truly the same behavior;
-small independent duplication is retained when it keeps a module deletable and
-avoids coupling. Every abstraction must have a seam that makes its removal
-safe, and dead or functionally dead code is deleted rather than preserved for
-possible future use.
-
-The type system is load-bearing. Domain identifiers are distinct types rather
-than interchangeable strings, and adapters perform the unavoidable conversion
-from wire values exactly once. Functions accept the narrowest domain type they
-need. This makes invalid combinations a compile-time error and keeps parsing,
-authorization, and persistence boundaries visible in code review.
-
-Collections are bounded or streamed. A list endpoint must normalize its page
-parameters once, read at most the requested page plus the continuation marker,
-and expose continuation explicitly. It must not load an unbounded history into
-memory merely to render or serialize it. Where the protocol permits streaming,
-the implementation should consume and emit records incrementally. File
-uploads are streamed through the module boundary in bounded chunks; metadata
-is committed only after the blob is durably published.
-
-Message limits are service invariants, not HTTP-adapter conveniences. Plain
-text is bounded by Unicode code points, while normalized blocks, attachments,
-and unfurls share a byte ceiling before parsing and persistence. The same
-limits therefore apply to local calls, gRPC calls, incoming webhooks, scheduled
-and ephemeral messages, edits, and external-upload completion. The browser
-projects stored blocks, attachments, and unfurls into server-rendered content;
-it does not offer its plain-text editor for a structured message because that
-editor cannot round-trip the structured payload without destroying it.
-
-Blob storage is an explicit capability. A configured absolute directory selects
-the filesystem store; a configured Amazon Simple Storage Service bucket selects
-the provider store; no storage configuration selects the typed `blob.Disabled` store,
-whose operations fail with an explicit unavailable error. The disabled store is
-not an empty-store fallback, and filesystem and Amazon Simple Storage Service
-configuration cannot be selected together. Production composition does not use a nil blob
-store. Directly constructed test services still reject a nil capability at the
-boundary so an invalid composition cannot panic or silently skip file behavior.
+The engineering rules live in `CLAUDE.md` at the repository root and are not
+restated here. The two that shape this document: the program fails fast and
+loudly — missing, invalid or contradictory configuration is an error, never a
+silent default — and where several implementations are genuinely supported the
+caller selects one explicitly (`memory`, `sqlite`, `postgresql`, `dqlite`).
+Those are operating modes, not fallbacks, and an unavailable selected mode
+fails at startup.
 
 ## Crash-only operation
 

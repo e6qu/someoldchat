@@ -148,6 +148,12 @@ message ResetUserSessionsRequest {
   string target_user_id = 3;
 }
 
+message AdminUninstallAppsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string app_ids = 3;
+}
+
 message WorkspaceSession {
   string id = 1;
   string user_id = 2;
@@ -466,6 +472,7 @@ service DirectoryService {
   rpc InvitationPreview(InvitationPreviewRequest) returns (InviteRequest);
   rpc AcceptInvitationForEmail(AcceptInvitationRequest) returns (User);
   rpc AdminApproveApp(AppApprovalMutationRequest) returns (MutationResponse);
+  rpc AdminUninstallApps(AdminUninstallAppsRequest) returns (MutationResponse);
   rpc AdminRestrictApp(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminListApps(AppApprovalsRequest) returns (AppApprovalPage);
   rpc GetWorkspaceMembership(WorkspaceMembershipRequest) returns (WorkspaceMembership);
