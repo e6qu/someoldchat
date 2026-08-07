@@ -21,10 +21,28 @@ var (
 	evidenceID     = regexp.MustCompile(`[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+`)
 )
 
+// browserGapCeiling is how many journeys are allowed to have no browser
+// citation.
+//
+// The uncovered set was printed and never enforced, so a journey losing its
+// citation — somebody deleting a test — left the count quietly larger and this
+// gate green. That is the same shape as the seam's parity backlog: an
+// enumerated gap with its reasons written in prose somewhere else and nothing
+// stopping it growing.
+//
+// The nine are structural rather than unwritten tests, and each says so in its
+// own journey's Evidence section: APP-04 and APP-06 are observable only at an
+// app endpoint the harness does not host, REMIND-04 needs a worker beside a
+// server sharing a durable store, REMIND-API-01 restricts itself to SDK
+// evidence, and AUTH-02, AUTH-05, CONNECT-02, HUDDLE-02 and HUDDLE-04 need an
+// identity provider or media transport.
+const browserGapCeiling = 9
+
 func main() {
 	if err := verifyCatalog(
 		"specs/journeys",
 		"tests/browser/specs",
+		browserGapCeiling,
 		"tests/external-contract-qualification/qualify.sh",
 	); err != nil {
 		fmt.Fprintln(os.Stderr, "journeycheck:", err)
@@ -32,7 +50,10 @@ func main() {
 	}
 }
 
-func verifyCatalog(catalogDirectory, browserDirectory string, externalEvidencePaths ...string) error {
+// verifyCatalog checks the catalog. ceiling bounds the journeys allowed to have
+// no browser citation; a negative ceiling means the caller is not asserting one,
+// which is what the unit tests use so they can build small catalogs.
+func verifyCatalog(catalogDirectory, browserDirectory string, ceiling int, externalEvidencePaths ...string) error {
 	documents, err := filepath.Glob(filepath.Join(catalogDirectory, "[0-9][0-9]-*.md"))
 	if err != nil {
 		return err
@@ -147,6 +168,22 @@ func verifyCatalog(catalogDirectory, browserDirectory string, externalEvidencePa
 	}
 	if len(uncovered) != 0 {
 		fmt.Printf("journeys.browser-gaps=%s\n", strings.Join(uncovered, ","))
+	}
+	return checkBrowserGapCeiling(len(uncovered), ceiling)
+}
+
+// checkBrowserGapCeiling holds the uncovered set to a recorded size, in both
+// directions. Growing means a journey lost its citation. Shrinking without the
+// ceiling moving means coverage was won and left as slack for whoever next
+// needs room, which is how a backlog stops shrinking.
+func checkBrowserGapCeiling(uncovered, ceiling int) error {
+	switch {
+	case ceiling < 0:
+		return nil
+	case uncovered > ceiling:
+		return fmt.Errorf("%d journeys have no browser citation against a ceiling of %d: a journey that loses its citation needs the test back, not a larger ceiling", uncovered, ceiling)
+	case uncovered < ceiling:
+		return fmt.Errorf("only %d journeys have no browser citation against a ceiling of %d: lower browserGapCeiling to match, so the ground gained is kept", uncovered, ceiling)
 	}
 	return nil
 }
