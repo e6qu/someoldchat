@@ -3023,6 +3023,63 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 	}
 }
 
+// aChannelConvertsBothWaysAndSaysWhichKindItIsNot pins the pair of visibility
+// changes. They are not one operation with a flag: making a channel private
+// hides what was said from people who could read it, and making one public
+// shows it to people who never could. What both profiles must agree on is the
+// flag they end up with, that nothing else about the channel moves, and how
+// they refuse — this profile used to answer ErrNotFound where memory answered
+// ErrInvalidConversationType for a channel that plainly exists.
+func aChannelConvertsBothWaysAndSaysWhichKindItIsNot(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	channel := domain.ConversationID("C-visibility-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: f.workspaceID, Name: "visibility", Topic: "who can read this", Purpose: "conversion"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SeedConversationMember(ctx, channel, f.userID); err != nil {
+		t.Fatal(err)
+	}
+
+	private, err := f.repository.SetConversationPrivate(ctx, channel, f.event("to-private", "conversation.converted_to_private", string(channel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !private.IsPrivate || private.Topic != "who can read this" || private.Purpose != "conversion" {
+		t.Fatalf("converted channel = %+v, want it private with everything else intact", private)
+	}
+	// Converting again is the wrong kind of conversation, not a missing one.
+	if _, err := f.repository.SetConversationPrivate(ctx, channel, f.event("to-private-again", "conversation.converted_to_private", string(channel))); !errors.Is(err, store.ErrInvalidConversationType) {
+		t.Fatalf("second conversion to private: %v, want ErrInvalidConversationType", err)
+	}
+	// Membership is not visibility: the people in it stay in it.
+	members, err := f.repository.ListConversationMembers(ctx, channel, domain.PageRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members.Users) != 1 || members.Users[0].ID != f.userID {
+		t.Fatalf("members after conversion = %+v, want the original member", members.Users)
+	}
+
+	back, err := f.repository.SetConversationPublic(ctx, channel, f.event("to-public", "conversation.converted_to_public", string(channel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.IsPrivate {
+		t.Fatalf("converted back = %+v, want it public", back)
+	}
+	if _, err := f.repository.SetConversationPublic(ctx, channel, f.event("to-public-again", "conversation.converted_to_public", string(channel))); !errors.Is(err, store.ErrInvalidConversationType) {
+		t.Fatalf("second conversion to public: %v, want ErrInvalidConversationType", err)
+	}
+	// A channel that is not there is missing, which is a different answer from
+	// one that is there and cannot be converted.
+	if _, err := f.repository.SetConversationPublic(ctx, domain.ConversationID("C-absent-"+f.suffix), f.event("to-public-absent", "conversation.converted_to_public", "absent")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("converting a channel that is not there: %v, want ErrNotFound", err)
+	}
+}
+
 // stoppingAWorkflowIsNotAnEdit pins the one workflow write that changes status
 // without changing content. An administrator stopping a workflow is not
 // authoring it: the steps must not move, and neither must the version, because

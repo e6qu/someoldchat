@@ -92,6 +92,31 @@ test('[ADMIN-02 CONNECT-03] the workspace names the organizations it is connecte
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// A channel could be made private and never made public again from any
+// first-party surface. The two directions are one control, and the one that
+// cannot be undone says so before it is used. It lives here rather than in the
+// workspace suite because changing who may read a channel belongs to a
+// workspace administrator, and only this project's server signs one in.
+test('[ADMIN-02 CONV-03] an administrator changes who may read a channel, both ways', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app?channel=Cdev&details=1');
+
+  const toPrivate = page.locator('.conversation-setting', { hasText: 'Make this channel private' });
+  await expect(toPrivate).toBeVisible();
+  await toPrivate.locator('summary').click();
+  await expect(toPrivate).toContainText('Only members will be able to read');
+  await expectNoSeriousAccessibilityViolations(page);
+  await toPrivate.getByRole('button', { name: 'Make private' }).click();
+
+  // The reverse says what it exposes, which is the half that cannot be undone.
+  const toPublic = page.locator('.conversation-setting', { hasText: 'Make this channel public' });
+  await expect(toPublic).toBeVisible();
+  await toPublic.locator('summary').click();
+  await expect(toPublic).toContainText('cannot be undone');
+  await toPublic.getByRole('button', { name: 'Make public' }).click();
+  await expect(page.locator('.conversation-setting', { hasText: 'Make this channel private' })).toBeVisible();
+});
+
 test('[ADMIN-03] audit and analytics render for an eligible role and agree with their own export', async ({ page, context, request }) => {
   await signIn(context);
 

@@ -1737,6 +1737,14 @@ func (r Remote) AdminInviteConversationMembers(ctx context.Context, workspaceID 
 	return decodeProtoConversation(out)
 }
 
+func (r Remote) AdminConvertConversationToPublic(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Conversation, error) {
+	out, err := r.mutations.AdminConvertConversationToPublic(ctx, &chatv1.ConvertConversationToPrivateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
 func (r Remote) AdminConvertConversationToPrivate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Conversation, error) {
 	out, err := r.mutations.AdminConvertConversationToPrivate(ctx, &chatv1.ConvertConversationToPrivateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
 	if err != nil {
@@ -5356,6 +5364,14 @@ func (s *Server) AdminInviteConversationMembers(ctx context.Context, input *chat
 		return nil, mapError(err)
 	}
 	return encodeProtoConversation(result), nil
+}
+
+func (s *Server) AdminConvertConversationToPublic(ctx context.Context, input *chatv1.ConvertConversationToPrivateRequest) (*chatv1.Conversation, error) {
+	value, err := s.implementation.AdminConvertConversationToPublic(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(value), nil
 }
 
 func (s *Server) AdminConvertConversationToPrivate(ctx context.Context, input *chatv1.ConvertConversationToPrivateRequest) (*chatv1.Conversation, error) {

@@ -4991,16 +4991,25 @@ func (s *Store) SetSocketModeCursor(_ context.Context, appID domain.AppID, curso
 }
 
 func (s *Store) SetConversationPrivate(_ context.Context, conversation domain.ConversationID, event events.Event) (domain.Conversation, error) {
+	return s.setConversationVisibility(conversation, true, event)
+}
+
+// SetConversationPublic is the reverse of SetConversationPrivate.
+func (s *Store) SetConversationPublic(_ context.Context, conversation domain.ConversationID, event events.Event) (domain.Conversation, error) {
+	return s.setConversationVisibility(conversation, false, event)
+}
+
+func (s *Store) setConversationVisibility(conversation domain.ConversationID, private bool, event events.Event) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if value.IsPrivate || value.IsDirect || value.IsGroupDirect {
+	if value.IsDirect || value.IsGroupDirect || value.IsPrivate == private {
 		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
-	value.IsPrivate = true
+	value.IsPrivate = private
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	return value, nil

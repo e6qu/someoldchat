@@ -751,6 +751,15 @@ assert.equal(privateInvited.ok, true);
 const left = await client.conversations.leave({ channel: "C2" });
 assert.equal(left.ok, true);
 assert.equal((await client.admin.conversations.convertToPrivate({ channel_id: "C2" })).ok, true);
+// The reverse converts it back, and converting a channel that is already public
+// is refused rather than reported as a change nobody made.
+assert.equal((await client.admin.conversations.convertToPublic({ channel_id: "C2" })).ok, true);
+await assert.rejects(
+  () => client.admin.conversations.convertToPublic({ channel_id: "C2" }),
+  // invalid_arg_name rather than channel_not_found: the channel is plainly
+  // there, it is the conversion that does not apply to it.
+  (error) => String(error).includes("invalid_arg_name"),
+);
 assert.equal((await client.admin.conversations.delete({ channel_id: "C2" })).ok, true);
 const createdAdminConversation = await client.admin.conversations.create({
 	name: "sdk-admin-created",

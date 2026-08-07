@@ -355,6 +355,53 @@ func TestListSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt(t *testing.T) {
 	}
 }
 
+// A channel could be made private and never made public again from any
+// first-party surface: admin.conversations.convertToPublic did not exist, and
+// nothing in the client offered either direction for a channel.
+func TestChannelVisibilityChangesBothWaysForAnAdministrator(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleAdmin, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	csrf := auth.CSRFToken("session")
+	details := func() string {
+		t.Helper()
+		return get(t, mux, "/app?channel=Cdev&details=1").Body.String()
+	}
+	// The warning is the point of the control: going public cannot be undone in
+	// effect, and the page says so before it is used.
+	requireContains(t, "public channel details", details(), "Make this channel private", "Only members will be able to read")
+
+	private := postForm(t, mux, "/app/conversation/visibility?channel=Cdev", url.Values{"_csrf": {csrf}, "private": {"true"}}.Encode(), false)
+	if private.Code != http.StatusSeeOther {
+		t.Fatalf("make private = %d: %s", private.Code, private.Body)
+	}
+	requireContains(t, "private channel details", details(), "Make this channel public", "will be able to read everything already said")
+
+	public := postForm(t, mux, "/app/conversation/visibility?channel=Cdev", url.Values{"_csrf": {csrf}, "private": {"false"}}.Encode(), false)
+	if public.Code != http.StatusSeeOther {
+		t.Fatalf("make public = %d: %s", public.Code, public.Body)
+	}
+	conversation, err := s.GetConversation(context.Background(), "Cdev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conversation.IsPrivate {
+		t.Fatalf("channel = %+v, want it public again", conversation)
+	}
+
+	// A member who is not an administrator is not offered the control and is
+	// refused if they post anyway.
+	if err := s.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleMember, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	requireMissing(t, "member details", details(), "Make this channel private")
+	refused := postForm(t, mux, "/app/conversation/visibility?channel=Cdev", url.Values{"_csrf": {csrf}, "private": {"true"}}.Encode(), false)
+	if refused.Code != http.StatusBadRequest {
+		t.Fatalf("member conversion = %d: %s", refused.Code, refused.Body)
+	}
+}
+
 // A conversation's own canvas existed in the API and nowhere else: the store,
 // the service and conversations.canvases.create have carried it since canvases
 // were built, and no first-party surface offered or opened one.

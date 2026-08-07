@@ -306,28 +306,33 @@ type conversationView struct {
 }
 
 type conversationDetailsView struct {
-	ID                string
-	Name              string
-	IsChannel         bool
-	Topic             string
-	Purpose           string
-	Type              string
-	Archived          bool
-	Members           []memberView
-	Invitees          []memberView
-	Truncated         bool
-	CloseURL          string
-	CanEdit           bool
-	CanInvite         bool
-	CanAddPeople      bool
-	CanConvert        bool
-	CanLeave          bool
-	CanClose          bool
-	CanArchive        bool
-	CanNotify         bool
-	NotificationLevel string
-	FollowEveryThread bool
-	ArchiveVerb       string
+	ID        string
+	Name      string
+	IsChannel bool
+	// IsPrivate and CanChangeVisibility drive the administrator's conversion
+	// control. Going public is the one direction that cannot be undone in
+	// effect, so the control says so before it is used.
+	IsPrivate           bool
+	CanChangeVisibility bool
+	Topic               string
+	Purpose             string
+	Type                string
+	Archived            bool
+	Members             []memberView
+	Invitees            []memberView
+	Truncated           bool
+	CloseURL            string
+	CanEdit             bool
+	CanInvite           bool
+	CanAddPeople        bool
+	CanConvert          bool
+	CanLeave            bool
+	CanClose            bool
+	CanArchive          bool
+	CanNotify           bool
+	NotificationLevel   string
+	FollowEveryThread   bool
+	ArchiveVerb         string
 	// Slack Connect. Connected names the organizations already in the channel;
 	// Outstanding names the invitations still waiting on someone, so the panel
 	// distinguishes "shared with" from "asked to share with" rather than
@@ -2004,7 +2009,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <nav class="conversation-details-tabs" aria-label="Conversation details sections">
         <a href="#conversation-about-heading">About</a>
         <a href="#conversation-members-heading">Members</a>
-        {{if or .Details.CanEdit .Details.CanConvert}}<a href="#conversation-settings-heading">Settings</a>{{end}}
+        {{if or .Details.CanEdit .Details.CanConvert .Details.CanChangeVisibility}}<a href="#conversation-settings-heading">Settings</a>{{end}}
       </nav>
       <section class="conversation-details-section" aria-labelledby="conversation-about-heading">
         <h3 id="conversation-about-heading">About</h3>
@@ -2078,7 +2083,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         </details>
         {{end}}
       </section>
-      {{if or .Details.CanEdit .Details.CanConvert}}
+      {{if or .Details.CanEdit .Details.CanConvert .Details.CanChangeVisibility}}
       <section class="conversation-details-section" aria-labelledby="conversation-settings-heading">
         <h3 id="conversation-settings-heading">Settings</h3>
         {{if .Details.CanConvert}}
@@ -2089,6 +2094,17 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <label for="converted-channel-name">Private channel name<input id="converted-channel-name" name="name" maxlength="80" required pattern="[A-Za-z0-9_-]+"></label>
             <p class="conversation-details-note">Messages and files from this group DM will stay in the new private channel and will be visible to members added later. Everyone in this group DM will be notified.</p>
             <button type="submit">Change to Private</button>
+          </form>
+        </details>
+        {{end}}
+        {{if .Details.CanChangeVisibility}}
+        <details class="conversation-setting">
+          <summary>{{if .Details.IsPrivate}}Make this channel public{{else}}Make this channel private{{end}}</summary>
+          <form method="post" action="/app/conversation/visibility?channel={{.Details.ID}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <input type="hidden" name="private" value="{{if .Details.IsPrivate}}false{{else}}true{{end}}">
+            <p class="conversation-details-note">{{if .Details.IsPrivate}}Everyone in the workspace will be able to read everything already said in this channel. That cannot be undone by making it private again.{{else}}Only members will be able to read this channel. Everything already said stays, and stays visible to the people already in it.{{end}}</p>
+            <button type="submit">{{if .Details.IsPrivate}}Make public{{else}}Make private{{end}}</button>
           </form>
         </details>
         {{end}}
@@ -4390,6 +4406,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/conversation/open", h.openConversation)
 	mux.HandleFunc("POST /app/conversation/add-people", h.addPeopleToDirectConversation)
 	mux.HandleFunc("POST /app/conversation/convert-to-private", h.convertGroupDirectToPrivate)
+	mux.HandleFunc("POST /app/conversation/visibility", h.setConversationVisibility)
 	mux.HandleFunc("POST /app/conversation/invite", h.inviteConversationMember)
 	mux.HandleFunc("POST /app/conversation/rename", h.renameConversation)
 	mux.HandleFunc("POST /app/conversation/topic", h.setConversationTopic)
@@ -6286,38 +6303,44 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		}
 		canConvert = !membership.UltraRestricted
 	}
+	// Changing a channel's visibility belongs to a workspace administrator, not
+	// to whoever can manage the channel: it decides who in the whole workspace
+	// may read what was said in it.
+	canChangeVisibility := isChannel && !conversation.Archived && h.canShowWorkspaceAdmin(ctx, principal)
 	return &conversationDetailsView{
-		ID:                string(conversation.ID),
-		Name:              name,
-		IsChannel:         isChannel,
-		Topic:             conversation.Topic,
-		Purpose:           conversation.Purpose,
-		Type:              conversationType,
-		Archived:          conversation.Archived,
-		Members:           members,
-		Invitees:          invitees,
-		Truncated:         truncated,
-		CloseURL:          appURL(string(conversation.ID), "", "", "", ""),
-		CanEdit:           canManage && isChannel && !conversation.Archived,
-		CanInvite:         canManage && isChannel && !conversation.Archived,
-		CanAddPeople:      canManage && !isChannel && len(members) < 9 && len(invitees) > 0,
-		CanConvert:        canConvert,
-		CanLeave:          canManage && isChannel && !conversation.Archived && !required,
-		CanClose:          canManage && !isChannel,
-		CanArchive:        canManage && isChannel && !required,
-		CanNotify:         canNotify,
-		NotificationLevel: string(notificationPreferences.Level),
-		FollowEveryThread: notificationPreferences.FollowEveryThread,
-		ArchiveVerb:       archiveVerb,
-		Connected:         connected,
-		Outstanding:       outstanding,
-		CanConnect:        canManage && isChannel && !conversation.Archived && principal.HasScope(auth.ScopeConversationsConnectWrite),
-		CanSetRetention:   retentionAllowed,
-		RetentionDays:     retentionDays,
-		RetentionCustom:   retentionCustom,
-		RetentionSummary:  retentionNote,
-		ConnectURL:        "/app/connect/invite?channel=" + url.QueryEscape(string(conversation.ID)),
-		ConnectHosts:      connectDestinations,
+		ID:                  string(conversation.ID),
+		Name:                name,
+		IsChannel:           isChannel,
+		IsPrivate:           conversation.IsPrivate,
+		CanChangeVisibility: canChangeVisibility,
+		Topic:               conversation.Topic,
+		Purpose:             conversation.Purpose,
+		Type:                conversationType,
+		Archived:            conversation.Archived,
+		Members:             members,
+		Invitees:            invitees,
+		Truncated:           truncated,
+		CloseURL:            appURL(string(conversation.ID), "", "", "", ""),
+		CanEdit:             canManage && isChannel && !conversation.Archived,
+		CanInvite:           canManage && isChannel && !conversation.Archived,
+		CanAddPeople:        canManage && !isChannel && len(members) < 9 && len(invitees) > 0,
+		CanConvert:          canConvert,
+		CanLeave:            canManage && isChannel && !conversation.Archived && !required,
+		CanClose:            canManage && !isChannel,
+		CanArchive:          canManage && isChannel && !required,
+		CanNotify:           canNotify,
+		NotificationLevel:   string(notificationPreferences.Level),
+		FollowEveryThread:   notificationPreferences.FollowEveryThread,
+		ArchiveVerb:         archiveVerb,
+		Connected:           connected,
+		Outstanding:         outstanding,
+		CanConnect:          canManage && isChannel && !conversation.Archived && principal.HasScope(auth.ScopeConversationsConnectWrite),
+		CanSetRetention:     retentionAllowed,
+		RetentionDays:       retentionDays,
+		RetentionCustom:     retentionCustom,
+		RetentionSummary:    retentionNote,
+		ConnectURL:          "/app/connect/invite?channel=" + url.QueryEscape(string(conversation.ID)),
+		ConnectHosts:        connectDestinations,
 	}, nil
 }
 
@@ -11094,6 +11117,33 @@ func (h Handler) addPeopleToDirectConversation(w http.ResponseWriter, r *http.Re
 		return
 	}
 	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
+}
+
+// setConversationVisibility changes a channel between public and private. Both
+// directions are one control because they are one decision — who may read this
+// — and separating them would hide the fact that one of them is reversible and
+// the other is not.
+func (h Handler) setConversationVisibility(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the conversation and try again.")
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.URL.Query().Get("channel")))
+	if strings.TrimSpace(fields["private"]) == "true" {
+		_, err = h.Messages.AdminConvertConversationToPrivate(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	} else {
+		_, err = h.Messages.AdminConvertConversationToPublic(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	}
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The channel was not changed", "Only a workspace administrator can change who may read a channel, and a channel shared with another organization cannot be made public.")
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(channel), "", "", "", "")+"&details=1")
 }
 
 func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Request) {

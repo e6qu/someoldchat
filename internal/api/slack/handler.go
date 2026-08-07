@@ -224,6 +224,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.removeGroup", h.adminConversationAccessGroupRemove)
 	mux.HandleFunc("POST /api/admin.conversations.invite", h.adminConversationInvite)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
+	mux.HandleFunc("POST /api/admin.conversations.convertToPublic", h.adminConversationConvertToPublic)
 	mux.HandleFunc("GET /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
@@ -3716,6 +3717,33 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 	}
 	users := parseCallUsers(usersField)
 	conversation, err := h.Messages.AdminInviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+}
+
+// admin.conversations.convertToPublic is the reverse of convertToPrivate, and
+// is stricter: it shows what was said to people who never could read it, which
+// nothing in the product can take back.
+func (h Handler) adminConversationConvertToPublic(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	if channel == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	conversation, err := h.Messages.AdminConvertConversationToPublic(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
