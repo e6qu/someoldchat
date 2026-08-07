@@ -701,6 +701,49 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Four paged reads from the backlog, chosen by the priority the
+			// backlog itself records: methods that take a page bound. A limit
+			// the two compositions disagree about is the failure this harness
+			// exists to catch, and none of these had ever been compared.
+			name: "paged administrative reads agree on their bounds and their refusals",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				invites, err := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInvitePending, domain.PageRequest{Limit: 5})
+				if err != nil {
+					return nil, err
+				}
+				requests, err := chat.AdminListInviteRequests(ctx, "T1", "UA", domain.InviteRequestPending, domain.PageRequest{Limit: 5})
+				if err != nil {
+					return nil, err
+				}
+				logs, more, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Time{}, 5, 1)
+				if err != nil {
+					return nil, err
+				}
+				integration, err := chat.IntegrationLogs(ctx, "T1", "UA", "", "", "", "", 5, 1)
+				if err != nil {
+					return nil, err
+				}
+				// A limit neither composition may accept: the refusal has to be
+				// the same class on both, not a 400 on one and a 503 on the
+				// other, which is the divergence the backlog note names.
+				_, badPage := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInvitePending, domain.PageRequest{Limit: -1})
+				_, badRequests := chat.AdminListInviteRequests(ctx, "T1", "UA", domain.InviteRequestPending, domain.PageRequest{Limit: -1})
+				// A status nobody declares is refused rather than treated as
+				// "any".
+				_, badStatus := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteStatus("nonsense"), domain.PageRequest{Limit: 5})
+				// A member cannot read any of them.
+				_, memberInvites := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInvitePending, domain.PageRequest{Limit: 5})
+				_, memberRequests := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestPending, domain.PageRequest{Limit: 5})
+				_, _, memberLogs := chat.ListAccessLogs(ctx, "T1", "U1", time.Time{}, 5, 1)
+				return []any{
+					len(invites.Invites), invites.HasMore, len(requests.Requests), requests.HasMore,
+					len(logs), more, len(integration.Logs),
+					badPage != nil, badRequests != nil, badStatus != nil,
+					memberInvites != nil, memberRequests != nil, memberLogs != nil,
+				}, nil
+			},
+		},
+		{
 			// The two conversions are not one operation with a flag. Making a
 			// channel private hides what was said from people who could read
 			// it; making one public shows it to people who never could, and
@@ -3372,7 +3415,7 @@ func TestEveryChatMethodHasAParityCaseOrADocumentedGap(t *testing.T) {
 		case exercised[name] && isGap:
 			t.Errorf("chatapi.Service.%s is exercised by a parity case and also listed in parityGaps; remove the entry", name)
 		case !exercised[name] && !isGap:
-			t.Errorf("chatapi.Service.%s crosses the seam with no parity case. Add a case to parityCases, or add %q to parityGaps and say why it cannot have one.", name, name)
+			t.Errorf("chatapi.Service.%s crosses the seam with no parity case. Add a case to parityCases. Adding %q to parityGaps instead means lowering parityGapCeiling somewhere else in the same change, because the backlog is only allowed to shrink.", name, name)
 		}
 	}
 	for name := range parityGaps {
@@ -3433,13 +3476,38 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // It is not an exemption list: every entry is a method whose two compositions
 // have never been compared, which is the state the whole seam was in before the
 // harness existed. It exists so the gap is *enumerated and derived* rather than
-// invisible — the set can only shrink, a method added to chatapi.Service cannot
-// join it silently, and a method whose parity case is deleted reappears here as
-// a failure.
+// invisible — a method added to chatapi.Service cannot join it silently, and a
+// method whose parity case is deleted reappears here as a failure. That the set
+// can only shrink is now enforced by parityGapCeiling rather than asserted
+// here; it was asserted here for a long time while nothing checked it.
 //
 // Priority for closing it, from the failures the deleted guards produced: the
 // methods that take a page bound, a timestamp in nanoseconds, or an identifier
 // the store treats as optional.
+// parityGapCeiling is how large the backlog is allowed to be.
+//
+// The claim above — that the set can only shrink — was a claim nothing checked,
+// and the failure message next to it asked for a reason the structure could not
+// hold: parityGaps is a set of names, so "say why it cannot have one" had
+// nowhere to be said and 179 entries said nothing. A number is the honest form
+// of the promise that was being made. Closing a gap means lowering this, and a
+// method that arrives without a parity case cannot join the backlog without
+// taking somebody else's place.
+const parityGapCeiling = 175
+
+// TestTheParityBacklogOnlyShrinks makes that promise checkable in both
+// directions: the backlog cannot grow, and it cannot quietly shrink either —
+// coverage that is won has to be recorded, or the ceiling drifts upward again
+// the next time somebody needs room.
+func TestTheParityBacklogOnlyShrinks(t *testing.T) {
+	switch {
+	case len(parityGaps) > parityGapCeiling:
+		t.Errorf("the parity backlog grew to %d against a ceiling of %d: a method that crosses the seam needs a case, not an entry", len(parityGaps), parityGapCeiling)
+	case len(parityGaps) < parityGapCeiling:
+		t.Errorf("the parity backlog is down to %d: lower parityGapCeiling to match, so the ground gained is kept", len(parityGaps))
+	}
+}
+
 var parityGaps = map[string]struct{}{
 	"AcceptSharedInvite":                 {},
 	"AckSocketModeResponses":             {},
@@ -3468,7 +3536,6 @@ var parityGaps = map[string]struct{}{
 	"AdminListApps":                      {},
 	"AdminListConversationAccessGroups":  {},
 	"AcceptInvitationForEmail":           {},
-	"AdminListInviteRequests":            {},
 	"ApproveSharedInvite":                {},
 	"ConversationRetention":              {},
 	"DeclineSharedInvite":                {},
@@ -3524,7 +3591,6 @@ var parityGaps = map[string]struct{}{
 	"GetListDownload":                         {},
 	"GetSocketModeCursor":                     {},
 	"HandleAppResponse":                       {},
-	"IntegrationLogs":                         {},
 	"InviteConversationMembers":               {},
 	"InviteShared":                            {},
 	"JoinConversation":                        {},
@@ -3533,9 +3599,7 @@ var parityGaps = map[string]struct{}{
 	"LastRetentionSweep":                      {},
 	"LeaveConversation":                       {},
 	"LeaveHuddle":                             {},
-	"ListSharedInvites":                       {},
 	"ListWorkspaceApps":                       {},
-	"ListAccessLogs":                          {},
 	"ListAppEventsAfter":                      {},
 	"ListUserEventsAfter":                     {},
 	"ListAppInstallations":                    {},
