@@ -3166,10 +3166,15 @@ try{if(text.value)localStorage.setItem(draftKey,text.value);else localStorage.re
 if(draftTimer)window.clearTimeout(draftTimer);
 draftTimer=window.setTimeout(function(){saveDraftRemote(false)},450);
 }
+function persistDraftNow(){
+if(!text)return Promise.resolve();
+try{if(draftKey){if(text.value)localStorage.setItem(draftKey,text.value);else localStorage.removeItem(draftKey)}}catch(error){}
+return saveDraftRemote(false);
+}
 function saveDraftRemote(keepalive){
-if(!composer||!text)return;
+if(!composer||!text)return Promise.resolve();
 var action=composer.getAttribute('data-draft-url');
-if(!action||!ownPath(action))return;
+if(!action||!ownPath(action))return Promise.resolve();
 if(draftTimer){window.clearTimeout(draftTimer);draftTimer=null}
 var body=new URLSearchParams();
 var csrf=composer.querySelector('input[name="_csrf"]');
@@ -3178,7 +3183,7 @@ body.set('_csrf',csrf?csrf.value:'');
 body.set('text',text.value);
 body.set('draft_attachments',JSON.stringify(draftAttachments));
 if(thread)body.set('thread_ts',thread.value);
-fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin',keepalive:!!keepalive}).then(function(response){if(!response.ok)announce('Your draft has not been saved yet. Keep this tab open and try typing again.')}).catch(function(){announce('Your draft has not been saved yet. Keep this tab open and try typing again.')});
+return fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin',keepalive:!!keepalive}).then(function(response){if(!response.ok)announce('Your draft has not been saved yet. Keep this tab open and try typing again.')}).catch(function(){announce('Your draft has not been saved yet. Keep this tab open and try typing again.')});
 }
 function replaceComposerRange(start,end,value,selectStart,selectEnd){
 if(!text)return;
@@ -3702,9 +3707,10 @@ if(!response.ok)return response.text().then(function(body){throw new Error(body)
 return response.json();
 }).then(function(result){
 draftAttachments=result&&Array.isArray(result.attachments)?result.attachments:draftAttachments;
-syncDraftAttachments();uploadFile.value='';if(uploadTitle)uploadTitle.value='';stagingFiles=false;updateUploadPreview();persistDraft();
+syncDraftAttachments();uploadFile.value='';if(uploadTitle)uploadTitle.value='';stagingFiles=false;updateUploadPreview();
+return persistDraftNow().then(function(){
 announce(draftAttachments.length===1?'One file is saved with this draft.':draftAttachments.length+' files are saved with this draft.');
-return true;
+return true});
 }).catch(function(error){stagingFiles=false;updateUploadPreview();showError(failure(error,composer),composer);return false});
 }
 function stageFiles(fileList){
@@ -3793,8 +3799,8 @@ if(clipDialog)clipDialog.addEventListener('click',function(event){if(event.targe
 if(clipDialog)clipDialog.addEventListener('close',function(){if(clipTrigger&&document.contains(clipTrigger))clipTrigger.focus();clipTrigger=null});
 if(uploadFile){uploadFile.addEventListener('change',function(){updateUploadPreview();stageSelectedFiles()});syncDraftAttachments();updateUploadPreview()}
 if(uploadForm)uploadForm.addEventListener('submit',function(event){event.preventDefault();stageSelectedFiles()});
-if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';draftAttachments=[];syncDraftAttachments();updateUploadPreview();persistDraft();announce('Staged files removed from the draft.');if(text)text.focus()});
-if(uploadPreview)uploadPreview.addEventListener('click',function(event){var remove=event.target.closest('[data-remove-draft-attachment]');if(!remove)return;var index=Number(remove.getAttribute('data-remove-draft-attachment'));if(index<0||index>=draftAttachments.length)return;var name=draftAttachments[index].name||'Staged file';draftAttachments.splice(index,1);syncDraftAttachments();updateUploadPreview();persistDraft();announce(name+' removed from the draft.');if(text)text.focus()});
+if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';draftAttachments=[];syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce('Staged files removed from the draft.')});if(text)text.focus()});
+if(uploadPreview)uploadPreview.addEventListener('click',function(event){var remove=event.target.closest('[data-remove-draft-attachment]');if(!remove)return;var index=Number(remove.getAttribute('data-remove-draft-attachment'));if(index<0||index>=draftAttachments.length)return;var name=draftAttachments[index].name||'Staged file';draftAttachments.splice(index,1);syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce(name+' removed from the draft.')});if(text)text.focus()});
 if(text&&uploadFile){
 text.addEventListener('paste',function(event){var files=event.clipboardData&&event.clipboardData.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
 composer.addEventListener('dragover',function(event){if(event.dataTransfer&&event.dataTransfer.types&&Array.prototype.indexOf.call(event.dataTransfer.types,'Files')!==-1){event.preventDefault();composer.classList.add('is-dragging')}});
