@@ -260,6 +260,16 @@ assert.equal(billableInfo.ok, true);
 assert.equal(billableInfo.billable_info.U1.billing_active, true);
 const integrationLogs = await client.team.integrationLogs({ count: 1 });
 assert.equal(integrationLogs.ok, true);
+// Session administration: the list must describe sessions without carrying the
+// credential it describes, so the walk asserts the token is absent rather than
+// merely that the call succeeded.
+const sessions = await client.admin.users.session.list({ user_id: "U1" });
+assert.equal(sessions.ok, true);
+assert.equal(Array.isArray(sessions.active_sessions), true);
+assert.equal(JSON.stringify(sessions).includes("token-"), false);
+const bulkReset = await client.admin.users.session.resetBulk({ user_ids: "U1" });
+assert.equal(bulkReset.ok, true);
+
 // team.externalTeams.* is the whole-organization half of Slack Connect. The
 // walk exercises the read and the refusal: this fixture shares no channels with
 // another organization, so disconnecting one is the "no such connection" answer

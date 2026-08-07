@@ -71,6 +71,8 @@ type Service interface {
 	CreateExternalIdentity(context.Context, domain.ExternalIdentity) error
 	RevokeOIDCSessions(context.Context, domain.WorkspaceID, string, string, string, string, time.Time) error
 	ResetUserSessions(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) error
+	UserSessions(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) ([]domain.WorkspaceSession, error)
+	ResetUserSessionsBulk(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) error
 	Post(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	ShareFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)

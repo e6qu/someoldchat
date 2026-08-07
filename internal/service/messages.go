@@ -449,6 +449,54 @@ func (m Messages) ResetUserSessions(ctx context.Context, workspaceID domain.Work
 	return m.Store.RevokeUserSessions(ctx, workspaceID, targetID, event)
 }
 
+// UserSessions reports one member's live sessions to an administrator. It never
+// carries a session token: reviewing who is signed in and ending a session both
+// work from the stored hash, and answering with the credential would make the
+// review itself a way to impersonate the member.
+func (m Messages) UserSessions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) ([]domain.WorkspaceSession, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	target, err := m.Store.GetUser(ctx, targetID)
+	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
+		return nil, store.ErrNotFound
+	}
+	return m.Store.ListUserSessions(ctx, workspaceID, targetID)
+}
+
+// ResetUserSessionsBulk signs several members out at once.
+//
+// It is not the single reset in a loop with the loop hidden: a member named in
+// the request who is not a member of this workspace stops the whole thing
+// before anything is revoked, so an administrator acting on a list they pasted
+// finds out they were wrong instead of signing out an arbitrary prefix of it.
+func (m Messages) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return store.InvalidArgument("at least one member is required")
+	}
+	for _, targetID := range targets {
+		target, err := m.Store.GetUser(ctx, targetID)
+		if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
+			return store.ErrNotFound
+		}
+	}
+	for _, targetID := range targets {
+		event, err := newEvent(workspaceID, actorID, events.NewPayload("user.sessions_reset", events.String("user_id", string(targetID))), time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		// A member with no live session is not a failure of the request: they
+		// are already signed out, which is what was asked for.
+		if err := m.Store.RevokeUserSessions(ctx, workspaceID, targetID, event); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m Messages) LookupSession(ctx context.Context, token string) (domain.SessionRecord, error) {
 	return m.Store.LookupSession(ctx, token)
 }

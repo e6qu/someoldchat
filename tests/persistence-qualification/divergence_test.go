@@ -3023,6 +3023,104 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 	}
 }
 
+// sessionsAreListedWithoutTheirTokens pins what an administrator may see and
+// what they may never see. The identifier both profiles answer with is the
+// stored hash of the token, so the listing can tell two sessions apart and end
+// one without ever carrying the credential — a review that handed out tokens
+// would be a way to become the member rather than a way to see them. It also
+// pins that revoked and expired sessions are left out, because an
+// administrator asking who is signed in is asking who can act right now.
+func sessionsAreListedWithoutTheirTokens(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Now().UTC()
+	live := "live-" + f.suffix
+	expired := "expired-" + f.suffix
+	revoked := "revoked-" + f.suffix
+	for _, seed := range []struct {
+		token   string
+		created time.Time
+		expires time.Time
+		revoked bool
+	}{
+		{live, now.Add(-time.Hour), now.Add(time.Hour), false},
+		{expired, now.Add(-48 * time.Hour), now.Add(-time.Hour), false},
+		{revoked, now.Add(-2 * time.Hour), now.Add(time.Hour), true},
+	} {
+		if err := f.repository.SeedSession(ctx, seed.token, domain.SessionRecord{
+			WorkspaceID: f.workspaceID, UserID: f.userID, Scopes: []string{"chat:write"},
+			CreatedAt: seed.created, ExpiresAt: seed.expires, Revoked: seed.revoked,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sessions, err := f.repository.ListUserSessions(ctx, f.workspaceID, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %+v, want only the live one", sessions)
+	}
+	if sessions[0].ID != domain.HashToken(live) {
+		t.Fatalf("session id = %q, want the stored hash of the token", sessions[0].ID)
+	}
+	// Said explicitly because it is the whole security property: whatever else
+	// changes here, the token must never be what identifies a session.
+	if sessions[0].ID == live {
+		t.Fatal("the session list carried the token itself")
+	}
+	if sessions[0].CreatedAt.IsZero() || sessions[0].ExpiresAt.IsZero() {
+		t.Fatalf("session = %+v, want both instants", sessions[0])
+	}
+
+	// A session recorded before creation times existed reads as unknown rather
+	// than as the beginning of 1970, which would look like a session opened
+	// before the workspace was.
+	undated := "undated-" + f.suffix
+	if err := f.repository.SeedSession(ctx, undated, domain.SessionRecord{
+		WorkspaceID: f.workspaceID, UserID: f.userID, Scopes: []string{"chat:write"}, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	withUndated, err := f.repository.ListUserSessions(ctx, f.workspaceID, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, session := range withUndated {
+		if session.ID == domain.HashToken(undated) {
+			found = true
+			if !session.CreatedAt.IsZero() {
+				t.Fatalf("an undated session began at %s", session.CreatedAt)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the undated session is missing: %+v", withUndated)
+	}
+
+	// Another member's sessions are not this member's, on either profile.
+	other := domain.UserID("U-other-session-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: other, WorkspaceID: f.workspaceID, Email: "other-session-" + f.suffix + "@example.com", Name: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := f.repository.ListUserSessions(ctx, f.workspaceID, other)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("another member's sessions = %+v err = %v, want none", empty, err)
+	}
+
+	if err := f.repository.RevokeUserSessions(ctx, f.workspaceID, f.userID, f.event("revoke-all", "user.sessions_reset", string(f.userID))); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.repository.ListUserSessions(ctx, f.workspaceID, f.userID)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("sessions after revoking = %+v err = %v, want none", after, err)
+	}
+}
+
 // externalConnectionsAreDerivedAndEndEverywhere covers the whole-organization
 // half of Slack Connect. A connection is not stored: it is the fact that some
 // channel of this workspace carries another organization, so both profiles have

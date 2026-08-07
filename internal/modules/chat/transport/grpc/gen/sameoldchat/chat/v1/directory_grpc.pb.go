@@ -28,6 +28,8 @@ const (
 	DirectoryService_SetUserRole_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
 	DirectoryService_SetUserExpiration_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
 	DirectoryService_ResetUserSessions_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
+	DirectoryService_UserSessions_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
+	DirectoryService_ResetUserSessionsBulk_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
 	DirectoryService_Emojis_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/Emojis"
 	DirectoryService_AddEmoji_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AddEmoji"
 	DirectoryService_AddEmojiAlias_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AddEmojiAlias"
@@ -77,6 +79,8 @@ type DirectoryServiceClient interface {
 	SetUserRole(ctx context.Context, in *SetUserRoleRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	ResetUserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error)
+	ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	Emojis(ctx context.Context, in *EmojiListRequest, opts ...grpc.CallOption) (*EmojiListResponse, error)
 	AddEmoji(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AddEmojiAlias(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -205,6 +209,26 @@ func (c *directoryServiceClient) ResetUserSessions(ctx context.Context, in *Rese
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
 	err := c.cc.Invoke(ctx, DirectoryService_ResetUserSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserSessionsResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_UserSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_ResetUserSessionsBulk_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -564,6 +588,8 @@ type DirectoryServiceServer interface {
 	SetUserRole(context.Context, *SetUserRoleRequest) (*MutationResponse, error)
 	SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error)
 	ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error)
+	UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error)
+	ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error)
 	Emojis(context.Context, *EmojiListRequest) (*EmojiListResponse, error)
 	AddEmoji(context.Context, *EmojiMutationRequest) (*MutationResponse, error)
 	AddEmojiAlias(context.Context, *EmojiMutationRequest) (*MutationResponse, error)
@@ -633,6 +659,12 @@ func (UnimplementedDirectoryServiceServer) SetUserExpiration(context.Context, *S
 }
 func (UnimplementedDirectoryServiceServer) ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetUserSessions not implemented")
+}
+func (UnimplementedDirectoryServiceServer) UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UserSessions not implemented")
+}
+func (UnimplementedDirectoryServiceServer) ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetUserSessionsBulk not implemented")
 }
 func (UnimplementedDirectoryServiceServer) Emojis(context.Context, *EmojiListRequest) (*EmojiListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Emojis not implemented")
@@ -914,6 +946,42 @@ func _DirectoryService_ResetUserSessions_Handler(srv interface{}, ctx context.Co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).ResetUserSessions(ctx, req.(*ResetUserSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_UserSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetUserSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).UserSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_UserSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).UserSessions(ctx, req.(*ResetUserSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_ResetUserSessionsBulk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetUserSessionsBulkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).ResetUserSessionsBulk(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_ResetUserSessionsBulk_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).ResetUserSessionsBulk(ctx, req.(*ResetUserSessionsBulkRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1572,6 +1640,14 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResetUserSessions",
 			Handler:    _DirectoryService_ResetUserSessions_Handler,
+		},
+		{
+			MethodName: "UserSessions",
+			Handler:    _DirectoryService_UserSessions_Handler,
+		},
+		{
+			MethodName: "ResetUserSessionsBulk",
+			Handler:    _DirectoryService_ResetUserSessionsBulk_Handler,
 		},
 		{
 			MethodName: "Emojis",

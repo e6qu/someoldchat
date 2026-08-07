@@ -269,6 +269,12 @@ type Store interface {
 	CreateExternalIdentity(context.Context, domain.ExternalIdentity) error
 	RevokeSession(context.Context, string) error
 	RevokeOIDCSessions(context.Context, domain.WorkspaceID, string, string, string, string, time.Time, events.Event) error
+	// ListUserSessions reports one member's live sessions for an administrator
+	// to review. It answers with the stored hash as each session's identifier
+	// and never the token: telling two sessions apart and ending one need no
+	// credential, and a list that handed out tokens would turn "review who is
+	// signed in" into a way to become them.
+	ListUserSessions(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.WorkspaceSession, error)
 	RevokeUserSessions(context.Context, domain.WorkspaceID, domain.UserID, events.Event) error
 	RevokeToken(context.Context, string) error
 	RevokeAppToken(context.Context, string) error
