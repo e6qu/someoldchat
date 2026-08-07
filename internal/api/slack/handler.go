@@ -183,6 +183,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.remove", h.adminUsersRemove)
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
+	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
+	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
+	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
 	mux.HandleFunc("GET /api/admin.users.session.list", h.adminUsersSessionList)
 	mux.HandleFunc("POST /api/admin.users.session.list", h.adminUsersSessionList)
 	mux.HandleFunc("POST /api/admin.users.session.resetBulk", h.adminUsersSessionResetBulk)
@@ -2979,6 +2982,81 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := h.Messages.ResetUserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.workflows.search lists every workflow in the workspace, including the
+// drafts and abandoned workflows no member-facing directory shows — which are
+// exactly the ones an administrator is looking for.
+func (h Handler) adminWorkflowsSearch(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	values, more, next, err := h.Messages.AdminWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, fields["query"], request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "not_an_admin"))
+		return
+	}
+	workflows := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		workflows = append(workflows, map[string]any{
+			"id": string(value.ID), "workflow_id": string(value.ID), "title": value.Title,
+			"description": value.Description, "app_id": string(value.AppID),
+			"creator_id": string(value.OwnerID), "collaborator_ids": managerIDStrings(value.ManagerIDs),
+			"status": string(value.Status), "version": value.Version,
+			"date_updated": value.UpdatedAt.UTC().Unix(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "workflows": workflows, "has_more": more,
+		"response_metadata": map[string]any{"next_cursor": string(next)},
+	})
+}
+
+func managerIDStrings(values []domain.UserID) []string {
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, string(value))
+	}
+	return ids
+}
+
+// admin.workflows.unpublish takes workflows out of service. It is not the
+// owner's unpublish with a different caller: that path revalidates the steps
+// and requires the owning app to still be installed, and an administrator most
+// needs to stop exactly the workflows that would fail those checks.
+func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.WorkflowID](fields["workflow_ids"])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if err := h.Messages.AdminUnpublishWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

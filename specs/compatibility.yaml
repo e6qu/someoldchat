@@ -1227,7 +1227,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.permissions.lookup/
   - method: admin.workflows.search
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.search/
   - method: admin.workflows.triggers.types.permissions.lookup
@@ -1239,7 +1239,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.triggers.types.permissions.set/
   - method: admin.workflows.unpublish
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.unpublish/
   - method: apps.activities.list

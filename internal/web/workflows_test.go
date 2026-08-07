@@ -17,6 +17,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
@@ -79,6 +80,62 @@ func TestWorkflowPagesAgreeWithTheContentSecurityPolicy(t *testing.T) {
 			}
 		}
 	}
+}
+
+// An administrator could not find a workflow they did not own, and stopping one
+// was only reachable through the owner's builder — which revalidates the steps
+// and requires the owning app to still be installed, so exactly the workflows
+// most worth stopping were the ones that could not be.
+func TestAdministrativeWorkflowDirectoryFindsAndStopsWhatMembersCannot(t *testing.T) {
+	repository, mux, csrf := seedWorkflowAppWithStore(t)
+	if err := repository.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleAdmin, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	messages := service.Messages{Store: repository}
+	// Owned by somebody else, so the ordinary directory does not show it.
+	created, err := messages.CreateWorkflow(context.Background(), "T1", "U2", domain.WorkflowDefinition{
+		AppID: "Aworkflow", CallbackID: "nightly", Title: "Nightly triage", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","title":"Triage request"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.UpdateWorkflow(context.Background(), "T1", "U2", created, created.Version, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// The administrative view is opt-in: the ordinary directory still shows
+	// only what this member may see.
+	requireMissing(t, "member directory", get(t, mux, "/app/workflows").Body.String(), "Stop Nightly triage")
+
+	all := get(t, mux, "/app/workflows?scope=all")
+	if all.Code != http.StatusOK {
+		t.Fatalf("administrative directory=%d: %s", all.Code, all.Body)
+	}
+	requireContains(t, "administrative directory", all.Body.String(), "Nightly triage", "Stop Nightly triage", "Search every workflow")
+
+	// The query means something.
+	requireMissing(t, "filtered directory", get(t, mux, "/app/workflows?scope=all&q=nothing-is-called-this").Body.String(), "Nightly triage")
+
+	stopped := postForm(t, mux, "/app/workflows/"+string(created.ID)+"/stop", url.Values{"_csrf": {csrf}}.Encode(), false)
+	if stopped.Code != http.StatusSeeOther {
+		t.Fatalf("stop=%d: %s", stopped.Code, stopped.Body)
+	}
+	after, err := repository.GetWorkflow(context.Background(), "T1", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != domain.WorkflowDisabled {
+		t.Fatalf("workflow status = %q, want disabled", after.Status)
+	}
+	// Stopping is not authoring: the content and the version are untouched, so
+	// runs that pinned the published version are not looking at a revision
+	// nobody wrote.
+	if after.Version != created.Version+1 || after.Title != "Nightly triage" {
+		t.Fatalf("stopping rewrote the workflow: %+v", after)
+	}
+	// A stopped workflow is no longer offered for stopping.
+	requireMissing(t, "administrative directory after stopping", get(t, mux, "/app/workflows?scope=all").Body.String(), "Stop Nightly triage")
 }
 
 func TestWorkflowBuilderPublishesTriggersAndStartsADurableRun(t *testing.T) {

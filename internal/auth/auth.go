@@ -101,6 +101,11 @@ const (
 	ScopeAdminInvitesWrite          Scope = "admin.invites:write"
 	ScopeAdminAppsRead              Scope = "admin.apps:read"
 	ScopeAdminAppsWrite             Scope = "admin.apps:write"
+	// Slack's own scopes for admin.workflows.*. Separate from admin.apps
+	// because a workflow is not an app: an administrator may need to stop a
+	// workflow without being trusted to install or remove the app that owns it.
+	ScopeAdminWorkflowsRead  Scope = "admin.workflows:read"
+	ScopeAdminWorkflowsWrite Scope = "admin.workflows:write"
 )
 
 type Principal struct {
@@ -555,6 +560,8 @@ var allScopes = []Scope{
 	ScopeAdminInvitesWrite,
 	ScopeAdminAppsRead,
 	ScopeAdminAppsWrite,
+	ScopeAdminWorkflowsRead,
+	ScopeAdminWorkflowsWrite,
 }
 
 // AllScopes returns a fresh copy on every call, so a caller that appends to or

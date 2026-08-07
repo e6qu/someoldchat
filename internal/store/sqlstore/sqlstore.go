@@ -6895,6 +6895,35 @@ func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 	return tx.Commit()
 }
 
+// SetWorkflowStatus changes only the status and the moment it changed. See the
+// interface for why this is not an edit.
+func (s *Store) SetWorkflowStatus(ctx context.Context, workspace domain.WorkspaceID, id domain.WorkflowID, status domain.WorkflowStatus, at time.Time, event events.Event) error {
+	if id == "" || workspace == "" || status == "" {
+		return store.InvalidArgument("invalid workflow status")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE workflows SET status = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
+		status, at.UTC().UnixNano(), id, workspace)
+	if err != nil {
+		return classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinition, expectedVersion uint64, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || expectedVersion == 0 {
 		return store.InvalidArgument("invalid workflow update")

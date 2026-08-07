@@ -162,6 +162,25 @@ message WorkflowListRequest {
   bool descending = 5;
 }
 
+message AdminWorkflowListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+  string query = 6;
+}
+
+message AdminUnpublishWorkflowsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string workflow_ids = 3;
+}
+
+message AdminUnpublishWorkflowsResponse {
+  bool ok = 1;
+}
+
 message WorkflowListResponse {
   repeated WorkflowDefinition workflows = 1;
   bool has_more = 2;
@@ -378,6 +397,8 @@ service WorkflowsService {
   rpc CanManageWorkflow(WorkflowGetRequest) returns (WorkflowManagePermissionResponse);
   rpc UpdateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
   rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
+  rpc AdminWorkflows(AdminWorkflowListRequest) returns (WorkflowListResponse);
+  rpc AdminUnpublishWorkflows(AdminUnpublishWorkflowsRequest) returns (AdminUnpublishWorkflowsResponse);
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);
   rpc ListWorkflowTriggers(WorkflowTriggerListRequest) returns (WorkflowTriggerListResponse);
   rpc RunWorkflow(WorkflowRunRequest) returns (WorkflowRun);

@@ -129,6 +129,7 @@ func runQualification(t *testing.T, open opener) {
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},
 		{"external connections are derived and end everywhere", externalConnectionsAreDerivedAndEndEverywhere},
 		{"sessions are listed without their tokens", sessionsAreListedWithoutTheirTokens},
+		{"stopping a workflow is not an edit", stoppingAWorkflowIsNotAnEdit},
 		{"search modifiers mean the same on every profile", searchModifiersMeanTheSame},
 		{"canvas revisions record what was replaced", canvasRevisionsRecordWhatWasReplaced},
 		{"canvas comments outlive the section they annotate", canvasCommentsOutliveTheirSection},

@@ -154,6 +154,24 @@ for later steps and conditions to read.
 
 ## Evidence
 
+- A workspace administrator can find every workflow and take one out of
+  service. The member-facing directory answers what one member may see, which
+  is the wrong question when the workflow to stop belongs to somebody else, is
+  an unpublished draft, or is owned by an app nobody maintains — exactly the
+  ones worth finding. The administrative view is opt-in rather than the default
+  even for an administrator, because a directory that silently showed every
+  draft in the workspace would make somebody else's unfinished work look like
+  theirs. Stopping is deliberately not the owner's unpublish with a different
+  caller: that path is an edit, so it revalidates the steps and requires the
+  owning app to still be installed, and the workflows most worth stopping are
+  the ones that would fail those checks. It changes the status and nothing
+  else — the content stays as its author left it, and the version does not
+  move, because runs pin the published version and a bumped version would make
+  a stop look like a revision nobody wrote. A workflow named in the request that
+  is not in this workspace stops the whole thing before anything is stopped, and
+  one that is already out of service is the state that was asked for rather than
+  an error.
+
 - Who a canvas is shared with is now visible and changeable from the canvas
   itself. Anyone who may open it sees the list: they can already see who
   commented on it and who edited it, so who else may open it is not a further

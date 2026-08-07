@@ -205,7 +205,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -1596,6 +1596,67 @@ func TestAdminConversationSharedDisconnectAndEKMInfo(t *testing.T) {
 	handler.ServeHTTP(disconnectResult, disconnect)
 	if disconnectResult.Code != http.StatusOK {
 		t.Fatalf("disconnect status=%d body=%s", disconnectResult.Code, disconnectResult.Body)
+	}
+}
+
+// An administrator could not find a workflow they did not own, and could stop
+// one only through the owner's edit path — which revalidates the steps and
+// requires the owning app to still be installed, so exactly the workflows most
+// worth stopping were the ones that could not be.
+func TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	post := func(path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	// Workflows are authored in the builder rather than through the Web API —
+	// Slack publishes no create method either — so the one under administration
+	// here is created through the service.
+	messages := service.Messages{Store: repository}
+	created, err := messages.CreateWorkflow(context.Background(), "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", CallbackID: "nightly", Title: "Nightly triage", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","title":"Triage"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := messages.UpdateWorkflow(context.Background(), "T1", "U1", created, created.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := post("/api/admin.workflows.search", "query=nightly&limit=10")
+	if found.Code != http.StatusOK || !strings.Contains(found.Body.String(), string(published.ID)) {
+		t.Fatalf("search status=%d body=%s", found.Code, found.Body)
+	}
+	// The query means something: a term nobody matches answers with nothing
+	// rather than with everything.
+	if empty := post("/api/admin.workflows.search", "query=nothing-is-called-this&limit=10"); strings.Contains(empty.Body.String(), string(published.ID)) {
+		t.Fatalf("an unmatched query returned the workflow: %s", empty.Body)
+	}
+
+	// A workflow that is not here stops the whole request.
+	mixed := post("/api/admin.workflows.unpublish", "workflow_ids="+string(published.ID)+",Wf-absent")
+	if !strings.Contains(mixed.Body.String(), `"ok":false`) {
+		t.Fatalf("a mixed unpublish succeeded: %s", mixed.Body)
+	}
+
+	if stopped := post("/api/admin.workflows.unpublish", "workflow_ids="+string(published.ID)); stopped.Code != http.StatusOK || !strings.Contains(stopped.Body.String(), `"ok":true`) {
+		t.Fatalf("unpublish status=%d body=%s", stopped.Code, stopped.Body)
+	}
+	after := post("/api/admin.workflows.search", "query=nightly&limit=10")
+	if !strings.Contains(after.Body.String(), `"status":"disabled"`) {
+		t.Fatalf("the workflow is not out of service: %s", after.Body)
+	}
+	// Stopping is not authoring: the version does not move, because runs pin
+	// the published version and a stop is not a revision anybody wrote.
+	if !strings.Contains(after.Body.String(), `"version":`+strconv.FormatUint(published.Version, 10)) {
+		t.Fatalf("stopping the workflow moved its version: %s", after.Body)
 	}
 }
 

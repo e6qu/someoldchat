@@ -260,6 +260,18 @@ assert.equal(billableInfo.ok, true);
 assert.equal(billableInfo.billable_info.U1.billing_active, true);
 const integrationLogs = await client.team.integrationLogs({ count: 1 });
 assert.equal(integrationLogs.ok, true);
+// admin.workflows.*: an administrator finds workflows across the workspace and
+// takes one out of service. The walk asserts the shape of the search and the
+// refusal for a workflow that is not there, which is the case the fixture can
+// reach without authoring one.
+const workflowSearch = await client.admin.workflows.search({ query: "", limit: 10 });
+assert.equal(workflowSearch.ok, true);
+assert.equal(Array.isArray(workflowSearch.workflows), true);
+await assert.rejects(
+  () => client.admin.workflows.unpublish({ workflow_ids: ["Wf-not-here"] }),
+  (error) => String(error).includes("workflow_not_found"),
+);
+
 // Session administration: the list must describe sessions without carrying the
 // credential it describes, so the walk asserts the token is absent rather than
 // merely that the call succeeded.

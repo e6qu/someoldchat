@@ -446,6 +446,12 @@ type Store interface {
 	// installed app, or ErrNotFound when the app has not issued one.
 	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
+	// SetWorkflowStatus takes a workflow in or out of service without touching
+	// what it says. It is deliberately not an edit: an administrator stopping a
+	// workflow is not authoring it, the content must not change under its
+	// owner, and the version must not move — runs pin the published version,
+	// and bumping it would make a stop look like a revision nobody wrote.
+	SetWorkflowStatus(context.Context, domain.WorkspaceID, domain.WorkflowID, domain.WorkflowStatus, time.Time, events.Event) error
 	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)
 	SetWorkflowTrigger(context.Context, domain.WorkflowTrigger, uint64, events.Event) error
 	GetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID) (domain.WorkflowTrigger, error)

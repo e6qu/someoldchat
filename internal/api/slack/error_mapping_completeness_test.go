@@ -205,6 +205,7 @@ func recordedNonPinnedCodes() map[string]string {
 		"channel_canvas_already_exists":  "current conversations.canvases.create singular-resource conflict; absent from the legacy OpenAPI snapshot",
 		"channel_canvas_creation_failed": "current conversations.canvases.create storage failure; absent from the legacy OpenAPI snapshot",
 		"list_not_found":                 "slackLists.* is absent from the pinned snapshot",
+		"workflow_not_found":             "admin.workflows.* is absent from the pinned snapshot, which predates the workflow admin methods",
 		"call_not_found":                 "calls.* declares no error enum",
 		"bookmark_not_found":             "bookmarks.* is absent from the pinned snapshot",
 		"too_many_bookmarks":             "bookmarks.* is absent from the pinned snapshot",
