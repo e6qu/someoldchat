@@ -2746,10 +2746,12 @@ func decodeWorkflowDefinition(value *chatv1.WorkflowDefinition) domain.WorkflowD
 	}
 }
 
+// decodeWorkflowUserIDs answers with an empty list rather than nil when there
+// are none. It used to answer nil, which is the same thing to most Go code and
+// a different answer at the seam: the local composition returns the empty list
+// the store holds, so the remote one returning nil made the two compositions
+// disagree about a workflow nobody manages. The parity gate caught it.
 func decodeWorkflowUserIDs(ids []string) []domain.UserID {
-	if len(ids) == 0 {
-		return nil
-	}
 	values := make([]domain.UserID, 0, len(ids))
 	for _, id := range ids {
 		values = append(values, domain.UserID(id))
@@ -3025,6 +3027,36 @@ func (r Remote) AdminWorkflows(ctx context.Context, workspaceID domain.Workspace
 		values = append(values, decodeWorkflowDefinition(value))
 	}
 	return values, out.GetHasMore(), domain.Cursor(out.GetNextCursor()), nil
+}
+
+func (r Remote) AddWorkflowCollaborators(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.WorkflowID, collaborators []domain.UserID) error {
+	return r.changeWorkflowCollaborators(ctx, workspaceID, userID, ids, collaborators, true)
+}
+
+func (r Remote) RemoveWorkflowCollaborators(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.WorkflowID, collaborators []domain.UserID) error {
+	return r.changeWorkflowCollaborators(ctx, workspaceID, userID, ids, collaborators, false)
+}
+
+func (r Remote) changeWorkflowCollaborators(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.WorkflowID, collaborators []domain.UserID, adding bool) error {
+	workflowIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		workflowIDs = append(workflowIDs, string(id))
+	}
+	collaboratorIDs := make([]string, 0, len(collaborators))
+	for _, id := range collaborators {
+		collaboratorIDs = append(collaboratorIDs, string(id))
+	}
+	out, err := r.workflows.ChangeWorkflowCollaborators(ctx, &chatv1.WorkflowCollaboratorsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+		WorkflowIds: workflowIDs, CollaboratorIds: collaboratorIDs, Adding: adding,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed workflow collaborator change was not acknowledged")
+	}
+	return nil
 }
 
 func (r Remote) AdminUnpublishWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.WorkflowID) error {
@@ -6353,6 +6385,25 @@ func (s *Server) AdminWorkflows(ctx context.Context, input *chatv1.AdminWorkflow
 		out.Workflows = append(out.Workflows, encodeWorkflowDefinition(value))
 	}
 	return out, nil
+}
+
+func (s *Server) ChangeWorkflowCollaborators(ctx context.Context, input *chatv1.WorkflowCollaboratorsRequest) (*chatv1.AdminUnpublishWorkflowsResponse, error) {
+	ids := make([]domain.WorkflowID, 0, len(input.GetWorkflowIds()))
+	for _, id := range input.GetWorkflowIds() {
+		ids = append(ids, domain.WorkflowID(id))
+	}
+	collaborators := make([]domain.UserID, 0, len(input.GetCollaboratorIds()))
+	for _, id := range input.GetCollaboratorIds() {
+		collaborators = append(collaborators, domain.UserID(id))
+	}
+	change := s.implementation.RemoveWorkflowCollaborators
+	if input.GetAdding() {
+		change = s.implementation.AddWorkflowCollaborators
+	}
+	if err := change(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids, collaborators); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AdminUnpublishWorkflowsResponse{Ok: true}, nil
 }
 
 func (s *Server) AdminUnpublishWorkflows(ctx context.Context, input *chatv1.AdminUnpublishWorkflowsRequest) (*chatv1.AdminUnpublishWorkflowsResponse, error) {

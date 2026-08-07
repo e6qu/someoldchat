@@ -117,6 +117,8 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/admin.conversations.disconnectShared", auth.ScopeAdminConversationsWrite},
 		{http.MethodPost, "/api/admin.workflows.search", auth.ScopeAdminWorkflowsRead},
 		{http.MethodPost, "/api/admin.workflows.unpublish", auth.ScopeAdminWorkflowsWrite},
+		{http.MethodPost, "/api/admin.workflows.collaborators.add", auth.ScopeAdminWorkflowsWrite},
+		{http.MethodPost, "/api/admin.workflows.collaborators.remove", auth.ScopeAdminWorkflowsWrite},
 		{http.MethodPost, "/api/admin.users.session.list", auth.ScopeAdminUsersRead},
 		{http.MethodPost, "/api/admin.users.session.resetBulk", auth.ScopeAdminUsersWrite},
 		{http.MethodPost, "/api/team.externalTeams.list", auth.ScopeAdminTeamsRead},

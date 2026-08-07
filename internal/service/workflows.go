@@ -1207,6 +1207,106 @@ func (m Messages) AdminWorkflows(ctx context.Context, workspaceID domain.Workspa
 	return matched, hasMore, nextCursor, nil
 }
 
+// AddWorkflowCollaborators and RemoveWorkflowCollaborators change who manages
+// workflows, one name at a time rather than by replacing the list.
+//
+// SetWorkflowManagers replaces it, which is right for a form that shows the
+// whole list and submits it back. It is wrong for "add this person": two
+// administrators adding different people would each submit a list computed
+// before the other's change, and the second would silently drop the first's.
+// Adding and removing are expressed against the list as it is at the moment of
+// the write.
+func (m Messages) AddWorkflowCollaborators(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, ids []domain.WorkflowID, collaborators []domain.UserID) error {
+	return m.changeWorkflowCollaborators(ctx, workspaceID, actor, ids, collaborators, true)
+}
+
+func (m Messages) RemoveWorkflowCollaborators(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, ids []domain.WorkflowID, collaborators []domain.UserID) error {
+	return m.changeWorkflowCollaborators(ctx, workspaceID, actor, ids, collaborators, false)
+}
+
+func (m Messages) changeWorkflowCollaborators(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, ids []domain.WorkflowID, collaborators []domain.UserID, adding bool) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
+		return err
+	}
+	if len(ids) == 0 || len(collaborators) == 0 {
+		return ErrInvalidWorkflowStep
+	}
+	// Everything is checked before anything is written, for the reason a bulk
+	// sign-out is: an administrator acting on a list finds out they were wrong
+	// rather than discovering later that an arbitrary prefix of it was applied.
+	current := make([]domain.WorkflowDefinition, 0, len(ids))
+	for _, id := range ids {
+		value, err := m.Store.GetWorkflow(ctx, workspaceID, id)
+		if err != nil {
+			return err
+		}
+		current = append(current, value)
+	}
+	if adding {
+		for _, collaborator := range collaborators {
+			if _, err := m.activeWorkspaceMembership(ctx, workspaceID, collaborator); err != nil {
+				// Somebody who is not a member cannot manage a workflow, and
+				// writing the name anyway would leave a manager list naming a
+				// person the workspace cannot resolve.
+				return ErrInvalidWorkflowStep
+			}
+		}
+	}
+	now := time.Now().UTC()
+	for _, value := range current {
+		managers := workflowManagersAfter(value.ManagerIDs, collaborators, adding)
+		if slices.Equal(managers, value.ManagerIDs) {
+			// Nothing to say: adding somebody who already manages it, or
+			// removing somebody who never did, is the state that was asked for.
+			continue
+		}
+		event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.managers_set",
+			events.String("workflow_id", string(value.ID)),
+			events.Int("managers", int64(len(managers))),
+		), now)
+		if err != nil {
+			return err
+		}
+		if err := m.Store.SetWorkflowManagers(ctx, workspaceID, value.ID, managers, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// workflowManagersAfter applies one add or remove to a manager list, keeping
+// the order the list already had so a change does not reshuffle it.
+func workflowManagersAfter(existing []domain.UserID, changed []domain.UserID, adding bool) []domain.UserID {
+	present := make(map[domain.UserID]bool, len(existing))
+	for _, id := range existing {
+		present[id] = true
+	}
+	result := make([]domain.UserID, 0, len(existing)+len(changed))
+	if adding {
+		result = append(result, existing...)
+		for _, id := range changed {
+			id = domain.UserID(strings.TrimSpace(string(id)))
+			if id == "" || present[id] {
+				continue
+			}
+			present[id] = true
+			result = append(result, id)
+		}
+		return result
+	}
+	removing := make(map[domain.UserID]bool, len(changed))
+	for _, id := range changed {
+		removing[domain.UserID(strings.TrimSpace(string(id)))] = true
+	}
+	for _, id := range existing {
+		if removing[id] {
+			continue
+		}
+		result = append(result, id)
+	}
+	return result
+}
+
 // AdminUnpublishWorkflows takes workflows out of service.
 //
 // It is not the owner's unpublish with a different caller: that path is an edit

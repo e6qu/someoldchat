@@ -1215,11 +1215,11 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.unsupportedVersions.export/
   - method: admin.workflows.collaborators.add
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.add/
   - method: admin.workflows.collaborators.remove
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.remove/
   - method: admin.workflows.permissions.lookup

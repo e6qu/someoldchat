@@ -1633,6 +1633,82 @@ func (x *AdminWorkflowListRequest) GetQuery() string {
 	return ""
 }
 
+type WorkflowCollaboratorsRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WorkflowIds     []string               `protobuf:"bytes,3,rep,name=workflow_ids,json=workflowIds,proto3" json:"workflow_ids,omitempty"`
+	CollaboratorIds []string               `protobuf:"bytes,4,rep,name=collaborator_ids,json=collaboratorIds,proto3" json:"collaborator_ids,omitempty"`
+	Adding          bool                   `protobuf:"varint,5,opt,name=adding,proto3" json:"adding,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *WorkflowCollaboratorsRequest) Reset() {
+	*x = WorkflowCollaboratorsRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowCollaboratorsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowCollaboratorsRequest) ProtoMessage() {}
+
+func (x *WorkflowCollaboratorsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowCollaboratorsRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowCollaboratorsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *WorkflowCollaboratorsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowCollaboratorsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowCollaboratorsRequest) GetWorkflowIds() []string {
+	if x != nil {
+		return x.WorkflowIds
+	}
+	return nil
+}
+
+func (x *WorkflowCollaboratorsRequest) GetCollaboratorIds() []string {
+	if x != nil {
+		return x.CollaboratorIds
+	}
+	return nil
+}
+
+func (x *WorkflowCollaboratorsRequest) GetAdding() bool {
+	if x != nil {
+		return x.Adding
+	}
+	return false
+}
+
 type AdminUnpublishWorkflowsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -1644,7 +1720,7 @@ type AdminUnpublishWorkflowsRequest struct {
 
 func (x *AdminUnpublishWorkflowsRequest) Reset() {
 	*x = AdminUnpublishWorkflowsRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1656,7 +1732,7 @@ func (x *AdminUnpublishWorkflowsRequest) String() string {
 func (*AdminUnpublishWorkflowsRequest) ProtoMessage() {}
 
 func (x *AdminUnpublishWorkflowsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1669,7 +1745,7 @@ func (x *AdminUnpublishWorkflowsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminUnpublishWorkflowsRequest.ProtoReflect.Descriptor instead.
 func (*AdminUnpublishWorkflowsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{23}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *AdminUnpublishWorkflowsRequest) GetWorkspaceId() string {
@@ -1702,7 +1778,7 @@ type AdminUnpublishWorkflowsResponse struct {
 
 func (x *AdminUnpublishWorkflowsResponse) Reset() {
 	*x = AdminUnpublishWorkflowsResponse{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1714,7 +1790,7 @@ func (x *AdminUnpublishWorkflowsResponse) String() string {
 func (*AdminUnpublishWorkflowsResponse) ProtoMessage() {}
 
 func (x *AdminUnpublishWorkflowsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1727,7 +1803,7 @@ func (x *AdminUnpublishWorkflowsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminUnpublishWorkflowsResponse.ProtoReflect.Descriptor instead.
 func (*AdminUnpublishWorkflowsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{24}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *AdminUnpublishWorkflowsResponse) GetOk() bool {
@@ -1748,7 +1824,7 @@ type WorkflowListResponse struct {
 
 func (x *WorkflowListResponse) Reset() {
 	*x = WorkflowListResponse{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1760,7 +1836,7 @@ func (x *WorkflowListResponse) String() string {
 func (*WorkflowListResponse) ProtoMessage() {}
 
 func (x *WorkflowListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1773,7 +1849,7 @@ func (x *WorkflowListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowListResponse.ProtoReflect.Descriptor instead.
 func (*WorkflowListResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{25}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *WorkflowListResponse) GetWorkflows() []*WorkflowDefinition {
@@ -1817,7 +1893,7 @@ type WorkflowTrigger struct {
 
 func (x *WorkflowTrigger) Reset() {
 	*x = WorkflowTrigger{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1829,7 +1905,7 @@ func (x *WorkflowTrigger) String() string {
 func (*WorkflowTrigger) ProtoMessage() {}
 
 func (x *WorkflowTrigger) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1842,7 +1918,7 @@ func (x *WorkflowTrigger) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowTrigger.ProtoReflect.Descriptor instead.
 func (*WorkflowTrigger) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{26}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *WorkflowTrigger) GetId() string {
@@ -1941,7 +2017,7 @@ type WorkflowTriggerMutationRequest struct {
 
 func (x *WorkflowTriggerMutationRequest) Reset() {
 	*x = WorkflowTriggerMutationRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[27]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1953,7 +2029,7 @@ func (x *WorkflowTriggerMutationRequest) String() string {
 func (*WorkflowTriggerMutationRequest) ProtoMessage() {}
 
 func (x *WorkflowTriggerMutationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[27]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1966,7 +2042,7 @@ func (x *WorkflowTriggerMutationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowTriggerMutationRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowTriggerMutationRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{27}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *WorkflowTriggerMutationRequest) GetWorkspaceId() string {
@@ -2008,7 +2084,7 @@ type WorkflowTriggerListRequest struct {
 
 func (x *WorkflowTriggerListRequest) Reset() {
 	*x = WorkflowTriggerListRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[28]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2020,7 +2096,7 @@ func (x *WorkflowTriggerListRequest) String() string {
 func (*WorkflowTriggerListRequest) ProtoMessage() {}
 
 func (x *WorkflowTriggerListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[28]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2033,7 +2109,7 @@ func (x *WorkflowTriggerListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowTriggerListRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowTriggerListRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{28}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *WorkflowTriggerListRequest) GetWorkspaceId() string {
@@ -2066,7 +2142,7 @@ type WorkflowTriggerListResponse struct {
 
 func (x *WorkflowTriggerListResponse) Reset() {
 	*x = WorkflowTriggerListResponse{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[29]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2078,7 +2154,7 @@ func (x *WorkflowTriggerListResponse) String() string {
 func (*WorkflowTriggerListResponse) ProtoMessage() {}
 
 func (x *WorkflowTriggerListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[29]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2091,7 +2167,7 @@ func (x *WorkflowTriggerListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowTriggerListResponse.ProtoReflect.Descriptor instead.
 func (*WorkflowTriggerListResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{29}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *WorkflowTriggerListResponse) GetTriggers() []*WorkflowTrigger {
@@ -2126,7 +2202,7 @@ type WorkflowRun struct {
 
 func (x *WorkflowRun) Reset() {
 	*x = WorkflowRun{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[30]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2138,7 +2214,7 @@ func (x *WorkflowRun) String() string {
 func (*WorkflowRun) ProtoMessage() {}
 
 func (x *WorkflowRun) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[30]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2151,7 +2227,7 @@ func (x *WorkflowRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowRun.ProtoReflect.Descriptor instead.
 func (*WorkflowRun) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{30}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *WorkflowRun) GetId() string {
@@ -2287,7 +2363,7 @@ type WorkflowRunRequest struct {
 
 func (x *WorkflowRunRequest) Reset() {
 	*x = WorkflowRunRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[31]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2299,7 +2375,7 @@ func (x *WorkflowRunRequest) String() string {
 func (*WorkflowRunRequest) ProtoMessage() {}
 
 func (x *WorkflowRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[31]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2312,7 +2388,7 @@ func (x *WorkflowRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowRunRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowRunRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{31}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *WorkflowRunRequest) GetWorkspaceId() string {
@@ -2370,7 +2446,7 @@ type AutomaticWorkflowRunRequest struct {
 
 func (x *AutomaticWorkflowRunRequest) Reset() {
 	*x = AutomaticWorkflowRunRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[32]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2382,7 +2458,7 @@ func (x *AutomaticWorkflowRunRequest) String() string {
 func (*AutomaticWorkflowRunRequest) ProtoMessage() {}
 
 func (x *AutomaticWorkflowRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[32]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2395,7 +2471,7 @@ func (x *AutomaticWorkflowRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomaticWorkflowRunRequest.ProtoReflect.Descriptor instead.
 func (*AutomaticWorkflowRunRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{32}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *AutomaticWorkflowRunRequest) GetWorkspaceId() string {
@@ -2445,7 +2521,7 @@ type WebhookWorkflowRunRequest struct {
 
 func (x *WebhookWorkflowRunRequest) Reset() {
 	*x = WebhookWorkflowRunRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[33]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2457,7 +2533,7 @@ func (x *WebhookWorkflowRunRequest) String() string {
 func (*WebhookWorkflowRunRequest) ProtoMessage() {}
 
 func (x *WebhookWorkflowRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[33]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2470,7 +2546,7 @@ func (x *WebhookWorkflowRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookWorkflowRunRequest.ProtoReflect.Descriptor instead.
 func (*WebhookWorkflowRunRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{33}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *WebhookWorkflowRunRequest) GetWorkspaceId() string {
@@ -2512,7 +2588,7 @@ type WebhookTriggerURLRequest struct {
 
 func (x *WebhookTriggerURLRequest) Reset() {
 	*x = WebhookTriggerURLRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2524,7 +2600,7 @@ func (x *WebhookTriggerURLRequest) String() string {
 func (*WebhookTriggerURLRequest) ProtoMessage() {}
 
 func (x *WebhookTriggerURLRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2537,7 +2613,7 @@ func (x *WebhookTriggerURLRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookTriggerURLRequest.ProtoReflect.Descriptor instead.
 func (*WebhookTriggerURLRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{34}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *WebhookTriggerURLRequest) GetWorkspaceId() string {
@@ -2570,7 +2646,7 @@ type WebhookTriggerURLResponse struct {
 
 func (x *WebhookTriggerURLResponse) Reset() {
 	*x = WebhookTriggerURLResponse{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[35]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2582,7 +2658,7 @@ func (x *WebhookTriggerURLResponse) String() string {
 func (*WebhookTriggerURLResponse) ProtoMessage() {}
 
 func (x *WebhookTriggerURLResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[35]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2595,7 +2671,7 @@ func (x *WebhookTriggerURLResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookTriggerURLResponse.ProtoReflect.Descriptor instead.
 func (*WebhookTriggerURLResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{35}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *WebhookTriggerURLResponse) GetUrl() string {
@@ -2615,7 +2691,7 @@ type WorkflowEventDispatchRequest struct {
 
 func (x *WorkflowEventDispatchRequest) Reset() {
 	*x = WorkflowEventDispatchRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[36]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2627,7 +2703,7 @@ func (x *WorkflowEventDispatchRequest) String() string {
 func (*WorkflowEventDispatchRequest) ProtoMessage() {}
 
 func (x *WorkflowEventDispatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[36]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2640,7 +2716,7 @@ func (x *WorkflowEventDispatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowEventDispatchRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowEventDispatchRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{36}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *WorkflowEventDispatchRequest) GetWorkspaceId() string {
@@ -2666,7 +2742,7 @@ type WorkflowEventDispatchResponse struct {
 
 func (x *WorkflowEventDispatchResponse) Reset() {
 	*x = WorkflowEventDispatchResponse{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[37]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2678,7 +2754,7 @@ func (x *WorkflowEventDispatchResponse) String() string {
 func (*WorkflowEventDispatchResponse) ProtoMessage() {}
 
 func (x *WorkflowEventDispatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[37]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2691,7 +2767,7 @@ func (x *WorkflowEventDispatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowEventDispatchResponse.ProtoReflect.Descriptor instead.
 func (*WorkflowEventDispatchResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{37}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *WorkflowEventDispatchResponse) GetStarted() int32 {
@@ -2712,7 +2788,7 @@ type WorkflowRunGetRequest struct {
 
 func (x *WorkflowRunGetRequest) Reset() {
 	*x = WorkflowRunGetRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[38]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2724,7 +2800,7 @@ func (x *WorkflowRunGetRequest) String() string {
 func (*WorkflowRunGetRequest) ProtoMessage() {}
 
 func (x *WorkflowRunGetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[38]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2737,7 +2813,7 @@ func (x *WorkflowRunGetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowRunGetRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowRunGetRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{38}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *WorkflowRunGetRequest) GetWorkspaceId() string {
@@ -2775,7 +2851,7 @@ type FunctionCompletionRequest struct {
 
 func (x *FunctionCompletionRequest) Reset() {
 	*x = FunctionCompletionRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[39]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2787,7 +2863,7 @@ func (x *FunctionCompletionRequest) String() string {
 func (*FunctionCompletionRequest) ProtoMessage() {}
 
 func (x *FunctionCompletionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[39]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2800,7 +2876,7 @@ func (x *FunctionCompletionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FunctionCompletionRequest.ProtoReflect.Descriptor instead.
 func (*FunctionCompletionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{39}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *FunctionCompletionRequest) GetWorkspaceId() string {
@@ -2863,7 +2939,7 @@ type AutomationPermission struct {
 
 func (x *AutomationPermission) Reset() {
 	*x = AutomationPermission{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[40]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2875,7 +2951,7 @@ func (x *AutomationPermission) String() string {
 func (*AutomationPermission) ProtoMessage() {}
 
 func (x *AutomationPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[40]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2888,7 +2964,7 @@ func (x *AutomationPermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationPermission.ProtoReflect.Descriptor instead.
 func (*AutomationPermission) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{40}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *AutomationPermission) GetResourceType() string {
@@ -2975,7 +3051,7 @@ type FunctionPermissionRequest struct {
 
 func (x *FunctionPermissionRequest) Reset() {
 	*x = FunctionPermissionRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[41]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2987,7 +3063,7 @@ func (x *FunctionPermissionRequest) String() string {
 func (*FunctionPermissionRequest) ProtoMessage() {}
 
 func (x *FunctionPermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[41]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3000,7 +3076,7 @@ func (x *FunctionPermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FunctionPermissionRequest.ProtoReflect.Descriptor instead.
 func (*FunctionPermissionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{41}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *FunctionPermissionRequest) GetWorkspaceId() string {
@@ -3058,7 +3134,7 @@ type TriggerPermissionRequest struct {
 
 func (x *TriggerPermissionRequest) Reset() {
 	*x = TriggerPermissionRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[42]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3070,7 +3146,7 @@ func (x *TriggerPermissionRequest) String() string {
 func (*TriggerPermissionRequest) ProtoMessage() {}
 
 func (x *TriggerPermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[42]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3083,7 +3159,7 @@ func (x *TriggerPermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerPermissionRequest.ProtoReflect.Descriptor instead.
 func (*TriggerPermissionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{42}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *TriggerPermissionRequest) GetWorkspaceId() string {
@@ -3134,7 +3210,7 @@ type WorkflowPermissionRequest struct {
 
 func (x *WorkflowPermissionRequest) Reset() {
 	*x = WorkflowPermissionRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[43]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3146,7 +3222,7 @@ func (x *WorkflowPermissionRequest) String() string {
 func (*WorkflowPermissionRequest) ProtoMessage() {}
 
 func (x *WorkflowPermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[43]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3159,7 +3235,7 @@ func (x *WorkflowPermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowPermissionRequest.ProtoReflect.Descriptor instead.
 func (*WorkflowPermissionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{43}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *WorkflowPermissionRequest) GetWorkspaceId() string {
@@ -3210,7 +3286,7 @@ type FeaturedWorkflowsRequest struct {
 
 func (x *FeaturedWorkflowsRequest) Reset() {
 	*x = FeaturedWorkflowsRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[44]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3222,7 +3298,7 @@ func (x *FeaturedWorkflowsRequest) String() string {
 func (*FeaturedWorkflowsRequest) ProtoMessage() {}
 
 func (x *FeaturedWorkflowsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[44]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3235,7 +3311,7 @@ func (x *FeaturedWorkflowsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeaturedWorkflowsRequest.ProtoReflect.Descriptor instead.
 func (*FeaturedWorkflowsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{44}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *FeaturedWorkflowsRequest) GetWorkspaceId() string {
@@ -3286,7 +3362,7 @@ type FeaturedWorkflow struct {
 
 func (x *FeaturedWorkflow) Reset() {
 	*x = FeaturedWorkflow{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[45]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3298,7 +3374,7 @@ func (x *FeaturedWorkflow) String() string {
 func (*FeaturedWorkflow) ProtoMessage() {}
 
 func (x *FeaturedWorkflow) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[45]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3311,7 +3387,7 @@ func (x *FeaturedWorkflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeaturedWorkflow.ProtoReflect.Descriptor instead.
 func (*FeaturedWorkflow) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{45}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *FeaturedWorkflow) GetWorkspaceId() string {
@@ -3358,7 +3434,7 @@ type FeaturedWorkflowsResponse struct {
 
 func (x *FeaturedWorkflowsResponse) Reset() {
 	*x = FeaturedWorkflowsResponse{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[46]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3370,7 +3446,7 @@ func (x *FeaturedWorkflowsResponse) String() string {
 func (*FeaturedWorkflowsResponse) ProtoMessage() {}
 
 func (x *FeaturedWorkflowsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[46]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3383,7 +3459,7 @@ func (x *FeaturedWorkflowsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeaturedWorkflowsResponse.ProtoReflect.Descriptor instead.
 func (*FeaturedWorkflowsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{46}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *FeaturedWorkflowsResponse) GetWorkflows() []*FeaturedWorkflow {
@@ -3408,7 +3484,7 @@ type FunctionWorkflowStepsRequest struct {
 
 func (x *FunctionWorkflowStepsRequest) Reset() {
 	*x = FunctionWorkflowStepsRequest{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[47]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3420,7 +3496,7 @@ func (x *FunctionWorkflowStepsRequest) String() string {
 func (*FunctionWorkflowStepsRequest) ProtoMessage() {}
 
 func (x *FunctionWorkflowStepsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[47]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3433,7 +3509,7 @@ func (x *FunctionWorkflowStepsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FunctionWorkflowStepsRequest.ProtoReflect.Descriptor instead.
 func (*FunctionWorkflowStepsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{47}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *FunctionWorkflowStepsRequest) GetWorkspaceId() string {
@@ -3498,7 +3574,7 @@ type WorkflowStepVersion struct {
 
 func (x *WorkflowStepVersion) Reset() {
 	*x = WorkflowStepVersion{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[48]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3510,7 +3586,7 @@ func (x *WorkflowStepVersion) String() string {
 func (*WorkflowStepVersion) ProtoMessage() {}
 
 func (x *WorkflowStepVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[48]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3523,7 +3599,7 @@ func (x *WorkflowStepVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowStepVersion.ProtoReflect.Descriptor instead.
 func (*WorkflowStepVersion) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{48}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *WorkflowStepVersion) GetTitle() string {
@@ -3570,7 +3646,7 @@ type WorkflowStepVersionsResponse struct {
 
 func (x *WorkflowStepVersionsResponse) Reset() {
 	*x = WorkflowStepVersionsResponse{}
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[49]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3582,7 +3658,7 @@ func (x *WorkflowStepVersionsResponse) String() string {
 func (*WorkflowStepVersionsResponse) ProtoMessage() {}
 
 func (x *WorkflowStepVersionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[49]
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3595,7 +3671,7 @@ func (x *WorkflowStepVersionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowStepVersionsResponse.ProtoReflect.Descriptor instead.
 func (*WorkflowStepVersionsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{49}
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *WorkflowStepVersionsResponse) GetStepsVersions() []*WorkflowStepVersion {
@@ -3747,7 +3823,13 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\n" +
 	"descending\x18\x05 \x01(\bR\n" +
 	"descending\x12\x14\n" +
-	"\x05query\x18\x06 \x01(\tR\x05query\"\x7f\n" +
+	"\x05query\x18\x06 \x01(\tR\x05query\"\xc0\x01\n" +
+	"\x1cWorkflowCollaboratorsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\fworkflow_ids\x18\x03 \x03(\tR\vworkflowIds\x12)\n" +
+	"\x10collaborator_ids\x18\x04 \x03(\tR\x0fcollaboratorIds\x12\x16\n" +
+	"\x06adding\x18\x05 \x01(\bR\x06adding\"\x7f\n" +
 	"\x1eAdminUnpublishWorkflowsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
@@ -3934,7 +4016,7 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"is_deleted\x18\x04 \x01(\bR\tisDeleted\x128\n" +
 	"\x18workflow_version_created\x18\x05 \x01(\tR\x16workflowVersionCreated\"o\n" +
 	"\x1cWorkflowStepVersionsResponse\x12O\n" +
-	"\x0esteps_versions\x18\x01 \x03(\v2(.sameoldchat.chat.v1.WorkflowStepVersionR\rstepsVersions2\xf2\"\n" +
+	"\x0esteps_versions\x18\x01 \x03(\v2(.sameoldchat.chat.v1.WorkflowStepVersionR\rstepsVersions2\xfb#\n" +
 	"\x10WorkflowsService\x12l\n" +
 	"\rStepCompleted\x12(.sameoldchat.chat.v1.WorkflowStepRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12i\n" +
 	"\n" +
@@ -3958,7 +4040,8 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\x0eUpdateWorkflow\x12,.sameoldchat.chat.v1.WorkflowMutationRequest\x1a'.sameoldchat.chat.v1.WorkflowDefinition\x12d\n" +
 	"\rListWorkflows\x12(.sameoldchat.chat.v1.WorkflowListRequest\x1a).sameoldchat.chat.v1.WorkflowListResponse\x12j\n" +
 	"\x0eAdminWorkflows\x12-.sameoldchat.chat.v1.AdminWorkflowListRequest\x1a).sameoldchat.chat.v1.WorkflowListResponse\x12\x84\x01\n" +
-	"\x17AdminUnpublishWorkflows\x123.sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest\x1a4.sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse\x12o\n" +
+	"\x17AdminUnpublishWorkflows\x123.sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest\x1a4.sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse\x12\x86\x01\n" +
+	"\x1bChangeWorkflowCollaborators\x121.sameoldchat.chat.v1.WorkflowCollaboratorsRequest\x1a4.sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse\x12o\n" +
 	"\x12SetWorkflowTrigger\x123.sameoldchat.chat.v1.WorkflowTriggerMutationRequest\x1a$.sameoldchat.chat.v1.WorkflowTrigger\x12y\n" +
 	"\x14ListWorkflowTriggers\x12/.sameoldchat.chat.v1.WorkflowTriggerListRequest\x1a0.sameoldchat.chat.v1.WorkflowTriggerListResponse\x12X\n" +
 	"\vRunWorkflow\x12'.sameoldchat.chat.v1.WorkflowRunRequest\x1a .sameoldchat.chat.v1.WorkflowRun\x12j\n" +
@@ -3990,7 +4073,7 @@ func file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_workflows_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_sameoldchat_chat_v1_workflows_proto_goTypes = []any{
 	(*WorkflowStepRequest)(nil),              // 0: sameoldchat.chat.v1.WorkflowStepRequest
 	(*WorkflowStepUpdateRequest)(nil),        // 1: sameoldchat.chat.v1.WorkflowStepUpdateRequest
@@ -4015,49 +4098,50 @@ var file_sameoldchat_chat_v1_workflows_proto_goTypes = []any{
 	(*WorkflowStepChangesResponse)(nil),      // 20: sameoldchat.chat.v1.WorkflowStepChangesResponse
 	(*WorkflowListRequest)(nil),              // 21: sameoldchat.chat.v1.WorkflowListRequest
 	(*AdminWorkflowListRequest)(nil),         // 22: sameoldchat.chat.v1.AdminWorkflowListRequest
-	(*AdminUnpublishWorkflowsRequest)(nil),   // 23: sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest
-	(*AdminUnpublishWorkflowsResponse)(nil),  // 24: sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
-	(*WorkflowListResponse)(nil),             // 25: sameoldchat.chat.v1.WorkflowListResponse
-	(*WorkflowTrigger)(nil),                  // 26: sameoldchat.chat.v1.WorkflowTrigger
-	(*WorkflowTriggerMutationRequest)(nil),   // 27: sameoldchat.chat.v1.WorkflowTriggerMutationRequest
-	(*WorkflowTriggerListRequest)(nil),       // 28: sameoldchat.chat.v1.WorkflowTriggerListRequest
-	(*WorkflowTriggerListResponse)(nil),      // 29: sameoldchat.chat.v1.WorkflowTriggerListResponse
-	(*WorkflowRun)(nil),                      // 30: sameoldchat.chat.v1.WorkflowRun
-	(*WorkflowRunRequest)(nil),               // 31: sameoldchat.chat.v1.WorkflowRunRequest
-	(*AutomaticWorkflowRunRequest)(nil),      // 32: sameoldchat.chat.v1.AutomaticWorkflowRunRequest
-	(*WebhookWorkflowRunRequest)(nil),        // 33: sameoldchat.chat.v1.WebhookWorkflowRunRequest
-	(*WebhookTriggerURLRequest)(nil),         // 34: sameoldchat.chat.v1.WebhookTriggerURLRequest
-	(*WebhookTriggerURLResponse)(nil),        // 35: sameoldchat.chat.v1.WebhookTriggerURLResponse
-	(*WorkflowEventDispatchRequest)(nil),     // 36: sameoldchat.chat.v1.WorkflowEventDispatchRequest
-	(*WorkflowEventDispatchResponse)(nil),    // 37: sameoldchat.chat.v1.WorkflowEventDispatchResponse
-	(*WorkflowRunGetRequest)(nil),            // 38: sameoldchat.chat.v1.WorkflowRunGetRequest
-	(*FunctionCompletionRequest)(nil),        // 39: sameoldchat.chat.v1.FunctionCompletionRequest
-	(*AutomationPermission)(nil),             // 40: sameoldchat.chat.v1.AutomationPermission
-	(*FunctionPermissionRequest)(nil),        // 41: sameoldchat.chat.v1.FunctionPermissionRequest
-	(*TriggerPermissionRequest)(nil),         // 42: sameoldchat.chat.v1.TriggerPermissionRequest
-	(*WorkflowPermissionRequest)(nil),        // 43: sameoldchat.chat.v1.WorkflowPermissionRequest
-	(*FeaturedWorkflowsRequest)(nil),         // 44: sameoldchat.chat.v1.FeaturedWorkflowsRequest
-	(*FeaturedWorkflow)(nil),                 // 45: sameoldchat.chat.v1.FeaturedWorkflow
-	(*FeaturedWorkflowsResponse)(nil),        // 46: sameoldchat.chat.v1.FeaturedWorkflowsResponse
-	(*FunctionWorkflowStepsRequest)(nil),     // 47: sameoldchat.chat.v1.FunctionWorkflowStepsRequest
-	(*WorkflowStepVersion)(nil),              // 48: sameoldchat.chat.v1.WorkflowStepVersion
-	(*WorkflowStepVersionsResponse)(nil),     // 49: sameoldchat.chat.v1.WorkflowStepVersionsResponse
+	(*WorkflowCollaboratorsRequest)(nil),     // 23: sameoldchat.chat.v1.WorkflowCollaboratorsRequest
+	(*AdminUnpublishWorkflowsRequest)(nil),   // 24: sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest
+	(*AdminUnpublishWorkflowsResponse)(nil),  // 25: sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
+	(*WorkflowListResponse)(nil),             // 26: sameoldchat.chat.v1.WorkflowListResponse
+	(*WorkflowTrigger)(nil),                  // 27: sameoldchat.chat.v1.WorkflowTrigger
+	(*WorkflowTriggerMutationRequest)(nil),   // 28: sameoldchat.chat.v1.WorkflowTriggerMutationRequest
+	(*WorkflowTriggerListRequest)(nil),       // 29: sameoldchat.chat.v1.WorkflowTriggerListRequest
+	(*WorkflowTriggerListResponse)(nil),      // 30: sameoldchat.chat.v1.WorkflowTriggerListResponse
+	(*WorkflowRun)(nil),                      // 31: sameoldchat.chat.v1.WorkflowRun
+	(*WorkflowRunRequest)(nil),               // 32: sameoldchat.chat.v1.WorkflowRunRequest
+	(*AutomaticWorkflowRunRequest)(nil),      // 33: sameoldchat.chat.v1.AutomaticWorkflowRunRequest
+	(*WebhookWorkflowRunRequest)(nil),        // 34: sameoldchat.chat.v1.WebhookWorkflowRunRequest
+	(*WebhookTriggerURLRequest)(nil),         // 35: sameoldchat.chat.v1.WebhookTriggerURLRequest
+	(*WebhookTriggerURLResponse)(nil),        // 36: sameoldchat.chat.v1.WebhookTriggerURLResponse
+	(*WorkflowEventDispatchRequest)(nil),     // 37: sameoldchat.chat.v1.WorkflowEventDispatchRequest
+	(*WorkflowEventDispatchResponse)(nil),    // 38: sameoldchat.chat.v1.WorkflowEventDispatchResponse
+	(*WorkflowRunGetRequest)(nil),            // 39: sameoldchat.chat.v1.WorkflowRunGetRequest
+	(*FunctionCompletionRequest)(nil),        // 40: sameoldchat.chat.v1.FunctionCompletionRequest
+	(*AutomationPermission)(nil),             // 41: sameoldchat.chat.v1.AutomationPermission
+	(*FunctionPermissionRequest)(nil),        // 42: sameoldchat.chat.v1.FunctionPermissionRequest
+	(*TriggerPermissionRequest)(nil),         // 43: sameoldchat.chat.v1.TriggerPermissionRequest
+	(*WorkflowPermissionRequest)(nil),        // 44: sameoldchat.chat.v1.WorkflowPermissionRequest
+	(*FeaturedWorkflowsRequest)(nil),         // 45: sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	(*FeaturedWorkflow)(nil),                 // 46: sameoldchat.chat.v1.FeaturedWorkflow
+	(*FeaturedWorkflowsResponse)(nil),        // 47: sameoldchat.chat.v1.FeaturedWorkflowsResponse
+	(*FunctionWorkflowStepsRequest)(nil),     // 48: sameoldchat.chat.v1.FunctionWorkflowStepsRequest
+	(*WorkflowStepVersion)(nil),              // 49: sameoldchat.chat.v1.WorkflowStepVersion
+	(*WorkflowStepVersionsResponse)(nil),     // 50: sameoldchat.chat.v1.WorkflowStepVersionsResponse
 }
 var file_sameoldchat_chat_v1_workflows_proto_depIdxs = []int32{
 	3,  // 0: sameoldchat.chat.v1.WorkflowMutationRequest.workflow:type_name -> sameoldchat.chat.v1.WorkflowDefinition
-	30, // 1: sameoldchat.chat.v1.WorkflowActivitySummary.recent_runs:type_name -> sameoldchat.chat.v1.WorkflowRun
+	31, // 1: sameoldchat.chat.v1.WorkflowActivitySummary.recent_runs:type_name -> sameoldchat.chat.v1.WorkflowRun
 	13, // 2: sameoldchat.chat.v1.WorkflowInteraction.fields:type_name -> sameoldchat.chat.v1.WorkflowInteractionField
-	30, // 3: sameoldchat.chat.v1.WorkflowRunListResponse.runs:type_name -> sameoldchat.chat.v1.WorkflowRun
+	31, // 3: sameoldchat.chat.v1.WorkflowRunListResponse.runs:type_name -> sameoldchat.chat.v1.WorkflowRun
 	16, // 4: sameoldchat.chat.v1.WorkflowFormResponseListResponse.responses:type_name -> sameoldchat.chat.v1.WorkflowFormResponse
 	18, // 5: sameoldchat.chat.v1.WorkflowStepChangesResponse.changes:type_name -> sameoldchat.chat.v1.WorkflowStepChange
 	3,  // 6: sameoldchat.chat.v1.WorkflowListResponse.workflows:type_name -> sameoldchat.chat.v1.WorkflowDefinition
-	26, // 7: sameoldchat.chat.v1.WorkflowTriggerMutationRequest.trigger:type_name -> sameoldchat.chat.v1.WorkflowTrigger
-	26, // 8: sameoldchat.chat.v1.WorkflowTriggerListResponse.triggers:type_name -> sameoldchat.chat.v1.WorkflowTrigger
-	40, // 9: sameoldchat.chat.v1.FunctionPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
-	40, // 10: sameoldchat.chat.v1.TriggerPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
-	40, // 11: sameoldchat.chat.v1.WorkflowPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
-	45, // 12: sameoldchat.chat.v1.FeaturedWorkflowsResponse.workflows:type_name -> sameoldchat.chat.v1.FeaturedWorkflow
-	48, // 13: sameoldchat.chat.v1.WorkflowStepVersionsResponse.steps_versions:type_name -> sameoldchat.chat.v1.WorkflowStepVersion
+	27, // 7: sameoldchat.chat.v1.WorkflowTriggerMutationRequest.trigger:type_name -> sameoldchat.chat.v1.WorkflowTrigger
+	27, // 8: sameoldchat.chat.v1.WorkflowTriggerListResponse.triggers:type_name -> sameoldchat.chat.v1.WorkflowTrigger
+	41, // 9: sameoldchat.chat.v1.FunctionPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
+	41, // 10: sameoldchat.chat.v1.TriggerPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
+	41, // 11: sameoldchat.chat.v1.WorkflowPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
+	46, // 12: sameoldchat.chat.v1.FeaturedWorkflowsResponse.workflows:type_name -> sameoldchat.chat.v1.FeaturedWorkflow
+	49, // 13: sameoldchat.chat.v1.WorkflowStepVersionsResponse.steps_versions:type_name -> sameoldchat.chat.v1.WorkflowStepVersion
 	0,  // 14: sameoldchat.chat.v1.WorkflowsService.StepCompleted:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
 	0,  // 15: sameoldchat.chat.v1.WorkflowsService.StepFailed:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
 	1,  // 16: sameoldchat.chat.v1.WorkflowsService.UpdateStep:input_type -> sameoldchat.chat.v1.WorkflowStepUpdateRequest
@@ -4070,7 +4154,7 @@ var file_sameoldchat_chat_v1_workflows_proto_depIdxs = []int32{
 	5,  // 23: sameoldchat.chat.v1.WorkflowsService.WorkflowActivity:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
 	11, // 24: sameoldchat.chat.v1.WorkflowsService.SubmitWorkflowForm:input_type -> sameoldchat.chat.v1.WorkflowFormSubmitRequest
 	12, // 25: sameoldchat.chat.v1.WorkflowsService.CompleteWorkflowButton:input_type -> sameoldchat.chat.v1.WorkflowButtonRequest
-	38, // 26: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
+	39, // 26: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
 	5,  // 27: sameoldchat.chat.v1.WorkflowsService.WorkflowRunExport:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
 	5,  // 28: sameoldchat.chat.v1.WorkflowsService.WorkflowFormResponseExport:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
 	8,  // 29: sameoldchat.chat.v1.WorkflowsService.SetWorkflowManagers:input_type -> sameoldchat.chat.v1.WorkflowManagersRequest
@@ -4078,66 +4162,68 @@ var file_sameoldchat_chat_v1_workflows_proto_depIdxs = []int32{
 	4,  // 31: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowMutationRequest
 	21, // 32: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:input_type -> sameoldchat.chat.v1.WorkflowListRequest
 	22, // 33: sameoldchat.chat.v1.WorkflowsService.AdminWorkflows:input_type -> sameoldchat.chat.v1.AdminWorkflowListRequest
-	23, // 34: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:input_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest
-	27, // 35: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:input_type -> sameoldchat.chat.v1.WorkflowTriggerMutationRequest
-	28, // 36: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:input_type -> sameoldchat.chat.v1.WorkflowTriggerListRequest
-	31, // 37: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:input_type -> sameoldchat.chat.v1.WorkflowRunRequest
-	32, // 38: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:input_type -> sameoldchat.chat.v1.AutomaticWorkflowRunRequest
-	33, // 39: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:input_type -> sameoldchat.chat.v1.WebhookWorkflowRunRequest
-	34, // 40: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:input_type -> sameoldchat.chat.v1.WebhookTriggerURLRequest
-	36, // 41: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:input_type -> sameoldchat.chat.v1.WorkflowEventDispatchRequest
-	38, // 42: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
-	39, // 43: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:input_type -> sameoldchat.chat.v1.FunctionCompletionRequest
-	41, // 44: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
-	41, // 45: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
-	42, // 46: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
-	42, // 47: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
-	43, // 48: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
-	43, // 49: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
-	44, // 50: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
-	44, // 51: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
-	47, // 52: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:input_type -> sameoldchat.chat.v1.FunctionWorkflowStepsRequest
-	2,  // 53: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2,  // 54: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2,  // 55: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	3,  // 56: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	3,  // 57: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	2,  // 58: sameoldchat.chat.v1.WorkflowsService.DiscardWorkflowStagedChanges:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	20, // 59: sameoldchat.chat.v1.WorkflowsService.WorkflowStepChanges:output_type -> sameoldchat.chat.v1.WorkflowStepChangesResponse
-	3,  // 60: sameoldchat.chat.v1.WorkflowsService.DuplicateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	2,  // 61: sameoldchat.chat.v1.WorkflowsService.DeleteWorkflow:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	10, // 62: sameoldchat.chat.v1.WorkflowsService.WorkflowActivity:output_type -> sameoldchat.chat.v1.WorkflowActivitySummary
-	2,  // 63: sameoldchat.chat.v1.WorkflowsService.SubmitWorkflowForm:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2,  // 64: sameoldchat.chat.v1.WorkflowsService.CompleteWorkflowButton:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	14, // 65: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:output_type -> sameoldchat.chat.v1.WorkflowInteraction
-	15, // 66: sameoldchat.chat.v1.WorkflowsService.WorkflowRunExport:output_type -> sameoldchat.chat.v1.WorkflowRunListResponse
-	17, // 67: sameoldchat.chat.v1.WorkflowsService.WorkflowFormResponseExport:output_type -> sameoldchat.chat.v1.WorkflowFormResponseListResponse
-	3,  // 68: sameoldchat.chat.v1.WorkflowsService.SetWorkflowManagers:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	9,  // 69: sameoldchat.chat.v1.WorkflowsService.CanManageWorkflow:output_type -> sameoldchat.chat.v1.WorkflowManagePermissionResponse
-	3,  // 70: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	25, // 71: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
-	25, // 72: sameoldchat.chat.v1.WorkflowsService.AdminWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
-	24, // 73: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:output_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
-	26, // 74: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:output_type -> sameoldchat.chat.v1.WorkflowTrigger
-	29, // 75: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:output_type -> sameoldchat.chat.v1.WorkflowTriggerListResponse
-	30, // 76: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
-	30, // 77: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
-	30, // 78: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:output_type -> sameoldchat.chat.v1.WorkflowRun
-	35, // 79: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:output_type -> sameoldchat.chat.v1.WebhookTriggerURLResponse
-	37, // 80: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:output_type -> sameoldchat.chat.v1.WorkflowEventDispatchResponse
-	30, // 81: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:output_type -> sameoldchat.chat.v1.WorkflowRun
-	2,  // 82: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	40, // 83: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	40, // 84: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	40, // 85: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	40, // 86: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	40, // 87: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	40, // 88: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	2,  // 89: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	46, // 90: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:output_type -> sameoldchat.chat.v1.FeaturedWorkflowsResponse
-	49, // 91: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:output_type -> sameoldchat.chat.v1.WorkflowStepVersionsResponse
-	53, // [53:92] is the sub-list for method output_type
-	14, // [14:53] is the sub-list for method input_type
+	24, // 34: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:input_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest
+	23, // 35: sameoldchat.chat.v1.WorkflowsService.ChangeWorkflowCollaborators:input_type -> sameoldchat.chat.v1.WorkflowCollaboratorsRequest
+	28, // 36: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:input_type -> sameoldchat.chat.v1.WorkflowTriggerMutationRequest
+	29, // 37: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:input_type -> sameoldchat.chat.v1.WorkflowTriggerListRequest
+	32, // 38: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:input_type -> sameoldchat.chat.v1.WorkflowRunRequest
+	33, // 39: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:input_type -> sameoldchat.chat.v1.AutomaticWorkflowRunRequest
+	34, // 40: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:input_type -> sameoldchat.chat.v1.WebhookWorkflowRunRequest
+	35, // 41: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:input_type -> sameoldchat.chat.v1.WebhookTriggerURLRequest
+	37, // 42: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:input_type -> sameoldchat.chat.v1.WorkflowEventDispatchRequest
+	39, // 43: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
+	40, // 44: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:input_type -> sameoldchat.chat.v1.FunctionCompletionRequest
+	42, // 45: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
+	42, // 46: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
+	43, // 47: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
+	43, // 48: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
+	44, // 49: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
+	44, // 50: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
+	45, // 51: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	45, // 52: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	48, // 53: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:input_type -> sameoldchat.chat.v1.FunctionWorkflowStepsRequest
+	2,  // 54: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 55: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 56: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	3,  // 57: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	3,  // 58: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	2,  // 59: sameoldchat.chat.v1.WorkflowsService.DiscardWorkflowStagedChanges:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	20, // 60: sameoldchat.chat.v1.WorkflowsService.WorkflowStepChanges:output_type -> sameoldchat.chat.v1.WorkflowStepChangesResponse
+	3,  // 61: sameoldchat.chat.v1.WorkflowsService.DuplicateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	2,  // 62: sameoldchat.chat.v1.WorkflowsService.DeleteWorkflow:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	10, // 63: sameoldchat.chat.v1.WorkflowsService.WorkflowActivity:output_type -> sameoldchat.chat.v1.WorkflowActivitySummary
+	2,  // 64: sameoldchat.chat.v1.WorkflowsService.SubmitWorkflowForm:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 65: sameoldchat.chat.v1.WorkflowsService.CompleteWorkflowButton:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	14, // 66: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:output_type -> sameoldchat.chat.v1.WorkflowInteraction
+	15, // 67: sameoldchat.chat.v1.WorkflowsService.WorkflowRunExport:output_type -> sameoldchat.chat.v1.WorkflowRunListResponse
+	17, // 68: sameoldchat.chat.v1.WorkflowsService.WorkflowFormResponseExport:output_type -> sameoldchat.chat.v1.WorkflowFormResponseListResponse
+	3,  // 69: sameoldchat.chat.v1.WorkflowsService.SetWorkflowManagers:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	9,  // 70: sameoldchat.chat.v1.WorkflowsService.CanManageWorkflow:output_type -> sameoldchat.chat.v1.WorkflowManagePermissionResponse
+	3,  // 71: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	26, // 72: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
+	26, // 73: sameoldchat.chat.v1.WorkflowsService.AdminWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
+	25, // 74: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:output_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
+	25, // 75: sameoldchat.chat.v1.WorkflowsService.ChangeWorkflowCollaborators:output_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
+	27, // 76: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:output_type -> sameoldchat.chat.v1.WorkflowTrigger
+	30, // 77: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:output_type -> sameoldchat.chat.v1.WorkflowTriggerListResponse
+	31, // 78: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
+	31, // 79: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
+	31, // 80: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:output_type -> sameoldchat.chat.v1.WorkflowRun
+	36, // 81: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:output_type -> sameoldchat.chat.v1.WebhookTriggerURLResponse
+	38, // 82: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:output_type -> sameoldchat.chat.v1.WorkflowEventDispatchResponse
+	31, // 83: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:output_type -> sameoldchat.chat.v1.WorkflowRun
+	2,  // 84: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	41, // 85: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 86: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 87: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 88: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 89: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 90: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	2,  // 91: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	47, // 92: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:output_type -> sameoldchat.chat.v1.FeaturedWorkflowsResponse
+	50, // 93: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:output_type -> sameoldchat.chat.v1.WorkflowStepVersionsResponse
+	54, // [54:94] is the sub-list for method output_type
+	14, // [14:54] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
 	14, // [14:14] is the sub-list for extension extendee
 	0,  // [0:14] is the sub-list for field type_name
@@ -4154,7 +4240,7 @@ func file_sameoldchat_chat_v1_workflows_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_workflows_proto_rawDesc), len(file_sameoldchat_chat_v1_workflows_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   50,
+			NumMessages:   51,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

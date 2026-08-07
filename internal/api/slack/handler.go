@@ -186,6 +186,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
+	mux.HandleFunc("POST /api/admin.workflows.collaborators.add", h.adminWorkflowsCollaboratorsAdd)
+	mux.HandleFunc("POST /api/admin.workflows.collaborators.remove", h.adminWorkflowsCollaboratorsRemove)
 	mux.HandleFunc("GET /api/admin.users.session.list", h.adminUsersSessionList)
 	mux.HandleFunc("POST /api/admin.users.session.list", h.adminUsersSessionList)
 	mux.HandleFunc("POST /api/admin.users.session.resetBulk", h.adminUsersSessionResetBulk)
@@ -3033,6 +3035,47 @@ func managerIDStrings(values []domain.UserID) []string {
 		ids = append(ids, string(value))
 	}
 	return ids
+}
+
+// admin.workflows.collaborators.add and .remove change who manages workflows,
+// one name at a time. The whole-list form exists as well and is what the
+// builder submits; these are for the case that form cannot express safely —
+// two administrators each adding somebody, where a replacement computed before
+// the other's change would silently drop it.
+func (h Handler) adminWorkflowsCollaboratorsAdd(w http.ResponseWriter, r *http.Request) {
+	h.adminWorkflowsCollaborators(w, r, true)
+}
+
+func (h Handler) adminWorkflowsCollaboratorsRemove(w http.ResponseWriter, r *http.Request) {
+	h.adminWorkflowsCollaborators(w, r, false)
+}
+
+func (h Handler) adminWorkflowsCollaborators(w http.ResponseWriter, r *http.Request, adding bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.WorkflowID](fields["workflow_ids"])
+	collaborators := parseIDList[domain.UserID](fields["collaborator_ids"])
+	if len(ids) == 0 || len(collaborators) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	change := h.Messages.RemoveWorkflowCollaborators
+	if adding {
+		change = h.Messages.AddWorkflowCollaborators
+	}
+	if err := change(r.Context(), principal.WorkspaceID, principal.UserID, ids, collaborators); err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // admin.workflows.unpublish takes workflows out of service. It is not the

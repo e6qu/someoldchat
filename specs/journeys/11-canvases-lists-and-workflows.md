@@ -154,6 +154,16 @@ for later steps and conditions to read.
 
 ## Evidence
 
+- An administrator can hand a workflow over, one name at a time. The builder
+  submits the whole manager list, which is right for a form that shows it and
+  sends it back, and wrong for "add this person": two administrators each adding
+  somebody would each submit a list computed before the other's change, and the
+  second write would silently drop the first. Adding and removing are applied
+  against the list as it stands at the moment of the write, keeping the order it
+  already had. Adding somebody who already manages it, or removing somebody who
+  never did, is the state that was asked for rather than an error; somebody who
+  is not a member of the workspace is refused, because a manager list naming a
+  person the workspace cannot resolve is a list nobody can act on.
 - A workspace administrator can find every workflow and take one out of
   service. The member-facing directory answers what one member may see, which
   is the wrong question when the workflow to stop belongs to somebody else, is

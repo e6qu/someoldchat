@@ -15,6 +15,60 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+// Handing a workflow over has to be expressible as a change to the list as it
+// stands. The whole-list form cannot do it safely: two administrators each
+// adding somebody would each submit a list computed before the other's change,
+// and the second write would silently drop the first.
+func TestWorkflowCollaboratorsChangeTheListRatherThanReplacingIt(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	if err := repository.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "member3"}); err != nil {
+		t.Fatal(err)
+	}
+	// The actor is the workspace administrator these methods are for.
+	if err := repository.SetWorkspaceRole(ctx, "T1", "U1", domain.WorkspaceRoleAdmin, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := messages.AddWorkflowCollaborators(ctx, "T1", "U1", []domain.WorkflowID{workflow.ID}, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	// The concurrent case the whole-list form loses: this add is computed
+	// against the list as it is now, not against the one the caller last saw.
+	if err := messages.AddWorkflowCollaborators(ctx, "T1", "U1", []domain.WorkflowID{workflow.ID}, []domain.UserID{"U3"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetWorkflow(ctx, "T1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(stored.ManagerIDs, []domain.UserID{"U2", "U3"}) {
+		t.Fatalf("managers = %v, want both additions in the order they were made", stored.ManagerIDs)
+	}
+
+	// Adding somebody who already manages it is the state that was asked for.
+	if err := messages.AddWorkflowCollaborators(ctx, "T1", "U1", []domain.WorkflowID{workflow.ID}, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = repository.GetWorkflow(ctx, "T1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(stored.ManagerIDs, []domain.UserID{"U2", "U3"}) {
+		t.Fatalf("managers = %v, want no duplicate", stored.ManagerIDs)
+	}
+
+	if err := messages.RemoveWorkflowCollaborators(ctx, "T1", "U1", []domain.WorkflowID{workflow.ID}, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = repository.GetWorkflow(ctx, "T1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(stored.ManagerIDs, []domain.UserID{"U3"}) {
+		t.Fatalf("managers after removal = %v, want only U3", stored.ManagerIDs)
+	}
+}
+
 func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	ctx := context.Background()
 	repository := memory.New()
