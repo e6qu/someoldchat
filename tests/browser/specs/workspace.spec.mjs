@@ -2302,6 +2302,12 @@ test('[WORKFLOW-02] a wait step can be authored and published from the builder',
   await page.getByLabel('Step 2 type').selectOption('wait_until');
   await page.getByLabel('Step 2 wait until').fill('2030-01-15T09:30');
   await page.getByRole('button', { name: 'Publish' }).click();
+  // Wait for the publish to land before reloading. Reloading straight after
+  // the click aborted the in-flight POST on WebKit, so nothing was saved and
+  // the reload showed the untouched draft — the step type read "function", the
+  // value it was created with. [WORKFLOW-05] already waits for this notice
+  // after its own publish.
+  await expect(page.getByText('Workflow published')).toBeVisible();
 
   await page.reload();
   await expect(page.getByLabel('Step 1 type')).toHaveValue('delay');
