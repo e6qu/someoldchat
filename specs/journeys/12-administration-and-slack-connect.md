@@ -95,6 +95,20 @@ events include current shared-channel identity fields. Removing an organization
 follows Slack's history/copy/disconnect behavior and does not corrupt the
 remaining channel.
 
+An administrator can also see the whole picture rather than one channel of it:
+the workspace settings page lists every organization this workspace shares
+channels with, and how many channels each is in, because that count is what a
+disconnection ends. Disconnecting one ends it in every shared channel in a
+single transaction — doing it channel by channel would leave the connection
+alive wherever an administrator missed one, and an administrator told an
+organization is disconnected while one channel still carries it has been told
+something false about who can read their messages. A connection is derived from
+the channels that carry it rather than recorded a second time, so the product
+has one answer to "are we connected" rather than two that can disagree. There
+is no "connected since": nothing records when a connection began, and a date
+derived from the oldest shared channel would look precise and mean something
+else.
+
 ## What this deployment implements, and what it does not
 
 **Slack Connect** is implemented as an invitation lifecycle inside one

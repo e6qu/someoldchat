@@ -127,6 +127,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an assigned list item reaches Activity on every profile", listAssignmentReachesActivity},
 		{"deleting a list item is all or nothing and survives in Activity", deletingAListItemIsAllOrNothingAndSurvivesInActivity},
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},
+		{"external connections are derived and end everywhere", externalConnectionsAreDerivedAndEndEverywhere},
 		{"search modifiers mean the same on every profile", searchModifiersMeanTheSame},
 		{"canvas revisions record what was replaced", canvasRevisionsRecordWhatWasReplaced},
 		{"canvas comments outlive the section they annotate", canvasCommentsOutliveTheirSection},

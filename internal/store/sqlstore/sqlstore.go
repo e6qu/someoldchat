@@ -8138,6 +8138,82 @@ func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.Works
 	return tx.Commit()
 }
 
+// ListExternalTeams derives this workspace's connections from the channels that
+// carry them. The workspace itself is excluded: a workspace is not connected to
+// itself, and every one of its channels names it.
+func (s *Store) ListExternalTeams(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT t.team_id, COALESCE(w.name, ''), COUNT(*)
+		FROM conversation_teams t
+		JOIN conversations c ON c.id = t.conversation_id
+		LEFT JOIN workspaces w ON w.id = t.team_id
+		WHERE c.workspace_id = ? AND t.team_id <> ? AND t.team_id > ?
+		GROUP BY t.team_id, w.name
+		ORDER BY t.team_id LIMIT ?`, workspace, workspace, after, request.Limit+1)
+	if err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	defer rows.Close()
+	teams := make([]domain.ExternalTeam, 0, request.Limit+1)
+	for rows.Next() {
+		var team domain.ExternalTeam
+		if err := rows.Scan(&team.ID, &team.Name, &team.Channels); err != nil {
+			return domain.ExternalTeamPage{}, err
+		}
+		teams = append(teams, team)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	hasMore := len(teams) > request.Limit
+	if hasMore {
+		teams = teams[:request.Limit]
+	}
+	page := domain.ExternalTeamPage{Teams: teams, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(teams[len(teams)-1].ID))
+	}
+	return page, err
+}
+
+// DisconnectExternalTeam removes one organization from every conversation of
+// this workspace at once. Doing it channel by channel would leave a window in
+// which the organization is disconnected from some channels and not others,
+// which is not a state an administrator asked for.
+func (s *Store) DisconnectExternalTeam(ctx context.Context, workspace domain.WorkspaceID, team domain.WorkspaceID, event events.Event) error {
+	if team == "" || team == workspace {
+		return store.InvalidArgument("an external organization is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM conversation_teams WHERE team_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE workspace_id = ?)`, team, workspace)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		// Nothing was shared with this organization. Reporting success would
+		// tell an administrator they had ended a connection that never existed.
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ListConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) ([]domain.WorkspaceID, bool, error) {
 	var owner domain.WorkspaceID
 	if err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, conversation).Scan(&owner); err != nil {

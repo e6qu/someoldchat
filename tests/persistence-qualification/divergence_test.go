@@ -3023,6 +3023,85 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 	}
 }
 
+// externalConnectionsAreDerivedAndEndEverywhere covers the whole-organization
+// half of Slack Connect. A connection is not stored: it is the fact that some
+// channel of this workspace carries another organization, so both profiles have
+// to derive the same set from the same channels — and ending one has to end it
+// in every channel at once, because an administrator told an organization is
+// disconnected while one channel still carries it has been told something false
+// about who can read their messages.
+func externalConnectionsAreDerivedAndEndEverywhere(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	partner := domain.WorkspaceID("T-partner-" + f.suffix)
+	other := domain.WorkspaceID("T-other-" + f.suffix)
+	for _, id := range []domain.WorkspaceID{partner, other} {
+		if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: id, Name: "org " + string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := domain.ConversationID("C-second-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: second, WorkspaceID: f.workspaceID, Name: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	// The partner is in both channels; the other organization is in one, so a
+	// count that merely said "connected" would lose what a disconnection ends.
+	for _, channel := range []domain.ConversationID{f.channelID, second} {
+		if err := f.repository.SetConversationTeams(ctx, f.workspaceID, channel, []domain.WorkspaceID{f.workspaceID, partner}, false, f.event("connect-"+string(channel), "conversation.connected", string(channel))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.repository.SetConversationTeams(ctx, f.workspaceID, second, []domain.WorkspaceID{f.workspaceID, partner, other}, false, f.event("connect-other", "conversation.connected", string(second))); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := f.repository.ListExternalTeams(ctx, f.workspaceID, domain.PageRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := make(map[domain.WorkspaceID]int, len(page.Teams))
+	for _, team := range page.Teams {
+		counts[team.ID] = team.Channels
+		if team.ID == f.workspaceID {
+			t.Fatalf("the workspace is listed as connected to itself: %+v", page.Teams)
+		}
+	}
+	if counts[partner] != 2 || counts[other] != 1 || len(page.Teams) != 2 {
+		t.Fatalf("connections = %+v, want the partner in two channels and the other in one", page.Teams)
+	}
+
+	// An organization nothing is shared with is not a connection to end.
+	if err := f.repository.DisconnectExternalTeam(ctx, f.workspaceID, domain.WorkspaceID("T-never-"+f.suffix), f.event("disconnect-absent", "team.external_disconnected", "absent")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("disconnecting an unconnected organization: %v, want ErrNotFound", err)
+	}
+
+	if err := f.repository.DisconnectExternalTeam(ctx, f.workspaceID, partner, f.event("disconnect", "team.external_disconnected", string(partner))); err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []domain.ConversationID{f.channelID, second} {
+		teams, _, err := f.repository.ListConversationTeams(ctx, f.workspaceID, channel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, team := range teams {
+			if team == partner {
+				t.Fatalf("%s still carries the disconnected organization: %v", channel, teams)
+			}
+		}
+	}
+	// The other organization keeps its channel: a disconnection names one
+	// organization, not every guest.
+	remaining, err := f.repository.ListExternalTeams(ctx, f.workspaceID, domain.PageRequest{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining.Teams) != 1 || remaining.Teams[0].ID != other || remaining.Teams[0].Channels != 1 {
+		t.Fatalf("connections after disconnecting = %+v, want only the other organization", remaining.Teams)
+	}
+}
+
 // removingAListColumnTakesItsCellsWithIt pins the one write in this product
 // that changes a schema and the rows under it at the same time. A schema that
 // no longer declares a column while items still carry values under it is a list

@@ -29,6 +29,8 @@ const (
 	ConversationsService_AcceptSharedInvite_FullMethodName           = "/sameoldchat.chat.v1.ConversationsService/AcceptSharedInvite"
 	ConversationsService_ListSharedInvites_FullMethodName            = "/sameoldchat.chat.v1.ConversationsService/ListSharedInvites"
 	ConversationsService_SetExternalInvitePermissions_FullMethodName = "/sameoldchat.chat.v1.ConversationsService/SetExternalInvitePermissions"
+	ConversationsService_ExternalTeams_FullMethodName                = "/sameoldchat.chat.v1.ConversationsService/ExternalTeams"
+	ConversationsService_DisconnectExternalTeam_FullMethodName       = "/sameoldchat.chat.v1.ConversationsService/DisconnectExternalTeam"
 	ConversationsService_GetWorkspaceRetention_FullMethodName        = "/sameoldchat.chat.v1.ConversationsService/GetWorkspaceRetention"
 	ConversationsService_SetWorkspaceRetention_FullMethodName        = "/sameoldchat.chat.v1.ConversationsService/SetWorkspaceRetention"
 	ConversationsService_GetLastRetentionSweep_FullMethodName        = "/sameoldchat.chat.v1.ConversationsService/GetLastRetentionSweep"
@@ -51,6 +53,8 @@ type ConversationsServiceClient interface {
 	AcceptSharedInvite(ctx context.Context, in *SharedInviteMutationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	ListSharedInvites(ctx context.Context, in *SharedInvitesRequest, opts ...grpc.CallOption) (*SharedInvitePage, error)
 	SetExternalInvitePermissions(ctx context.Context, in *ExternalInvitePermissionsRequest, opts ...grpc.CallOption) (*Conversation, error)
+	ExternalTeams(ctx context.Context, in *ExternalTeamsRequest, opts ...grpc.CallOption) (*ExternalTeamPage, error)
+	DisconnectExternalTeam(ctx context.Context, in *DisconnectExternalTeamRequest, opts ...grpc.CallOption) (*DisconnectExternalTeamResponse, error)
 	// Named GetWorkspaceRetention because an rpc named RetentionPolicy would
 	// shadow the RetentionPolicy message type for every later return here.
 	GetWorkspaceRetention(ctx context.Context, in *RetentionPolicyRequest, opts ...grpc.CallOption) (*RetentionPolicy, error)
@@ -169,6 +173,26 @@ func (c *conversationsServiceClient) SetExternalInvitePermissions(ctx context.Co
 	return out, nil
 }
 
+func (c *conversationsServiceClient) ExternalTeams(ctx context.Context, in *ExternalTeamsRequest, opts ...grpc.CallOption) (*ExternalTeamPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExternalTeamPage)
+	err := c.cc.Invoke(ctx, ConversationsService_ExternalTeams_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationsServiceClient) DisconnectExternalTeam(ctx context.Context, in *DisconnectExternalTeamRequest, opts ...grpc.CallOption) (*DisconnectExternalTeamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DisconnectExternalTeamResponse)
+	err := c.cc.Invoke(ctx, ConversationsService_DisconnectExternalTeam_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *conversationsServiceClient) GetWorkspaceRetention(ctx context.Context, in *RetentionPolicyRequest, opts ...grpc.CallOption) (*RetentionPolicy, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RetentionPolicy)
@@ -243,6 +267,8 @@ type ConversationsServiceServer interface {
 	AcceptSharedInvite(context.Context, *SharedInviteMutationRequest) (*Conversation, error)
 	ListSharedInvites(context.Context, *SharedInvitesRequest) (*SharedInvitePage, error)
 	SetExternalInvitePermissions(context.Context, *ExternalInvitePermissionsRequest) (*Conversation, error)
+	ExternalTeams(context.Context, *ExternalTeamsRequest) (*ExternalTeamPage, error)
+	DisconnectExternalTeam(context.Context, *DisconnectExternalTeamRequest) (*DisconnectExternalTeamResponse, error)
 	// Named GetWorkspaceRetention because an rpc named RetentionPolicy would
 	// shadow the RetentionPolicy message type for every later return here.
 	GetWorkspaceRetention(context.Context, *RetentionPolicyRequest) (*RetentionPolicy, error)
@@ -289,6 +315,12 @@ func (UnimplementedConversationsServiceServer) ListSharedInvites(context.Context
 }
 func (UnimplementedConversationsServiceServer) SetExternalInvitePermissions(context.Context, *ExternalInvitePermissionsRequest) (*Conversation, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetExternalInvitePermissions not implemented")
+}
+func (UnimplementedConversationsServiceServer) ExternalTeams(context.Context, *ExternalTeamsRequest) (*ExternalTeamPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExternalTeams not implemented")
+}
+func (UnimplementedConversationsServiceServer) DisconnectExternalTeam(context.Context, *DisconnectExternalTeamRequest) (*DisconnectExternalTeamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DisconnectExternalTeam not implemented")
 }
 func (UnimplementedConversationsServiceServer) GetWorkspaceRetention(context.Context, *RetentionPolicyRequest) (*RetentionPolicy, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkspaceRetention not implemented")
@@ -508,6 +540,42 @@ func _ConversationsService_SetExternalInvitePermissions_Handler(srv interface{},
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConversationsService_ExternalTeams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExternalTeamsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).ExternalTeams(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_ExternalTeams_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).ExternalTeams(ctx, req.(*ExternalTeamsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationsService_DisconnectExternalTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DisconnectExternalTeamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationsServiceServer).DisconnectExternalTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationsService_DisconnectExternalTeam_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationsServiceServer).DisconnectExternalTeam(ctx, req.(*DisconnectExternalTeamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConversationsService_GetWorkspaceRetention_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RetentionPolicyRequest)
 	if err := dec(in); err != nil {
@@ -662,6 +730,14 @@ var ConversationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetExternalInvitePermissions",
 			Handler:    _ConversationsService_SetExternalInvitePermissions_Handler,
+		},
+		{
+			MethodName: "ExternalTeams",
+			Handler:    _ConversationsService_ExternalTeams_Handler,
+		},
+		{
+			MethodName: "DisconnectExternalTeam",
+			Handler:    _ConversationsService_DisconnectExternalTeam_Handler,
 		},
 		{
 			MethodName: "GetWorkspaceRetention",

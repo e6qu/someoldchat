@@ -211,6 +211,43 @@ func (m Messages) ListSharedInvites(ctx context.Context, workspaceID domain.Work
 	return m.Store.ListSharedInvites(ctx, workspaceID, status, request)
 }
 
+// ExternalTeams reports the organizations this workspace shares channels with.
+//
+// It is administrative: knowing every organization a workspace is connected to
+// is a statement about the whole workspace rather than about a channel someone
+// is in, and Slack puts it behind an administrator's token for the same reason.
+// A member can still see the organizations in a channel they belong to, which
+// is what conversations.info answers.
+func (m Messages) ExternalTeams(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	return m.Store.ListExternalTeams(ctx, workspaceID, request)
+}
+
+// DisconnectExternalTeam ends a connection with one organization across every
+// channel it is in.
+//
+// Slack's per-channel disconnection already exists here as
+// admin.conversations.disconnectShared. This is the whole-organization form,
+// and it is not the same act repeated: an administrator ending a relationship
+// wants it ended everywhere, and doing it channel by channel leaves the
+// connection alive wherever they missed one.
+func (m Messages) DisconnectExternalTeam(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, target domain.WorkspaceID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(target)) == "" || target == workspaceID {
+		return ErrInvalidSharedInvite
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("team.external_disconnected",
+		events.String("team_id", string(target))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DisconnectExternalTeam(ctx, workspaceID, target, event)
+}
+
 // SetExternalInvitePermissions narrows or widens an already-connected
 // organization's ability to invite further organizations into a conversation.
 // It is expressed through the team association the conversation already

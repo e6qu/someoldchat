@@ -107,6 +107,8 @@ type Service interface {
 	DeclineSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
 	AcceptSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.Conversation, error)
 	ListSharedInvites(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteStatus, domain.PageRequest) (domain.SharedInvitePage, error)
+	ExternalTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ExternalTeamPage, error)
+	DisconnectExternalTeam(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceID) error
 	SetExternalInvitePermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, bool) (domain.Conversation, error)
 	IntegrationLogs(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int, int) (domain.IntegrationLogPage, error)
 	Permalink(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (string, error)

@@ -348,8 +348,10 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
 		},
-		"CanvasGrant": {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
-		"ListGrant":   {sample: &domain.ListAccess{}, through: throughInfallible(encodeProtoListGrant, decodeProtoListGrant)},
+		"ExternalTeam":     {sample: &domain.ExternalTeam{}, through: throughInfallible(encodeProtoExternalTeam, decodeProtoExternalTeam)},
+		"ExternalTeamPage": {sample: &domain.ExternalTeamPage{Teams: []domain.ExternalTeam{{}}}, through: throughInfallible(encodeProtoExternalTeamPage, decodeProtoExternalTeamPage)},
+		"CanvasGrant":      {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
+		"ListGrant":        {sample: &domain.ListAccess{}, through: throughInfallible(encodeProtoListGrant, decodeProtoListGrant)},
 		"ListGrants": {
 			sample: &listGrantsRoundTrip{},
 			through: func(t *testing.T, filled any) (any, proto.Message, error) {

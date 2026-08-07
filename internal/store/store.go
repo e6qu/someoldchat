@@ -474,6 +474,14 @@ type Store interface {
 	SetConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, bool, events.Event) error
 	ListConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.WorkspaceID, bool, error)
 	DisconnectConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, events.Event) error
+	// ListExternalTeams reports the organizations this workspace shares
+	// channels with, derived from the channels themselves so there is one
+	// answer rather than two that can disagree.
+	ListExternalTeams(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.ExternalTeamPage, error)
+	// DisconnectExternalTeam removes one organization from every conversation
+	// of this workspace, in one transaction: a disconnection that left the
+	// organization in one channel would not be a disconnection.
+	DisconnectExternalTeam(context.Context, domain.WorkspaceID, domain.WorkspaceID, events.Event) error
 	CreateSharedInvite(context.Context, domain.SharedInvite, events.Event) error
 	GetSharedInvite(context.Context, domain.SharedInviteID) (domain.SharedInvite, error)
 	// ListSharedInvites pages one workspace's invitations in a given status.

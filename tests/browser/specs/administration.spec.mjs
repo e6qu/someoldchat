@@ -74,6 +74,24 @@ test('[ADMIN-02 ADMIN-05] workspace policy writes through and retention states i
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// Slack Connect had a per-channel disconnection and no answer to "who are we
+// connected to". The populated list and the disconnection are asserted by the
+// web, API and cross-profile tests, which can arrange two organizations; this
+// server has one, so what this journey pins is that the section exists and says
+// the workspace is connected to nobody rather than rendering an empty box.
+test('[ADMIN-02 CONNECT-03] the workspace names the organizations it is connected to', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/admin/settings');
+
+  await expect(page.getByRole('heading', { name: 'Connected organizations' })).toBeVisible();
+  // Disconnecting is the whole-organization act, and the page says so before
+  // anybody uses it: an administrator who thought it applied to one channel
+  // would end far more access than they meant to.
+  await expect(page.locator('body')).toContainText(/every shared channel at once/i);
+  await expect(page.locator('body')).toContainText(/shares no channels with another organization/i);
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[ADMIN-03] audit and analytics render for an eligible role and agree with their own export', async ({ page, context, request }) => {
   await signIn(context);
 

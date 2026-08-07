@@ -260,6 +260,18 @@ assert.equal(billableInfo.ok, true);
 assert.equal(billableInfo.billable_info.U1.billing_active, true);
 const integrationLogs = await client.team.integrationLogs({ count: 1 });
 assert.equal(integrationLogs.ok, true);
+// team.externalTeams.* is the whole-organization half of Slack Connect. The
+// walk exercises the read and the refusal: this fixture shares no channels with
+// another organization, so disconnecting one is the "no such connection" answer
+// rather than a success, which is the case worth pinning — reporting success
+// would tell an administrator they had ended a connection that never existed.
+const externalTeams = await client.team.externalTeams.list({ limit: 10 });
+assert.equal(externalTeams.ok, true);
+assert.equal(Array.isArray(externalTeams.organizations), true);
+await assert.rejects(
+  () => client.team.externalTeams.disconnect({ target_team: "T-not-connected" }),
+  (error) => String(error).includes("team_not_found"),
+);
 const migration = await client.migration.exchange({ users: "U1" });
 assert.equal(migration.ok, true);
 assert.equal(migration.user_id_map.U1, "W1");

@@ -1051,6 +1051,68 @@ func TestWorkspaceSettingsWriteThroughAndNameWhatIsAbsent(t *testing.T) {
 // A value the workspace does not accept is a caller mistake, not an outage:
 // reporting it as "temporarily unavailable" tells an administrator to retry
 // something that can never succeed.
+// Slack Connect had a per-channel disconnection and no answer to "who are we
+// connected to". An administrator could not see the relationships their
+// workspace was in, let alone end one, without walking every channel.
+func TestWorkspaceSettingsListsConnectedOrganizationsAndEndsOneEverywhere(t *testing.T) {
+	handler, repository := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	repository.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Partner Co"})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	repository.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design"})
+	for _, channel := range []domain.ConversationID{"C1", "C2"} {
+		if err := repository.SetConversationTeams(ctx, "T1", channel, []domain.WorkspaceID{"T1", "T2"}, false, events.Event{ID: domain.EventID("E-" + string(channel)), WorkspaceID: "T1", Topic: "conversation.connected", CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app/admin/settings", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	// The channel count is what makes the control safe to use: it says how much
+	// access the disconnection ends.
+	before := page()
+	for _, expected := range []string{"Connected organizations", "Partner Co", ">2<", "Disconnect Partner Co"} {
+		if !strings.Contains(before, expected) {
+			t.Fatalf("the connection list is missing %q: %s", expected, before)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/app/admin/settings/disconnect", strings.NewReader("_csrf="+auth.CSRFToken("session")+"&target_team=T2"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set(auth.CSRFTokenHeaderName, auth.CSRFToken("session"))
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("disconnect status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	// It ends in every channel, not the one an administrator happened to open.
+	for _, channel := range []domain.ConversationID{"C1", "C2"} {
+		teams, _, err := repository.ListConversationTeams(ctx, "T1", channel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, team := range teams {
+			if team == "T2" {
+				t.Fatalf("%s is still connected to T2: %v", channel, teams)
+			}
+		}
+	}
+	if after := page(); strings.Contains(after, "Partner Co") {
+		t.Fatalf("the disconnected organization is still listed: %s", after)
+	}
+}
+
 func TestWorkspaceSettingsRefuseAnUnknownDiscoverability(t *testing.T) {
 	handler, _ := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
 	response := httptest.NewRecorder()

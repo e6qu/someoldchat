@@ -14,6 +14,7 @@ import (
 	"net"
 	"path"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1983,6 +1984,33 @@ func parityCases() []parityCase {
 				// directory is a directory, not a search.
 				_, blankErr := chat.SearchChannels(ctx, "T1", "U1", "  ", page)
 				return []any{names, len(missing.Users), found, blankErr != nil}, nil
+			},
+		},
+		{
+			// A connection is derived from the channels that carry it, and
+			// ending one has to end it everywhere. Both compositions must
+			// agree, because an administrator told an organization is
+			// disconnected while one channel still carries it has been told
+			// something false about who can read their messages.
+			name: "external connections are listed for an administrator and ended everywhere at once",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				before, err := chat.ExternalTeams(ctx, "T1", "UA", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(before.Teams))
+				for _, team := range before.Teams {
+					listed = append(listed, string(team.ID)+":"+strconv.Itoa(team.Channels))
+				}
+				// A member who is not an administrator cannot ask at all.
+				_, memberErr := chat.ExternalTeams(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				// An organization nothing is shared with cannot be
+				// disconnected: saying otherwise would report ending a
+				// connection that never existed. Neither can the workspace
+				// disconnect itself.
+				absent := chat.DisconnectExternalTeam(ctx, "T1", "UA", "T-never-connected") != nil
+				itself := chat.DisconnectExternalTeam(ctx, "T1", "UA", "T1") != nil
+				return []any{listed, memberErr != nil, absent, itself}, nil
 			},
 		},
 		{

@@ -1574,11 +1574,11 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.billing.info/
   - method: team.externalTeams.disconnect
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.externalTeams.disconnect/
   - method: team.externalTeams.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.externalTeams.list/
   - method: team.preferences.list

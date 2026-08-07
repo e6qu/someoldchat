@@ -53,6 +53,8 @@ service ConversationsService {
   rpc AcceptSharedInvite(SharedInviteMutationRequest) returns (Conversation);
   rpc ListSharedInvites(SharedInvitesRequest) returns (SharedInvitePage);
   rpc SetExternalInvitePermissions(ExternalInvitePermissionsRequest) returns (Conversation);
+  rpc ExternalTeams(ExternalTeamsRequest) returns (ExternalTeamPage);
+  rpc DisconnectExternalTeam(DisconnectExternalTeamRequest) returns (DisconnectExternalTeamResponse);
   // Named GetWorkspaceRetention because an rpc named RetentionPolicy would
   // shadow the RetentionPolicy message type for every later return here.
   rpc GetWorkspaceRetention(RetentionPolicyRequest) returns (RetentionPolicy);
@@ -115,6 +117,35 @@ message SharedInvitePage {
   repeated SharedInvite invites = 1;
   string next_cursor = 2;
   bool has_more = 3;
+}
+
+message ExternalTeam {
+  string team_id = 1;
+  string name = 2;
+  int32 channels = 3;
+}
+
+message ExternalTeamPage {
+  repeated ExternalTeam teams = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message ExternalTeamsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message DisconnectExternalTeamRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string team_id = 3;
+}
+
+message DisconnectExternalTeamResponse {
+  bool ok = 1;
 }
 
 message InviteSharedRequest {

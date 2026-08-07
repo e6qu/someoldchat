@@ -115,6 +115,8 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodGet, "/api/admin.conversations.getTeams", auth.ScopeAdminConversationsRead},
 		{http.MethodPost, "/api/admin.conversations.setTeams", auth.ScopeAdminConversationsWrite},
 		{http.MethodPost, "/api/admin.conversations.disconnectShared", auth.ScopeAdminConversationsWrite},
+		{http.MethodPost, "/api/team.externalTeams.list", auth.ScopeAdminTeamsRead},
+		{http.MethodPost, "/api/team.externalTeams.disconnect", auth.ScopeAdminTeamsWrite},
 		{http.MethodGet, "/api/admin.conversations.ekm.listOriginalConnectedChannelInfo", auth.ScopeAdminConversationsRead},
 		{http.MethodPost, "/api/admin.emoji.add", auth.ScopeAdminTeamsWrite},
 		{http.MethodPost, "/api/admin.emoji.addAlias", auth.ScopeAdminTeamsWrite},

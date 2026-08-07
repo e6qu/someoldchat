@@ -1599,6 +1599,55 @@ func TestAdminConversationSharedDisconnectAndEKMInfo(t *testing.T) {
 	}
 }
 
+// team.externalTeams.* is the whole-organization half of Slack Connect. The
+// per-channel form already existed; the question "who are we connected to, and
+// end it everywhere" had no answer at all.
+func TestExternalTeamsListAndDisconnectSpanEveryChannel(t *testing.T) {
+	handler, s := testHandlerWithStore()
+	s.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Partner"})
+	post := func(path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	// The connection is seeded rather than made through admin.conversations
+	// .setTeams, which deliberately refuses a foreign workspace: a connection is
+	// only ever created by accepting a shared invitation. What is under test
+	// here is what an administrator can see and end afterwards.
+	for _, channel := range []domain.ConversationID{"C1", "C2"} {
+		if err := s.SetConversationTeams(context.Background(), "T1", channel, []domain.WorkspaceID{"T1", "T2"}, false, events.Event{ID: domain.EventID("E-connect-" + string(channel)), WorkspaceID: "T1", Topic: "conversation.connected", CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatalf("connect %s: %v", channel, err)
+		}
+	}
+
+	listed := post("/api/team.externalTeams.list", "limit=10")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"team_id":"T2"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body)
+	}
+	// The count is the reason to look: disconnecting ends access to every one.
+	if !strings.Contains(listed.Body.String(), `"channel_count":2`) {
+		t.Fatalf("list did not count both channels: %s", listed.Body)
+	}
+
+	// An organization nothing is shared with cannot be disconnected: reporting
+	// success would say a connection had been ended that never existed.
+	if absent := post("/api/team.externalTeams.disconnect", "target_team=T3"); !strings.Contains(absent.Body.String(), `"ok":false`) {
+		t.Fatalf("absent disconnect: %s", absent.Body)
+	}
+
+	if result := post("/api/team.externalTeams.disconnect", "target_team=T2"); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("disconnect status=%d body=%s", result.Code, result.Body)
+	}
+	after := post("/api/team.externalTeams.list", "limit=10")
+	if strings.Contains(after.Body.String(), `"team_id":"T2"`) {
+		t.Fatalf("the organization is still connected after disconnecting: %s", after.Body)
+	}
+}
+
 func TestAdminUserGroupAddTeamsValidatesWorkspaceTopology(t *testing.T) {
 	handler := testHandler()
 	create := httptest.NewRequest(http.MethodPost, "/api/usergroups.create", strings.NewReader("name=Engineering&handle=engineering"))
