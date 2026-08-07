@@ -2174,6 +2174,19 @@ func (r Remote) AcceptSharedInvite(ctx context.Context, workspaceID domain.Works
 	return decodeProtoConversation(out)
 }
 
+func (r Remote) ExternalTeams(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
+	out, err := r.conversations.ExternalTeams(ctx, &chatv1.ExternalTeamsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	return decodeProtoExternalTeamPage(out), nil
+}
+
+func (r Remote) DisconnectExternalTeam(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, target domain.WorkspaceID) error {
+	_, err := r.conversations.DisconnectExternalTeam(ctx, &chatv1.DisconnectExternalTeamRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TeamId: string(target)})
+	return err
+}
+
 func (r Remote) ListSharedInvites(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
 	out, err := r.conversations.ListSharedInvites(ctx, &chatv1.SharedInvitesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Status: string(status), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
 	if err != nil {
@@ -5550,6 +5563,48 @@ func (s *Server) AcceptSharedInvite(ctx context.Context, input *chatv1.SharedInv
 		return nil, mapError(err)
 	}
 	return encodeProtoConversation(value), nil
+}
+
+func (s *Server) ExternalTeams(ctx context.Context, input *chatv1.ExternalTeamsRequest) (*chatv1.ExternalTeamPage, error) {
+	page, err := s.implementation.ExternalTeams(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoExternalTeamPage(page), nil
+}
+
+func (s *Server) DisconnectExternalTeam(ctx context.Context, input *chatv1.DisconnectExternalTeamRequest) (*chatv1.DisconnectExternalTeamResponse, error) {
+	if err := s.implementation.DisconnectExternalTeam(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.WorkspaceID(input.GetTeamId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.DisconnectExternalTeamResponse{Ok: true}, nil
+}
+
+func encodeProtoExternalTeam(value domain.ExternalTeam) *chatv1.ExternalTeam {
+	return &chatv1.ExternalTeam{TeamId: string(value.ID), Name: value.Name, Channels: int32(value.Channels)}
+}
+
+func decodeProtoExternalTeam(value *chatv1.ExternalTeam) domain.ExternalTeam {
+	if value == nil {
+		return domain.ExternalTeam{}
+	}
+	return domain.ExternalTeam{ID: domain.WorkspaceID(value.GetTeamId()), Name: value.GetName(), Channels: int(value.GetChannels())}
+}
+
+func encodeProtoExternalTeamPage(page domain.ExternalTeamPage) *chatv1.ExternalTeamPage {
+	teams := make([]*chatv1.ExternalTeam, 0, len(page.Teams))
+	for _, team := range page.Teams {
+		teams = append(teams, encodeProtoExternalTeam(team))
+	}
+	return &chatv1.ExternalTeamPage{Teams: teams, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+}
+
+func decodeProtoExternalTeamPage(value *chatv1.ExternalTeamPage) domain.ExternalTeamPage {
+	teams := make([]domain.ExternalTeam, 0, len(value.GetTeams()))
+	for _, team := range value.GetTeams() {
+		teams = append(teams, decodeProtoExternalTeam(team))
+	}
+	return domain.ExternalTeamPage{Teams: teams, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}
 }
 
 func (s *Server) ListSharedInvites(ctx context.Context, input *chatv1.SharedInvitesRequest) (*chatv1.SharedInvitePage, error) {

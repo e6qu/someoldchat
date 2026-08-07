@@ -44,9 +44,19 @@ type workspaceSettingsData struct {
 	RetentionSummary      string
 	RetentionSweptAt      string
 	RetentionSweptMachine string
-	Options               []workspaceDiscoverabilityOption
-	Channels              []workspaceDefaultChannelOption
-	CanWrite              bool
+	// ExternalTeams are the organizations this workspace shares channels with,
+	// each with the number of channels a disconnection would end access to.
+	// That count is the whole reason the list is worth reading before acting.
+	ExternalTeams []workspaceConnectionView
+	Options       []workspaceDiscoverabilityOption
+	Channels      []workspaceDefaultChannelOption
+	CanWrite      bool
+}
+
+type workspaceConnectionView struct {
+	ID       string
+	Name     string
+	Channels int
 }
 
 type workspaceDiscoverabilityOption struct {
@@ -115,6 +125,11 @@ const workspaceSettingsMarkup = `{{define "title"}}Workspace settings · SameOld
 <p class="read-only">{{.RetentionSummary}}</p>
 {{if .RetentionSweptAt}}<p class="read-only">Last swept <time datetime="{{.RetentionSweptMachine}}" data-local-time>{{.RetentionSweptAt}}</time>. A conversation is swept about once a day; if this is much older, the retention worker is not running.</p>{{else}}<p class="read-only">Nothing has been swept yet.</p>{{end}}
 <p class="read-only">A channel can be given a shorter limit of its own from its conversation details. Canvases and lists are not covered by retention here and are kept indefinitely.</p>
+</section>
+<section class="card" aria-labelledby="connect-heading">
+<div class="section-head"><h2 id="connect-heading">Connected organizations</h2><p>Organizations this workspace shares channels with. Disconnecting one ends its access to every shared channel at once, not just the one you are looking at.</p></div>
+{{if .ExternalTeams}}<ul class="connections">{{range .ExternalTeams}}<li class="connection"><span class="connection-name">{{.Name}}</span><span class="connection-count">{{.Channels}}</span>{{if $.CanWrite}}<form method="post" action="/app/admin/settings/disconnect"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target_team" value="{{.ID}}"><button class="toggle" type="submit">Disconnect {{.Name}}</button></form>{{end}}</li>{{end}}</ul>
+{{else}}<p class="read-only">This workspace shares no channels with another organization.</p>{{end}}
 </section>
 <section class="card" aria-labelledby="absent-heading">
 <div class="section-head"><h2 id="absent-heading">Not governed here</h2><p>These are absent rather than off. A switch that changed nothing would be worse than no switch, because you would stop looking for the missing capability.</p></div>
@@ -245,6 +260,18 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 			data.Channels = append(data.Channels, workspaceDefaultChannelOption{ID: option.ID, Name: option.Name, Selected: selected})
 		}
 	}
+	if connections, connectErr := h.Messages.ExternalTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: searchFilterOptionLimit}); connectErr == nil {
+		for _, team := range connections.Teams {
+			name := strings.TrimSpace(team.Name)
+			if name == "" {
+				// An organization whose name this deployment does not hold is
+				// still one that can read the shared channels, so it is listed
+				// by the identifier rather than left out.
+				name = string(team.ID)
+			}
+			data.ExternalTeams = append(data.ExternalTeams, workspaceConnectionView{ID: string(team.ID), Name: name, Channels: team.Channels})
+		}
+	}
 	h.writeHTMLWithPolicy(w, workspaceSettingsTemplate, data, http.StatusOK, "the workspace settings could not be rendered", authAdminContentSecurityPolicy)
 }
 
@@ -284,6 +311,20 @@ func (h Handler) workspaceRetentionSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirectSettings(w, r, "Retention saved")
+}
+
+// workspaceDisconnectTeam ends a connection with one organization everywhere.
+func (h Handler) workspaceDisconnectTeam(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.workspaceSettingsMutation(w, r, "")
+	if !ok {
+		return
+	}
+	target := domain.WorkspaceID(strings.TrimSpace(fields["target_team"]))
+	if err := h.Messages.DisconnectExternalTeam(r.Context(), principal.WorkspaceID, principal.UserID, target); err != nil {
+		h.writeAuthAdminProblem(w, r, workspaceSettingsProblem(err, "The organization was not disconnected. It may already have been."))
+		return
+	}
+	h.redirectSettings(w, r, "Organization disconnected")
 }
 
 func (h Handler) workspaceIdentitySet(w http.ResponseWriter, r *http.Request) {

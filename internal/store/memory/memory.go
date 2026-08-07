@@ -4037,6 +4037,78 @@ func (s *Store) SetConversationTeams(_ context.Context, workspace domain.Workspa
 	return nil
 }
 
+// ListExternalTeams mirrors the SQL derivation: the connections are whatever
+// organizations appear in this workspace's channels.
+func (s *Store) ListExternalTeams(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ExternalTeamPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := make(map[domain.WorkspaceID]int)
+	for conversation, teams := range s.conversationTeams {
+		value, exists := s.conversations[conversation]
+		if !exists || value.WorkspaceID != workspace {
+			continue
+		}
+		for team := range teams {
+			if team == workspace {
+				continue
+			}
+			counts[team]++
+		}
+	}
+	teams := make([]domain.ExternalTeam, 0, len(counts))
+	for team, channels := range counts {
+		if string(team) <= after {
+			continue
+		}
+		teams = append(teams, domain.ExternalTeam{ID: team, Name: s.workspaces[team].Name, Channels: channels})
+	}
+	sort.Slice(teams, func(i, j int) bool { return teams[i].ID < teams[j].ID })
+	hasMore := len(teams) > request.Limit
+	if hasMore {
+		teams = teams[:request.Limit]
+	}
+	page := domain.ExternalTeamPage{Teams: teams, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(teams[len(teams)-1].ID))
+	}
+	return page, err
+}
+
+// DisconnectExternalTeam removes one organization from every conversation of
+// this workspace under one lock, so no reader sees it gone from some channels
+// and still present in others.
+func (s *Store) DisconnectExternalTeam(_ context.Context, workspace domain.WorkspaceID, team domain.WorkspaceID, event events.Event) error {
+	if team == "" || team == workspace {
+		return store.InvalidArgument("an external organization is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for conversation, teams := range s.conversationTeams {
+		value, exists := s.conversations[conversation]
+		if !exists || value.WorkspaceID != workspace {
+			continue
+		}
+		if _, present := teams[team]; !present {
+			continue
+		}
+		delete(teams, team)
+		removed++
+	}
+	if removed == 0 {
+		return store.ErrNotFound
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) ListConversationTeams(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) ([]domain.WorkspaceID, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

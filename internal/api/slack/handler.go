@@ -167,6 +167,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/bots.info", h.botsInfo)
 	mux.HandleFunc("GET /api/migration.exchange", h.migrationExchange)
 	mux.HandleFunc("POST /api/migration.exchange", h.migrationExchange)
+	mux.HandleFunc("GET /api/team.externalTeams.list", h.externalTeamsList)
+	mux.HandleFunc("POST /api/team.externalTeams.list", h.externalTeamsList)
+	mux.HandleFunc("POST /api/team.externalTeams.disconnect", h.externalTeamsDisconnect)
 	mux.HandleFunc("GET /api/team.billableInfo", h.teamBillableInfo)
 	mux.HandleFunc("POST /api/team.billableInfo", h.teamBillableInfo)
 	mux.HandleFunc("GET /api/team.profile.get", h.teamProfileGet)
@@ -2625,6 +2628,73 @@ func (h Handler) teamPreferencesList(w http.ResponseWriter, r *http.Request) {
 		"who_can_post_general":   "everyone",
 		"who_can_create_channel": "regular",
 	})
+}
+
+// team.externalTeams.list reports the organizations this workspace shares
+// channels with. It is administrative: the set of every organization a
+// workspace is connected to is a statement about the workspace, where the
+// organizations in one channel are already reported by conversations.info to
+// anyone in that channel.
+func (h Handler) externalTeamsList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminTeamsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	page, err := h.Messages.ExternalTeams(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "not_an_admin"))
+		return
+	}
+	teams := make([]map[string]any, 0, len(page.Teams))
+	for _, team := range page.Teams {
+		teams = append(teams, map[string]any{
+			"team_id": string(team.ID), "team_name": team.Name,
+			"connection_status": "connected", "slack_connect_pref": map[string]any{},
+			"channel_count": team.Channels,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "organizations": teams,
+		"response_metadata": map[string]any{"next_cursor": string(page.NextCursor)},
+	})
+}
+
+// team.externalTeams.disconnect ends the connection with one organization
+// across every channel it is in. The per-channel form is
+// admin.conversations.disconnectShared; this is not that repeated, because an
+// administrator ending a relationship wants it ended everywhere.
+func (h Handler) externalTeamsDisconnect(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminTeamsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	target := strings.TrimSpace(fields["target_team"])
+	if target == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.DisconnectExternalTeam(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkspaceID(target)); err != nil {
+		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {

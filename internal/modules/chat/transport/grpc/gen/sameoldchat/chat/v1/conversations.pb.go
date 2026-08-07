@@ -887,6 +887,298 @@ func (x *SharedInvitePage) GetHasMore() bool {
 	return false
 }
 
+type ExternalTeam struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Channels      int32                  `protobuf:"varint,3,opt,name=channels,proto3" json:"channels,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExternalTeam) Reset() {
+	*x = ExternalTeam{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalTeam) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalTeam) ProtoMessage() {}
+
+func (x *ExternalTeam) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalTeam.ProtoReflect.Descriptor instead.
+func (*ExternalTeam) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ExternalTeam) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *ExternalTeam) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ExternalTeam) GetChannels() int32 {
+	if x != nil {
+		return x.Channels
+	}
+	return 0
+}
+
+type ExternalTeamPage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Teams         []*ExternalTeam        `protobuf:"bytes,1,rep,name=teams,proto3" json:"teams,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExternalTeamPage) Reset() {
+	*x = ExternalTeamPage{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalTeamPage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalTeamPage) ProtoMessage() {}
+
+func (x *ExternalTeamPage) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalTeamPage.ProtoReflect.Descriptor instead.
+func (*ExternalTeamPage) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ExternalTeamPage) GetTeams() []*ExternalTeam {
+	if x != nil {
+		return x.Teams
+	}
+	return nil
+}
+
+func (x *ExternalTeamPage) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+func (x *ExternalTeamPage) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+type ExternalTeamsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExternalTeamsRequest) Reset() {
+	*x = ExternalTeamsRequest{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalTeamsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalTeamsRequest) ProtoMessage() {}
+
+func (x *ExternalTeamsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalTeamsRequest.ProtoReflect.Descriptor instead.
+func (*ExternalTeamsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ExternalTeamsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ExternalTeamsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ExternalTeamsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ExternalTeamsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type DisconnectExternalTeamRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TeamId        string                 `protobuf:"bytes,3,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DisconnectExternalTeamRequest) Reset() {
+	*x = DisconnectExternalTeamRequest{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DisconnectExternalTeamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DisconnectExternalTeamRequest) ProtoMessage() {}
+
+func (x *DisconnectExternalTeamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DisconnectExternalTeamRequest.ProtoReflect.Descriptor instead.
+func (*DisconnectExternalTeamRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *DisconnectExternalTeamRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *DisconnectExternalTeamRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *DisconnectExternalTeamRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+type DisconnectExternalTeamResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DisconnectExternalTeamResponse) Reset() {
+	*x = DisconnectExternalTeamResponse{}
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DisconnectExternalTeamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DisconnectExternalTeamResponse) ProtoMessage() {}
+
+func (x *DisconnectExternalTeamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DisconnectExternalTeamResponse.ProtoReflect.Descriptor instead.
+func (*DisconnectExternalTeamResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *DisconnectExternalTeamResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 type InviteSharedRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -900,7 +1192,7 @@ type InviteSharedRequest struct {
 
 func (x *InviteSharedRequest) Reset() {
 	*x = InviteSharedRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -912,7 +1204,7 @@ func (x *InviteSharedRequest) String() string {
 func (*InviteSharedRequest) ProtoMessage() {}
 
 func (x *InviteSharedRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -925,7 +1217,7 @@ func (x *InviteSharedRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteSharedRequest.ProtoReflect.Descriptor instead.
 func (*InviteSharedRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *InviteSharedRequest) GetWorkspaceId() string {
@@ -974,7 +1266,7 @@ type SharedInviteMutationRequest struct {
 
 func (x *SharedInviteMutationRequest) Reset() {
 	*x = SharedInviteMutationRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +1278,7 @@ func (x *SharedInviteMutationRequest) String() string {
 func (*SharedInviteMutationRequest) ProtoMessage() {}
 
 func (x *SharedInviteMutationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +1291,7 @@ func (x *SharedInviteMutationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedInviteMutationRequest.ProtoReflect.Descriptor instead.
 func (*SharedInviteMutationRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SharedInviteMutationRequest) GetWorkspaceId() string {
@@ -1036,7 +1328,7 @@ type SharedInvitesRequest struct {
 
 func (x *SharedInvitesRequest) Reset() {
 	*x = SharedInvitesRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1048,7 +1340,7 @@ func (x *SharedInvitesRequest) String() string {
 func (*SharedInvitesRequest) ProtoMessage() {}
 
 func (x *SharedInvitesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1061,7 +1353,7 @@ func (x *SharedInvitesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedInvitesRequest.ProtoReflect.Descriptor instead.
 func (*SharedInvitesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{14}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SharedInvitesRequest) GetWorkspaceId() string {
@@ -1112,7 +1404,7 @@ type ExternalInvitePermissionsRequest struct {
 
 func (x *ExternalInvitePermissionsRequest) Reset() {
 	*x = ExternalInvitePermissionsRequest{}
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1124,7 +1416,7 @@ func (x *ExternalInvitePermissionsRequest) String() string {
 func (*ExternalInvitePermissionsRequest) ProtoMessage() {}
 
 func (x *ExternalInvitePermissionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_conversations_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1137,7 +1429,7 @@ func (x *ExternalInvitePermissionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalInvitePermissionsRequest.ProtoReflect.Descriptor instead.
 func (*ExternalInvitePermissionsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{15}
+	return file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ExternalInvitePermissionsRequest) GetWorkspaceId() string {
@@ -1256,7 +1548,27 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\ainvites\x18\x01 \x03(\v2!.sameoldchat.chat.v1.SharedInviteR\ainvites\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xcd\x01\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"W\n" +
+	"\fExternalTeam\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\bchannels\x18\x03 \x01(\x05R\bchannels\"\x87\x01\n" +
+	"\x10ExternalTeamPage\x127\n" +
+	"\x05teams\x18\x01 \x03(\v2!.sameoldchat.chat.v1.ExternalTeamR\x05teams\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x80\x01\n" +
+	"\x14ExternalTeamsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"t\n" +
+	"\x1dDisconnectExternalTeamRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
+	"\ateam_id\x18\x03 \x01(\tR\x06teamId\"0\n" +
+	"\x1eDisconnectExternalTeamResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xcd\x01\n" +
 	"\x13InviteSharedRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -1279,7 +1591,7 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12.\n" +
 	"\x13target_workspace_id\x18\x04 \x01(\tR\x11targetWorkspaceId\x12\x1d\n" +
 	"\n" +
-	"can_invite\x18\x05 \x01(\bR\tcanInvite2\x88\x0e\n" +
+	"can_invite\x18\x05 \x01(\bR\tcanInvite2\xef\x0f\n" +
 	"\x14ConversationsService\x12c\n" +
 	"\x10ConversationInfo\x12,.sameoldchat.chat.v1.ConversationInfoRequest\x1a!.sameoldchat.chat.v1.Conversation\x12a\n" +
 	"\rConversations\x12).sameoldchat.chat.v1.ConversationsRequest\x1a%.sameoldchat.chat.v1.ConversationPage\x12[\n" +
@@ -1290,7 +1602,9 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x13DeclineSharedInvite\x120.sameoldchat.chat.v1.SharedInviteMutationRequest\x1a!.sameoldchat.chat.v1.SharedInvite\x12i\n" +
 	"\x12AcceptSharedInvite\x120.sameoldchat.chat.v1.SharedInviteMutationRequest\x1a!.sameoldchat.chat.v1.Conversation\x12e\n" +
 	"\x11ListSharedInvites\x12).sameoldchat.chat.v1.SharedInvitesRequest\x1a%.sameoldchat.chat.v1.SharedInvitePage\x12x\n" +
-	"\x1cSetExternalInvitePermissions\x125.sameoldchat.chat.v1.ExternalInvitePermissionsRequest\x1a!.sameoldchat.chat.v1.Conversation\x12j\n" +
+	"\x1cSetExternalInvitePermissions\x125.sameoldchat.chat.v1.ExternalInvitePermissionsRequest\x1a!.sameoldchat.chat.v1.Conversation\x12a\n" +
+	"\rExternalTeams\x12).sameoldchat.chat.v1.ExternalTeamsRequest\x1a%.sameoldchat.chat.v1.ExternalTeamPage\x12\x81\x01\n" +
+	"\x16DisconnectExternalTeam\x122.sameoldchat.chat.v1.DisconnectExternalTeamRequest\x1a3.sameoldchat.chat.v1.DisconnectExternalTeamResponse\x12j\n" +
 	"\x15GetWorkspaceRetention\x12+.sameoldchat.chat.v1.RetentionPolicyRequest\x1a$.sameoldchat.chat.v1.RetentionPolicy\x12j\n" +
 	"\x15SetWorkspaceRetention\x12+.sameoldchat.chat.v1.RetentionPolicyRequest\x1a$.sameoldchat.chat.v1.RetentionPolicy\x12u\n" +
 	"\x15GetLastRetentionSweep\x12+.sameoldchat.chat.v1.RetentionPolicyRequest\x1a/.sameoldchat.chat.v1.LastRetentionSweepResponse\x12\x81\x01\n" +
@@ -1310,7 +1624,7 @@ func file_sameoldchat_chat_v1_conversations_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_conversations_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_sameoldchat_chat_v1_conversations_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_sameoldchat_chat_v1_conversations_proto_goTypes = []any{
 	(*Conversation)(nil),                     // 0: sameoldchat.chat.v1.Conversation
 	(*ConversationPage)(nil),                 // 1: sameoldchat.chat.v1.ConversationPage
@@ -1324,52 +1638,62 @@ var file_sameoldchat_chat_v1_conversations_proto_goTypes = []any{
 	(*ConversationRetentionResponse)(nil),    // 9: sameoldchat.chat.v1.ConversationRetentionResponse
 	(*SharedInvite)(nil),                     // 10: sameoldchat.chat.v1.SharedInvite
 	(*SharedInvitePage)(nil),                 // 11: sameoldchat.chat.v1.SharedInvitePage
-	(*InviteSharedRequest)(nil),              // 12: sameoldchat.chat.v1.InviteSharedRequest
-	(*SharedInviteMutationRequest)(nil),      // 13: sameoldchat.chat.v1.SharedInviteMutationRequest
-	(*SharedInvitesRequest)(nil),             // 14: sameoldchat.chat.v1.SharedInvitesRequest
-	(*ExternalInvitePermissionsRequest)(nil), // 15: sameoldchat.chat.v1.ExternalInvitePermissionsRequest
+	(*ExternalTeam)(nil),                     // 12: sameoldchat.chat.v1.ExternalTeam
+	(*ExternalTeamPage)(nil),                 // 13: sameoldchat.chat.v1.ExternalTeamPage
+	(*ExternalTeamsRequest)(nil),             // 14: sameoldchat.chat.v1.ExternalTeamsRequest
+	(*DisconnectExternalTeamRequest)(nil),    // 15: sameoldchat.chat.v1.DisconnectExternalTeamRequest
+	(*DisconnectExternalTeamResponse)(nil),   // 16: sameoldchat.chat.v1.DisconnectExternalTeamResponse
+	(*InviteSharedRequest)(nil),              // 17: sameoldchat.chat.v1.InviteSharedRequest
+	(*SharedInviteMutationRequest)(nil),      // 18: sameoldchat.chat.v1.SharedInviteMutationRequest
+	(*SharedInvitesRequest)(nil),             // 19: sameoldchat.chat.v1.SharedInvitesRequest
+	(*ExternalInvitePermissionsRequest)(nil), // 20: sameoldchat.chat.v1.ExternalInvitePermissionsRequest
 }
 var file_sameoldchat_chat_v1_conversations_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.ConversationPage.conversations:type_name -> sameoldchat.chat.v1.Conversation
 	4,  // 1: sameoldchat.chat.v1.RetentionPolicyRequest.policy:type_name -> sameoldchat.chat.v1.RetentionPolicy
 	10, // 2: sameoldchat.chat.v1.SharedInvitePage.invites:type_name -> sameoldchat.chat.v1.SharedInvite
-	2,  // 3: sameoldchat.chat.v1.ConversationsService.ConversationInfo:input_type -> sameoldchat.chat.v1.ConversationInfoRequest
-	3,  // 4: sameoldchat.chat.v1.ConversationsService.Conversations:input_type -> sameoldchat.chat.v1.ConversationsRequest
-	12, // 5: sameoldchat.chat.v1.ConversationsService.InviteShared:input_type -> sameoldchat.chat.v1.InviteSharedRequest
-	13, // 6: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	13, // 7: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	13, // 8: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	13, // 9: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	13, // 10: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
-	14, // 11: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:input_type -> sameoldchat.chat.v1.SharedInvitesRequest
-	15, // 12: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:input_type -> sameoldchat.chat.v1.ExternalInvitePermissionsRequest
-	5,  // 13: sameoldchat.chat.v1.ConversationsService.GetWorkspaceRetention:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
-	5,  // 14: sameoldchat.chat.v1.ConversationsService.SetWorkspaceRetention:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
-	5,  // 15: sameoldchat.chat.v1.ConversationsService.GetLastRetentionSweep:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
-	8,  // 16: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
-	8,  // 17: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
-	8,  // 18: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
-	0,  // 19: sameoldchat.chat.v1.ConversationsService.ConversationInfo:output_type -> sameoldchat.chat.v1.Conversation
-	1,  // 20: sameoldchat.chat.v1.ConversationsService.Conversations:output_type -> sameoldchat.chat.v1.ConversationPage
-	10, // 21: sameoldchat.chat.v1.ConversationsService.InviteShared:output_type -> sameoldchat.chat.v1.SharedInvite
-	10, // 22: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	10, // 23: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	10, // 24: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	10, // 25: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
-	0,  // 26: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:output_type -> sameoldchat.chat.v1.Conversation
-	11, // 27: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:output_type -> sameoldchat.chat.v1.SharedInvitePage
-	0,  // 28: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:output_type -> sameoldchat.chat.v1.Conversation
-	4,  // 29: sameoldchat.chat.v1.ConversationsService.GetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
-	4,  // 30: sameoldchat.chat.v1.ConversationsService.SetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
-	7,  // 31: sameoldchat.chat.v1.ConversationsService.GetLastRetentionSweep:output_type -> sameoldchat.chat.v1.LastRetentionSweepResponse
-	9,  // 32: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:output_type -> sameoldchat.chat.v1.ConversationRetentionResponse
-	6,  // 33: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
-	6,  // 34: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
-	19, // [19:35] is the sub-list for method output_type
-	3,  // [3:19] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	12, // 3: sameoldchat.chat.v1.ExternalTeamPage.teams:type_name -> sameoldchat.chat.v1.ExternalTeam
+	2,  // 4: sameoldchat.chat.v1.ConversationsService.ConversationInfo:input_type -> sameoldchat.chat.v1.ConversationInfoRequest
+	3,  // 5: sameoldchat.chat.v1.ConversationsService.Conversations:input_type -> sameoldchat.chat.v1.ConversationsRequest
+	17, // 6: sameoldchat.chat.v1.ConversationsService.InviteShared:input_type -> sameoldchat.chat.v1.InviteSharedRequest
+	18, // 7: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	18, // 8: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	18, // 9: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	18, // 10: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	18, // 11: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:input_type -> sameoldchat.chat.v1.SharedInviteMutationRequest
+	19, // 12: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:input_type -> sameoldchat.chat.v1.SharedInvitesRequest
+	20, // 13: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:input_type -> sameoldchat.chat.v1.ExternalInvitePermissionsRequest
+	14, // 14: sameoldchat.chat.v1.ConversationsService.ExternalTeams:input_type -> sameoldchat.chat.v1.ExternalTeamsRequest
+	15, // 15: sameoldchat.chat.v1.ConversationsService.DisconnectExternalTeam:input_type -> sameoldchat.chat.v1.DisconnectExternalTeamRequest
+	5,  // 16: sameoldchat.chat.v1.ConversationsService.GetWorkspaceRetention:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
+	5,  // 17: sameoldchat.chat.v1.ConversationsService.SetWorkspaceRetention:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
+	5,  // 18: sameoldchat.chat.v1.ConversationsService.GetLastRetentionSweep:input_type -> sameoldchat.chat.v1.RetentionPolicyRequest
+	8,  // 19: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
+	8,  // 20: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
+	8,  // 21: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:input_type -> sameoldchat.chat.v1.ConversationRetentionRequest
+	0,  // 22: sameoldchat.chat.v1.ConversationsService.ConversationInfo:output_type -> sameoldchat.chat.v1.Conversation
+	1,  // 23: sameoldchat.chat.v1.ConversationsService.Conversations:output_type -> sameoldchat.chat.v1.ConversationPage
+	10, // 24: sameoldchat.chat.v1.ConversationsService.InviteShared:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 25: sameoldchat.chat.v1.ConversationsService.ApproveSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 26: sameoldchat.chat.v1.ConversationsService.DenySharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 27: sameoldchat.chat.v1.ConversationsService.RevokeSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	10, // 28: sameoldchat.chat.v1.ConversationsService.DeclineSharedInvite:output_type -> sameoldchat.chat.v1.SharedInvite
+	0,  // 29: sameoldchat.chat.v1.ConversationsService.AcceptSharedInvite:output_type -> sameoldchat.chat.v1.Conversation
+	11, // 30: sameoldchat.chat.v1.ConversationsService.ListSharedInvites:output_type -> sameoldchat.chat.v1.SharedInvitePage
+	0,  // 31: sameoldchat.chat.v1.ConversationsService.SetExternalInvitePermissions:output_type -> sameoldchat.chat.v1.Conversation
+	13, // 32: sameoldchat.chat.v1.ConversationsService.ExternalTeams:output_type -> sameoldchat.chat.v1.ExternalTeamPage
+	16, // 33: sameoldchat.chat.v1.ConversationsService.DisconnectExternalTeam:output_type -> sameoldchat.chat.v1.DisconnectExternalTeamResponse
+	4,  // 34: sameoldchat.chat.v1.ConversationsService.GetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
+	4,  // 35: sameoldchat.chat.v1.ConversationsService.SetWorkspaceRetention:output_type -> sameoldchat.chat.v1.RetentionPolicy
+	7,  // 36: sameoldchat.chat.v1.ConversationsService.GetLastRetentionSweep:output_type -> sameoldchat.chat.v1.LastRetentionSweepResponse
+	9,  // 37: sameoldchat.chat.v1.ConversationsService.GetConversationRetention:output_type -> sameoldchat.chat.v1.ConversationRetentionResponse
+	6,  // 38: sameoldchat.chat.v1.ConversationsService.SetConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
+	6,  // 39: sameoldchat.chat.v1.ConversationsService.RemoveConversationRetention:output_type -> sameoldchat.chat.v1.RetentionMutationResponse
+	22, // [22:40] is the sub-list for method output_type
+	4,  // [4:22] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_conversations_proto_init() }
@@ -1383,7 +1707,7 @@ func file_sameoldchat_chat_v1_conversations_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_conversations_proto_rawDesc), len(file_sameoldchat_chat_v1_conversations_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

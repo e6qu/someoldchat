@@ -827,6 +827,34 @@ func SharedInviteTransition(from, to SharedInviteStatus) bool {
 	}
 }
 
+// ExternalTeam is one organization this workspace shares channels with.
+//
+// It is derived rather than stored: a connection is the fact that some
+// conversation of this workspace carries another organization, so the set of
+// connections is exactly the set of organizations appearing in those channels.
+// Recording it a second time would give the product two answers to the same
+// question and a way for them to disagree.
+//
+// There is no "connected since": nothing records when a connection began, only
+// which channels carry it, and deriving a date from the oldest shared channel
+// would be a number that looks precise and means something else.
+type ExternalTeam struct {
+	ID   WorkspaceID
+	Name string
+	// Channels is how many of this workspace's conversations the organization
+	// is in. It is the whole reason to look at this list: disconnecting an
+	// organization ends its access to every one of them.
+	Channels int
+}
+
+// ExternalTeamPage is one page of connections, ordered by name so a list read
+// twice reads the same.
+type ExternalTeamPage struct {
+	Teams      []ExternalTeam
+	NextCursor Cursor
+	HasMore    bool
+}
+
 // SharedInvite is one invitation for an external organization to join one
 // conversation. It is modelled on InviteRequest — the same recorded/issued/
 // redeemed shape — because it is the same kind of fact about a different
