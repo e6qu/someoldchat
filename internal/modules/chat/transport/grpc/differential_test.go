@@ -774,6 +774,32 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An administrator archives or deletes several channels in one
+			// request. The service checks every channel first, so a name that
+			// is not here stops the request before it changes anything.
+			name: "an administrator archives and deletes channels in bulk",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				member := chat.AdminBulkArchiveConversations(ctx, "T1", "U1", []domain.ConversationID{"C1"}) != nil
+				empty := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", nil) != nil
+				absent := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1", "C-not-here"}) != nil
+				if err := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+					return nil, err
+				}
+				archived, err := chat.ConversationInfo(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				// A channel that is already archived is the state the request
+				// asked for.
+				again := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}) == nil
+				if err := chat.AdminBulkDeleteConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+					return nil, err
+				}
+				_, missing := chat.ConversationInfo(ctx, "T1", "UA", "C1")
+				return []any{member, empty, absent, archived.Archived, again, missing != nil}, nil
+			},
+		},
+		{
 			// The two conversions are not one operation with a flag. Making a
 			// channel private hides what was said from people who could read
 			// it; making one public shows it to people who never could, and
@@ -3523,7 +3549,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 174
+const parityGapCeiling = 173
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -3591,7 +3617,6 @@ var parityGaps = map[string]struct{}{
 	"CompleteExternalUploads":            {},
 	"CompleteReminder":                   {},
 	"ConsumeRTMConnection":               {},
-	"ConversationInfo":                   {},
 	"CountSocketModeConnections":         {},
 	"CreateAppInstallation":              {},
 	"CreateExternalIdentity":             {},

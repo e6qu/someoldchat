@@ -272,6 +272,18 @@ await assert.rejects(
   (error) => String(error).includes("workflow_not_found"),
 );
 
+// Bulk channel administration. The walk pins the refusal for a channel that is
+// not here; archiving the fixture's channels would take the rest of the walk
+// with them.
+await assert.rejects(
+  () => client.admin.conversations.bulkArchive({ channel_ids: ["C-not-here"] }),
+  (error) => String(error).includes("channel_not_found"),
+);
+await assert.rejects(
+  () => client.admin.conversations.bulkDelete({ channel_ids: ["C-not-here"] }),
+  (error) => String(error).includes("channel_not_found"),
+);
+
 // An administrator removes an app without holding its client secret. The walk
 // pins the refusal for an app nobody has heard of; uninstalling the fixture's
 // own app would take the rest of the walk's app calls with it.

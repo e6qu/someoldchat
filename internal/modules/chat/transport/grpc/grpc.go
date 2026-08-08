@@ -1680,6 +1680,29 @@ func (r Remote) AdminSetConversationArchived(ctx context.Context, workspaceID do
 	return decodeProtoConversation(out)
 }
 
+func (r Remote) AdminBulkArchiveConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) error {
+	return r.bulkConversations(ctx, r.mutations.AdminBulkArchiveConversations, workspaceID, userID, ids, "archive")
+}
+
+func (r Remote) AdminBulkDeleteConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) error {
+	return r.bulkConversations(ctx, r.mutations.AdminBulkDeleteConversations, workspaceID, userID, ids, "deletion")
+}
+
+func (r Remote) bulkConversations(ctx context.Context, call func(context.Context, *chatv1.BulkConversationsRequest, ...grpc.CallOption) (*chatv1.MutationResponse, error), workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID, what string) error {
+	values := make([]string, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, string(id))
+	}
+	out, err := call(ctx, &chatv1.BulkConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: values})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed bulk conversation " + what + " was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) AdminDeleteConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
 	out, err := r.mutations.AdminDeleteConversation(ctx, &chatv1.DeleteConversationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
 	if err != nil {
@@ -5379,6 +5402,28 @@ func (s *Server) AdminInviteConversationMembers(ctx context.Context, input *chat
 		return nil, mapError(err)
 	}
 	return encodeProtoConversation(result), nil
+}
+
+func (s *Server) AdminBulkArchiveConversations(ctx context.Context, input *chatv1.BulkConversationsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminBulkArchiveConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), bulkConversationIDs(input)); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminBulkDeleteConversations(ctx context.Context, input *chatv1.BulkConversationsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminBulkDeleteConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), bulkConversationIDs(input)); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func bulkConversationIDs(input *chatv1.BulkConversationsRequest) []domain.ConversationID {
+	ids := make([]domain.ConversationID, 0, len(input.GetConversationIds()))
+	for _, id := range input.GetConversationIds() {
+		ids = append(ids, domain.ConversationID(id))
+	}
+	return ids
 }
 
 func (s *Server) AdminConvertConversationToPublic(ctx context.Context, input *chatv1.ConvertConversationToPrivateRequest) (*chatv1.Conversation, error) {

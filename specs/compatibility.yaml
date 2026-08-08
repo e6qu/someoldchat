@@ -1088,11 +1088,11 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.update/
   - method: admin.conversations.bulkArchive
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkArchive/
   - method: admin.conversations.bulkDelete
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkDelete/
   - method: admin.conversations.bulkMove

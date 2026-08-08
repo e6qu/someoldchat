@@ -142,6 +142,8 @@ type Service interface {
 	AdminRenameConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)
 	AdminSetConversationArchived(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool) (domain.Conversation, error)
 	AdminDeleteConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
+	AdminBulkArchiveConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error
+	AdminBulkDeleteConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error
 	AdminAddConversationAccessGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserGroupID) error
 	AdminRemoveConversationAccessGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserGroupID) error
 	AdminListConversationAccessGroups(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.UserGroupID, error)

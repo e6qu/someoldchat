@@ -1681,6 +1681,64 @@ func (m Messages) AdminRenameConversation(ctx context.Context, workspaceID domai
 	return m.Store.RenameConversation(ctx, conversationID, name, event)
 }
 
+// AdminBulkArchiveConversations archives several channels. The service checks
+// every channel before it archives one, so an administrator who names a channel
+// that is not here learns it before the request changes anything. A channel that
+// is already archived is the state the request asked for.
+func (m Messages) AdminBulkArchiveConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	pending := make([]domain.Conversation, 0, len(ids))
+	for _, id := range ids {
+		conversation, err := m.Store.GetConversation(ctx, id)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return store.ErrNotFound
+		}
+		if conversation.IsDirectOrGroup() {
+			return ErrInvalidConversation
+		}
+		pending = append(pending, conversation)
+	}
+	for _, conversation := range pending {
+		if conversation.Archived {
+			continue
+		}
+		if _, err := m.AdminSetConversationArchived(ctx, workspaceID, actorID, conversation.ID, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AdminBulkDeleteConversations deletes several channels under the same rule.
+func (m Messages) AdminBulkDeleteConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	for _, id := range ids {
+		conversation, err := m.Store.GetConversation(ctx, id)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return store.ErrNotFound
+		}
+		if conversation.IsDirectOrGroup() {
+			return ErrInvalidConversation
+		}
+	}
+	for _, id := range ids {
+		if err := m.AdminDeleteConversation(ctx, workspaceID, actorID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m Messages) AdminSetConversationArchived(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, archived bool) (domain.Conversation, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.Conversation{}, err

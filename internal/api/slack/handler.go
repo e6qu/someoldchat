@@ -226,6 +226,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.invite", h.adminConversationInvite)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPublic", h.adminConversationConvertToPublic)
+	mux.HandleFunc("POST /api/admin.conversations.bulkArchive", h.adminConversationBulkArchive)
+	mux.HandleFunc("POST /api/admin.conversations.bulkDelete", h.adminConversationBulkDelete)
 	mux.HandleFunc("GET /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
@@ -3750,6 +3752,43 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+}
+
+// admin.conversations.bulkArchive and .bulkDelete act on several channels. The
+// service checks every channel before it changes one.
+func (h Handler) adminConversationBulkArchive(w http.ResponseWriter, r *http.Request) {
+	h.adminConversationBulk(w, r, true)
+}
+
+func (h Handler) adminConversationBulkDelete(w http.ResponseWriter, r *http.Request) {
+	h.adminConversationBulk(w, r, false)
+}
+
+func (h Handler) adminConversationBulk(w http.ResponseWriter, r *http.Request, archive bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channel_ids"])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	act := h.Messages.AdminBulkDeleteConversations
+	if archive {
+		act = h.Messages.AdminBulkArchiveConversations
+	}
+	if err := act(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // admin.conversations.convertToPublic is the reverse of convertToPrivate, and

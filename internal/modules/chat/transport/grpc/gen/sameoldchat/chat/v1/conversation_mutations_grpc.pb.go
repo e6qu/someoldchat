@@ -40,6 +40,8 @@ const (
 	ConversationMutationsService_AdminInviteConversationMembers_FullMethodName     = "/sameoldchat.chat.v1.ConversationMutationsService/AdminInviteConversationMembers"
 	ConversationMutationsService_AdminConvertConversationToPrivate_FullMethodName  = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPrivate"
 	ConversationMutationsService_AdminConvertConversationToPublic_FullMethodName   = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPublic"
+	ConversationMutationsService_AdminBulkArchiveConversations_FullMethodName      = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkArchiveConversations"
+	ConversationMutationsService_AdminBulkDeleteConversations_FullMethodName       = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkDeleteConversations"
 	ConversationMutationsService_AdminConversationTeams_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConversationTeams"
 	ConversationMutationsService_AdminSetConversationTeams_FullMethodName          = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationTeams"
 )
@@ -69,6 +71,8 @@ type ConversationMutationsServiceClient interface {
 	AdminInviteConversationMembers(ctx context.Context, in *InviteConversationMembersRequest, opts ...grpc.CallOption) (*Conversation, error)
 	AdminConvertConversationToPrivate(ctx context.Context, in *ConvertConversationToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error)
 	AdminConvertConversationToPublic(ctx context.Context, in *ConvertConversationToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error)
+	AdminBulkArchiveConversations(ctx context.Context, in *BulkConversationsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminBulkDeleteConversations(ctx context.Context, in *BulkConversationsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminConversationTeams(ctx context.Context, in *AdminConversationTeamsRequest, opts ...grpc.CallOption) (*AdminConversationTeamsResponse, error)
 	AdminSetConversationTeams(ctx context.Context, in *AdminConversationTeamsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 }
@@ -291,6 +295,26 @@ func (c *conversationMutationsServiceClient) AdminConvertConversationToPublic(ct
 	return out, nil
 }
 
+func (c *conversationMutationsServiceClient) AdminBulkArchiveConversations(ctx context.Context, in *BulkConversationsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminBulkArchiveConversations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminBulkDeleteConversations(ctx context.Context, in *BulkConversationsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminBulkDeleteConversations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *conversationMutationsServiceClient) AdminConversationTeams(ctx context.Context, in *AdminConversationTeamsRequest, opts ...grpc.CallOption) (*AdminConversationTeamsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminConversationTeamsResponse)
@@ -336,6 +360,8 @@ type ConversationMutationsServiceServer interface {
 	AdminInviteConversationMembers(context.Context, *InviteConversationMembersRequest) (*Conversation, error)
 	AdminConvertConversationToPrivate(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error)
 	AdminConvertConversationToPublic(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error)
+	AdminBulkArchiveConversations(context.Context, *BulkConversationsRequest) (*MutationResponse, error)
+	AdminBulkDeleteConversations(context.Context, *BulkConversationsRequest) (*MutationResponse, error)
 	AdminConversationTeams(context.Context, *AdminConversationTeamsRequest) (*AdminConversationTeamsResponse, error)
 	AdminSetConversationTeams(context.Context, *AdminConversationTeamsRequest) (*MutationResponse, error)
 }
@@ -409,6 +435,12 @@ func (UnimplementedConversationMutationsServiceServer) AdminConvertConversationT
 }
 func (UnimplementedConversationMutationsServiceServer) AdminConvertConversationToPublic(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminConvertConversationToPublic not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminBulkArchiveConversations(context.Context, *BulkConversationsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminBulkArchiveConversations not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminBulkDeleteConversations(context.Context, *BulkConversationsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminBulkDeleteConversations not implemented")
 }
 func (UnimplementedConversationMutationsServiceServer) AdminConversationTeams(context.Context, *AdminConversationTeamsRequest) (*AdminConversationTeamsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminConversationTeams not implemented")
@@ -814,6 +846,42 @@ func _ConversationMutationsService_AdminConvertConversationToPublic_Handler(srv 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConversationMutationsService_AdminBulkArchiveConversations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BulkConversationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminBulkArchiveConversations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminBulkArchiveConversations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminBulkArchiveConversations(ctx, req.(*BulkConversationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminBulkDeleteConversations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BulkConversationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminBulkDeleteConversations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminBulkDeleteConversations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminBulkDeleteConversations(ctx, req.(*BulkConversationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConversationMutationsService_AdminConversationTeams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminConversationTeamsRequest)
 	if err := dec(in); err != nil {
@@ -940,6 +1008,14 @@ var ConversationMutationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminConvertConversationToPublic",
 			Handler:    _ConversationMutationsService_AdminConvertConversationToPublic_Handler,
+		},
+		{
+			MethodName: "AdminBulkArchiveConversations",
+			Handler:    _ConversationMutationsService_AdminBulkArchiveConversations_Handler,
+		},
+		{
+			MethodName: "AdminBulkDeleteConversations",
+			Handler:    _ConversationMutationsService_AdminBulkDeleteConversations_Handler,
 		},
 		{
 			MethodName: "AdminConversationTeams",

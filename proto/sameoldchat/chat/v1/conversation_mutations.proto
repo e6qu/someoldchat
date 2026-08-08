@@ -103,6 +103,12 @@ message ConversationAccessGroupsResponse {
   repeated string group_ids = 1;
 }
 
+message BulkConversationsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string conversation_ids = 3;
+}
+
 message ConvertConversationToPrivateRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -147,6 +153,8 @@ service ConversationMutationsService {
   rpc AdminInviteConversationMembers(InviteConversationMembersRequest) returns (Conversation);
   rpc AdminConvertConversationToPrivate(ConvertConversationToPrivateRequest) returns (Conversation);
   rpc AdminConvertConversationToPublic(ConvertConversationToPrivateRequest) returns (Conversation);
+  rpc AdminBulkArchiveConversations(BulkConversationsRequest) returns (MutationResponse);
+  rpc AdminBulkDeleteConversations(BulkConversationsRequest) returns (MutationResponse);
   rpc AdminConversationTeams(AdminConversationTeamsRequest) returns (AdminConversationTeamsResponse);
   rpc AdminSetConversationTeams(AdminConversationTeamsRequest) returns (MutationResponse);
 }
