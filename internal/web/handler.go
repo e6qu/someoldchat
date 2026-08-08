@@ -6236,7 +6236,7 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 				name = participants
 			}
 		}
-	case conversation.PrivateFlag():
+	case conversation.Kind == domain.ConversationTypePrivate:
 		conversationType = "Private channel"
 	}
 	archiveVerb := "Archive"
@@ -11958,7 +11958,7 @@ func conversationMeta(conversation domain.Conversation) string {
 	if conversation.IsDirectOrGroup() {
 		return "Direct message"
 	}
-	if conversation.PrivateFlag() {
+	if conversation.Kind == domain.ConversationTypePrivate {
 		return "Private channel"
 	}
 	return "Channel"

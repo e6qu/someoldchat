@@ -1361,7 +1361,7 @@ func (s *Store) SetWorkspaceDefaultChannels(_ context.Context, id domain.Workspa
 	}
 	for _, channel := range channels {
 		conversation, exists := s.conversations[channel]
-		if !exists || conversation.WorkspaceID != id || conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+		if !exists || conversation.WorkspaceID != id || conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 			return domain.Workspace{}, store.ErrNotFound
 		}
 	}
@@ -2056,7 +2056,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.PrivateFlag() || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
+	if !conversation.IsDirectOrGroup() || len(members) < 2 {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
@@ -5008,7 +5008,7 @@ func (s *Store) setConversationVisibility(conversation domain.ConversationID, pr
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if value.IsDirectOrGroup() || value.PrivateFlag() == private {
+	if value.IsDirectOrGroup() || (value.Kind == domain.ConversationTypePrivate) == private {
 		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
 	value.Kind = domain.ConversationTypePublic
@@ -6128,7 +6128,7 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				continue
 			}
 		}
-		if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+		if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 			_, viewerMember := s.memberships[conversation.ID][user]
 			_, subjectMember := s.memberships[conversation.ID][memberUser]
 			if !viewerMember || !subjectMember {
@@ -6469,7 +6469,7 @@ func (s *Store) canViewActivitySourceLocked(workspace domain.WorkspaceID, user d
 	if !ok || !membership.Active {
 		return false
 	}
-	private := conversation.PrivateFlag() || conversation.IsDirectOrGroup()
+	private := conversation.Kind.OrPublic() != domain.ConversationTypePublic
 	if !private {
 		return conversation.WorkspaceID == workspace
 	}

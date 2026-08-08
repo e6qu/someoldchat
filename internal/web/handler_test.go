@@ -4321,7 +4321,7 @@ func TestDirectMessageDetailsReviewHistoryExpansionAndConvertInPlace(t *testing.
 		t.Fatalf("conversion status=%d location=%q body=%s", convertedResponse.Code, convertedResponse.Header().Get("Location"), convertedResponse.Body)
 	}
 	converted, err := s.GetConversation(ctx, group.ID)
-	if err != nil || converted.Name != "project-room" || !converted.PrivateFlag() || converted.IsDirectOrGroup() {
+	if err != nil || converted.Name != "project-room" || converted.Kind != domain.ConversationTypePrivate {
 		t.Fatalf("converted=%+v err=%v", converted, err)
 	}
 	history, err := messages.History(ctx, "T1", "U1", group.ID, domain.PageRequest{Limit: 10})

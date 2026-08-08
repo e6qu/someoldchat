@@ -1748,7 +1748,7 @@ func (m Messages) changeConversationAccessGroup(ctx context.Context, workspaceID
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() || groupID == "" {
+	if conversation.Kind != domain.ConversationTypePrivate || groupID == "" {
 		return ErrInvalidConversation
 	}
 	if _, err := m.Store.GetUserGroup(ctx, workspaceID, groupID); err != nil {
@@ -1797,7 +1797,7 @@ func (m Messages) AdminListConversationAccessGroups(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return nil, store.ErrNotFound
 	}
-	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind != domain.ConversationTypePrivate {
 		return nil, ErrInvalidConversation
 	}
 	return m.Store.ListConversationAccessGroups(ctx, workspaceID, conversationID)
@@ -4012,7 +4012,7 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	// refuses this too, inside the write transaction, which is where the race-free
 	// enforcement belongs — but every neighbouring method states its own
 	// precondition, and this one silently depended on a backend detail.
-	if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 		return domain.Conversation{}, store.ErrNotFound
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload(
@@ -4127,7 +4127,7 @@ func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	event, err := newEvent(workspaceID, userID, conversationPayload("conversation.converted_to_private", conversationID), time.Now().UTC())
@@ -4157,7 +4157,7 @@ func (m Messages) AdminConvertConversationToPublic(ctx context.Context, workspac
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind != domain.ConversationTypePrivate {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	teams, _, err := m.Store.ListConversationTeams(ctx, workspaceID, conversationID)

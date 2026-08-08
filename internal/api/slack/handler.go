@@ -4989,7 +4989,7 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		required = []auth.Scope{auth.ScopeIMWrite}
 	case conversation.Kind == domain.ConversationTypeMPIM:
 		required = []auth.Scope{auth.ScopeMPIMWrite}
-	case conversation.PrivateFlag():
+	case conversation.Kind == domain.ConversationTypePrivate:
 		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
 	case principal.TokenType == "bot" || principal.BotID != "":
 		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}

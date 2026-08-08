@@ -388,13 +388,13 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 			return []string{"im:history"}, nil
 		case conversation.Kind == domain.ConversationTypeMPIM:
 			return []string{"mpim:history"}, nil
-		case conversation.PrivateFlag():
+		case conversation.Kind == domain.ConversationTypePrivate:
 			return []string{"groups:history"}, nil
 		default:
 			return []string{"channels:history"}, nil
 		}
 	case strings.HasPrefix(event.Topic, "conversation."):
-		if conversation.PrivateFlag() || conversation.Kind == domain.ConversationTypeMPIM {
+		if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 			return []string{"groups:read"}, nil
 		}
 		return []string{"channels:read"}, nil
