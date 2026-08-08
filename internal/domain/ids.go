@@ -201,6 +201,16 @@ func NewUserGroupID() (UserGroupID, error) {
 	return UserGroupID("S" + strings.ToUpper(value[1:])), nil
 }
 
+// NewBarrierID mints an information barrier identifier. Slack prefixes one with
+// B, as it does a bot, and the two never share a table.
+func NewBarrierID() (BarrierID, error) {
+	value, err := PublicID("B")
+	if err != nil {
+		return "", err
+	}
+	return BarrierID("B" + strings.ToUpper(value[1:])), nil
+}
+
 func NewCallID() (CallID, error) { value, err := PublicID("call_"); return CallID(value), err }
 func NewIncomingWebhookID() (IncomingWebhookID, error) {
 	value, err := PublicID("wh_")

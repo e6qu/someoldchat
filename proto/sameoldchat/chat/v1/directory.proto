@@ -475,6 +475,37 @@ message RoleAssignmentPage {
   bool has_more = 3;
 }
 
+message InformationBarrier {
+  string id = 1;
+  string workspace_id = 2;
+  string primary_usergroup_id = 3;
+  repeated string barriered_from_ids = 4;
+  repeated string subjects = 5;
+  int64 updated_at = 6;
+}
+
+message BarrierMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string barrier_id = 3;
+  string primary_usergroup_id = 4;
+  repeated string barriered_from_ids = 5;
+  repeated string subjects = 6;
+}
+
+message BarriersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message InformationBarrierPage {
+  repeated InformationBarrier barriers = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
 message SessionSettings {
   string user_id = 1;
   string workspace_id = 2;
@@ -541,6 +572,10 @@ service DirectoryService {
   rpc AdminAddRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminRemoveRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminListRoleAssignments(RoleAssignmentsRequest) returns (RoleAssignmentPage);
+  rpc AdminCreateBarrier(BarrierMutationRequest) returns (InformationBarrier);
+  rpc AdminUpdateBarrier(BarrierMutationRequest) returns (InformationBarrier);
+  rpc AdminDeleteBarrier(BarrierMutationRequest) returns (MutationResponse);
+  rpc AdminBarriers(BarriersRequest) returns (InformationBarrierPage);
   rpc AdminSetSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
   rpc AdminClearSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
   rpc AdminSessionSettings(SessionSettingsMutationRequest) returns (SessionSettingsResponse);

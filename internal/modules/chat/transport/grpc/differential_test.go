@@ -227,6 +227,22 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}}))
 }
 
+// seedUserGroupParity gives the fixture two user groups, so a barrier has
+// something real to name on both compositions.
+func seedUserGroupParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_300, 0).UTC()
+	for _, group := range []domain.UserGroup{
+		{ID: "S1", WorkspaceID: "T1", Name: "Traders", Handle: "traders", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+		{ID: "S2", WorkspaceID: "T1", Name: "Analysts", Handle: "analysts", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+	} {
+		requireSeed(t, target.CreateUserGroup(context.Background(), group, events.Event{
+			ID: domain.EventID("evt_group_" + string(group.ID)), WorkspaceID: "T1", Topic: "subteam.created", CreatedAt: now,
+		}))
+	}
+}
+
 func seedFormParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedWorkflowParity(t, target)
@@ -770,6 +786,45 @@ func parityCases() []parityCase {
 					len(logs), more, len(integration.Logs),
 					badPage != nil, badRequests != nil, badStatus != nil,
 					memberInvites != nil, memberRequests != nil, memberLogs != nil,
+				}, nil
+			},
+		},
+		{
+			// A barrier that restricts a subset of the subjects is not a
+			// barrier, so both compositions must refuse one the same way.
+			name: "information barriers are built, listed, and refused identically",
+			seed: seedUserGroupParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				every := domain.BarrierSubjects()
+				created, err := chat.AdminCreateBarrier(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S2"}, every)
+				if err != nil {
+					return nil, err
+				}
+				partial := chat.AdminCreateBarrier
+				_, someSubjects := partial(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S2"}, []domain.BarrierSubject{domain.BarrierSubjectDirect})
+				_, itself := partial(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S1"}, every)
+				_, unknownGroup := partial(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S-nobody"}, every)
+				updated, err := chat.AdminUpdateBarrier(ctx, "T1", "UA", created.ID, "S2", []domain.UserGroupID{"S1"}, every)
+				if err != nil {
+					return nil, err
+				}
+				_, unknownBarrier := chat.AdminUpdateBarrier(ctx, "T1", "UA", "B-nobody", "S1", []domain.UserGroupID{"S2"}, every)
+				page, err := chat.AdminBarriers(ctx, "T1", "UA", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminDeleteBarrier(ctx, "T1", "UA", created.ID); err != nil {
+					return nil, err
+				}
+				missing := chat.AdminDeleteBarrier(ctx, "T1", "UA", created.ID)
+				left, err := chat.AdminBarriers(ctx, "T1", "UA", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					created.PrimaryGroupID, created.BarrieredFromIDs, created.Subjects,
+					updated.PrimaryGroupID, updated.BarrieredFromIDs, len(page.Barriers), len(left.Barriers),
+					someSubjects != nil, itself != nil, unknownGroup != nil, unknownBarrier != nil, missing != nil,
 				}, nil
 			},
 		},

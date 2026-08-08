@@ -1344,6 +1344,22 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const barrier = await client.apiCall("admin.barriers.create", {
+	primary_usergroup_id: usergroupId,
+	barriered_from_usergroup_ids: accessGroup.usergroup.id,
+	restricted_subjects: "im,mpim,call",
+});
+assert.equal(barrier.ok, true);
+assert.equal(barrier.barrier.restricted_subjects.length, 3);
+assert.equal((await client.apiCall("admin.barriers.update", {
+	barrier_id: barrier.barrier.id,
+	primary_usergroup_id: accessGroup.usergroup.id,
+	barriered_from_usergroup_ids: usergroupId,
+	restricted_subjects: "im,mpim,call",
+})).ok, true);
+assert.equal((await client.apiCall("admin.barriers.list")).barriers.length, 1);
+assert.equal((await client.apiCall("admin.barriers.delete", { barrier_id: barrier.barrier.id })).ok, true);
+
 assert.equal((await client.apiCall("admin.users.session.setSettings", {
 	user_ids: "U2",
 	duration: 43200,

@@ -122,6 +122,7 @@ type Store struct {
 	roleAssignments               map[string]domain.RoleAssignment
 	authPolicyEntities            map[string]domain.AuthPolicyEntity
 	sessionSettings               map[string]domain.SessionSettings
+	barriers                      map[domain.BarrierID]domain.InformationBarrier
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -307,6 +308,7 @@ func New() *Store {
 		roleAssignments:               make(map[string]domain.RoleAssignment),
 		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
 		sessionSettings:               make(map[string]domain.SessionSettings),
+		barriers:                      make(map[domain.BarrierID]domain.InformationBarrier),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -1822,6 +1824,76 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) CreateBarrier(_ context.Context, barrier domain.InformationBarrier, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.barriers[barrier.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if _, exists := s.userGroups[barrier.PrimaryGroupID]; !exists {
+		return store.ErrNotFound
+	}
+	s.barriers[barrier.ID] = barrier
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) UpdateBarrier(_ context.Context, barrier domain.InformationBarrier, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.barriers[barrier.ID]
+	if !exists || current.WorkspaceID != barrier.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.userGroups[barrier.PrimaryGroupID]; !exists {
+		return store.ErrNotFound
+	}
+	s.barriers[barrier.ID] = barrier
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteBarrier(_ context.Context, workspace domain.WorkspaceID, id domain.BarrierID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.barriers[id]
+	if !exists || current.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.barriers, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListBarriers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.InformationBarrierPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	barriers := make([]domain.InformationBarrier, 0, len(s.barriers))
+	for _, barrier := range s.barriers {
+		if barrier.WorkspaceID != workspace || string(barrier.ID) <= after {
+			continue
+		}
+		barriers = append(barriers, barrier)
+	}
+	sort.Slice(barriers, func(left, right int) bool { return barriers[left].ID < barriers[right].ID })
+	hasMore := len(barriers) > request.Limit
+	if hasMore {
+		barriers = barriers[:request.Limit]
+	}
+	page := domain.InformationBarrierPage{Barriers: barriers, HasMore: hasMore}
+	if hasMore && len(barriers) > 0 {
+		page.NextCursor, err = domain.NewListCursor(string(barriers[len(barriers)-1].ID))
+	}
+	return page, err
 }
 
 func (s *Store) SetSessionSettings(_ context.Context, settings []domain.SessionSettings, event events.Event) error {

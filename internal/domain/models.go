@@ -2291,6 +2291,59 @@ type RoleAssignmentPage struct {
 	HasMore     bool
 }
 
+type BarrierID string
+
+// BarrierSubject is what an information barrier stops. Slack declares three and
+// requires every barrier to restrict all three, so a barrier that restricts a
+// subset cannot be built.
+type BarrierSubject string
+
+const (
+	BarrierSubjectDirect      BarrierSubject = "im"
+	BarrierSubjectGroupDirect BarrierSubject = "mpim"
+	BarrierSubjectCall        BarrierSubject = "call"
+)
+
+// BarrierSubjects is every subject a barrier restricts, in the order Slack
+// reports them.
+func BarrierSubjects() []BarrierSubject {
+	return []BarrierSubject{BarrierSubjectDirect, BarrierSubjectGroupDirect, BarrierSubjectCall}
+}
+
+// ValidBarrierSubjects accepts exactly the three subjects, in any order and
+// without repeats. Slack refuses anything else, because a barrier that stops
+// direct messages but not calls is not a barrier.
+func ValidBarrierSubjects(subjects []BarrierSubject) bool {
+	seen := make(map[BarrierSubject]struct{}, len(subjects))
+	for _, subject := range subjects {
+		switch subject {
+		case BarrierSubjectDirect, BarrierSubjectGroupDirect, BarrierSubjectCall:
+			seen[subject] = struct{}{}
+		default:
+			return false
+		}
+	}
+	return len(seen) == len(BarrierSubjects())
+}
+
+// InformationBarrier stops one user group from reaching another. The barrier is
+// symmetric in effect but not in shape: Slack names one primary group and the
+// groups it is barriered from.
+type InformationBarrier struct {
+	ID               BarrierID
+	WorkspaceID      WorkspaceID
+	PrimaryGroupID   UserGroupID
+	BarrieredFromIDs []UserGroupID
+	Subjects         []BarrierSubject
+	UpdatedAt        time.Time
+}
+
+type InformationBarrierPage struct {
+	Barriers   []InformationBarrier
+	NextCursor Cursor
+	HasMore    bool
+}
+
 // SessionDuration is how long a session lives, counted in seconds. Slack states
 // the duration in seconds and refuses anything under eight hours, so a value
 // finer than a second means nothing. Holding it as time.Duration let one be

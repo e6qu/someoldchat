@@ -1090,21 +1090,45 @@ operations:
     deviations:
       - email_password is the only policy and USER the only entity type, which is every value Slack's reference declares.
   - method: admin.barriers.create
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.create/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.barriers.delete
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.delete/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.barriers.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.barriers.update
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.update/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.conversations.bulkArchive
     status: behavior-compatible
     provenance: slack-reference

@@ -3614,6 +3614,104 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminCreateBarrier builds an information barrier. Every named group is
+// checked before the barrier is stored, so a barrier never names a group that
+// does not exist and therefore stops nothing.
+func (m Messages) AdminCreateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	barrier, err := m.barrierValue(ctx, workspaceID, actorID, "", primary, barrieredFrom, subjects)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	id, err := domain.NewBarrierID()
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	barrier.ID = id
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("barrier.created", events.String("barrier_id", string(id))), barrier.UpdatedAt)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if err := m.Store.CreateBarrier(ctx, barrier, event); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return barrier, nil
+}
+
+// AdminUpdateBarrier replaces the groups and subjects one barrier holds.
+func (m Messages) AdminUpdateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	barrier, err := m.barrierValue(ctx, workspaceID, actorID, id, primary, barrieredFrom, subjects)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("barrier.updated", events.String("barrier_id", string(id))), barrier.UpdatedAt)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if err := m.Store.UpdateBarrier(ctx, barrier, event); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return barrier, nil
+}
+
+// AdminDeleteBarrier removes one barrier.
+func (m Messages) AdminDeleteBarrier(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.BarrierID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(id)) == "" {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("barrier.deleted", events.String("barrier_id", string(id))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteBarrier(ctx, workspaceID, id, event)
+}
+
+// AdminBarriers reports the workspace's barriers.
+func (m Messages) AdminBarriers(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, request domain.PageRequest) (domain.InformationBarrierPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	return m.Store.ListBarriers(ctx, workspaceID, request)
+}
+
+func (m Messages) barrierValue(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if primary == "" || len(barrieredFrom) == 0 || !domain.ValidBarrierSubjects(subjects) {
+		return domain.InformationBarrier{}, ErrInvalidUserGroup
+	}
+	if _, err := m.Store.GetUserGroup(ctx, workspaceID, primary); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	seen := make(map[domain.UserGroupID]struct{}, len(barrieredFrom))
+	groups := make([]domain.UserGroupID, 0, len(barrieredFrom))
+	for _, group := range barrieredFrom {
+		// A group barriered from itself would stop the group reaching itself,
+		// which is not a barrier and which no administrator means.
+		if group == primary {
+			return domain.InformationBarrier{}, ErrInvalidUserGroup
+		}
+		if _, repeated := seen[group]; repeated {
+			continue
+		}
+		if _, err := m.Store.GetUserGroup(ctx, workspaceID, group); err != nil {
+			return domain.InformationBarrier{}, err
+		}
+		seen[group] = struct{}{}
+		groups = append(groups, group)
+	}
+	if len(groups) == 0 {
+		return domain.InformationBarrier{}, ErrInvalidUserGroup
+	}
+	return domain.InformationBarrier{
+		ID: id, WorkspaceID: workspaceID, PrimaryGroupID: primary,
+		BarrieredFromIDs: groups, Subjects: domain.BarrierSubjects(), UpdatedAt: time.Now().UTC(),
+	}, nil
+}
+
 // AdminSetSessionSettings writes session settings for the named members. A
 // duration Slack refuses is refused here, so a caller never stores a setting
 // that silently becomes something else.

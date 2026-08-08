@@ -201,6 +201,11 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("POST /api/admin.barriers.create", h.adminBarriersCreate)
+	mux.HandleFunc("POST /api/admin.barriers.update", h.adminBarriersUpdate)
+	mux.HandleFunc("POST /api/admin.barriers.delete", h.adminBarriersDelete)
+	mux.HandleFunc("GET /api/admin.barriers.list", h.adminBarriersList)
+	mux.HandleFunc("POST /api/admin.barriers.list", h.adminBarriersList)
 	mux.HandleFunc("POST /api/admin.users.session.setSettings", h.adminUsersSessionSetSettings)
 	mux.HandleFunc("POST /api/admin.users.session.clearSettings", h.adminUsersSessionClearSettings)
 	mux.HandleFunc("GET /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
@@ -3235,6 +3240,121 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.barriers.create, update, delete and list govern who may reach whom.
+// Slack requires a barrier to restrict every subject it declares - direct
+// messages, group direct messages and calls - so a request naming a subset is
+// refused rather than stored as a barrier that stops only some of them.
+func (h Handler) adminBarriersCreate(w http.ResponseWriter, r *http.Request) {
+	h.writeBarrier(w, r, true)
+}
+
+func (h Handler) adminBarriersUpdate(w http.ResponseWriter, r *http.Request) {
+	h.writeBarrier(w, r, false)
+}
+
+func (h Handler) writeBarrier(w http.ResponseWriter, r *http.Request, creating bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminBarriersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	primary := domain.UserGroupID(strings.TrimSpace(fields["primary_usergroup_id"]))
+	barrieredFrom := parseIDList[domain.UserGroupID](fields["barriered_from_usergroup_ids"])
+	subjects := parseIDList[domain.BarrierSubject](fields["restricted_subjects"])
+	id := domain.BarrierID(strings.TrimSpace(fields["barrier_id"]))
+	if primary == "" || len(barrieredFrom) == 0 || !domain.ValidBarrierSubjects(subjects) || (!creating && id == "") {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	change := h.Messages.AdminUpdateBarrier
+	if creating {
+		change = func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, _ domain.BarrierID, primary domain.UserGroupID, from []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+			return h.Messages.AdminCreateBarrier(ctx, workspace, actor, primary, from, subjects)
+		}
+	}
+	barrier, err := change(r.Context(), principal.WorkspaceID, principal.UserID, id, primary, barrieredFrom, subjects)
+	if err != nil {
+		writeError(w, mapServiceError(err, "barrier_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "barrier": barrierResponse(barrier)})
+}
+
+func (h Handler) adminBarriersDelete(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminBarriersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	id := domain.BarrierID(strings.TrimSpace(fields["barrier_id"]))
+	if id == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminDeleteBarrier(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
+		writeError(w, mapServiceError(err, "barrier_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) adminBarriersList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminBarriersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminBarriers(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "barrier_not_found"))
+		return
+	}
+	barriers := make([]map[string]any, 0, len(page.Barriers))
+	for _, barrier := range page.Barriers {
+		barriers = append(barriers, barrierResponse(barrier))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "barriers": barriers,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+func barrierResponse(barrier domain.InformationBarrier) map[string]any {
+	barrieredFrom := make([]string, 0, len(barrier.BarrieredFromIDs))
+	for _, group := range barrier.BarrieredFromIDs {
+		barrieredFrom = append(barrieredFrom, string(group))
+	}
+	subjects := make([]string, 0, len(barrier.Subjects))
+	for _, subject := range barrier.Subjects {
+		subjects = append(subjects, string(subject))
+	}
+	return map[string]any{
+		"id":                        string(barrier.ID),
+		"primary_usergroup":         string(barrier.PrimaryGroupID),
+		"barriered_from_usergroups": barrieredFrom,
+		"restricted_subjects":       subjects,
+		"date_update":               barrier.UpdatedAt.UTC().Unix(),
+	}
 }
 
 // admin.users.session.setSettings, getSettings and clearSettings govern how

@@ -142,6 +142,7 @@ func runQualification(t *testing.T, open opener) {
 		{"role assignments agree on every profile", roleAssignmentsAgreeOnEveryProfile},
 		{"authentication policy entities agree on every profile", authPolicyEntitiesAgreeOnEveryProfile},
 		{"session settings are absent rather than zero", sessionSettingsAreAbsentRatherThanZero},
+		{"information barriers keep their groups and subjects", informationBarriersKeepTheirGroupsAndSubjects},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2061,5 +2062,79 @@ func sessionSettingsAreAbsentRatherThanZero(t *testing.T, open opener) {
 	absent := []domain.SessionSettings{{UserID: domain.UserID("U-absent-" + suffix), WorkspaceID: workspaceID, Duration: 12 * 60 * 60, UpdatedAt: now}}
 	if err := repository.SetSessionSettings(ctx, absent, event("session-absent", "user.session_settings_set")); err == nil {
 		t.Fatal("settings for a member outside the workspace were stored")
+	}
+}
+
+// informationBarriersKeepTheirGroupsAndSubjects holds the storage contract for
+// admin.barriers.*. The group list and the subject list are stored whole, so a
+// barrier that comes back with fewer groups than it went in with stops fewer
+// people than the administrator asked it to.
+func informationBarriersKeepTheirGroupsAndSubjects(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-barrier-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Barriers"}); err != nil {
+		t.Fatal(err)
+	}
+	creatorID := domain.UserID("U-barrier-" + suffix)
+	if err := repository.SeedUser(ctx, domain.User{ID: creatorID, WorkspaceID: workspaceID, Name: string(creatorID)}); err != nil {
+		t.Fatal(err)
+	}
+	groups := []domain.UserGroupID{domain.UserGroupID("S1-" + suffix), domain.UserGroupID("S2-" + suffix), domain.UserGroupID("S3-" + suffix)}
+	for index, group := range groups {
+		value := domain.UserGroup{ID: group, WorkspaceID: workspaceID, Name: string(group), Handle: fmt.Sprintf("group-%d-%s", index, suffix), Creator: creatorID, UpdatedBy: creatorID, CreatedAt: now, UpdatedAt: now}
+		if err := repository.CreateUserGroup(ctx, value, event("group-"+string(group), "subteam.created")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	barrier := domain.InformationBarrier{
+		ID: domain.BarrierID("B1-" + suffix), WorkspaceID: workspaceID, PrimaryGroupID: groups[0],
+		BarrieredFromIDs: []domain.UserGroupID{groups[1], groups[2]}, Subjects: domain.BarrierSubjects(), UpdatedAt: now,
+	}
+	if err := repository.CreateBarrier(ctx, barrier, event("barrier-create", "barrier.created")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateBarrier(ctx, barrier, event("barrier-again", "barrier.created")); err == nil {
+		t.Fatal("a repeated barrier identifier was accepted")
+	}
+	page, err := repository.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Barriers) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	stored := page.Barriers[0]
+	if stored.PrimaryGroupID != groups[0] || len(stored.BarrieredFromIDs) != 2 ||
+		stored.BarrieredFromIDs[0] != groups[1] || stored.BarrieredFromIDs[1] != groups[2] ||
+		len(stored.Subjects) != 3 || !domain.ValidBarrierSubjects(stored.Subjects) {
+		t.Fatalf("stored=%+v", stored)
+	}
+	barrier.PrimaryGroupID, barrier.BarrieredFromIDs = groups[1], []domain.UserGroupID{groups[0]}
+	if err := repository.UpdateBarrier(ctx, barrier, event("barrier-update", "barrier.updated")); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repository.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: 10})
+	if err != nil || len(updated.Barriers) != 1 || updated.Barriers[0].PrimaryGroupID != groups[1] || len(updated.Barriers[0].BarrieredFromIDs) != 1 {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	absent := barrier
+	absent.ID = domain.BarrierID("B-absent-" + suffix)
+	if err := repository.UpdateBarrier(ctx, absent, event("barrier-absent", "barrier.updated")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("update of a missing barrier error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.DeleteBarrier(ctx, workspaceID, barrier.ID, event("barrier-delete", "barrier.deleted")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteBarrier(ctx, workspaceID, barrier.ID, event("barrier-delete-again", "barrier.deleted")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("delete of a missing barrier error=%v, want %v", err, store.ErrNotFound)
+	}
+	left, err := repository.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: 10})
+	if err != nil || len(left.Barriers) != 0 {
+		t.Fatalf("left=%+v err=%v", left, err)
 	}
 }

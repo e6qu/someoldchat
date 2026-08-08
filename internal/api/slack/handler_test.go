@@ -205,7 +205,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -2167,6 +2167,81 @@ func TestAdminUsersSessionSettings(t *testing.T) {
 	after := call(t, http.MethodGet, "admin.users.session.getSettings?user_ids=U1", "")
 	if len(after["session_settings"].([]any)) != 0 || len(after["no_settings_applied"].([]any)) != 1 {
 		t.Fatalf("after=%v", after)
+	}
+}
+
+// TestAdminBarriers holds the admin.barriers.* contract. A barrier restricts
+// every subject Slack declares or it is refused: one that stopped direct
+// messages but not calls would read as a barrier and leave a way through.
+func TestAdminBarriers(t *testing.T) {
+	handler, target := testHandlerWithStore()
+	now := time.Now().UTC()
+	for _, group := range []domain.UserGroup{
+		{ID: "S1", WorkspaceID: "T1", Name: "Traders", Handle: "traders", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+		{ID: "S2", WorkspaceID: "T1", Name: "Analysts", Handle: "analysts", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := target.CreateUserGroup(context.Background(), group, events.Event{ID: domain.EventID("evt-group-" + string(group.ID)), WorkspaceID: "T1", ActorID: "U1", Topic: "subteam.created", Payload: string(group.ID), CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	created := call(t, http.MethodPost, "admin.barriers.create", "primary_usergroup_id=S1&barriered_from_usergroup_ids=S2&restricted_subjects=im,mpim,call")
+	barrier, ok := created["barrier"].(map[string]any)
+	if !ok || barrier["primary_usergroup"] != "S1" {
+		t.Fatalf("created=%v", created)
+	}
+	id := barrier["id"].(string)
+	if subjects := barrier["restricted_subjects"].([]any); len(subjects) != 3 {
+		t.Fatalf("restricted_subjects=%v", subjects)
+	}
+	for _, body := range []string{
+		"primary_usergroup_id=S1&barriered_from_usergroup_ids=S2&restricted_subjects=im",
+		"primary_usergroup_id=S1&barriered_from_usergroup_ids=S2&restricted_subjects=im,mpim,call,email",
+		"primary_usergroup_id=S1&restricted_subjects=im,mpim,call",
+		"barriered_from_usergroup_ids=S2&restricted_subjects=im,mpim,call",
+	} {
+		if refused := call(t, http.MethodPost, "admin.barriers.create", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	// A group barriered from itself is not a barrier.
+	if itself := call(t, http.MethodPost, "admin.barriers.create", "primary_usergroup_id=S1&barriered_from_usergroup_ids=S1&restricted_subjects=im,mpim,call"); itself["ok"] == true {
+		t.Fatalf("a group was barriered from itself: %v", itself)
+	}
+	updated := call(t, http.MethodPost, "admin.barriers.update", "barrier_id="+id+"&primary_usergroup_id=S2&barriered_from_usergroup_ids=S1&restricted_subjects=im,mpim,call")
+	if updated["barrier"].(map[string]any)["primary_usergroup"] != "S2" {
+		t.Fatalf("updated=%v", updated)
+	}
+	if missing := call(t, http.MethodPost, "admin.barriers.update", "barrier_id=B-nobody&primary_usergroup_id=S2&barriered_from_usergroup_ids=S1&restricted_subjects=im,mpim,call"); missing["error"] != "barrier_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+	listed := call(t, http.MethodGet, "admin.barriers.list", "")
+	if len(listed["barriers"].([]any)) != 1 {
+		t.Fatalf("listed=%v", listed)
+	}
+	if deleted := call(t, http.MethodPost, "admin.barriers.delete", "barrier_id="+id); deleted["ok"] != true {
+		t.Fatalf("deleted=%v", deleted)
+	}
+	if again := call(t, http.MethodPost, "admin.barriers.delete", "barrier_id="+id); again["error"] != "barrier_not_found" {
+		t.Fatalf("again=%v", again)
+	}
+	if left := call(t, http.MethodPost, "admin.barriers.list", ""); len(left["barriers"].([]any)) != 0 {
+		t.Fatalf("left=%v", left)
 	}
 }
 

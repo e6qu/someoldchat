@@ -340,6 +340,14 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// CreateBarrier stores a new information barrier.
+	CreateBarrier(context.Context, domain.InformationBarrier, events.Event) error
+	// UpdateBarrier replaces the groups and subjects one barrier holds.
+	UpdateBarrier(context.Context, domain.InformationBarrier, events.Event) error
+	// DeleteBarrier removes one barrier.
+	DeleteBarrier(context.Context, domain.WorkspaceID, domain.BarrierID, events.Event) error
+	// ListBarriers reports the workspace's barriers, newest identifier last.
+	ListBarriers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.InformationBarrierPage, error)
 	// SetSessionSettings writes one member's session settings, replacing what
 	// was there. A zero value clears them back to the workspace default.
 	SetSessionSettings(context.Context, []domain.SessionSettings, events.Event) error

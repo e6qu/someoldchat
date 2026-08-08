@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 152
+const schemaVersion = 153
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 153 {
+		// Information barriers. The two group lists are JSON because a barrier
+		// is read and written whole: no query ever asks which barriers name one
+		// group, so a join table would carry cost and no reader.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS information_barriers (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			primary_usergroup_id TEXT NOT NULL REFERENCES user_groups(id),
+			barriered_from TEXT NOT NULL DEFAULT '[]', subjects TEXT NOT NULL DEFAULT '[]',
+			updated_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate information barriers: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS information_barriers_workspace ON information_barriers(workspace_id, id)`); err != nil {
+			return fmt.Errorf("index information barriers: %w", err)
+		}
+	}
 	if version < 152 {
 		// Per-member session settings. A member with no row falls back to the
 		// workspace default, so absence is the default and not a zero row.
@@ -4670,6 +4686,131 @@ func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.Worksp
 		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
 	}
 	return page, err
+}
+
+func (s *Store) CreateBarrier(ctx context.Context, barrier domain.InformationBarrier, event events.Event) error {
+	return s.writeBarrier(ctx, barrier, event, true)
+}
+
+func (s *Store) UpdateBarrier(ctx context.Context, barrier domain.InformationBarrier, event events.Event) error {
+	return s.writeBarrier(ctx, barrier, event, false)
+}
+
+func (s *Store) writeBarrier(ctx context.Context, barrier domain.InformationBarrier, event events.Event, creating bool) error {
+	groups, err := json.Marshal(barrier.BarrieredFromIDs)
+	if err != nil {
+		return err
+	}
+	subjects, err := json.Marshal(barrier.Subjects)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if creating {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO information_barriers(id, workspace_id, primary_usergroup_id, barriered_from, subjects, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, barrier.ID, barrier.WorkspaceID, barrier.PrimaryGroupID, string(groups), string(subjects),
+			barrier.UpdatedAt.UTC().UnixNano()); err != nil {
+			return classify(err)
+		}
+	} else {
+		result, err := tx.ExecContext(ctx, `UPDATE information_barriers SET primary_usergroup_id = ?, barriered_from = ?, subjects = ?, updated_at = ?
+			WHERE id = ? AND workspace_id = ?`, barrier.PrimaryGroupID, string(groups), string(subjects),
+			barrier.UpdatedAt.UTC().UnixNano(), barrier.ID, barrier.WorkspaceID)
+		if err != nil {
+			return classify(err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return store.ErrNotFound
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteBarrier(ctx context.Context, workspace domain.WorkspaceID, id domain.BarrierID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM information_barriers WHERE id = ? AND workspace_id = ?`, id, workspace)
+	if err != nil {
+		return classify(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListBarriers(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.InformationBarrierPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, primary_usergroup_id, barriered_from, subjects, updated_at
+		FROM information_barriers WHERE workspace_id = ? AND id > ? ORDER BY id LIMIT ?`, workspace, after, request.Limit+1)
+	if err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	defer rows.Close()
+	barriers := make([]domain.InformationBarrier, 0, request.Limit+1)
+	for rows.Next() {
+		barrier, err := scanBarrier(rows)
+		if err != nil {
+			return domain.InformationBarrierPage{}, err
+		}
+		barriers = append(barriers, barrier)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	hasMore := len(barriers) > request.Limit
+	if hasMore {
+		barriers = barriers[:request.Limit]
+	}
+	page := domain.InformationBarrierPage{Barriers: barriers, HasMore: hasMore}
+	if hasMore && len(barriers) > 0 {
+		page.NextCursor, err = domain.NewListCursor(string(barriers[len(barriers)-1].ID))
+	}
+	return page, err
+}
+
+func scanBarrier(rows *sql.Rows) (domain.InformationBarrier, error) {
+	var barrier domain.InformationBarrier
+	var groups, subjects string
+	var updated int64
+	if err := rows.Scan(&barrier.ID, &barrier.WorkspaceID, &barrier.PrimaryGroupID, &groups, &subjects, &updated); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if err := json.Unmarshal([]byte(groups), &barrier.BarrieredFromIDs); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if err := json.Unmarshal([]byte(subjects), &barrier.Subjects); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	barrier.UpdatedAt = timeFromUnixNanoOrZero(updated)
+	return barrier, nil
 }
 
 func (s *Store) SetSessionSettings(ctx context.Context, settings []domain.SessionSettings, event events.Event) error {

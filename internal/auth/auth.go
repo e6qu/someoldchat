@@ -110,6 +110,10 @@ const (
 	// workspace membership, so admin.users does not cover it.
 	ScopeAdminRolesRead  Scope = "admin.roles:read"
 	ScopeAdminRolesWrite Scope = "admin.roles:write"
+	// An information barrier decides who may reach whom, which is a different
+	// authority from managing the groups it names.
+	ScopeAdminBarriersRead  Scope = "admin.barriers:read"
+	ScopeAdminBarriersWrite Scope = "admin.barriers:write"
 )
 
 type Principal struct {
@@ -568,6 +572,8 @@ var allScopes = []Scope{
 	ScopeAdminWorkflowsWrite,
 	ScopeAdminRolesRead,
 	ScopeAdminRolesWrite,
+	ScopeAdminBarriersRead,
+	ScopeAdminBarriersWrite,
 }
 
 // AllScopes returns a fresh copy on every call, so a caller that appends to or

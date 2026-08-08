@@ -1631,6 +1631,105 @@ func (r Remote) DiscoverableContacts(ctx context.Context, workspaceID domain.Wor
 	return users, nil
 }
 
+func (r Remote) AdminCreateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	out, err := r.directory.AdminCreateBarrier(ctx, barrierMutation(workspaceID, userID, "", primary, barrieredFrom, subjects))
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return decodeProtoBarrier(out), nil
+}
+
+func (r Remote) AdminUpdateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	out, err := r.directory.AdminUpdateBarrier(ctx, barrierMutation(workspaceID, userID, id, primary, barrieredFrom, subjects))
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return decodeProtoBarrier(out), nil
+}
+
+func (r Remote) AdminDeleteBarrier(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.BarrierID) error {
+	out, err := r.directory.AdminDeleteBarrier(ctx, barrierMutation(workspaceID, userID, id, "", nil, nil))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed barrier deletion was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminBarriers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.InformationBarrierPage, error) {
+	out, err := r.directory.AdminBarriers(ctx, &chatv1.BarriersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	barriers := make([]domain.InformationBarrier, 0, len(out.GetBarriers()))
+	for _, encoded := range out.GetBarriers() {
+		barriers = append(barriers, decodeProtoBarrier(encoded))
+	}
+	return domain.InformationBarrierPage{Barriers: barriers, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func barrierMutation(workspaceID domain.WorkspaceID, userID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) *chatv1.BarrierMutationRequest {
+	return &chatv1.BarrierMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), BarrierId: string(id),
+		PrimaryUsergroupId: string(primary), BarrieredFromIds: encodeUserGroupIDs(barrieredFrom),
+		Subjects: encodeBarrierSubjects(subjects),
+	}
+}
+
+func encodeUserGroupIDs(values []domain.UserGroupID) []string {
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, string(value))
+	}
+	return ids
+}
+
+func decodeUserGroupIDs(values []string) []domain.UserGroupID {
+	ids := make([]domain.UserGroupID, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, domain.UserGroupID(value))
+	}
+	return ids
+}
+
+func encodeBarrierSubjects(values []domain.BarrierSubject) []string {
+	subjects := make([]string, 0, len(values))
+	for _, value := range values {
+		subjects = append(subjects, string(value))
+	}
+	return subjects
+}
+
+func decodeBarrierSubjects(values []string) []domain.BarrierSubject {
+	subjects := make([]domain.BarrierSubject, 0, len(values))
+	for _, value := range values {
+		subjects = append(subjects, domain.BarrierSubject(value))
+	}
+	return subjects
+}
+
+func encodeProtoBarrier(value domain.InformationBarrier) *chatv1.InformationBarrier {
+	return &chatv1.InformationBarrier{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID),
+		PrimaryUsergroupId: string(value.PrimaryGroupID),
+		BarrieredFromIds:   encodeUserGroupIDs(value.BarrieredFromIDs),
+		Subjects:           encodeBarrierSubjects(value.Subjects),
+		UpdatedAt:          optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoBarrier(value *chatv1.InformationBarrier) domain.InformationBarrier {
+	return domain.InformationBarrier{
+		ID: domain.BarrierID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		PrimaryGroupID:   domain.UserGroupID(value.GetPrimaryUsergroupId()),
+		BarrieredFromIDs: decodeUserGroupIDs(value.GetBarrieredFromIds()),
+		Subjects:         decodeBarrierSubjects(value.GetSubjects()),
+		UpdatedAt:        optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
 func (r Remote) AdminSetSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID, settings domain.SessionSettings) error {
 	request := sessionSettingsMutation(workspaceID, userID, targets)
 	request.Settings = encodeProtoSessionSettings(settings)
@@ -5500,6 +5599,44 @@ func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleReque
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminCreateBarrier(ctx context.Context, input *chatv1.BarrierMutationRequest) (*chatv1.InformationBarrier, error) {
+	barrier, err := s.implementation.AdminCreateBarrier(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.UserGroupID(input.GetPrimaryUsergroupId()), decodeUserGroupIDs(input.GetBarrieredFromIds()), decodeBarrierSubjects(input.GetSubjects()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoBarrier(barrier), nil
+}
+
+func (s *Server) AdminUpdateBarrier(ctx context.Context, input *chatv1.BarrierMutationRequest) (*chatv1.InformationBarrier, error) {
+	barrier, err := s.implementation.AdminUpdateBarrier(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.BarrierID(input.GetBarrierId()), domain.UserGroupID(input.GetPrimaryUsergroupId()),
+		decodeUserGroupIDs(input.GetBarrieredFromIds()), decodeBarrierSubjects(input.GetSubjects()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoBarrier(barrier), nil
+}
+
+func (s *Server) AdminDeleteBarrier(ctx context.Context, input *chatv1.BarrierMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminDeleteBarrier(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.BarrierID(input.GetBarrierId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminBarriers(ctx context.Context, input *chatv1.BarriersRequest) (*chatv1.InformationBarrierPage, error) {
+	page, err := s.implementation.AdminBarriers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	barriers := make([]*chatv1.InformationBarrier, 0, len(page.Barriers))
+	for _, value := range page.Barriers {
+		barriers = append(barriers, encodeProtoBarrier(value))
+	}
+	return &chatv1.InformationBarrierPage{Barriers: barriers, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
 }
 
 func (s *Server) AdminSetSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.MutationResponse, error) {

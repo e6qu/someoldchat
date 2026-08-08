@@ -285,6 +285,10 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	AdminCreateBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserGroupID, []domain.BarrierSubject) (domain.InformationBarrier, error)
+	AdminUpdateBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.BarrierID, domain.UserGroupID, []domain.UserGroupID, []domain.BarrierSubject) (domain.InformationBarrier, error)
+	AdminDeleteBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.BarrierID) error
+	AdminBarriers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.InformationBarrierPage, error)
 	AdminSetSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, domain.SessionSettings) error
 	AdminClearSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) error
 	AdminSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) ([]domain.SessionSettings, error)
