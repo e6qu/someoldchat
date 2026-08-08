@@ -1861,6 +1861,77 @@ func decodeProtoAuthPolicyEntity(value *chatv1.AuthPolicyEntity) domain.AuthPoli
 	}
 }
 
+func (r Remote) AdminRequestExport(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind string, bounds map[string]int64) error {
+	out, err := r.directory.AdminRequestExport(ctx, &chatv1.ExportRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Kind: kind, Bounds: bounds,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed export request was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) RequestWorkflowStepResponsesExport(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, stepID string) error {
+	out, err := r.directory.RequestWorkflowStepResponsesExport(ctx, &chatv1.ExportRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID), StepId: stepID,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed step response export was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.AnomalyAllowList, error) {
+	out, err := r.directory.AdminAnomalyAllowList(ctx, &chatv1.AnomalyAllowListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return decodeProtoAnomalyAllowList(out), nil
+}
+
+func (r Remote) AdminSetAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, addresses, reasons []string) (domain.AnomalyAllowList, error) {
+	out, err := r.directory.AdminSetAnomalyAllowList(ctx, &chatv1.AnomalyAllowListRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+		IpAddresses: append([]string{}, addresses...), Reasons: append([]string{}, reasons...),
+	})
+	if err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return decodeProtoAnomalyAllowList(out), nil
+}
+
+func (r Remote) TeamBillingInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspacePlan, error) {
+	out, err := r.directory.TeamBillingInfo(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return "", err
+	}
+	return domain.WorkspacePlan(out.GetPlan()), nil
+}
+
+func encodeProtoAnomalyAllowList(value domain.AnomalyAllowList) *chatv1.AnomalyAllowList {
+	return &chatv1.AnomalyAllowList{
+		WorkspaceId: string(value.WorkspaceID),
+		IpAddresses: append([]string{}, value.IPAddresses...),
+		Reasons:     append([]string{}, value.Reasons...),
+		UpdatedAt:   optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoAnomalyAllowList(value *chatv1.AnomalyAllowList) domain.AnomalyAllowList {
+	return domain.AnomalyAllowList{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		IPAddresses: append([]string{}, value.GetIpAddresses()...),
+		Reasons:     append([]string{}, value.GetReasons()...),
+		UpdatedAt:   optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
 func (r Remote) AdminAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
 	out, err := r.directory.AdminAnalytics(ctx, &chatv1.AnalyticsRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Kind: string(kind), Day: optionalUnixNano(day),
@@ -5792,6 +5863,47 @@ func (s *Server) AdminAuthPolicyEntities(ctx context.Context, input *chatv1.Auth
 	}
 	return &chatv1.AuthPolicyEntityPage{Entities: entities, NextCursor: string(page.NextCursor),
 		HasMore: page.HasMore, TotalCount: int32(page.TotalCount)}, nil
+}
+
+func (s *Server) AdminRequestExport(ctx context.Context, input *chatv1.ExportRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminRequestExport(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetKind(), input.GetBounds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) RequestWorkflowStepResponsesExport(ctx context.Context, input *chatv1.ExportRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.RequestWorkflowStepResponsesExport(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetStepId()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminAnomalyAllowList(ctx context.Context, input *chatv1.AnomalyAllowListRequest) (*chatv1.AnomalyAllowList, error) {
+	value, err := s.implementation.AdminAnomalyAllowList(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAnomalyAllowList(value), nil
+}
+
+func (s *Server) AdminSetAnomalyAllowList(ctx context.Context, input *chatv1.AnomalyAllowListRequest) (*chatv1.AnomalyAllowList, error) {
+	value, err := s.implementation.AdminSetAnomalyAllowList(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetIpAddresses(), input.GetReasons())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAnomalyAllowList(value), nil
+}
+
+func (s *Server) TeamBillingInfo(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.BillingInfoResponse, error) {
+	plan, err := s.implementation.TeamBillingInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.BillingInfoResponse{Plan: string(plan)}, nil
 }
 
 func (s *Server) AdminAnalytics(ctx context.Context, input *chatv1.AnalyticsRequest) (*chatv1.AnalyticsResponse, error) {
@@ -10125,7 +10237,7 @@ func encodeProtoWorkspace(value domain.Workspace) *chatv1.Workspace {
 	for _, channel := range value.DefaultChannelIDs {
 		channels = append(channels, string(channel))
 	}
-	return &chatv1.Workspace{Id: string(value.ID), Domain: value.Domain, Name: value.Name, Description: value.Description, Discoverability: string(value.Discoverability), IconUrl: value.IconURL, DefaultChannelIds: channels}
+	return &chatv1.Workspace{Id: string(value.ID), Domain: value.Domain, Name: value.Name, Description: value.Description, Discoverability: string(value.Discoverability), IconUrl: value.IconURL, DefaultChannelIds: channels, Plan: string(value.Plan)}
 }
 
 func decodeProtoWorkspace(value *chatv1.Workspace) (domain.Workspace, error) {
@@ -10136,7 +10248,7 @@ func decodeProtoWorkspace(value *chatv1.Workspace) (domain.Workspace, error) {
 	for _, channel := range value.GetDefaultChannelIds() {
 		channels = append(channels, domain.ConversationID(channel))
 	}
-	return domain.Workspace{ID: domain.WorkspaceID(value.GetId()), Domain: value.GetDomain(), Name: value.GetName(), Description: value.GetDescription(), Discoverability: domain.WorkspaceDiscoverability(value.GetDiscoverability()), IconURL: value.GetIconUrl(), DefaultChannelIDs: channels}, nil
+	return domain.Workspace{ID: domain.WorkspaceID(value.GetId()), Domain: value.GetDomain(), Name: value.GetName(), Description: value.GetDescription(), Discoverability: domain.WorkspaceDiscoverability(value.GetDiscoverability()), IconURL: value.GetIconUrl(), DefaultChannelIDs: channels, Plan: domain.WorkspacePlan(value.GetPlan())}, nil
 }
 
 func encodeProtoWorkspacePage(value domain.WorkspacePage) *chatv1.WorkspacePage {

@@ -641,6 +641,10 @@ const functionSteps = await workflowClient.apiCall("functions.workflows.steps.li
 });
 assert.equal(functionSteps.ok, true);
 assert.equal(functionSteps.steps_versions[0].title, "Triage");
+assert.equal((await workflowClient.apiCall("functions.workflows.steps.responses.export", {
+  workflow_id: "WfQualification",
+  step_id: functionSteps.steps_versions[0].step_id ?? "triage",
+})).ok, true);
 assert.equal((await workflowClient.apiCall("functions.completeSuccess", {
   function_execution_id: "FxQualification",
   outputs: { result: "qualified by Node" },
@@ -1344,6 +1348,18 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const anomalyAllowList = await client.apiCall("admin.audit.anomaly.allow.getItem");
+assert.equal(anomalyAllowList.ok, true);
+assert.equal(anomalyAllowList.anomaly_allow_updated_item.ips.length, 0);
+assert.equal((await client.apiCall("admin.audit.anomaly.allow.updateItem", {
+	ip_addresses: "198.51.100.7",
+	reasons: "office",
+})).anomaly_allow_updated_item.ips.length, 1);
+assert.equal((await client.apiCall("team.billing.info")).ok, true);
+assert.equal((await client.apiCall("admin.users.unsupportedVersions.export", {
+	date_end_of_support: 1700000000,
+})).ok, true);
+
 const analyticsMetadata = await client.apiCall("admin.analytics.getFile", {
 	type: "public_channel",
 	metadata_only: true,

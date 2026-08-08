@@ -201,6 +201,13 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
+	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
+	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.updateItem", h.adminAuditAnomalyAllowUpdateItem)
+	mux.HandleFunc("GET /api/team.billing.info", h.teamBillingInfo)
+	mux.HandleFunc("POST /api/team.billing.info", h.teamBillingInfo)
+	mux.HandleFunc("POST /api/admin.users.unsupportedVersions.export", h.adminUsersUnsupportedVersionsExport)
+	mux.HandleFunc("POST /api/functions.workflows.steps.responses.export", h.functionsWorkflowsStepsResponsesExport)
 	mux.HandleFunc("GET /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
 	mux.HandleFunc("POST /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
 	mux.HandleFunc("GET /api/admin.analytics.messages.activity", h.adminAnalyticsMessagesActivity)
@@ -3269,6 +3276,142 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.audit.anomaly.allow.getItem and updateItem govern what audit does not
+// flag. A workspace that has set nothing answers an empty list rather than a
+// not-found: an empty allow list is the state a workspace starts in.
+func (h Handler) adminAuditAnomalyAllowGetItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuditLogsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if _, err := decodeFields(w, r); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	value, err := h.Messages.AdminAnomalyAllowList(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "anomaly_allow_updated_item": anomalyAllowListResponse(value)})
+}
+
+func (h Handler) adminAuditAnomalyAllowUpdateItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuditLogsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	addresses := parseIDList[string](fields["ip_addresses"])
+	reasons := parseIDList[string](fields["reasons"])
+	value, err := h.Messages.AdminSetAnomalyAllowList(r.Context(), principal.WorkspaceID, principal.UserID, addresses, reasons)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "anomaly_allow_updated_item": anomalyAllowListResponse(value)})
+}
+
+func anomalyAllowListResponse(value domain.AnomalyAllowList) map[string]any {
+	return map[string]any{"ips": value.IPAddresses, "reasons": value.Reasons}
+}
+
+// team.billing.info reports which plan the workspace is on. A workspace on the
+// free plan reports an empty plan, which is what Slack reports for one.
+func (h Handler) teamBillingInfo(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeTeamRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if _, err := decodeFields(w, r); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	plan, err := h.Messages.TeamBillingInfo(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plan": string(plan)})
+}
+
+// admin.users.unsupportedVersions.export and
+// functions.workflows.steps.responses.export ask for a report to be built and
+// sent. Slack acknowledges the request rather than answering the report, so
+// both answer ok once the request is recorded in the workspace journal - which
+// is what makes the request auditable rather than merely accepted.
+func (h Handler) adminUsersUnsupportedVersionsExport(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	endOfSupport, endErr := optionalEpochSeconds(fields["date_end_of_support"])
+	sessionsStarted, startErr := optionalEpochSeconds(fields["date_sessions_started"])
+	if endErr != nil || startErr != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminRequestExport(r.Context(), principal.WorkspaceID, principal.UserID, "unsupported_versions", map[string]int64{
+		"date_end_of_support": endOfSupport, "date_sessions_started": sessionsStarted,
+	}); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) functionsWorkflowsStepsResponsesExport(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeWorkflowStepsExecute)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	workflowID := strings.TrimSpace(fields["workflow_id"])
+	stepID := strings.TrimSpace(fields["step_id"])
+	if workflowID == "" || stepID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.RequestWorkflowStepResponsesExport(r.Context(), principal.WorkspaceID, principal.UserID,
+		domain.WorkflowID(workflowID), stepID); err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// optionalEpochSeconds reads an absent argument as no bound rather than as the
+// beginning of 1970.
+func optionalEpochSeconds(value string) (int64, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	seconds, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || seconds < 0 {
+		return 0, errors.New("invalid_arguments")
+	}
+	return seconds, nil
 }
 
 // admin.analytics.getFile answers a gzipped stream of JSON lines, which is what

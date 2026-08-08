@@ -285,6 +285,11 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	AdminRequestExport(context.Context, domain.WorkspaceID, domain.UserID, string, map[string]int64) error
+	RequestWorkflowStepResponsesExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) error
+	AdminAnomalyAllowList(context.Context, domain.WorkspaceID, domain.UserID) (domain.AnomalyAllowList, error)
+	AdminSetAnomalyAllowList(context.Context, domain.WorkspaceID, domain.UserID, []string, []string) (domain.AnomalyAllowList, error)
+	TeamBillingInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspacePlan, error)
 	AdminAnalytics(context.Context, domain.WorkspaceID, domain.UserID, domain.AnalyticsKind, time.Time) ([]domain.AnalyticsRow, error)
 	AppActivities(context.Context, domain.WorkspaceID, domain.AppID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)
 	AdminAppActivities(context.Context, domain.WorkspaceID, domain.UserID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)

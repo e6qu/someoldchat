@@ -147,6 +147,7 @@ func runQualification(t *testing.T, open opener) {
 		{"administrative channel batches are all or nothing", administrativeChannelBatchesAreAllOrNothing},
 		{"app activity filters by rank on every profile", appActivityFiltersByRank},
 		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
+		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2478,5 +2479,60 @@ func analyticsCountOneDayAndNotAnother(t *testing.T, open opener) {
 	}
 	if _, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsKind("hourly"), day); err == nil {
 		t.Fatal("an unknown analytics kind was accepted")
+	}
+}
+
+// anomalyAllowListIsEmptyNotMissing holds the storage contract for
+// admin.audit.anomaly.allow.*. A workspace that has set nothing answers an
+// empty list, because an empty allow list is the state a workspace starts in
+// and a not-found would read as a workspace that does not exist. The workspace
+// plan round-trips in the same contract: it is a new column, and a column that
+// does not survive a read is a setting that silently reverts.
+func anomalyAllowListIsEmptyNotMissing(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-anomaly-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Anomaly", Plan: domain.PlanPlus}); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := repository.GetWorkspace(ctx, workspaceID)
+	if err != nil || workspace.Plan != domain.PlanPlus {
+		t.Fatalf("workspace=%+v err=%v", workspace, err)
+	}
+	unset, err := repository.GetAnomalyAllowList(ctx, workspaceID)
+	if err != nil || unset.IPAddresses == nil || len(unset.IPAddresses) != 0 || unset.Reasons == nil || len(unset.Reasons) != 0 {
+		t.Fatalf("unset=%+v err=%v", unset, err)
+	}
+	value := domain.AnomalyAllowList{
+		WorkspaceID: workspaceID, IPAddresses: []string{"198.51.100.7"}, Reasons: []string{"office"}, UpdatedAt: now,
+	}
+	event := events.Event{ID: domain.EventID("evt-anomaly-" + suffix), WorkspaceID: workspaceID, Topic: "audit.anomaly_allow_list_set", Payload: "{}", CreatedAt: now}
+	if err := repository.SetAnomalyAllowList(ctx, value, event); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetAnomalyAllowList(ctx, workspaceID)
+	if err != nil || len(stored.IPAddresses) != 1 || stored.IPAddresses[0] != "198.51.100.7" || len(stored.Reasons) != 1 {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	// Writing again replaces the lists rather than adding to them.
+	value.IPAddresses, value.Reasons = []string{}, []string{}
+	replaced := events.Event{ID: domain.EventID("evt-anomaly-again-" + suffix), WorkspaceID: workspaceID, Topic: "audit.anomaly_allow_list_set", Payload: "{}", CreatedAt: now}
+	if err := repository.SetAnomalyAllowList(ctx, value, replaced); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repository.GetAnomalyAllowList(ctx, workspaceID)
+	if err != nil || len(cleared.IPAddresses) != 0 {
+		t.Fatalf("cleared=%+v err=%v", cleared, err)
+	}
+	// A workspace that does not exist cannot hold an allow list.
+	absent := value
+	absent.WorkspaceID = domain.WorkspaceID("T-absent-" + suffix)
+	missing := events.Event{ID: domain.EventID("evt-anomaly-absent-" + suffix), WorkspaceID: absent.WorkspaceID, Topic: "audit.anomaly_allow_list_set", Payload: "{}", CreatedAt: now}
+	if err := repository.SetAnomalyAllowList(ctx, absent, missing); err == nil {
+		t.Fatal("an allow list was stored for a workspace that does not exist")
 	}
 }

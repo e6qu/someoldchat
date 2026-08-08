@@ -1088,13 +1088,20 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.uninstall/
   - method: admin.audit.anomaly.allow.getItem
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.audit.anomaly.allow.getItem/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:anomalyAllowListIsEmptyNotMissing
   - method: admin.audit.anomaly.allow.updateItem
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.audit.anomaly.allow.updateItem/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.auth.policy.assignEntities
     status: behavior-compatible
     provenance: slack-reference
@@ -1343,9 +1350,14 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
   - method: admin.users.unsupportedVersions.export
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.unsupportedVersions.export/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - The request is acknowledged and recorded in the workspace journal; the report itself is not built or delivered.
   - method: admin.workflows.collaborators.add
     status: behavior-compatible
     provenance: slack-reference
@@ -1683,9 +1695,14 @@ operations:
       - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
   - method: functions.workflows.steps.responses.export
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.responses.export/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - The request is acknowledged and recorded in the workspace journal; the report itself is not built or delivered.
   - method: rtm.start
     status: sdk-compatible
     provenance: slack-reference
@@ -1717,9 +1734,12 @@ operations:
       - Remote files and Slack's private relevance ranking are not yet represented.
       - Highlight-marker behavior has not been differentially qualified.
   - method: team.billing.info
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.billing.info/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: team.externalTeams.disconnect
     status: behavior-compatible
     provenance: slack-reference

@@ -340,6 +340,12 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// GetAnomalyAllowList reports what audit is told not to flag. A workspace
+	// that has set nothing answers an empty list rather than not found: an
+	// empty allow list is the state a workspace starts in.
+	GetAnomalyAllowList(context.Context, domain.WorkspaceID) (domain.AnomalyAllowList, error)
+	// SetAnomalyAllowList replaces it.
+	SetAnomalyAllowList(context.Context, domain.AnomalyAllowList, events.Event) error
 	// AnalyticsRows reports one day of analytics, in entity-identifier order.
 	AnalyticsRows(context.Context, domain.WorkspaceID, domain.AnalyticsKind, time.Time) ([]domain.AnalyticsRow, error)
 	// RecordAppActivity appends one entry to an app's activity log.

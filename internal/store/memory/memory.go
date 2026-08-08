@@ -127,6 +127,7 @@ type Store struct {
 	aiExcludedConversations       map[domain.ConversationID]struct{}
 	conversationObjects           map[string]domain.LinkedObject
 	appActivities                 []domain.AppActivity
+	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -316,6 +317,7 @@ func New() *Store {
 		appConfigs:                    make(map[string]domain.AppConfig),
 		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
 		conversationObjects:           make(map[string]domain.LinkedObject),
+		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -1831,6 +1833,26 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) GetAnomalyAllowList(_ context.Context, workspace domain.WorkspaceID) (domain.AnomalyAllowList, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if value, exists := s.anomalyAllowLists[workspace]; exists {
+		return value, nil
+	}
+	return domain.AnomalyAllowList{WorkspaceID: workspace, IPAddresses: []string{}, Reasons: []string{}}, nil
+}
+
+func (s *Store) SetAnomalyAllowList(_ context.Context, value domain.AnomalyAllowList, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[value.WorkspaceID]; !exists {
+		return store.ErrNotFound
+	}
+	s.anomalyAllowLists[value.WorkspaceID] = value
+	s.outbox = append(s.outbox, event)
+	return nil
 }
 
 func (s *Store) AnalyticsRows(_ context.Context, workspace domain.WorkspaceID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {

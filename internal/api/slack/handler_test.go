@@ -206,7 +206,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -2586,6 +2586,65 @@ func TestAdminAnalytics(t *testing.T) {
 	}
 	if described := decode(t, get(t, "admin.analytics.messages.metadata", "")); len(described["fields"].([]any)) == 0 {
 		t.Fatalf("metadata=%v", described)
+	}
+}
+
+// TestAdminAuditBillingAndExports holds the audit allow list, the billing plan
+// and the two export requests. An empty allow list is the state a workspace
+// starts in, not a missing one, and an address without a reason is refused: an
+// exclusion nobody explained is one nobody can review later.
+func TestAdminAuditBillingAndExports(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	empty := call(t, http.MethodPost, "admin.audit.anomaly.allow.getItem", "")
+	item, ok := empty["anomaly_allow_updated_item"].(map[string]any)
+	if !ok || len(item["ips"].([]any)) != 0 {
+		t.Fatalf("empty=%v", empty)
+	}
+	updated := call(t, http.MethodPost, "admin.audit.anomaly.allow.updateItem", "ip_addresses=198.51.100.7,203.0.113.0/24&reasons=office")
+	stored := updated["anomaly_allow_updated_item"].(map[string]any)
+	if len(stored["ips"].([]any)) != 2 || len(stored["reasons"].([]any)) != 1 {
+		t.Fatalf("updated=%v", updated)
+	}
+	if read := call(t, http.MethodGet, "admin.audit.anomaly.allow.getItem", ""); len(read["anomaly_allow_updated_item"].(map[string]any)["ips"].([]any)) != 2 {
+		t.Fatalf("read=%v", read)
+	}
+	for _, body := range []string{"ip_addresses=198.51.100.7", "ip_addresses=the-office&reasons=office"} {
+		if refused := call(t, http.MethodPost, "admin.audit.anomaly.allow.updateItem", body); refused["ok"] == true {
+			t.Fatalf("body=%q was accepted: %v", body, refused)
+		}
+	}
+	if plan := call(t, http.MethodGet, "team.billing.info", ""); plan["ok"] != true {
+		t.Fatalf("plan=%v", plan)
+	}
+	if exported := call(t, http.MethodPost, "admin.users.unsupportedVersions.export", "date_end_of_support=1700000000"); exported["ok"] != true {
+		t.Fatalf("exported=%v", exported)
+	}
+	for _, body := range []string{"date_end_of_support=soon", "date_sessions_started=-1"} {
+		if refused := call(t, http.MethodPost, "admin.users.unsupportedVersions.export", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if noStep := call(t, http.MethodPost, "functions.workflows.steps.responses.export", "workflow_id=Wf1"); noStep["error"] != "invalid_arguments" {
+		t.Fatalf("noStep=%v", noStep)
+	}
+	if missing := call(t, http.MethodPost, "functions.workflows.steps.responses.export", "workflow_id=Wf-nobody&step_id=intake"); missing["ok"] == true {
+		t.Fatalf("an export was accepted for a workflow that is not here: %v", missing)
 	}
 }
 

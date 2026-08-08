@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 156
+const schemaVersion = 157
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1206,7 +1206,7 @@ func (s *Store) SeedWorkspace(ctx context.Context, value domain.Workspace) error
 	if !discoverability.Valid() {
 		return store.InvalidArgument("invalid workspace discoverability")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO workspaces(id, domain, name, description, discoverability, icon_url) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET domain = excluded.domain, name = excluded.name, description = excluded.description, discoverability = excluded.discoverability, icon_url = excluded.icon_url`, value.ID, value.Domain, value.Name, value.Description, discoverability, value.IconURL)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO workspaces(id, domain, name, description, discoverability, icon_url, plan) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET domain = excluded.domain, name = excluded.name, description = excluded.description, discoverability = excluded.discoverability, icon_url = excluded.icon_url, plan = excluded.plan`, value.ID, value.Domain, value.Name, value.Description, discoverability, value.IconURL, string(value.Plan))
 	return err
 }
 
@@ -3150,6 +3150,26 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 157 {
+		// The workspace's plan, and what audit is told not to flag. The plan is
+		// a column because every workspace has one; the allow list is its own
+		// table because most workspaces never set one.
+		columns, err := s.tableColumns(ctx, db, "workspaces")
+		if err != nil {
+			return err
+		}
+		if !columns["plan"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE workspaces ADD COLUMN plan TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate workspace plan: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS anomaly_allow_lists (
+			workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+			ip_addresses TEXT NOT NULL DEFAULT '[]', reasons TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate anomaly allow lists: %w", err)
+		}
+	}
 	if version < 156 {
 		// One app's activity log. The identifier is a row number rather than a
 		// public identifier because an entry is only ever read in order.
@@ -3970,7 +3990,7 @@ func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string
 
 func (s *Store) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (domain.Workspace, error) {
 	var value domain.Workspace
-	err := s.db.QueryRowContext(ctx, `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL)
+	err := s.db.QueryRowContext(ctx, `SELECT id, domain, name, description, discoverability, icon_url, plan FROM workspaces WHERE id = ?`, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL, &value.Plan)
 	if err := translateNotFound(err); err != nil {
 		return domain.Workspace{}, err
 	}
@@ -4022,7 +4042,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, eve
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workspaces(id, domain, name, description, discoverability, icon_url) VALUES (?, ?, ?, ?, ?, ?)`, value.ID, value.Domain, value.Name, value.Description, value.Discoverability, value.IconURL); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspaces(id, domain, name, description, discoverability, icon_url, plan) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.Domain, value.Name, value.Description, value.Discoverability, value.IconURL, string(value.Plan)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -4066,7 +4086,7 @@ const (
 	workspaceColumnIcon            workspaceColumn = "icon_url"
 )
 
-const selectWorkspaceStatement = `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`
+const selectWorkspaceStatement = `SELECT id, domain, name, description, discoverability, icon_url, plan FROM workspaces WHERE id = ?`
 
 func (s *Store) setWorkspaceColumn(ctx context.Context, id domain.WorkspaceID, column workspaceColumn, value any, event events.Event) (domain.Workspace, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -4095,7 +4115,7 @@ func (s *Store) setWorkspaceColumn(ctx context.Context, id domain.WorkspaceID, c
 // commits, so the returned value is the value this call wrote.
 func (s *Store) commitWorkspace(ctx context.Context, tx *sql.Tx, id domain.WorkspaceID) (domain.Workspace, error) {
 	var value domain.Workspace
-	if err := tx.QueryRowContext(ctx, selectWorkspaceStatement, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL); err != nil {
+	if err := tx.QueryRowContext(ctx, selectWorkspaceStatement, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL, &value.Plan); err != nil {
 		return domain.Workspace{}, translateNotFound(err)
 	}
 	value, err := s.withDefaultChannels(ctx, tx, value)
@@ -6968,6 +6988,56 @@ func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.Workspace
 // day already holds. Nothing is precomputed: an aggregate stored nightly would
 // be a second copy of the truth, and the two would disagree the first time a
 // message was deleted.
+func (s *Store) GetAnomalyAllowList(ctx context.Context, workspace domain.WorkspaceID) (domain.AnomalyAllowList, error) {
+	value := domain.AnomalyAllowList{WorkspaceID: workspace, IPAddresses: []string{}, Reasons: []string{}}
+	var addresses, reasons string
+	var updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT ip_addresses, reasons, updated_at FROM anomaly_allow_lists WHERE workspace_id = ?`, workspace).
+		Scan(&addresses, &reasons, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A workspace that has set nothing has an empty allow list; it is not
+		// a workspace that cannot be found.
+		return value, nil
+	}
+	if err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	if err := json.Unmarshal([]byte(addresses), &value.IPAddresses); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	if err := json.Unmarshal([]byte(reasons), &value.Reasons); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	value.UpdatedAt = timeFromUnixNanoOrZero(updated)
+	return value, nil
+}
+
+func (s *Store) SetAnomalyAllowList(ctx context.Context, value domain.AnomalyAllowList, event events.Event) error {
+	addresses, err := json.Marshal(value.IPAddresses)
+	if err != nil {
+		return err
+	}
+	reasons, err := json.Marshal(value.Reasons)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO anomaly_allow_lists(workspace_id, ip_addresses, reasons, updated_at)
+		VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET ip_addresses = excluded.ip_addresses,
+			reasons = excluded.reasons, updated_at = excluded.updated_at`,
+		value.WorkspaceID, string(addresses), string(reasons), value.UpdatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) AnalyticsRows(ctx context.Context, workspace domain.WorkspaceID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
 	if !kind.Valid() {
 		return nil, store.InvalidArgument("unknown analytics kind")

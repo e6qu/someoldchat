@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -3612,6 +3614,97 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 		}
 	}
 	return page, nil
+}
+
+// AdminRequestExport records a request for a report the workspace will build
+// and send. Slack acknowledges the request rather than answering the report, so
+// the acknowledgement has to leave a trace: an export nobody can find later is
+// the same as one that never ran.
+func (m Messages) AdminRequestExport(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind string, bounds map[string]int64) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	fields := []events.Field{events.String("export", kind)}
+	for _, name := range slices.Sorted(maps.Keys(bounds)) {
+		fields = append(fields, events.Int(name, bounds[name]))
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("export.requested", fields...), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// RequestWorkflowStepResponsesExport records a request for one step's collected
+// responses. Only somebody who may manage the workflow may ask, because the
+// responses are what its members submitted.
+func (m Messages) RequestWorkflowStepResponsesExport(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowID domain.WorkflowID, stepID string) error {
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return err
+	}
+	if err := m.requireWorkflowManager(ctx, workflow, actorID); err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("export.requested",
+		events.String("export", "workflow_step_responses"),
+		events.String("workflow_id", string(workflowID)),
+		events.String("step_id", stepID)), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// AdminAnomalyAllowList reports what audit is told not to flag.
+func (m Messages) AdminAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.AnomalyAllowList, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return m.Store.GetAnomalyAllowList(ctx, workspaceID)
+}
+
+// AdminSetAnomalyAllowList replaces the allow list. An address without a reason
+// is refused: an exclusion nobody explained is one nobody can review later.
+func (m Messages) AdminSetAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, addresses, reasons []string) (domain.AnomalyAllowList, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	if len(addresses) > 0 && len(reasons) == 0 {
+		return domain.AnomalyAllowList{}, ErrInvalidWorkspace
+	}
+	for _, address := range addresses {
+		if net.ParseIP(strings.TrimSpace(address)) == nil {
+			if _, _, err := net.ParseCIDR(strings.TrimSpace(address)); err != nil {
+				return domain.AnomalyAllowList{}, ErrInvalidWorkspace
+			}
+		}
+	}
+	value := domain.AnomalyAllowList{
+		WorkspaceID: workspaceID, IPAddresses: append([]string{}, addresses...),
+		Reasons: append([]string{}, reasons...), UpdatedAt: time.Now().UTC(),
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("audit.anomaly_allow_list_set",
+		events.Int("addresses", int64(len(value.IPAddresses)))), value.UpdatedAt)
+	if err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	if err := m.Store.SetAnomalyAllowList(ctx, value, event); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return value, nil
+}
+
+// TeamBillingInfo reports which plan the workspace is on.
+func (m Messages) TeamBillingInfo(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.WorkspacePlan, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return "", err
+	}
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return workspace.Plan, nil
 }
 
 // AdminAnalytics reports one day of analytics. The rows are computed from the

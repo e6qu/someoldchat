@@ -117,6 +117,9 @@ const (
 	// Analytics covers every member and channel at once, which is a wider read
 	// than any single administrative surface.
 	ScopeAdminAnalyticsRead Scope = "admin.analytics:read"
+	// The audit log records what everybody did, so reading it is its own
+	// authority and not part of managing members.
+	ScopeAuditLogsRead Scope = "auditlogs:read"
 )
 
 type Principal struct {
@@ -578,6 +581,7 @@ var allScopes = []Scope{
 	ScopeAdminBarriersRead,
 	ScopeAdminBarriersWrite,
 	ScopeAdminAnalyticsRead,
+	ScopeAuditLogsRead,
 }
 
 // AllScopes returns a fresh copy on every call, so a caller that appends to or

@@ -32,6 +32,7 @@ type Workspace struct {
 	Discoverability   WorkspaceDiscoverability
 	IconURL           string
 	DefaultChannelIDs []ConversationID
+	Plan              WorkspacePlan
 }
 
 type WorkspaceDiscoverability string
@@ -112,6 +113,36 @@ type WorkspaceMembershipSummary struct {
 type BillableUser struct {
 	UserID        UserID
 	BillingActive bool
+}
+
+// WorkspacePlan is which Slack plan a workspace is on. team.billing.info reports
+// it, and several enterprise surfaces are gated on it, so the value is a type
+// rather than a free string that could name a plan nobody sells.
+type WorkspacePlan string
+
+const (
+	PlanFree       WorkspacePlan = ""
+	PlanStandard   WorkspacePlan = "std"
+	PlanPlus       WorkspacePlan = "plus"
+	PlanEnterprise WorkspacePlan = "compliance"
+)
+
+func (plan WorkspacePlan) Valid() bool {
+	switch plan {
+	case PlanFree, PlanStandard, PlanPlus, PlanEnterprise:
+		return true
+	}
+	return false
+}
+
+// AnomalyAllowList is what an administrator has told audit not to flag. Slack
+// keeps the addresses and the reasons together, because a reason without the
+// address it excuses explains nothing.
+type AnomalyAllowList struct {
+	WorkspaceID WorkspaceID
+	IPAddresses []string
+	Reasons     []string
+	UpdatedAt   time.Time
 }
 
 type BillableInfo struct {

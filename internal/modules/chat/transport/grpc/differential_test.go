@@ -790,6 +790,43 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An empty allow list is the state a workspace starts in, not a
+			// missing one, and an address without a reason is refused. Both
+			// compositions must answer the same on each.
+			name: "audit allow list, billing plan, and export requests agree",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				empty, err := chat.AdminAnomalyAllowList(ctx, "T1", "UA")
+				if err != nil {
+					return nil, err
+				}
+				written, err := chat.AdminSetAnomalyAllowList(ctx, "T1", "UA", []string{"198.51.100.7", "203.0.113.0/24"}, []string{"office"})
+				if err != nil {
+					return nil, err
+				}
+				_, unexplained := chat.AdminSetAnomalyAllowList(ctx, "T1", "UA", []string{"198.51.100.7"}, nil)
+				_, notAnAddress := chat.AdminSetAnomalyAllowList(ctx, "T1", "UA", []string{"the office"}, []string{"office"})
+				read, err := chat.AdminAnomalyAllowList(ctx, "T1", "UA")
+				if err != nil {
+					return nil, err
+				}
+				plan, err := chat.TeamBillingInfo(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				exported := chat.AdminRequestExport(ctx, "T1", "UA", "unsupported_versions", map[string]int64{"date_end_of_support": 1700000000})
+				strangerExport := chat.AdminRequestExport(ctx, "T1", "U-nobody", "unsupported_versions", nil)
+				stepExport := chat.RequestWorkflowStepResponsesExport(ctx, "T1", "U1", "Wf1", "intake")
+				missingWorkflow := chat.RequestWorkflowStepResponsesExport(ctx, "T1", "U1", "Wf-nobody", "intake")
+				return []any{
+					empty.IPAddresses, empty.Reasons, written.IPAddresses, written.Reasons,
+					read.IPAddresses, read.Reasons, plan,
+					unexplained != nil, notAnAddress != nil, exported != nil, strangerExport != nil,
+					stepExport != nil, missingWorkflow != nil,
+				}, nil
+			},
+		},
+		{
 			// Analytics are computed from the day's own messages, so both
 			// compositions must count the same rows for the same day and refuse
 			// the same kinds.

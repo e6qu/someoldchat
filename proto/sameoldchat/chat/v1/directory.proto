@@ -58,6 +58,7 @@ message Workspace {
 	string icon_url = 5;
 	repeated string default_channel_ids = 6;
 	string domain = 7;
+	string plan = 8;
 }
 
 message WorkspaceRequest {
@@ -445,6 +446,33 @@ message AppApprovalPage {
   bool has_more = 3;
 }
 
+message ExportRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string kind = 3;
+  map<string, int64> bounds = 4;
+  string workflow_id = 5;
+  string step_id = 6;
+}
+
+message AnomalyAllowList {
+  string workspace_id = 1;
+  repeated string ip_addresses = 2;
+  repeated string reasons = 3;
+  int64 updated_at = 4;
+}
+
+message AnomalyAllowListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string ip_addresses = 3;
+  repeated string reasons = 4;
+}
+
+message BillingInfoResponse {
+  string plan = 1;
+}
+
 message AnalyticsRow {
   string kind = 1;
   string date = 2;
@@ -592,6 +620,11 @@ service DirectoryService {
   rpc UserExpiration(SetUserExpirationRequest) returns (UserExpirationResponse);
   rpc DiscoverableContacts(DiscoverableContactsRequest) returns (DiscoverableContactsResponse);
   rpc AdminAnalytics(AnalyticsRequest) returns (AnalyticsResponse);
+  rpc AdminRequestExport(ExportRequest) returns (MutationResponse);
+  rpc RequestWorkflowStepResponsesExport(ExportRequest) returns (MutationResponse);
+  rpc AdminAnomalyAllowList(AnomalyAllowListRequest) returns (AnomalyAllowList);
+  rpc AdminSetAnomalyAllowList(AnomalyAllowListRequest) returns (AnomalyAllowList);
+  rpc TeamBillingInfo(WorkspaceRequest) returns (BillingInfoResponse);
   rpc AdminAddRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminRemoveRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminListRoleAssignments(RoleAssignmentsRequest) returns (RoleAssignmentPage);
