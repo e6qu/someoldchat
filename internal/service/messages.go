@@ -3614,6 +3614,144 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminLookupConversations finds channels an administrator is looking for. A
+// filter left at its zero value is not applied, so a lookup that names nothing
+// answers every channel rather than none.
+func (m Messages) AdminLookupConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, lookup domain.ConversationLookup, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.ConversationPage{}, err
+	}
+	return m.Store.LookupConversations(ctx, workspaceID, lookup, request)
+}
+
+// AdminBulkMoveConversations reassigns channels to another workspace. Every
+// channel is checked before one moves, so a request naming a channel that is
+// not here moves nothing.
+func (m Messages) AdminBulkMoveConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID, target domain.WorkspaceID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 || target == "" {
+		return ErrInvalidConversation
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.bulk_moved",
+		events.String("target_team_id", string(target)), events.Int("channels", int64(len(ids)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.MoveConversations(ctx, workspaceID, ids, target, event)
+}
+
+// AdminSetConversationsExcludedFromAI keeps channels in or out of the
+// workspace's generative features.
+func (m Messages) AdminSetConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID, excluded bool) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.ai_exclusion_set",
+		events.Int("channels", int64(len(ids)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetConversationsExcludedFromAI(ctx, workspaceID, ids, excluded, event)
+}
+
+// AdminConversationsExcludedFromAI reports which of the named channels are out.
+func (m Messages) AdminConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) ([]domain.ConversationID, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, ErrInvalidConversation
+	}
+	return m.Store.ConversationsExcludedFromAI(ctx, workspaceID, ids)
+}
+
+// AdminLinkConversationObjects links one channel to external records.
+func (m Messages) AdminLinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.ConversationID, orgID string, recordIDs []string) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	orgID = strings.TrimSpace(orgID)
+	if id == "" || orgID == "" || len(recordIDs) == 0 {
+		return ErrInvalidConversation
+	}
+	now := time.Now().UTC()
+	objects := make([]domain.LinkedObject, 0, len(recordIDs))
+	for _, recordID := range recordIDs {
+		recordID = strings.TrimSpace(recordID)
+		if recordID == "" {
+			return ErrInvalidConversation
+		}
+		objects = append(objects, domain.LinkedObject{
+			ConversationID: id, WorkspaceID: workspaceID, OrgID: orgID, RecordID: recordID, CreatedAt: now,
+		})
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.objects_linked",
+		events.String("channel", string(id)), events.Int("records", int64(len(objects)))), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.LinkConversationObjects(ctx, objects, event)
+}
+
+// AdminUnlinkConversationObjects removes every link the named channels hold.
+func (m Messages) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.objects_unlinked",
+		events.Int("channels", int64(len(ids)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.UnlinkConversationObjects(ctx, workspaceID, ids, event)
+}
+
+// AdminConversationObjects reports the records one channel is linked to.
+func (m Messages) AdminConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.ConversationID) ([]domain.LinkedObject, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, ErrInvalidConversation
+	}
+	return m.Store.ListConversationObjects(ctx, workspaceID, id)
+}
+
+// AdminCreateConversationForObjects creates a channel and links it to an
+// external record in one step. The link is written after the channel exists, so
+// a link that cannot be stored leaves no channel behind either.
+func (m Messages) AdminCreateConversationForObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, name, orgID, recordID string, private bool) (domain.Conversation, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.Conversation{}, err
+	}
+	orgID, recordID = strings.TrimSpace(orgID), strings.TrimSpace(recordID)
+	if orgID == "" || recordID == "" {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	conversation, err := m.CreateConversation(ctx, workspaceID, actorID, name, private)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := m.AdminLinkConversationObjects(ctx, workspaceID, actorID, conversation.ID, orgID, []string{recordID}); err != nil {
+		if deleteErr := m.Store.DeleteConversation(ctx, workspaceID, conversation.ID, events.Event{
+			ID: domain.EventID("evt_unlinked_" + string(conversation.ID)), WorkspaceID: workspaceID, ActorID: actorID,
+			Topic: "channel.deleted", Payload: string(conversation.ID), CreatedAt: time.Now().UTC(),
+		}); deleteErr != nil {
+			return domain.Conversation{}, deleteErr
+		}
+		return domain.Conversation{}, err
+	}
+	return conversation, nil
+}
+
 // AdminAppConfigs reports the administrative configuration of the named apps.
 // An app nobody has configured answers Slack's defaults rather than being left
 // out, so the caller learns the effective answer for every app it named.

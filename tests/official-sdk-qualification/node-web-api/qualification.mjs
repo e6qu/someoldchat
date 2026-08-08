@@ -1344,6 +1344,31 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const channelLookup = await client.apiCall("admin.conversations.lookup", { limit: 100 });
+assert.equal(channelLookup.ok, true);
+assert.ok(channelLookup.channels.length > 0);
+assert.equal((await client.apiCall("admin.conversations.bulkSetExcludeFromSlackAi", {
+	channel_ids: "C1",
+	exclude_from_slack_ai_value: true,
+})).ok, true);
+assert.equal((await client.apiCall("admin.conversations.linkObjects", {
+	channel: "C1",
+	salesforce_org_id: "00D000",
+	record_id: "a01",
+})).ok, true);
+assert.equal((await client.apiCall("admin.conversations.unlinkObjects", { channels: "C1" })).ok, true);
+const recordChannel = await client.apiCall("admin.conversations.createForObjects", {
+	channel_name: "sdk-record-channel",
+	salesforce_org_id: "00D000",
+	object_id: "a02",
+});
+assert.equal(recordChannel.ok, true);
+assert.equal(typeof recordChannel.channel_id, "string");
+assert.equal((await client.apiCall("admin.conversations.bulkMove", {
+	channel_ids: recordChannel.channel_id,
+	target_team_id: "T1",
+})).ok, true);
+
 const appConfigs = await client.apiCall("admin.apps.config.lookup", { app_ids: "A1" });
 assert.equal(appConfigs.ok, true);
 assert.equal(appConfigs.configs[0].workflow_auth_strategy, "builder_choice");

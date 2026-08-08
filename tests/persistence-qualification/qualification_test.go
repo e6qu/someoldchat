@@ -144,6 +144,7 @@ func runQualification(t *testing.T, open opener) {
 		{"session settings are absent rather than zero", sessionSettingsAreAbsentRatherThanZero},
 		{"information barriers keep their groups and subjects", informationBarriersKeepTheirGroupsAndSubjects},
 		{"app configuration and resolution survive on every profile", appConfigurationAndResolutionSurvive},
+		{"administrative channel batches are all or nothing", administrativeChannelBatchesAreAllOrNothing},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2213,5 +2214,98 @@ func appConfigurationAndResolutionSurvive(t *testing.T, open opener) {
 	}
 	if err := repository.ClearAppApproval(ctx, workspaceID, appID, event("clear-twice", "app.resolution_cleared")); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("second clear error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// administrativeChannelBatchesAreAllOrNothing holds the storage contract for
+// admin.conversations.bulkMove, bulkSetExcludeFromSlackAi, linkObjects and
+// unlinkObjects. A batch that names a channel the workspace does not hold
+// changes nothing at all: a partly applied batch is worse than a refused one,
+// because the administrator would not know which half landed.
+func administrativeChannelBatchesAreAllOrNothing(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-chanadmin-" + suffix)
+	otherID := domain.WorkspaceID("T-chanadmin-other-" + suffix)
+	userID := domain.UserID("U-chanadmin-" + suffix)
+	first := domain.ConversationID("C-chanadmin-a-" + suffix)
+	second := domain.ConversationID("C-chanadmin-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	for _, workspace := range []domain.WorkspaceID{workspaceID, otherID} {
+		if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspace, Name: string(workspace)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.ConversationID{first, second} {
+		if err := repository.SeedConversation(ctx, domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	absent := domain.ConversationID("C-absent-" + suffix)
+	// A batch naming a channel that is not here leaves the others untouched.
+	if err := repository.SetConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first, absent}, true, event("exclude-bad", "channel.ai_exclusion_set")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("exclusion naming a missing channel error=%v, want %v", err, store.ErrNotFound)
+	}
+	if excluded, err := repository.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first, second}); err != nil || len(excluded) != 0 {
+		t.Fatalf("a refused batch left rows behind: %+v err=%v", excluded, err)
+	}
+	if err := repository.SetConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first}, true, event("exclude", "channel.ai_exclusion_set")); err != nil {
+		t.Fatal(err)
+	}
+	excluded, err := repository.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first, second})
+	if err != nil || len(excluded) != 1 || excluded[0] != first {
+		t.Fatalf("excluded=%+v err=%v", excluded, err)
+	}
+	if err := repository.SetConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first}, false, event("include", "channel.ai_exclusion_set")); err != nil {
+		t.Fatal(err)
+	}
+	if back, err := repository.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first}); err != nil || len(back) != 0 {
+		t.Fatalf("back=%+v err=%v", back, err)
+	}
+	// Links are keyed by the triple, so the same record twice adds no row.
+	objects := []domain.LinkedObject{
+		{ConversationID: first, WorkspaceID: workspaceID, OrgID: "00D000", RecordID: "a02", CreatedAt: now},
+		{ConversationID: first, WorkspaceID: workspaceID, OrgID: "00D000", RecordID: "a01", CreatedAt: now},
+	}
+	if err := repository.LinkConversationObjects(ctx, objects, event("link", "channel.objects_linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.LinkConversationObjects(ctx, objects, event("link-again", "channel.objects_linked")); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := repository.ListConversationObjects(ctx, workspaceID, first)
+	if err != nil || len(linked) != 2 || linked[0].RecordID != "a01" || linked[1].RecordID != "a02" {
+		t.Fatalf("linked=%+v err=%v", linked, err)
+	}
+	if err := repository.UnlinkConversationObjects(ctx, workspaceID, []domain.ConversationID{first}, event("unlink", "channel.objects_unlinked")); err != nil {
+		t.Fatal(err)
+	}
+	if left, err := repository.ListConversationObjects(ctx, workspaceID, first); err != nil || len(left) != 0 {
+		t.Fatalf("left=%+v err=%v", left, err)
+	}
+	// A move to a workspace that does not exist moves nothing.
+	if err := repository.MoveConversations(ctx, workspaceID, []domain.ConversationID{first}, domain.WorkspaceID("T-nobody-"+suffix), event("move-bad", "channel.bulk_moved")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("move to a missing workspace error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.MoveConversations(ctx, workspaceID, []domain.ConversationID{first}, otherID, event("move", "channel.bulk_moved")); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := repository.GetConversation(ctx, first)
+	if err != nil || moved.WorkspaceID != otherID {
+		t.Fatalf("moved=%+v err=%v", moved, err)
+	}
+	// The lookup answers the channels the workspace still holds.
+	page, err := repository.LookupConversations(ctx, workspaceID, domain.ConversationLookup{}, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].ID != second {
+		t.Fatalf("lookup=%+v err=%v", page, err)
 	}
 }

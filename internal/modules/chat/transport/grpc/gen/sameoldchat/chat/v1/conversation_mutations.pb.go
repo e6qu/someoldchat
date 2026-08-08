@@ -1249,6 +1249,678 @@ func (x *AdminConversationTeamsResponse) GetHasMore() bool {
 	return false
 }
 
+type LinkedObject struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ConversationId string                 `protobuf:"bytes,1,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	WorkspaceId    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	OrgId          string                 `protobuf:"bytes,3,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	RecordId       string                 `protobuf:"bytes,4,opt,name=record_id,json=recordId,proto3" json:"record_id,omitempty"`
+	CreatedAt      int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *LinkedObject) Reset() {
+	*x = LinkedObject{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LinkedObject) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LinkedObject) ProtoMessage() {}
+
+func (x *LinkedObject) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LinkedObject.ProtoReflect.Descriptor instead.
+func (*LinkedObject) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *LinkedObject) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *LinkedObject) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *LinkedObject) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *LinkedObject) GetRecordId() string {
+	if x != nil {
+		return x.RecordId
+	}
+	return ""
+}
+
+func (x *LinkedObject) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+type ConversationLookupRequest struct {
+	state                     protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId               string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId                    string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TeamIds                   []string               `protobuf:"bytes,3,rep,name=team_ids,json=teamIds,proto3" json:"team_ids,omitempty"`
+	LastMessageActivityBefore int64                  `protobuf:"varint,4,opt,name=last_message_activity_before,json=lastMessageActivityBefore,proto3" json:"last_message_activity_before,omitempty"`
+	MaxMemberCount            int32                  `protobuf:"varint,5,opt,name=max_member_count,json=maxMemberCount,proto3" json:"max_member_count,omitempty"`
+	Limit                     int32                  `protobuf:"varint,6,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor                    string                 `protobuf:"bytes,7,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *ConversationLookupRequest) Reset() {
+	*x = ConversationLookupRequest{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConversationLookupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConversationLookupRequest) ProtoMessage() {}
+
+func (x *ConversationLookupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConversationLookupRequest.ProtoReflect.Descriptor instead.
+func (*ConversationLookupRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ConversationLookupRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ConversationLookupRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ConversationLookupRequest) GetTeamIds() []string {
+	if x != nil {
+		return x.TeamIds
+	}
+	return nil
+}
+
+func (x *ConversationLookupRequest) GetLastMessageActivityBefore() int64 {
+	if x != nil {
+		return x.LastMessageActivityBefore
+	}
+	return 0
+}
+
+func (x *ConversationLookupRequest) GetMaxMemberCount() int32 {
+	if x != nil {
+		return x.MaxMemberCount
+	}
+	return 0
+}
+
+func (x *ConversationLookupRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ConversationLookupRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type BulkMoveConversationsRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationIds []string               `protobuf:"bytes,3,rep,name=conversation_ids,json=conversationIds,proto3" json:"conversation_ids,omitempty"`
+	TargetTeamId    string                 `protobuf:"bytes,4,opt,name=target_team_id,json=targetTeamId,proto3" json:"target_team_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *BulkMoveConversationsRequest) Reset() {
+	*x = BulkMoveConversationsRequest{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BulkMoveConversationsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BulkMoveConversationsRequest) ProtoMessage() {}
+
+func (x *BulkMoveConversationsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BulkMoveConversationsRequest.ProtoReflect.Descriptor instead.
+func (*BulkMoveConversationsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *BulkMoveConversationsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *BulkMoveConversationsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *BulkMoveConversationsRequest) GetConversationIds() []string {
+	if x != nil {
+		return x.ConversationIds
+	}
+	return nil
+}
+
+func (x *BulkMoveConversationsRequest) GetTargetTeamId() string {
+	if x != nil {
+		return x.TargetTeamId
+	}
+	return ""
+}
+
+type ConversationAIExclusionRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationIds []string               `protobuf:"bytes,3,rep,name=conversation_ids,json=conversationIds,proto3" json:"conversation_ids,omitempty"`
+	Excluded        bool                   `protobuf:"varint,4,opt,name=excluded,proto3" json:"excluded,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ConversationAIExclusionRequest) Reset() {
+	*x = ConversationAIExclusionRequest{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConversationAIExclusionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConversationAIExclusionRequest) ProtoMessage() {}
+
+func (x *ConversationAIExclusionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConversationAIExclusionRequest.ProtoReflect.Descriptor instead.
+func (*ConversationAIExclusionRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ConversationAIExclusionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ConversationAIExclusionRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ConversationAIExclusionRequest) GetConversationIds() []string {
+	if x != nil {
+		return x.ConversationIds
+	}
+	return nil
+}
+
+func (x *ConversationAIExclusionRequest) GetExcluded() bool {
+	if x != nil {
+		return x.Excluded
+	}
+	return false
+}
+
+type ConversationAIExclusionResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ConversationIds []string               `protobuf:"bytes,1,rep,name=conversation_ids,json=conversationIds,proto3" json:"conversation_ids,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ConversationAIExclusionResponse) Reset() {
+	*x = ConversationAIExclusionResponse{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConversationAIExclusionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConversationAIExclusionResponse) ProtoMessage() {}
+
+func (x *ConversationAIExclusionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConversationAIExclusionResponse.ProtoReflect.Descriptor instead.
+func (*ConversationAIExclusionResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ConversationAIExclusionResponse) GetConversationIds() []string {
+	if x != nil {
+		return x.ConversationIds
+	}
+	return nil
+}
+
+type LinkConversationObjectsRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	OrgId          string                 `protobuf:"bytes,4,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	RecordIds      []string               `protobuf:"bytes,5,rep,name=record_ids,json=recordIds,proto3" json:"record_ids,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *LinkConversationObjectsRequest) Reset() {
+	*x = LinkConversationObjectsRequest{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LinkConversationObjectsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LinkConversationObjectsRequest) ProtoMessage() {}
+
+func (x *LinkConversationObjectsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LinkConversationObjectsRequest.ProtoReflect.Descriptor instead.
+func (*LinkConversationObjectsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *LinkConversationObjectsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *LinkConversationObjectsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *LinkConversationObjectsRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *LinkConversationObjectsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *LinkConversationObjectsRequest) GetRecordIds() []string {
+	if x != nil {
+		return x.RecordIds
+	}
+	return nil
+}
+
+type UnlinkConversationObjectsRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationIds []string               `protobuf:"bytes,3,rep,name=conversation_ids,json=conversationIds,proto3" json:"conversation_ids,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *UnlinkConversationObjectsRequest) Reset() {
+	*x = UnlinkConversationObjectsRequest{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnlinkConversationObjectsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnlinkConversationObjectsRequest) ProtoMessage() {}
+
+func (x *UnlinkConversationObjectsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnlinkConversationObjectsRequest.ProtoReflect.Descriptor instead.
+func (*UnlinkConversationObjectsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *UnlinkConversationObjectsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *UnlinkConversationObjectsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *UnlinkConversationObjectsRequest) GetConversationIds() []string {
+	if x != nil {
+		return x.ConversationIds
+	}
+	return nil
+}
+
+type ConversationObjectsRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ConversationObjectsRequest) Reset() {
+	*x = ConversationObjectsRequest{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConversationObjectsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConversationObjectsRequest) ProtoMessage() {}
+
+func (x *ConversationObjectsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConversationObjectsRequest.ProtoReflect.Descriptor instead.
+func (*ConversationObjectsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ConversationObjectsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ConversationObjectsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ConversationObjectsRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+type ConversationObjectsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Objects       []*LinkedObject        `protobuf:"bytes,1,rep,name=objects,proto3" json:"objects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConversationObjectsResponse) Reset() {
+	*x = ConversationObjectsResponse{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConversationObjectsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConversationObjectsResponse) ProtoMessage() {}
+
+func (x *ConversationObjectsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConversationObjectsResponse.ProtoReflect.Descriptor instead.
+func (*ConversationObjectsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ConversationObjectsResponse) GetObjects() []*LinkedObject {
+	if x != nil {
+		return x.Objects
+	}
+	return nil
+}
+
+type CreateConversationForObjectsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	OrgId         string                 `protobuf:"bytes,4,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	RecordId      string                 `protobuf:"bytes,5,opt,name=record_id,json=recordId,proto3" json:"record_id,omitempty"`
+	IsPrivate     bool                   `protobuf:"varint,6,opt,name=is_private,json=isPrivate,proto3" json:"is_private,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateConversationForObjectsRequest) Reset() {
+	*x = CreateConversationForObjectsRequest{}
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateConversationForObjectsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateConversationForObjectsRequest) ProtoMessage() {}
+
+func (x *CreateConversationForObjectsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateConversationForObjectsRequest.ProtoReflect.Descriptor instead.
+func (*CreateConversationForObjectsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *CreateConversationForObjectsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CreateConversationForObjectsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CreateConversationForObjectsRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateConversationForObjectsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *CreateConversationForObjectsRequest) GetRecordId() string {
+	if x != nil {
+		return x.RecordId
+	}
+	return ""
+}
+
+func (x *CreateConversationForObjectsRequest) GetIsPrivate() bool {
+	if x != nil {
+		return x.IsPrivate
+	}
+	return false
+}
+
 var File_sameoldchat_chat_v1_conversation_mutations_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc = "" +
@@ -1342,8 +2014,68 @@ const file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc = "" +
 	"\bteam_ids\x18\x01 \x03(\tR\ateamIds\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\x9d\x17\n" +
-	"\x1cConversationMutationsService\x12c\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xad\x01\n" +
+	"\fLinkedObject\x12'\n" +
+	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x15\n" +
+	"\x06org_id\x18\x03 \x01(\tR\x05orgId\x12\x1b\n" +
+	"\trecord_id\x18\x04 \x01(\tR\brecordId\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03R\tcreatedAt\"\x8b\x02\n" +
+	"\x19ConversationLookupRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x19\n" +
+	"\bteam_ids\x18\x03 \x03(\tR\ateamIds\x12?\n" +
+	"\x1clast_message_activity_before\x18\x04 \x01(\x03R\x19lastMessageActivityBefore\x12(\n" +
+	"\x10max_member_count\x18\x05 \x01(\x05R\x0emaxMemberCount\x12\x14\n" +
+	"\x05limit\x18\x06 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\a \x01(\tR\x06cursor\"\xab\x01\n" +
+	"\x1cBulkMoveConversationsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12)\n" +
+	"\x10conversation_ids\x18\x03 \x03(\tR\x0fconversationIds\x12$\n" +
+	"\x0etarget_team_id\x18\x04 \x01(\tR\ftargetTeamId\"\xa3\x01\n" +
+	"\x1eConversationAIExclusionRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12)\n" +
+	"\x10conversation_ids\x18\x03 \x03(\tR\x0fconversationIds\x12\x1a\n" +
+	"\bexcluded\x18\x04 \x01(\bR\bexcluded\"L\n" +
+	"\x1fConversationAIExclusionResponse\x12)\n" +
+	"\x10conversation_ids\x18\x01 \x03(\tR\x0fconversationIds\"\xbb\x01\n" +
+	"\x1eLinkConversationObjectsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x15\n" +
+	"\x06org_id\x18\x04 \x01(\tR\x05orgId\x12\x1d\n" +
+	"\n" +
+	"record_ids\x18\x05 \x03(\tR\trecordIds\"\x89\x01\n" +
+	" UnlinkConversationObjectsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12)\n" +
+	"\x10conversation_ids\x18\x03 \x03(\tR\x0fconversationIds\"\x81\x01\n" +
+	"\x1aConversationObjectsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\"Z\n" +
+	"\x1bConversationObjectsResponse\x12;\n" +
+	"\aobjects\x18\x01 \x03(\v2!.sameoldchat.chat.v1.LinkedObjectR\aobjects\"\xc8\x01\n" +
+	"#CreateConversationForObjectsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x15\n" +
+	"\x06org_id\x18\x04 \x01(\tR\x05orgId\x12\x1b\n" +
+	"\trecord_id\x18\x05 \x01(\tR\brecordId\x12\x1d\n" +
+	"\n" +
+	"is_private\x18\x06 \x01(\bR\tisPrivate2\x9a\x1f\n" +
+	"\x1cConversationMutationsService\x12q\n" +
+	"\x18AdminLookupConversations\x12..sameoldchat.chat.v1.ConversationLookupRequest\x1a%.sameoldchat.chat.v1.ConversationPage\x12v\n" +
+	"\x1aAdminBulkMoveConversations\x121.sameoldchat.chat.v1.BulkMoveConversationsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12\x81\x01\n" +
+	"#AdminSetConversationsExcludedFromAI\x123.sameoldchat.chat.v1.ConversationAIExclusionRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12\x8d\x01\n" +
+	" AdminConversationsExcludedFromAI\x123.sameoldchat.chat.v1.ConversationAIExclusionRequest\x1a4.sameoldchat.chat.v1.ConversationAIExclusionResponse\x12z\n" +
+	"\x1cAdminLinkConversationObjects\x123.sameoldchat.chat.v1.LinkConversationObjectsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12~\n" +
+	"\x1eAdminUnlinkConversationObjects\x125.sameoldchat.chat.v1.UnlinkConversationObjectsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12}\n" +
+	"\x18AdminConversationObjects\x12/.sameoldchat.chat.v1.ConversationObjectsRequest\x1a0.sameoldchat.chat.v1.ConversationObjectsResponse\x12\x80\x01\n" +
+	"!AdminCreateConversationForObjects\x128.sameoldchat.chat.v1.CreateConversationForObjectsRequest\x1a!.sameoldchat.chat.v1.Conversation\x12c\n" +
 	"\x10OpenConversation\x12,.sameoldchat.chat.v1.OpenConversationRequest\x1a!.sameoldchat.chat.v1.Conversation\x12}\n" +
 	"\x1dAddPeopleToDirectConversation\x129.sameoldchat.chat.v1.AddPeopleToDirectConversationRequest\x1a!.sameoldchat.chat.v1.Conversation\x12y\n" +
 	"\x1bConvertGroupDirectToPrivate\x127.sameoldchat.chat.v1.ConvertGroupDirectToPrivateRequest\x1a!.sameoldchat.chat.v1.Conversation\x12g\n" +
@@ -1382,7 +2114,7 @@ func file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescGZIP() []byte 
 	return file_sameoldchat_chat_v1_conversation_mutations_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_sameoldchat_chat_v1_conversation_mutations_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_sameoldchat_chat_v1_conversation_mutations_proto_goTypes = []any{
 	(*OpenConversationRequest)(nil),              // 0: sameoldchat.chat.v1.OpenConversationRequest
 	(*AddPeopleToDirectConversationRequest)(nil), // 1: sameoldchat.chat.v1.AddPeopleToDirectConversationRequest
@@ -1403,64 +2135,92 @@ var file_sameoldchat_chat_v1_conversation_mutations_proto_goTypes = []any{
 	(*ConvertConversationToPrivateRequest)(nil),  // 16: sameoldchat.chat.v1.ConvertConversationToPrivateRequest
 	(*AdminConversationTeamsRequest)(nil),        // 17: sameoldchat.chat.v1.AdminConversationTeamsRequest
 	(*AdminConversationTeamsResponse)(nil),       // 18: sameoldchat.chat.v1.AdminConversationTeamsResponse
-	(*Conversation)(nil),                         // 19: sameoldchat.chat.v1.Conversation
+	(*LinkedObject)(nil),                         // 19: sameoldchat.chat.v1.LinkedObject
+	(*ConversationLookupRequest)(nil),            // 20: sameoldchat.chat.v1.ConversationLookupRequest
+	(*BulkMoveConversationsRequest)(nil),         // 21: sameoldchat.chat.v1.BulkMoveConversationsRequest
+	(*ConversationAIExclusionRequest)(nil),       // 22: sameoldchat.chat.v1.ConversationAIExclusionRequest
+	(*ConversationAIExclusionResponse)(nil),      // 23: sameoldchat.chat.v1.ConversationAIExclusionResponse
+	(*LinkConversationObjectsRequest)(nil),       // 24: sameoldchat.chat.v1.LinkConversationObjectsRequest
+	(*UnlinkConversationObjectsRequest)(nil),     // 25: sameoldchat.chat.v1.UnlinkConversationObjectsRequest
+	(*ConversationObjectsRequest)(nil),           // 26: sameoldchat.chat.v1.ConversationObjectsRequest
+	(*ConversationObjectsResponse)(nil),          // 27: sameoldchat.chat.v1.ConversationObjectsResponse
+	(*CreateConversationForObjectsRequest)(nil),  // 28: sameoldchat.chat.v1.CreateConversationForObjectsRequest
+	(*ConversationPage)(nil),                     // 29: sameoldchat.chat.v1.ConversationPage
+	(*Conversation)(nil),                         // 30: sameoldchat.chat.v1.Conversation
 }
 var file_sameoldchat_chat_v1_conversation_mutations_proto_depIdxs = []int32{
-	0,  // 0: sameoldchat.chat.v1.ConversationMutationsService.OpenConversation:input_type -> sameoldchat.chat.v1.OpenConversationRequest
-	1,  // 1: sameoldchat.chat.v1.ConversationMutationsService.AddPeopleToDirectConversation:input_type -> sameoldchat.chat.v1.AddPeopleToDirectConversationRequest
-	2,  // 2: sameoldchat.chat.v1.ConversationMutationsService.ConvertGroupDirectToPrivate:input_type -> sameoldchat.chat.v1.ConvertGroupDirectToPrivateRequest
-	3,  // 3: sameoldchat.chat.v1.ConversationMutationsService.CreateConversation:input_type -> sameoldchat.chat.v1.CreateConversationRequest
-	4,  // 4: sameoldchat.chat.v1.ConversationMutationsService.JoinConversation:input_type -> sameoldchat.chat.v1.ConversationRequest
-	5,  // 5: sameoldchat.chat.v1.ConversationMutationsService.InviteConversationMembers:input_type -> sameoldchat.chat.v1.InviteConversationMembersRequest
-	4,  // 6: sameoldchat.chat.v1.ConversationMutationsService.LeaveConversation:input_type -> sameoldchat.chat.v1.ConversationRequest
-	6,  // 7: sameoldchat.chat.v1.ConversationMutationsService.KickConversationMember:input_type -> sameoldchat.chat.v1.KickConversationMemberRequest
-	8,  // 8: sameoldchat.chat.v1.ConversationMutationsService.RenameConversation:input_type -> sameoldchat.chat.v1.RenameConversationRequest
-	9,  // 9: sameoldchat.chat.v1.ConversationMutationsService.SetConversationTopic:input_type -> sameoldchat.chat.v1.SetConversationTopicRequest
-	10, // 10: sameoldchat.chat.v1.ConversationMutationsService.SetConversationPurpose:input_type -> sameoldchat.chat.v1.SetConversationPurposeRequest
-	11, // 11: sameoldchat.chat.v1.ConversationMutationsService.SetConversationArchived:input_type -> sameoldchat.chat.v1.SetConversationArchivedRequest
-	8,  // 12: sameoldchat.chat.v1.ConversationMutationsService.AdminRenameConversation:input_type -> sameoldchat.chat.v1.RenameConversationRequest
-	11, // 13: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationArchived:input_type -> sameoldchat.chat.v1.SetConversationArchivedRequest
-	12, // 14: sameoldchat.chat.v1.ConversationMutationsService.AdminDeleteConversation:input_type -> sameoldchat.chat.v1.DeleteConversationRequest
-	13, // 15: sameoldchat.chat.v1.ConversationMutationsService.AdminAddConversationAccessGroup:input_type -> sameoldchat.chat.v1.ConversationAccessGroupRequest
-	13, // 16: sameoldchat.chat.v1.ConversationMutationsService.AdminRemoveConversationAccessGroup:input_type -> sameoldchat.chat.v1.ConversationAccessGroupRequest
-	4,  // 17: sameoldchat.chat.v1.ConversationMutationsService.AdminListConversationAccessGroups:input_type -> sameoldchat.chat.v1.ConversationRequest
-	5,  // 18: sameoldchat.chat.v1.ConversationMutationsService.AdminInviteConversationMembers:input_type -> sameoldchat.chat.v1.InviteConversationMembersRequest
-	16, // 19: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPrivate:input_type -> sameoldchat.chat.v1.ConvertConversationToPrivateRequest
-	16, // 20: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPublic:input_type -> sameoldchat.chat.v1.ConvertConversationToPrivateRequest
-	15, // 21: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkArchiveConversations:input_type -> sameoldchat.chat.v1.BulkConversationsRequest
-	15, // 22: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkDeleteConversations:input_type -> sameoldchat.chat.v1.BulkConversationsRequest
-	17, // 23: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
-	17, // 24: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
-	19, // 25: sameoldchat.chat.v1.ConversationMutationsService.OpenConversation:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 26: sameoldchat.chat.v1.ConversationMutationsService.AddPeopleToDirectConversation:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 27: sameoldchat.chat.v1.ConversationMutationsService.ConvertGroupDirectToPrivate:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 28: sameoldchat.chat.v1.ConversationMutationsService.CreateConversation:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 29: sameoldchat.chat.v1.ConversationMutationsService.JoinConversation:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 30: sameoldchat.chat.v1.ConversationMutationsService.InviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
-	7,  // 31: sameoldchat.chat.v1.ConversationMutationsService.LeaveConversation:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 32: sameoldchat.chat.v1.ConversationMutationsService.KickConversationMember:output_type -> sameoldchat.chat.v1.MutationResponse
-	19, // 33: sameoldchat.chat.v1.ConversationMutationsService.RenameConversation:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 34: sameoldchat.chat.v1.ConversationMutationsService.SetConversationTopic:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 35: sameoldchat.chat.v1.ConversationMutationsService.SetConversationPurpose:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 36: sameoldchat.chat.v1.ConversationMutationsService.SetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 37: sameoldchat.chat.v1.ConversationMutationsService.AdminRenameConversation:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 38: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
-	7,  // 39: sameoldchat.chat.v1.ConversationMutationsService.AdminDeleteConversation:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 40: sameoldchat.chat.v1.ConversationMutationsService.AdminAddConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 41: sameoldchat.chat.v1.ConversationMutationsService.AdminRemoveConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
-	14, // 42: sameoldchat.chat.v1.ConversationMutationsService.AdminListConversationAccessGroups:output_type -> sameoldchat.chat.v1.ConversationAccessGroupsResponse
-	19, // 43: sameoldchat.chat.v1.ConversationMutationsService.AdminInviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 44: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPrivate:output_type -> sameoldchat.chat.v1.Conversation
-	19, // 45: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPublic:output_type -> sameoldchat.chat.v1.Conversation
-	7,  // 46: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkArchiveConversations:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 47: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkDeleteConversations:output_type -> sameoldchat.chat.v1.MutationResponse
-	18, // 48: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:output_type -> sameoldchat.chat.v1.AdminConversationTeamsResponse
-	7,  // 49: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:output_type -> sameoldchat.chat.v1.MutationResponse
-	25, // [25:50] is the sub-list for method output_type
-	0,  // [0:25] is the sub-list for method input_type
-	0,  // [0:0] is the sub-list for extension type_name
-	0,  // [0:0] is the sub-list for extension extendee
-	0,  // [0:0] is the sub-list for field type_name
+	19, // 0: sameoldchat.chat.v1.ConversationObjectsResponse.objects:type_name -> sameoldchat.chat.v1.LinkedObject
+	20, // 1: sameoldchat.chat.v1.ConversationMutationsService.AdminLookupConversations:input_type -> sameoldchat.chat.v1.ConversationLookupRequest
+	21, // 2: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkMoveConversations:input_type -> sameoldchat.chat.v1.BulkMoveConversationsRequest
+	22, // 3: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationsExcludedFromAI:input_type -> sameoldchat.chat.v1.ConversationAIExclusionRequest
+	22, // 4: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationsExcludedFromAI:input_type -> sameoldchat.chat.v1.ConversationAIExclusionRequest
+	24, // 5: sameoldchat.chat.v1.ConversationMutationsService.AdminLinkConversationObjects:input_type -> sameoldchat.chat.v1.LinkConversationObjectsRequest
+	25, // 6: sameoldchat.chat.v1.ConversationMutationsService.AdminUnlinkConversationObjects:input_type -> sameoldchat.chat.v1.UnlinkConversationObjectsRequest
+	26, // 7: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationObjects:input_type -> sameoldchat.chat.v1.ConversationObjectsRequest
+	28, // 8: sameoldchat.chat.v1.ConversationMutationsService.AdminCreateConversationForObjects:input_type -> sameoldchat.chat.v1.CreateConversationForObjectsRequest
+	0,  // 9: sameoldchat.chat.v1.ConversationMutationsService.OpenConversation:input_type -> sameoldchat.chat.v1.OpenConversationRequest
+	1,  // 10: sameoldchat.chat.v1.ConversationMutationsService.AddPeopleToDirectConversation:input_type -> sameoldchat.chat.v1.AddPeopleToDirectConversationRequest
+	2,  // 11: sameoldchat.chat.v1.ConversationMutationsService.ConvertGroupDirectToPrivate:input_type -> sameoldchat.chat.v1.ConvertGroupDirectToPrivateRequest
+	3,  // 12: sameoldchat.chat.v1.ConversationMutationsService.CreateConversation:input_type -> sameoldchat.chat.v1.CreateConversationRequest
+	4,  // 13: sameoldchat.chat.v1.ConversationMutationsService.JoinConversation:input_type -> sameoldchat.chat.v1.ConversationRequest
+	5,  // 14: sameoldchat.chat.v1.ConversationMutationsService.InviteConversationMembers:input_type -> sameoldchat.chat.v1.InviteConversationMembersRequest
+	4,  // 15: sameoldchat.chat.v1.ConversationMutationsService.LeaveConversation:input_type -> sameoldchat.chat.v1.ConversationRequest
+	6,  // 16: sameoldchat.chat.v1.ConversationMutationsService.KickConversationMember:input_type -> sameoldchat.chat.v1.KickConversationMemberRequest
+	8,  // 17: sameoldchat.chat.v1.ConversationMutationsService.RenameConversation:input_type -> sameoldchat.chat.v1.RenameConversationRequest
+	9,  // 18: sameoldchat.chat.v1.ConversationMutationsService.SetConversationTopic:input_type -> sameoldchat.chat.v1.SetConversationTopicRequest
+	10, // 19: sameoldchat.chat.v1.ConversationMutationsService.SetConversationPurpose:input_type -> sameoldchat.chat.v1.SetConversationPurposeRequest
+	11, // 20: sameoldchat.chat.v1.ConversationMutationsService.SetConversationArchived:input_type -> sameoldchat.chat.v1.SetConversationArchivedRequest
+	8,  // 21: sameoldchat.chat.v1.ConversationMutationsService.AdminRenameConversation:input_type -> sameoldchat.chat.v1.RenameConversationRequest
+	11, // 22: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationArchived:input_type -> sameoldchat.chat.v1.SetConversationArchivedRequest
+	12, // 23: sameoldchat.chat.v1.ConversationMutationsService.AdminDeleteConversation:input_type -> sameoldchat.chat.v1.DeleteConversationRequest
+	13, // 24: sameoldchat.chat.v1.ConversationMutationsService.AdminAddConversationAccessGroup:input_type -> sameoldchat.chat.v1.ConversationAccessGroupRequest
+	13, // 25: sameoldchat.chat.v1.ConversationMutationsService.AdminRemoveConversationAccessGroup:input_type -> sameoldchat.chat.v1.ConversationAccessGroupRequest
+	4,  // 26: sameoldchat.chat.v1.ConversationMutationsService.AdminListConversationAccessGroups:input_type -> sameoldchat.chat.v1.ConversationRequest
+	5,  // 27: sameoldchat.chat.v1.ConversationMutationsService.AdminInviteConversationMembers:input_type -> sameoldchat.chat.v1.InviteConversationMembersRequest
+	16, // 28: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPrivate:input_type -> sameoldchat.chat.v1.ConvertConversationToPrivateRequest
+	16, // 29: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPublic:input_type -> sameoldchat.chat.v1.ConvertConversationToPrivateRequest
+	15, // 30: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkArchiveConversations:input_type -> sameoldchat.chat.v1.BulkConversationsRequest
+	15, // 31: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkDeleteConversations:input_type -> sameoldchat.chat.v1.BulkConversationsRequest
+	17, // 32: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
+	17, // 33: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:input_type -> sameoldchat.chat.v1.AdminConversationTeamsRequest
+	29, // 34: sameoldchat.chat.v1.ConversationMutationsService.AdminLookupConversations:output_type -> sameoldchat.chat.v1.ConversationPage
+	7,  // 35: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkMoveConversations:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 36: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationsExcludedFromAI:output_type -> sameoldchat.chat.v1.MutationResponse
+	23, // 37: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationsExcludedFromAI:output_type -> sameoldchat.chat.v1.ConversationAIExclusionResponse
+	7,  // 38: sameoldchat.chat.v1.ConversationMutationsService.AdminLinkConversationObjects:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 39: sameoldchat.chat.v1.ConversationMutationsService.AdminUnlinkConversationObjects:output_type -> sameoldchat.chat.v1.MutationResponse
+	27, // 40: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationObjects:output_type -> sameoldchat.chat.v1.ConversationObjectsResponse
+	30, // 41: sameoldchat.chat.v1.ConversationMutationsService.AdminCreateConversationForObjects:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 42: sameoldchat.chat.v1.ConversationMutationsService.OpenConversation:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 43: sameoldchat.chat.v1.ConversationMutationsService.AddPeopleToDirectConversation:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 44: sameoldchat.chat.v1.ConversationMutationsService.ConvertGroupDirectToPrivate:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 45: sameoldchat.chat.v1.ConversationMutationsService.CreateConversation:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 46: sameoldchat.chat.v1.ConversationMutationsService.JoinConversation:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 47: sameoldchat.chat.v1.ConversationMutationsService.InviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
+	7,  // 48: sameoldchat.chat.v1.ConversationMutationsService.LeaveConversation:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 49: sameoldchat.chat.v1.ConversationMutationsService.KickConversationMember:output_type -> sameoldchat.chat.v1.MutationResponse
+	30, // 50: sameoldchat.chat.v1.ConversationMutationsService.RenameConversation:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 51: sameoldchat.chat.v1.ConversationMutationsService.SetConversationTopic:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 52: sameoldchat.chat.v1.ConversationMutationsService.SetConversationPurpose:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 53: sameoldchat.chat.v1.ConversationMutationsService.SetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 54: sameoldchat.chat.v1.ConversationMutationsService.AdminRenameConversation:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 55: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationArchived:output_type -> sameoldchat.chat.v1.Conversation
+	7,  // 56: sameoldchat.chat.v1.ConversationMutationsService.AdminDeleteConversation:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 57: sameoldchat.chat.v1.ConversationMutationsService.AdminAddConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 58: sameoldchat.chat.v1.ConversationMutationsService.AdminRemoveConversationAccessGroup:output_type -> sameoldchat.chat.v1.MutationResponse
+	14, // 59: sameoldchat.chat.v1.ConversationMutationsService.AdminListConversationAccessGroups:output_type -> sameoldchat.chat.v1.ConversationAccessGroupsResponse
+	30, // 60: sameoldchat.chat.v1.ConversationMutationsService.AdminInviteConversationMembers:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 61: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPrivate:output_type -> sameoldchat.chat.v1.Conversation
+	30, // 62: sameoldchat.chat.v1.ConversationMutationsService.AdminConvertConversationToPublic:output_type -> sameoldchat.chat.v1.Conversation
+	7,  // 63: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkArchiveConversations:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 64: sameoldchat.chat.v1.ConversationMutationsService.AdminBulkDeleteConversations:output_type -> sameoldchat.chat.v1.MutationResponse
+	18, // 65: sameoldchat.chat.v1.ConversationMutationsService.AdminConversationTeams:output_type -> sameoldchat.chat.v1.AdminConversationTeamsResponse
+	7,  // 66: sameoldchat.chat.v1.ConversationMutationsService.AdminSetConversationTeams:output_type -> sameoldchat.chat.v1.MutationResponse
+	34, // [34:67] is the sub-list for method output_type
+	1,  // [1:34] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_conversation_mutations_proto_init() }
@@ -1475,7 +2235,7 @@ func file_sameoldchat_chat_v1_conversation_mutations_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc), len(file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

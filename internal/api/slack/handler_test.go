@@ -2386,6 +2386,70 @@ func TestAdminAppConfigAndResolution(t *testing.T) {
 	}
 }
 
+// TestAdminConversationAdministration holds the remaining
+// admin.conversations.* contract: the lookup, the two bulk settings and the
+// object links. A batch naming a channel that is not here changes nothing.
+func TestAdminConversationAdministration(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	everything := call(t, http.MethodPost, "admin.conversations.lookup", "")
+	channels, ok := everything["channels"].([]any)
+	if !ok || len(channels) == 0 {
+		t.Fatalf("a lookup naming no filter answered nothing: %v", everything)
+	}
+	// A member-count ceiling of zero is not a filter; it is the absence of one.
+	if unfiltered := call(t, http.MethodGet, "admin.conversations.lookup?max_member_count=0", ""); len(unfiltered["channels"].([]any)) != len(channels) {
+		t.Fatalf("a zero ceiling filtered: %v", unfiltered)
+	}
+	for _, body := range []string{"max_member_count=-1", "last_message_activity_before=-1", "last_message_activity_before=soon"} {
+		if refused := call(t, http.MethodPost, "admin.conversations.lookup", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if excluded := call(t, http.MethodPost, "admin.conversations.bulkSetExcludeFromSlackAi", "channel_ids=C1&exclude_from_slack_ai_value=true"); excluded["ok"] != true {
+		t.Fatalf("excluded=%v", excluded)
+	}
+	if missing := call(t, http.MethodPost, "admin.conversations.bulkSetExcludeFromSlackAi", "channel_ids=C1,C-nobody&exclude_from_slack_ai_value=true"); missing["error"] != "channel_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+	if linked := call(t, http.MethodPost, "admin.conversations.linkObjects", "channel=C1&salesforce_org_id=00D000&record_id=a01,a02"); linked["ok"] != true {
+		t.Fatalf("linked=%v", linked)
+	}
+	if unlinked := call(t, http.MethodPost, "admin.conversations.unlinkObjects", "channels=C1"); unlinked["ok"] != true {
+		t.Fatalf("unlinked=%v", unlinked)
+	}
+	made := call(t, http.MethodPost, "admin.conversations.createForObjects", "channel_name=record-channel&salesforce_org_id=00D000&object_id=a03")
+	if made["ok"] != true || made["channel_id"] == "" {
+		t.Fatalf("made=%v", made)
+	}
+	for _, body := range []string{"channel_name=other&salesforce_org_id=00D000", "salesforce_org_id=00D000&object_id=a04", "channel_name=other&object_id=a04"} {
+		if refused := call(t, http.MethodPost, "admin.conversations.createForObjects", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if noTarget := call(t, http.MethodPost, "admin.conversations.bulkMove", "channel_ids=C1"); noTarget["error"] != "invalid_arguments" {
+		t.Fatalf("noTarget=%v", noTarget)
+	}
+	if badTarget := call(t, http.MethodPost, "admin.conversations.bulkMove", "channel_ids=C1&target_team_id=T-nobody"); badTarget["error"] != "channel_not_found" {
+		t.Fatalf("badTarget=%v", badTarget)
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))

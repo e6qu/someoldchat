@@ -124,6 +124,8 @@ type Store struct {
 	sessionSettings               map[string]domain.SessionSettings
 	barriers                      map[domain.BarrierID]domain.InformationBarrier
 	appConfigs                    map[string]domain.AppConfig
+	aiExcludedConversations       map[domain.ConversationID]struct{}
+	conversationObjects           map[string]domain.LinkedObject
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -311,6 +313,8 @@ func New() *Store {
 		sessionSettings:               make(map[string]domain.SessionSettings),
 		barriers:                      make(map[domain.BarrierID]domain.InformationBarrier),
 		appConfigs:                    make(map[string]domain.AppConfig),
+		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
+		conversationObjects:           make(map[string]domain.LinkedObject),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -1826,6 +1830,198 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) SetConversationsExcludedFromAI(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, excluded bool, event events.Event) error {
+	if len(ids) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		if err := s.checkConversationOwnerLocked(workspace, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		if excluded {
+			s.aiExcludedConversations[id] = struct{}{}
+			continue
+		}
+		delete(s.aiExcludedConversations, id)
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ConversationsExcludedFromAI(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID) ([]domain.ConversationID, error) {
+	if len(ids) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	excluded := make([]domain.ConversationID, 0, len(ids))
+	for _, id := range ids {
+		conversation, exists := s.conversations[id]
+		if !exists || conversation.WorkspaceID != workspace {
+			continue
+		}
+		if _, out := s.aiExcludedConversations[id]; out {
+			excluded = append(excluded, id)
+		}
+	}
+	sort.Slice(excluded, func(left, right int) bool { return excluded[left] < excluded[right] })
+	return excluded, nil
+}
+
+func (s *Store) MoveConversations(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, target domain.WorkspaceID, event events.Event) error {
+	if len(ids) == 0 || target == "" {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[target]; !exists {
+		return store.ErrNotFound
+	}
+	for _, id := range ids {
+		if err := s.checkConversationOwnerLocked(workspace, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		conversation := s.conversations[id]
+		conversation.WorkspaceID = target
+		s.conversations[id] = conversation
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) LookupConversations(_ context.Context, workspace domain.WorkspaceID, lookup domain.ConversationLookup, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ConversationPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ConversationPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	workspaces := map[domain.WorkspaceID]struct{}{}
+	if len(lookup.TeamIDs) == 0 {
+		workspaces[workspace] = struct{}{}
+	}
+	for _, id := range lookup.TeamIDs {
+		workspaces[id] = struct{}{}
+	}
+	conversations := make([]domain.Conversation, 0, len(s.conversations))
+	for id, conversation := range s.conversations {
+		if _, held := workspaces[conversation.WorkspaceID]; !held {
+			continue
+		}
+		if conversation.IsDirectOrGroup() || string(id) <= after {
+			continue
+		}
+		if !lookup.LastMessageActivityBefore.IsZero() && s.conversationHasMessageSinceLocked(id, lookup.LastMessageActivityBefore) {
+			continue
+		}
+		if lookup.MaxMemberCount > 0 && len(s.memberships[id]) > lookup.MaxMemberCount {
+			continue
+		}
+		conversations = append(conversations, conversation)
+	}
+	sort.Slice(conversations, func(left, right int) bool { return conversations[left].ID < conversations[right].ID })
+	hasMore := len(conversations) > request.Limit
+	if hasMore {
+		conversations = conversations[:request.Limit]
+	}
+	page := domain.ConversationPage{Conversations: conversations, HasMore: hasMore}
+	if hasMore && len(conversations) > 0 {
+		page.NextCursor, err = domain.NewListCursor(string(conversations[len(conversations)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) conversationHasMessageSinceLocked(id domain.ConversationID, instant time.Time) bool {
+	for _, message := range s.messages[id] {
+		if !message.CreatedAt.Before(instant) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) LinkConversationObjects(_ context.Context, objects []domain.LinkedObject, event events.Event) error {
+	if len(objects) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, object := range objects {
+		if err := s.checkConversationOwnerLocked(object.WorkspaceID, object.ConversationID); err != nil {
+			return err
+		}
+	}
+	for _, object := range objects {
+		key := conversationObjectKey(object)
+		if _, exists := s.conversationObjects[key]; !exists {
+			s.conversationObjects[key] = object
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) UnlinkConversationObjects(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, event events.Event) error {
+	if len(ids) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		if err := s.checkConversationOwnerLocked(workspace, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		for key, object := range s.conversationObjects {
+			if object.ConversationID == id && object.WorkspaceID == workspace {
+				delete(s.conversationObjects, key)
+			}
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListConversationObjects(_ context.Context, workspace domain.WorkspaceID, id domain.ConversationID) ([]domain.LinkedObject, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	objects := make([]domain.LinkedObject, 0)
+	for _, object := range s.conversationObjects {
+		if object.ConversationID == id && object.WorkspaceID == workspace {
+			objects = append(objects, object)
+		}
+	}
+	sort.Slice(objects, func(left, right int) bool {
+		if objects[left].OrgID != objects[right].OrgID {
+			return objects[left].OrgID < objects[right].OrgID
+		}
+		return objects[left].RecordID < objects[right].RecordID
+	})
+	return objects, nil
+}
+
+func (s *Store) checkConversationOwnerLocked(workspace domain.WorkspaceID, id domain.ConversationID) error {
+	conversation, exists := s.conversations[id]
+	if !exists || conversation.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func conversationObjectKey(object domain.LinkedObject) string {
+	return string(object.ConversationID) + "\x00" + object.OrgID + "\x00" + object.RecordID
 }
 
 func (s *Store) SetAppConfig(_ context.Context, config domain.AppConfig, event events.Event) error {

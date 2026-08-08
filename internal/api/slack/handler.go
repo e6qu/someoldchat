@@ -200,6 +200,13 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/admin.conversations.lookup", h.adminConversationsLookup)
+	mux.HandleFunc("POST /api/admin.conversations.lookup", h.adminConversationsLookup)
+	mux.HandleFunc("POST /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
+	mux.HandleFunc("POST /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
+	mux.HandleFunc("POST /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
+	mux.HandleFunc("POST /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
+	mux.HandleFunc("POST /api/admin.conversations.createForObjects", h.adminConversationsCreateForObjects)
 	mux.HandleFunc("GET /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
 	mux.HandleFunc("POST /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
 	mux.HandleFunc("POST /api/admin.apps.config.set", h.adminAppsConfigSet)
@@ -3251,6 +3258,189 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.conversations.lookup finds channels that have gone quiet or stayed
+// small. A filter the caller leaves out is not applied, so a lookup naming
+// nothing answers every channel rather than none.
+func (h Handler) adminConversationsLookup(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	lookup := domain.ConversationLookup{TeamIDs: parseIDList[domain.WorkspaceID](fields["team_ids"])}
+	if before := strings.TrimSpace(fields["last_message_activity_before"]); before != "" {
+		seconds, parseErr := strconv.ParseInt(before, 10, 64)
+		if parseErr != nil || seconds < 0 {
+			writeError(w, "invalid_arguments")
+			return
+		}
+		lookup.LastMessageActivityBefore = time.Unix(seconds, 0).UTC()
+	}
+	if maximum := strings.TrimSpace(fields["max_member_count"]); maximum != "" {
+		count, parseErr := strconv.Atoi(maximum)
+		if parseErr != nil || count < 0 {
+			writeError(w, "invalid_arguments")
+			return
+		}
+		lookup.MaxMemberCount = count
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminLookupConversations(r.Context(), principal.WorkspaceID, principal.UserID, lookup, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	ids := make([]string, 0, len(page.Conversations))
+	for _, conversation := range page.Conversations {
+		ids = append(ids, string(conversation.ID))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channels": ids,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// admin.conversations.bulkMove reassigns channels to another workspace. Every
+// channel is checked before one moves, so a request naming a channel that is
+// not here moves nothing.
+func (h Handler) adminConversationsBulkMove(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channel_ids"])
+	target := domain.WorkspaceID(strings.TrimSpace(fields["target_team_id"]))
+	if len(ids) == 0 || target == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminBulkMoveConversations(r.Context(), principal.WorkspaceID, principal.UserID, ids, target); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.conversations.bulkSetExcludeFromSlackAi keeps channels in or out of the
+// workspace's generative features.
+func (h Handler) adminConversationsBulkSetExcludeFromAI(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channel_ids"])
+	excluded, err := parseBoolField(fields["exclude_from_slack_ai_value"])
+	if len(ids) == 0 || err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminSetConversationsExcludedFromAI(r.Context(), principal.WorkspaceID, principal.UserID, ids, excluded); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.conversations.linkObjects and unlinkObjects tie a channel to external
+// records and cut every tie again.
+func (h Handler) adminConversationsLinkObjects(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	id := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	orgID := strings.TrimSpace(fields["salesforce_org_id"])
+	records := parseIDList[string](fields["record_id"])
+	if id == "" || orgID == "" || len(records) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminLinkConversationObjects(r.Context(), principal.WorkspaceID, principal.UserID, id, orgID, records); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) adminConversationsUnlinkObjects(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channels"])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminUnlinkConversationObjects(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.conversations.createForObjects creates a channel already linked to an
+// external record. A link that cannot be stored leaves no channel behind: a
+// half-made channel is worse than none, because nobody would know it is not
+// linked.
+func (h Handler) adminConversationsCreateForObjects(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	name := strings.TrimSpace(fields["channel_name"])
+	orgID := strings.TrimSpace(fields["salesforce_org_id"])
+	recordID := strings.TrimSpace(fields["object_id"])
+	private, err := parseBoolField(fields["is_private"])
+	if name == "" || orgID == "" || recordID == "" || err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	conversation, err := h.Messages.AdminCreateConversationForObjects(r.Context(), principal.WorkspaceID, principal.UserID, name, orgID, recordID, private)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": string(conversation.ID)})
 }
 
 // admin.apps.config.lookup and set decide what an installed app may reach and

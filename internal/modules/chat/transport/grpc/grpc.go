@@ -10294,6 +10294,216 @@ func decodeProtoListDownload(value *chatv1.ListDownload) (domain.ListDownload, e
 	return domain.ListDownload{ID: domain.ListDownloadID(value.GetId()), ListID: domain.ListID(value.GetListId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Status: value.GetStatus(), URL: value.GetUrl(), IncludeArchived: value.GetIncludeArchived(), CreatedAt: createdAt}, nil
 }
 
+func (r Remote) AdminLookupConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, lookup domain.ConversationLookup, request domain.PageRequest) (domain.ConversationPage, error) {
+	teams := make([]string, 0, len(lookup.TeamIDs))
+	for _, id := range lookup.TeamIDs {
+		teams = append(teams, string(id))
+	}
+	out, err := r.mutations.AdminLookupConversations(ctx, &chatv1.ConversationLookupRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), TeamIds: teams,
+		LastMessageActivityBefore: optionalUnixNano(lookup.LastMessageActivityBefore),
+		MaxMemberCount:            int32(lookup.MaxMemberCount),
+		Limit:                     int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.ConversationPage{}, err
+	}
+	return decodeProtoConversationPage(out)
+}
+
+func (r Remote) AdminBulkMoveConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID, target domain.WorkspaceID) error {
+	out, err := r.mutations.AdminBulkMoveConversations(ctx, &chatv1.BulkMoveConversationsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+		ConversationIds: conversationStrings(ids), TargetTeamId: string(target),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed bulk channel move was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminSetConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID, excluded bool) error {
+	out, err := r.mutations.AdminSetConversationsExcludedFromAI(ctx, &chatv1.ConversationAIExclusionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(ids), Excluded: excluded,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed channel exclusion was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) ([]domain.ConversationID, error) {
+	out, err := r.mutations.AdminConversationsExcludedFromAI(ctx, &chatv1.ConversationAIExclusionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(ids),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return decodeConversationIDs(out.GetConversationIds()), nil
+}
+
+func (r Remote) AdminLinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ConversationID, orgID string, recordIDs []string) error {
+	out, err := r.mutations.AdminLinkConversationObjects(ctx, &chatv1.LinkConversationObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(id),
+		OrgId: orgID, RecordIds: append([]string{}, recordIDs...),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed channel object link was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) error {
+	out, err := r.mutations.AdminUnlinkConversationObjects(ctx, &chatv1.UnlinkConversationObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(ids),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed channel object unlink was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ConversationID) ([]domain.LinkedObject, error) {
+	out, err := r.mutations.AdminConversationObjects(ctx, &chatv1.ConversationObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(id),
+	})
+	if err != nil {
+		return nil, err
+	}
+	objects := make([]domain.LinkedObject, 0, len(out.GetObjects()))
+	for _, encoded := range out.GetObjects() {
+		objects = append(objects, decodeProtoLinkedObject(encoded))
+	}
+	return objects, nil
+}
+
+func (r Remote) AdminCreateConversationForObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, orgID, recordID string, private bool) (domain.Conversation, error) {
+	out, err := r.mutations.AdminCreateConversationForObjects(ctx, &chatv1.CreateConversationForObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Name: name,
+		OrgId: orgID, RecordId: recordID, IsPrivate: private,
+	})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
+func (s *Server) AdminLookupConversations(ctx context.Context, input *chatv1.ConversationLookupRequest) (*chatv1.ConversationPage, error) {
+	teams := make([]domain.WorkspaceID, 0, len(input.GetTeamIds()))
+	for _, id := range input.GetTeamIds() {
+		teams = append(teams, domain.WorkspaceID(id))
+	}
+	page, err := s.implementation.AdminLookupConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationLookup{
+			TeamIDs:                   teams,
+			LastMessageActivityBefore: optionalTimeFromUnixNano(input.GetLastMessageActivityBefore()),
+			MaxMemberCount:            int(input.GetMaxMemberCount()),
+		}, protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversationPage(page), nil
+}
+
+func (s *Server) AdminBulkMoveConversations(ctx context.Context, input *chatv1.BulkMoveConversationsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminBulkMoveConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds()), domain.WorkspaceID(input.GetTargetTeamId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminSetConversationsExcludedFromAI(ctx context.Context, input *chatv1.ConversationAIExclusionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminSetConversationsExcludedFromAI(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds()), input.GetExcluded()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminConversationsExcludedFromAI(ctx context.Context, input *chatv1.ConversationAIExclusionRequest) (*chatv1.ConversationAIExclusionResponse, error) {
+	ids, err := s.implementation.AdminConversationsExcludedFromAI(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ConversationAIExclusionResponse{ConversationIds: conversationStrings(ids)}, nil
+}
+
+func (s *Server) AdminLinkConversationObjects(ctx context.Context, input *chatv1.LinkConversationObjectsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminLinkConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), input.GetOrgId(), input.GetRecordIds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminUnlinkConversationObjects(ctx context.Context, input *chatv1.UnlinkConversationObjectsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminUnlinkConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminConversationObjects(ctx context.Context, input *chatv1.ConversationObjectsRequest) (*chatv1.ConversationObjectsResponse, error) {
+	objects, err := s.implementation.AdminConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.LinkedObject, 0, len(objects))
+	for _, object := range objects {
+		encoded = append(encoded, encodeProtoLinkedObject(object))
+	}
+	return &chatv1.ConversationObjectsResponse{Objects: encoded}, nil
+}
+
+func (s *Server) AdminCreateConversationForObjects(ctx context.Context, input *chatv1.CreateConversationForObjectsRequest) (*chatv1.Conversation, error) {
+	conversation, err := s.implementation.AdminCreateConversationForObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetName(), input.GetOrgId(), input.GetRecordId(), input.GetIsPrivate())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(conversation), nil
+}
+
+func decodeConversationIDs(values []string) []domain.ConversationID {
+	ids := make([]domain.ConversationID, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, domain.ConversationID(value))
+	}
+	return ids
+}
+
+func encodeProtoLinkedObject(value domain.LinkedObject) *chatv1.LinkedObject {
+	return &chatv1.LinkedObject{
+		ConversationId: string(value.ConversationID), WorkspaceId: string(value.WorkspaceID),
+		OrgId: value.OrgID, RecordId: value.RecordID, CreatedAt: optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoLinkedObject(value *chatv1.LinkedObject) domain.LinkedObject {
+	return domain.LinkedObject{
+		ConversationID: domain.ConversationID(value.GetConversationId()),
+		WorkspaceID:    domain.WorkspaceID(value.GetWorkspaceId()),
+		OrgID:          value.GetOrgId(), RecordID: value.GetRecordId(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
 func encodeProtoConversation(value domain.Conversation) *chatv1.Conversation {
 	return &chatv1.Conversation{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Name: value.Name,

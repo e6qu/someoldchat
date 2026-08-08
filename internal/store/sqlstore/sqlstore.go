@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 154
+const schemaVersion = 155
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 155 {
+		// Channels an administrator keeps out of the workspace's generative
+		// features, and the external records a channel is linked to. Exclusion
+		// is presence: a channel with no row is in.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS conversation_ai_exclusions (
+			conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), updated_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate conversation AI exclusions: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS conversation_objects (
+			conversation_id TEXT NOT NULL REFERENCES conversations(id),
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			org_id TEXT NOT NULL, record_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+			PRIMARY KEY (conversation_id, org_id, record_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate conversation objects: %w", err)
+		}
+	}
 	if version < 154 {
 		// One app's administrative configuration. The two destination lists are
 		// JSON because they are read and written whole and no query asks which
@@ -4699,6 +4718,239 @@ func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.Worksp
 		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
 	}
 	return page, err
+}
+
+func (s *Store) SetConversationsExcludedFromAI(ctx context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, excluded bool, event events.Event) error {
+	if len(ids) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().UnixNano()
+	for _, id := range ids {
+		if err := checkConversationOwner(ctx, tx, workspace, id); err != nil {
+			return err
+		}
+		if excluded {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_ai_exclusions(conversation_id, workspace_id, updated_at)
+				VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET updated_at = excluded.updated_at`, id, workspace, now); err != nil {
+				return classify(err)
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_ai_exclusions WHERE conversation_id = ? AND workspace_id = ?`, id, workspace); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ConversationsExcludedFromAI(ctx context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID) ([]domain.ConversationID, error) {
+	if len(ids) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	placeholders := make([]string, 0, len(ids))
+	arguments := make([]any, 0, len(ids)+1)
+	arguments = append(arguments, workspace)
+	for _, id := range ids {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, id)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT conversation_id FROM conversation_ai_exclusions
+		WHERE workspace_id = ? AND conversation_id IN (`+strings.Join(placeholders, ", ")+`) ORDER BY conversation_id`, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	excluded := make([]domain.ConversationID, 0, len(ids))
+	for rows.Next() {
+		var id domain.ConversationID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		excluded = append(excluded, id)
+	}
+	return excluded, rows.Err()
+}
+
+func (s *Store) MoveConversations(ctx context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, target domain.WorkspaceID, event events.Event) error {
+	if len(ids) == 0 || target == "" {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var targets int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces WHERE id = ?`, target).Scan(&targets); err != nil {
+		return err
+	}
+	if targets == 0 {
+		return store.ErrNotFound
+	}
+	for _, id := range ids {
+		if err := checkConversationOwner(ctx, tx, workspace, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET workspace_id = ? WHERE id = ?`, target, id); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) LookupConversations(ctx context.Context, workspace domain.WorkspaceID, lookup domain.ConversationLookup, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ConversationPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ConversationPage{}, err
+	}
+	// A zero filter is not applied, so a lookup naming nothing answers every
+	// channel the workspace holds rather than none of them.
+	workspaces := lookup.TeamIDs
+	if len(workspaces) == 0 {
+		workspaces = []domain.WorkspaceID{workspace}
+	}
+	placeholders := make([]string, 0, len(workspaces))
+	arguments := make([]any, 0, len(workspaces)+4)
+	for _, id := range workspaces {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, id)
+	}
+	query := `SELECT c.id, c.workspace_id, c.name, c.topic, c.purpose, c.archived, c.is_private, c.is_direct, c.is_group_direct
+		FROM conversations c
+		WHERE c.workspace_id IN (` + strings.Join(placeholders, ", ") + `) AND c.is_direct = 0 AND c.is_group_direct = 0 AND c.id > ?`
+	arguments = append(arguments, after)
+	if !lookup.LastMessageActivityBefore.IsZero() {
+		query += ` AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.created_at >= ?)`
+		arguments = append(arguments, string(domain.NewStoredTime(lookup.LastMessageActivityBefore)))
+	}
+	if lookup.MaxMemberCount > 0 {
+		query += ` AND (SELECT COUNT(*) FROM conversation_members cm WHERE cm.conversation_id = c.id) <= ?`
+		arguments = append(arguments, lookup.MaxMemberCount)
+	}
+	query += ` ORDER BY c.id LIMIT ?`
+	arguments = append(arguments, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return domain.ConversationPage{}, err
+	}
+	defer rows.Close()
+	conversations := make([]domain.Conversation, 0, request.Limit+1)
+	for rows.Next() {
+		conversation, err := scanConversationRow(rows)
+		if err != nil {
+			return domain.ConversationPage{}, err
+		}
+		conversations = append(conversations, conversation)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ConversationPage{}, err
+	}
+	hasMore := len(conversations) > request.Limit
+	if hasMore {
+		conversations = conversations[:request.Limit]
+	}
+	page := domain.ConversationPage{Conversations: conversations, HasMore: hasMore}
+	if hasMore && len(conversations) > 0 {
+		page.NextCursor, err = domain.NewListCursor(string(conversations[len(conversations)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) LinkConversationObjects(ctx context.Context, objects []domain.LinkedObject, event events.Event) error {
+	if len(objects) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, object := range objects {
+		if err := checkConversationOwner(ctx, tx, object.WorkspaceID, object.ConversationID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_objects(conversation_id, workspace_id, org_id, record_id, created_at)
+			VALUES (?, ?, ?, ?, ?) ON CONFLICT(conversation_id, org_id, record_id) DO NOTHING`,
+			object.ConversationID, object.WorkspaceID, object.OrgID, object.RecordID, object.CreatedAt.UTC().UnixNano()); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) UnlinkConversationObjects(ctx context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, event events.Event) error {
+	if len(ids) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		if err := checkConversationOwner(ctx, tx, workspace, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_objects WHERE conversation_id = ? AND workspace_id = ?`, id, workspace); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListConversationObjects(ctx context.Context, workspace domain.WorkspaceID, id domain.ConversationID) ([]domain.LinkedObject, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT conversation_id, workspace_id, org_id, record_id, created_at
+		FROM conversation_objects WHERE workspace_id = ? AND conversation_id = ? ORDER BY org_id, record_id`, workspace, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	objects := make([]domain.LinkedObject, 0)
+	for rows.Next() {
+		var object domain.LinkedObject
+		var created int64
+		if err := rows.Scan(&object.ConversationID, &object.WorkspaceID, &object.OrgID, &object.RecordID, &created); err != nil {
+			return nil, err
+		}
+		object.CreatedAt = timeFromUnixNanoOrZero(created)
+		objects = append(objects, object)
+	}
+	return objects, rows.Err()
+}
+
+// checkConversationOwner refuses a channel the workspace does not hold, so a
+// batch that names one leaves nothing behind.
+func checkConversationOwner(ctx context.Context, tx *sql.Tx, workspace domain.WorkspaceID, id domain.ConversationID) error {
+	var owner domain.WorkspaceID
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, id).Scan(&owner); err != nil {
+		return translateNotFound(err)
+	}
+	if owner != workspace {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) SetAppConfig(ctx context.Context, config domain.AppConfig, event events.Event) error {

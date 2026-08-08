@@ -285,6 +285,14 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	AdminLookupConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationLookup, domain.PageRequest) (domain.ConversationPage, error)
+	AdminBulkMoveConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, domain.WorkspaceID) error
+	AdminSetConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, bool) error
+	AdminConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.ConversationID, error)
+	AdminLinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, []string) error
+	AdminUnlinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error
+	AdminConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.LinkedObject, error)
+	AdminCreateConversationForObjects(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool) (domain.Conversation, error)
 	AdminAppConfigs(context.Context, domain.WorkspaceID, domain.UserID, []domain.AppID) ([]domain.AppConfig, error)
 	AdminSetAppConfig(context.Context, domain.WorkspaceID, domain.UserID, domain.AppConfig) (domain.AppConfig, error)
 	AdminClearAppResolution(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error

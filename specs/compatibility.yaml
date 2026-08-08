@@ -1150,21 +1150,33 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkDelete/
   - method: admin.conversations.bulkMove
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkMove/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.bulkSetExcludeFromSlackAi
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetExcludeFromSlackAi/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.convertToPublic
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.convertToPublic/
   - method: admin.conversations.createForObjects
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.createForObjects/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.getCustomRetention
     status: behavior-compatible
     provenance: slack-reference
@@ -1179,13 +1191,21 @@ operations:
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.linkObjects
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.linkObjects/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.removeCustomRetention
     status: behavior-compatible
     provenance: slack-reference
@@ -1213,9 +1233,13 @@ operations:
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.unlinkObjects
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.unlinkObjects/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.functions.list
     status: behavior-compatible
     provenance: slack-reference

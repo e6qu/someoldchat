@@ -340,6 +340,25 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// SetConversationsExcludedFromAI marks channels in or out of the
+	// workspace's generative features. Exclusion is its own row rather than a
+	// column on conversations: every conversation read names its columns
+	// explicitly in about twenty places, and a fact only the administrative
+	// surface reads does not belong in all of them.
+	SetConversationsExcludedFromAI(context.Context, domain.WorkspaceID, []domain.ConversationID, bool, events.Event) error
+	// ConversationsExcludedFromAI reports which of the named channels are out.
+	ConversationsExcludedFromAI(context.Context, domain.WorkspaceID, []domain.ConversationID) ([]domain.ConversationID, error)
+	// MoveConversations reassigns channels to another workspace.
+	MoveConversations(context.Context, domain.WorkspaceID, []domain.ConversationID, domain.WorkspaceID, events.Event) error
+	// LookupConversations reports the channels that match an administrative
+	// search, in identifier order.
+	LookupConversations(context.Context, domain.WorkspaceID, domain.ConversationLookup, domain.PageRequest) (domain.ConversationPage, error)
+	// LinkConversationObjects links channels to external records.
+	LinkConversationObjects(context.Context, []domain.LinkedObject, events.Event) error
+	// UnlinkConversationObjects removes every link the named channels hold.
+	UnlinkConversationObjects(context.Context, domain.WorkspaceID, []domain.ConversationID, events.Event) error
+	// ListConversationObjects reports the records one channel is linked to.
+	ListConversationObjects(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.LinkedObject, error)
 	// SetAppConfig writes one app's administrative configuration, replacing
 	// what was there.
 	SetAppConfig(context.Context, domain.AppConfig, events.Event) error

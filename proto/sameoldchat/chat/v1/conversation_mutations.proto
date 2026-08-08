@@ -131,7 +131,84 @@ message AdminConversationTeamsResponse {
   bool has_more = 3;
 }
 
+message LinkedObject {
+  string conversation_id = 1;
+  string workspace_id = 2;
+  string org_id = 3;
+  string record_id = 4;
+  int64 created_at = 5;
+}
+
+message ConversationLookupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string team_ids = 3;
+  int64 last_message_activity_before = 4;
+  int32 max_member_count = 5;
+  int32 limit = 6;
+  string cursor = 7;
+}
+
+message BulkMoveConversationsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string conversation_ids = 3;
+  string target_team_id = 4;
+}
+
+message ConversationAIExclusionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string conversation_ids = 3;
+  bool excluded = 4;
+}
+
+message ConversationAIExclusionResponse {
+  repeated string conversation_ids = 1;
+}
+
+message LinkConversationObjectsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string org_id = 4;
+  repeated string record_ids = 5;
+}
+
+message UnlinkConversationObjectsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string conversation_ids = 3;
+}
+
+message ConversationObjectsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message ConversationObjectsResponse {
+  repeated LinkedObject objects = 1;
+}
+
+message CreateConversationForObjectsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string org_id = 4;
+  string record_id = 5;
+  bool is_private = 6;
+}
+
 service ConversationMutationsService {
+  rpc AdminLookupConversations(ConversationLookupRequest) returns (ConversationPage);
+  rpc AdminBulkMoveConversations(BulkMoveConversationsRequest) returns (MutationResponse);
+  rpc AdminSetConversationsExcludedFromAI(ConversationAIExclusionRequest) returns (MutationResponse);
+  rpc AdminConversationsExcludedFromAI(ConversationAIExclusionRequest) returns (ConversationAIExclusionResponse);
+  rpc AdminLinkConversationObjects(LinkConversationObjectsRequest) returns (MutationResponse);
+  rpc AdminUnlinkConversationObjects(UnlinkConversationObjectsRequest) returns (MutationResponse);
+  rpc AdminConversationObjects(ConversationObjectsRequest) returns (ConversationObjectsResponse);
+  rpc AdminCreateConversationForObjects(CreateConversationForObjectsRequest) returns (Conversation);
   rpc OpenConversation(OpenConversationRequest) returns (Conversation);
   rpc AddPeopleToDirectConversation(AddPeopleToDirectConversationRequest) returns (Conversation);
   rpc ConvertGroupDirectToPrivate(ConvertGroupDirectToPrivateRequest) returns (Conversation);

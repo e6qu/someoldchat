@@ -2291,6 +2291,27 @@ type RoleAssignmentPage struct {
 	HasMore     bool
 }
 
+// LinkedObject is an external record a channel is linked to. Slack links a
+// channel to a Salesforce record, so the pair names the organization and the
+// record inside it.
+type LinkedObject struct {
+	ConversationID ConversationID
+	WorkspaceID    WorkspaceID
+	OrgID          string
+	RecordID       string
+	CreatedAt      time.Time
+}
+
+// ConversationLookup narrows a channel search to the channels an administrator
+// is looking for. Slack lets an administrator find channels that have gone
+// quiet or stayed small; a zero field means the filter is not applied, so a
+// lookup that names nothing answers every channel.
+type ConversationLookup struct {
+	TeamIDs                   []WorkspaceID
+	LastMessageActivityBefore time.Time
+	MaxMemberCount            int
+}
+
 // WorkflowAuthStrategy decides whose credentials a workflow step runs under.
 // Slack names two, and an unrecognised value would silently run a step as the
 // builder when the administrator asked for the end user.

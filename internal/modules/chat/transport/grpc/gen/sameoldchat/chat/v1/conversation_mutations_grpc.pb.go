@@ -19,37 +19,53 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ConversationMutationsService_OpenConversation_FullMethodName                   = "/sameoldchat.chat.v1.ConversationMutationsService/OpenConversation"
-	ConversationMutationsService_AddPeopleToDirectConversation_FullMethodName      = "/sameoldchat.chat.v1.ConversationMutationsService/AddPeopleToDirectConversation"
-	ConversationMutationsService_ConvertGroupDirectToPrivate_FullMethodName        = "/sameoldchat.chat.v1.ConversationMutationsService/ConvertGroupDirectToPrivate"
-	ConversationMutationsService_CreateConversation_FullMethodName                 = "/sameoldchat.chat.v1.ConversationMutationsService/CreateConversation"
-	ConversationMutationsService_JoinConversation_FullMethodName                   = "/sameoldchat.chat.v1.ConversationMutationsService/JoinConversation"
-	ConversationMutationsService_InviteConversationMembers_FullMethodName          = "/sameoldchat.chat.v1.ConversationMutationsService/InviteConversationMembers"
-	ConversationMutationsService_LeaveConversation_FullMethodName                  = "/sameoldchat.chat.v1.ConversationMutationsService/LeaveConversation"
-	ConversationMutationsService_KickConversationMember_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/KickConversationMember"
-	ConversationMutationsService_RenameConversation_FullMethodName                 = "/sameoldchat.chat.v1.ConversationMutationsService/RenameConversation"
-	ConversationMutationsService_SetConversationTopic_FullMethodName               = "/sameoldchat.chat.v1.ConversationMutationsService/SetConversationTopic"
-	ConversationMutationsService_SetConversationPurpose_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/SetConversationPurpose"
-	ConversationMutationsService_SetConversationArchived_FullMethodName            = "/sameoldchat.chat.v1.ConversationMutationsService/SetConversationArchived"
-	ConversationMutationsService_AdminRenameConversation_FullMethodName            = "/sameoldchat.chat.v1.ConversationMutationsService/AdminRenameConversation"
-	ConversationMutationsService_AdminSetConversationArchived_FullMethodName       = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationArchived"
-	ConversationMutationsService_AdminDeleteConversation_FullMethodName            = "/sameoldchat.chat.v1.ConversationMutationsService/AdminDeleteConversation"
-	ConversationMutationsService_AdminAddConversationAccessGroup_FullMethodName    = "/sameoldchat.chat.v1.ConversationMutationsService/AdminAddConversationAccessGroup"
-	ConversationMutationsService_AdminRemoveConversationAccessGroup_FullMethodName = "/sameoldchat.chat.v1.ConversationMutationsService/AdminRemoveConversationAccessGroup"
-	ConversationMutationsService_AdminListConversationAccessGroups_FullMethodName  = "/sameoldchat.chat.v1.ConversationMutationsService/AdminListConversationAccessGroups"
-	ConversationMutationsService_AdminInviteConversationMembers_FullMethodName     = "/sameoldchat.chat.v1.ConversationMutationsService/AdminInviteConversationMembers"
-	ConversationMutationsService_AdminConvertConversationToPrivate_FullMethodName  = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPrivate"
-	ConversationMutationsService_AdminConvertConversationToPublic_FullMethodName   = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPublic"
-	ConversationMutationsService_AdminBulkArchiveConversations_FullMethodName      = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkArchiveConversations"
-	ConversationMutationsService_AdminBulkDeleteConversations_FullMethodName       = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkDeleteConversations"
-	ConversationMutationsService_AdminConversationTeams_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConversationTeams"
-	ConversationMutationsService_AdminSetConversationTeams_FullMethodName          = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationTeams"
+	ConversationMutationsService_AdminLookupConversations_FullMethodName            = "/sameoldchat.chat.v1.ConversationMutationsService/AdminLookupConversations"
+	ConversationMutationsService_AdminBulkMoveConversations_FullMethodName          = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkMoveConversations"
+	ConversationMutationsService_AdminSetConversationsExcludedFromAI_FullMethodName = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationsExcludedFromAI"
+	ConversationMutationsService_AdminConversationsExcludedFromAI_FullMethodName    = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConversationsExcludedFromAI"
+	ConversationMutationsService_AdminLinkConversationObjects_FullMethodName        = "/sameoldchat.chat.v1.ConversationMutationsService/AdminLinkConversationObjects"
+	ConversationMutationsService_AdminUnlinkConversationObjects_FullMethodName      = "/sameoldchat.chat.v1.ConversationMutationsService/AdminUnlinkConversationObjects"
+	ConversationMutationsService_AdminConversationObjects_FullMethodName            = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConversationObjects"
+	ConversationMutationsService_AdminCreateConversationForObjects_FullMethodName   = "/sameoldchat.chat.v1.ConversationMutationsService/AdminCreateConversationForObjects"
+	ConversationMutationsService_OpenConversation_FullMethodName                    = "/sameoldchat.chat.v1.ConversationMutationsService/OpenConversation"
+	ConversationMutationsService_AddPeopleToDirectConversation_FullMethodName       = "/sameoldchat.chat.v1.ConversationMutationsService/AddPeopleToDirectConversation"
+	ConversationMutationsService_ConvertGroupDirectToPrivate_FullMethodName         = "/sameoldchat.chat.v1.ConversationMutationsService/ConvertGroupDirectToPrivate"
+	ConversationMutationsService_CreateConversation_FullMethodName                  = "/sameoldchat.chat.v1.ConversationMutationsService/CreateConversation"
+	ConversationMutationsService_JoinConversation_FullMethodName                    = "/sameoldchat.chat.v1.ConversationMutationsService/JoinConversation"
+	ConversationMutationsService_InviteConversationMembers_FullMethodName           = "/sameoldchat.chat.v1.ConversationMutationsService/InviteConversationMembers"
+	ConversationMutationsService_LeaveConversation_FullMethodName                   = "/sameoldchat.chat.v1.ConversationMutationsService/LeaveConversation"
+	ConversationMutationsService_KickConversationMember_FullMethodName              = "/sameoldchat.chat.v1.ConversationMutationsService/KickConversationMember"
+	ConversationMutationsService_RenameConversation_FullMethodName                  = "/sameoldchat.chat.v1.ConversationMutationsService/RenameConversation"
+	ConversationMutationsService_SetConversationTopic_FullMethodName                = "/sameoldchat.chat.v1.ConversationMutationsService/SetConversationTopic"
+	ConversationMutationsService_SetConversationPurpose_FullMethodName              = "/sameoldchat.chat.v1.ConversationMutationsService/SetConversationPurpose"
+	ConversationMutationsService_SetConversationArchived_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/SetConversationArchived"
+	ConversationMutationsService_AdminRenameConversation_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/AdminRenameConversation"
+	ConversationMutationsService_AdminSetConversationArchived_FullMethodName        = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationArchived"
+	ConversationMutationsService_AdminDeleteConversation_FullMethodName             = "/sameoldchat.chat.v1.ConversationMutationsService/AdminDeleteConversation"
+	ConversationMutationsService_AdminAddConversationAccessGroup_FullMethodName     = "/sameoldchat.chat.v1.ConversationMutationsService/AdminAddConversationAccessGroup"
+	ConversationMutationsService_AdminRemoveConversationAccessGroup_FullMethodName  = "/sameoldchat.chat.v1.ConversationMutationsService/AdminRemoveConversationAccessGroup"
+	ConversationMutationsService_AdminListConversationAccessGroups_FullMethodName   = "/sameoldchat.chat.v1.ConversationMutationsService/AdminListConversationAccessGroups"
+	ConversationMutationsService_AdminInviteConversationMembers_FullMethodName      = "/sameoldchat.chat.v1.ConversationMutationsService/AdminInviteConversationMembers"
+	ConversationMutationsService_AdminConvertConversationToPrivate_FullMethodName   = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPrivate"
+	ConversationMutationsService_AdminConvertConversationToPublic_FullMethodName    = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConvertConversationToPublic"
+	ConversationMutationsService_AdminBulkArchiveConversations_FullMethodName       = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkArchiveConversations"
+	ConversationMutationsService_AdminBulkDeleteConversations_FullMethodName        = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkDeleteConversations"
+	ConversationMutationsService_AdminConversationTeams_FullMethodName              = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConversationTeams"
+	ConversationMutationsService_AdminSetConversationTeams_FullMethodName           = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationTeams"
 )
 
 // ConversationMutationsServiceClient is the client API for ConversationMutationsService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ConversationMutationsServiceClient interface {
+	AdminLookupConversations(ctx context.Context, in *ConversationLookupRequest, opts ...grpc.CallOption) (*ConversationPage, error)
+	AdminBulkMoveConversations(ctx context.Context, in *BulkMoveConversationsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminSetConversationsExcludedFromAI(ctx context.Context, in *ConversationAIExclusionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminConversationsExcludedFromAI(ctx context.Context, in *ConversationAIExclusionRequest, opts ...grpc.CallOption) (*ConversationAIExclusionResponse, error)
+	AdminLinkConversationObjects(ctx context.Context, in *LinkConversationObjectsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminUnlinkConversationObjects(ctx context.Context, in *UnlinkConversationObjectsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminConversationObjects(ctx context.Context, in *ConversationObjectsRequest, opts ...grpc.CallOption) (*ConversationObjectsResponse, error)
+	AdminCreateConversationForObjects(ctx context.Context, in *CreateConversationForObjectsRequest, opts ...grpc.CallOption) (*Conversation, error)
 	OpenConversation(ctx context.Context, in *OpenConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	AddPeopleToDirectConversation(ctx context.Context, in *AddPeopleToDirectConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	ConvertGroupDirectToPrivate(ctx context.Context, in *ConvertGroupDirectToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error)
@@ -83,6 +99,86 @@ type conversationMutationsServiceClient struct {
 
 func NewConversationMutationsServiceClient(cc grpc.ClientConnInterface) ConversationMutationsServiceClient {
 	return &conversationMutationsServiceClient{cc}
+}
+
+func (c *conversationMutationsServiceClient) AdminLookupConversations(ctx context.Context, in *ConversationLookupRequest, opts ...grpc.CallOption) (*ConversationPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConversationPage)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminLookupConversations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminBulkMoveConversations(ctx context.Context, in *BulkMoveConversationsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminBulkMoveConversations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminSetConversationsExcludedFromAI(ctx context.Context, in *ConversationAIExclusionRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminSetConversationsExcludedFromAI_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminConversationsExcludedFromAI(ctx context.Context, in *ConversationAIExclusionRequest, opts ...grpc.CallOption) (*ConversationAIExclusionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConversationAIExclusionResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminConversationsExcludedFromAI_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminLinkConversationObjects(ctx context.Context, in *LinkConversationObjectsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminLinkConversationObjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminUnlinkConversationObjects(ctx context.Context, in *UnlinkConversationObjectsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminUnlinkConversationObjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminConversationObjects(ctx context.Context, in *ConversationObjectsRequest, opts ...grpc.CallOption) (*ConversationObjectsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConversationObjectsResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminConversationObjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminCreateConversationForObjects(ctx context.Context, in *CreateConversationForObjectsRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminCreateConversationForObjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *conversationMutationsServiceClient) OpenConversation(ctx context.Context, in *OpenConversationRequest, opts ...grpc.CallOption) (*Conversation, error) {
@@ -339,6 +435,14 @@ func (c *conversationMutationsServiceClient) AdminSetConversationTeams(ctx conte
 // All implementations should embed UnimplementedConversationMutationsServiceServer
 // for forward compatibility.
 type ConversationMutationsServiceServer interface {
+	AdminLookupConversations(context.Context, *ConversationLookupRequest) (*ConversationPage, error)
+	AdminBulkMoveConversations(context.Context, *BulkMoveConversationsRequest) (*MutationResponse, error)
+	AdminSetConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*MutationResponse, error)
+	AdminConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*ConversationAIExclusionResponse, error)
+	AdminLinkConversationObjects(context.Context, *LinkConversationObjectsRequest) (*MutationResponse, error)
+	AdminUnlinkConversationObjects(context.Context, *UnlinkConversationObjectsRequest) (*MutationResponse, error)
+	AdminConversationObjects(context.Context, *ConversationObjectsRequest) (*ConversationObjectsResponse, error)
+	AdminCreateConversationForObjects(context.Context, *CreateConversationForObjectsRequest) (*Conversation, error)
 	OpenConversation(context.Context, *OpenConversationRequest) (*Conversation, error)
 	AddPeopleToDirectConversation(context.Context, *AddPeopleToDirectConversationRequest) (*Conversation, error)
 	ConvertGroupDirectToPrivate(context.Context, *ConvertGroupDirectToPrivateRequest) (*Conversation, error)
@@ -373,6 +477,30 @@ type ConversationMutationsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedConversationMutationsServiceServer struct{}
 
+func (UnimplementedConversationMutationsServiceServer) AdminLookupConversations(context.Context, *ConversationLookupRequest) (*ConversationPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminLookupConversations not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminBulkMoveConversations(context.Context, *BulkMoveConversationsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminBulkMoveConversations not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminSetConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetConversationsExcludedFromAI not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*ConversationAIExclusionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminConversationsExcludedFromAI not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminLinkConversationObjects(context.Context, *LinkConversationObjectsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminLinkConversationObjects not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminUnlinkConversationObjects(context.Context, *UnlinkConversationObjectsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminUnlinkConversationObjects not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminConversationObjects(context.Context, *ConversationObjectsRequest) (*ConversationObjectsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminConversationObjects not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminCreateConversationForObjects(context.Context, *CreateConversationForObjectsRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminCreateConversationForObjects not implemented")
+}
 func (UnimplementedConversationMutationsServiceServer) OpenConversation(context.Context, *OpenConversationRequest) (*Conversation, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenConversation not implemented")
 }
@@ -466,6 +594,150 @@ func RegisterConversationMutationsServiceServer(s grpc.ServiceRegistrar, srv Con
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&ConversationMutationsService_ServiceDesc, srv)
+}
+
+func _ConversationMutationsService_AdminLookupConversations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConversationLookupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminLookupConversations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminLookupConversations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminLookupConversations(ctx, req.(*ConversationLookupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminBulkMoveConversations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BulkMoveConversationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminBulkMoveConversations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminBulkMoveConversations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminBulkMoveConversations(ctx, req.(*BulkMoveConversationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminSetConversationsExcludedFromAI_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConversationAIExclusionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminSetConversationsExcludedFromAI(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminSetConversationsExcludedFromAI_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminSetConversationsExcludedFromAI(ctx, req.(*ConversationAIExclusionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminConversationsExcludedFromAI_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConversationAIExclusionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminConversationsExcludedFromAI(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminConversationsExcludedFromAI_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminConversationsExcludedFromAI(ctx, req.(*ConversationAIExclusionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminLinkConversationObjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LinkConversationObjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminLinkConversationObjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminLinkConversationObjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminLinkConversationObjects(ctx, req.(*LinkConversationObjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminUnlinkConversationObjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnlinkConversationObjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminUnlinkConversationObjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminUnlinkConversationObjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminUnlinkConversationObjects(ctx, req.(*UnlinkConversationObjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminConversationObjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConversationObjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminConversationObjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminConversationObjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminConversationObjects(ctx, req.(*ConversationObjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminCreateConversationForObjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateConversationForObjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminCreateConversationForObjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminCreateConversationForObjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminCreateConversationForObjects(ctx, req.(*CreateConversationForObjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ConversationMutationsService_OpenConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -925,6 +1197,38 @@ var ConversationMutationsService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sameoldchat.chat.v1.ConversationMutationsService",
 	HandlerType: (*ConversationMutationsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "AdminLookupConversations",
+			Handler:    _ConversationMutationsService_AdminLookupConversations_Handler,
+		},
+		{
+			MethodName: "AdminBulkMoveConversations",
+			Handler:    _ConversationMutationsService_AdminBulkMoveConversations_Handler,
+		},
+		{
+			MethodName: "AdminSetConversationsExcludedFromAI",
+			Handler:    _ConversationMutationsService_AdminSetConversationsExcludedFromAI_Handler,
+		},
+		{
+			MethodName: "AdminConversationsExcludedFromAI",
+			Handler:    _ConversationMutationsService_AdminConversationsExcludedFromAI_Handler,
+		},
+		{
+			MethodName: "AdminLinkConversationObjects",
+			Handler:    _ConversationMutationsService_AdminLinkConversationObjects_Handler,
+		},
+		{
+			MethodName: "AdminUnlinkConversationObjects",
+			Handler:    _ConversationMutationsService_AdminUnlinkConversationObjects_Handler,
+		},
+		{
+			MethodName: "AdminConversationObjects",
+			Handler:    _ConversationMutationsService_AdminConversationObjects_Handler,
+		},
+		{
+			MethodName: "AdminCreateConversationForObjects",
+			Handler:    _ConversationMutationsService_AdminCreateConversationForObjects_Handler,
+		},
 		{
 			MethodName: "OpenConversation",
 			Handler:    _ConversationMutationsService_OpenConversation_Handler,

@@ -790,6 +790,73 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A lookup that names no filter answers every channel, and a batch
+			// that names a channel the workspace does not hold changes nothing.
+			// Both compositions must agree on each.
+			name: "administrative channel lookup, move, exclusion, and linking agree",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				everything, err := chat.AdminLookupConversations(ctx, "T1", "UA", domain.ConversationLookup{}, domain.PageRequest{Limit: 50})
+				if err != nil {
+					return nil, err
+				}
+				quiet, err := chat.AdminLookupConversations(ctx, "T1", "UA", domain.ConversationLookup{MaxMemberCount: 1}, domain.PageRequest{Limit: 50})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminSetConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1"}, true); err != nil {
+					return nil, err
+				}
+				excluded, err := chat.AdminConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1", "C2"})
+				if err != nil {
+					return nil, err
+				}
+				missingChannel := chat.AdminSetConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1", "C-nobody"}, true)
+				stillExcluded, err := chat.AdminConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1"})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminLinkConversationObjects(ctx, "T1", "UA", "C1", "00D000", []string{"a02", "a01"}); err != nil {
+					return nil, err
+				}
+				linked, err := chat.AdminConversationObjects(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				records := make([]string, 0, len(linked))
+				for _, object := range linked {
+					records = append(records, object.OrgID+"/"+object.RecordID)
+				}
+				if err := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+					return nil, err
+				}
+				after, err := chat.AdminConversationObjects(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				missingTarget := chat.AdminBulkMoveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}, "T-nobody")
+				// A channel made for a record carries the link from the start.
+				made, err := chat.AdminCreateConversationForObjects(ctx, "T1", "UA", "record-channel", "00D000", "a03", false)
+				if err != nil {
+					return nil, err
+				}
+				madeObjects, err := chat.AdminConversationObjects(ctx, "T1", "UA", made.ID)
+				if err != nil {
+					return nil, err
+				}
+				madeRecords := make([]string, 0, len(madeObjects))
+				for _, object := range madeObjects {
+					madeRecords = append(madeRecords, object.OrgID+"/"+object.RecordID)
+				}
+				_, unnamedRecord := chat.AdminCreateConversationForObjects(ctx, "T1", "UA", "no-record-channel", "00D000", "", false)
+				return []any{
+					made.Name, madeRecords, unnamedRecord != nil,
+					len(everything.Conversations) > 0, len(quiet.Conversations) <= len(everything.Conversations),
+					excluded, len(stillExcluded), records, len(after),
+					missingChannel != nil, missingTarget != nil,
+				}, nil
+			},
+		},
+		{
 			// An app nobody has configured answers the defaults, so both
 			// compositions must report the same effective configuration.
 			name: "app configuration defaults and resolution clearance agree",
