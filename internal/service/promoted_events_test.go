@@ -230,8 +230,8 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	}
 
 	// Private lifecycle: existence and name stay inside the room.
-	state.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "secrets", IsPrivate: true})
-	privateRename, err := conversationLifecycleEvent("T1", "conversation.renamed", domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "classified", IsPrivate: true}, "U1")
+	state.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "secrets", Kind: domain.ConversationTypePrivate})
+	privateRename, err := conversationLifecycleEvent("T1", "conversation.renamed", domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "classified", Kind: domain.ConversationTypePrivate}, "U1")
 	if err != nil {
 		t.Fatal(err)
 	}

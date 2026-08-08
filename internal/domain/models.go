@@ -796,16 +796,17 @@ func NormalizeScopes(scopes []string) []string {
 }
 
 type Conversation struct {
-	ID            ConversationID
-	WorkspaceID   WorkspaceID
-	Name          string
-	Topic         string
-	Purpose       string
-	Archived      bool
-	IsPrivate     bool
-	IsDirect      bool
-	IsGroupDirect bool
-	UnreadCount   int
+	ID          ConversationID
+	WorkspaceID WorkspaceID
+	Name        string
+	Topic       string
+	Purpose     string
+	Archived    bool
+	// Kind states what this conversation is. Three booleans held the same fact
+	// before and allowed four combinations that mean nothing, such as a
+	// conversation that is both a one-to-one and a group.
+	Kind        ConversationType
+	UnreadCount int
 	// The Slack Connect identity conversations.info must emit. A channel is
 	// externally shared once another organization has accepted an invitation
 	// to it, and pending while one is outstanding: the two are different facts
@@ -963,40 +964,60 @@ type ConversationPrefs struct {
 	WhoCanPost     ConversationPreferenceList
 }
 
-// Kind is what a conversation is, decided in one place.
-//
-// The three booleans admit eight combinations and only four mean anything. Every
-// layer used to read them directly and in its own order, so "is this a direct
-// conversation" was written as `IsDirect || IsGroupDirect` in three dozen places
-// and "is this a public channel" as a three-term negation in several more.
-//
-// The precedence here is the one those readers implied, made explicit and
-// applied once: a conversation between people is a conversation between people
-// whatever else is set, a group DM before a one-to-one because the group flag is
-// the more specific claim, and a channel is private if it says so. Nothing can
-// be two kinds any more, whatever the flags say.
-func (c Conversation) Kind() ConversationType {
+// OrPublic reads the zero kind as a public channel. A caller that builds a
+// Conversation and says nothing describes the least restricted kind, which is
+// what the three booleans said when a caller set none of them.
+func (t ConversationType) OrPublic() ConversationType {
+	if t == "" {
+		return ConversationTypePublic
+	}
+	return t
+}
+
+// IsDirectOrGroup reports whether this conversation joins people rather than
+// forms a channel.
+func (c Conversation) IsDirectOrGroup() bool {
+	return c.Kind == ConversationTypeIM || c.Kind == ConversationTypeMPIM
+}
+
+// PrivateFlag reports the value the stored is_private column carries for this
+// kind. A one-to-one and a group are private as well as a private channel, so
+// every reader of the old boolean keeps its exact meaning.
+func (c Conversation) PrivateFlag() bool {
+	private, _, _ := ConversationKindFlags(c.Kind.OrPublic())
+	return private
+}
+
+// ConversationKindFor maps the three stored flags to one kind. Both stores call
+// it when they read a row, and nothing else interprets the flags.
+func ConversationKindFor(private, direct, groupDirect bool) ConversationType {
 	switch {
-	case c.IsGroupDirect:
+	case groupDirect:
 		return ConversationTypeMPIM
-	case c.IsDirect:
+	case direct:
 		return ConversationTypeIM
-	case c.IsPrivate:
+	case private:
 		return ConversationTypePrivate
 	}
 	return ConversationTypePublic
 }
 
-// IsDirectOrGroup reports whether this is a conversation between people rather
-// than a channel. It is the question three dozen call sites asked by combining
-// two booleans, each free to get the combination wrong.
-func (c Conversation) IsDirectOrGroup() bool {
-	kind := c.Kind()
-	return kind == ConversationTypeIM || kind == ConversationTypeMPIM
+// ConversationKindFlags reverses ConversationKindFor for a store that writes
+// the three columns.
+func ConversationKindFlags(kind ConversationType) (private, direct, groupDirect bool) {
+	switch kind {
+	case ConversationTypeMPIM:
+		return true, false, true
+	case ConversationTypeIM:
+		return true, true, false
+	case ConversationTypePrivate:
+		return true, false, false
+	}
+	return false, false, false
 }
 
 func MatchesConversationType(conversation Conversation, typeValue ConversationType) bool {
-	return conversation.Kind() == typeValue
+	return conversation.Kind.OrPublic() == typeValue
 }
 
 type ReadCursor struct {

@@ -17,7 +17,7 @@ func TestSavedItemsArePrivateIdempotentAndRetainNoInaccessibleContent(t *testing
 		repository.SeedWorkspace(domain.Workspace{ID: "T1"}),
 		repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}),
 		repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}),
-		repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true}),
+		repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate}),
 		repository.SeedConversationMember("C1", "U1"),
 		repository.SeedConversationMember("C1", "U2"),
 	} {

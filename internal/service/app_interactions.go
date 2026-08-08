@@ -1401,7 +1401,7 @@ func (m Messages) escapeSlashCommandText(ctx context.Context, workspaceID domain
 		if !ok {
 			return match
 		}
-		if conversation.IsPrivate {
+		if conversation.PrivateFlag() {
 			return match[:prefixLength] + "<#" + string(conversation.ID) + "|>"
 		}
 		return match[:prefixLength] + "<#" + string(conversation.ID) + "|" + conversation.Name + ">"

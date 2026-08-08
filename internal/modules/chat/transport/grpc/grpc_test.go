@@ -790,7 +790,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatalf("public conversations=%+v err=%v", publicConversations, err)
 	}
 	createdConversation, err := remote.CreateConversation(ctx, "T1", "U1", "private-room", true)
-	if err != nil || !createdConversation.IsPrivate || createdConversation.Name != "private-room" {
+	if err != nil || !createdConversation.PrivateFlag() || createdConversation.Name != "private-room" {
 		t.Fatalf("created conversation=%+v err=%v", createdConversation, err)
 	}
 	joined, err := remote.JoinConversation(ctx, "T1", "U1", "C1")

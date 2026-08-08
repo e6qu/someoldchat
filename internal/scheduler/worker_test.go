@@ -239,7 +239,7 @@ func TestRunOnceCompletesTheBatchAroundAnItemThatCannotBePosted(t *testing.T) {
 	store.SeedConversationMember("C1", "U1")
 	// A private conversation the author is not a member of. That is an ordinary
 	// durable state: the author was removed after the message was scheduled.
-	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	due := time.Now().UTC().Add(-time.Hour)
 	for _, value := range []domain.ScheduledMessage{
 		{WorkspaceID: "T1", ID: "Q1", Channel: "C2", Author: "U1", Text: "undeliverable", PostAt: due, CreatedAt: due},

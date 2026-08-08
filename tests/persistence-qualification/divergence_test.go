@@ -1443,7 +1443,7 @@ func conversationCreatorIsAMember(t *testing.T, open opener) {
 		private bool
 	}{{"public", false}, {"private", true}} {
 		id := domain.ConversationID("C-creator-" + testCase.name + "-" + f.suffix)
-		conversation := domain.Conversation{ID: id, WorkspaceID: f.workspaceID, Name: "creator-" + testCase.name, IsPrivate: testCase.private}
+		conversation := domain.Conversation{ID: id, WorkspaceID: f.workspaceID, Name: "creator-" + testCase.name, Kind: domain.ConversationKindFor(testCase.private, false, false)}
 		if err := f.repository.CreateConversation(ctx, conversation, f.userID, f.event("event-creator-"+testCase.name, "conversation.created", string(id))); err != nil {
 			t.Fatalf("create %s conversation: %v", testCase.name, err)
 		}
@@ -1926,7 +1926,7 @@ func workspaceAnalyticsCountTheSameOnEveryProfile(t *testing.T, open opener) {
 
 	private := domain.ConversationID("C-private-" + f.suffix)
 	archived := domain.ConversationID("C-archived-" + f.suffix)
-	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: f.workspaceID, Name: "private", IsPrivate: true}); err != nil {
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: f.workspaceID, Name: "private", Kind: domain.ConversationTypePrivate}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: archived, WorkspaceID: f.workspaceID, Name: "archived", Archived: true}); err != nil {
@@ -2676,7 +2676,7 @@ func directorySearchFoldsNamesOnEveryProfile(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 	private := domain.ConversationID("C-private-" + f.suffix)
-	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: f.workspaceID, Name: "divergence-leadership", IsPrivate: true}); err != nil {
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: f.workspaceID, Name: "divergence-leadership", Kind: domain.ConversationTypePrivate}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.repository.SeedConversationMember(ctx, private, member); err != nil {
@@ -3049,7 +3049,7 @@ func aChannelConvertsBothWaysAndSaysWhichKindItIsNot(t *testing.T, open opener) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !private.IsPrivate || private.Topic != "who can read this" || private.Purpose != "conversion" {
+	if !private.PrivateFlag() || private.Topic != "who can read this" || private.Purpose != "conversion" {
 		t.Fatalf("converted channel = %+v, want it private with everything else intact", private)
 	}
 	// Converting again is the wrong kind of conversation, not a missing one.
@@ -3069,7 +3069,7 @@ func aChannelConvertsBothWaysAndSaysWhichKindItIsNot(t *testing.T, open opener) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if back.IsPrivate {
+	if back.PrivateFlag() {
 		t.Fatalf("converted back = %+v, want it public", back)
 	}
 	if _, err := f.repository.SetConversationPublic(ctx, channel, f.event("to-public-again", "conversation.converted_to_public", string(channel))); !errors.Is(err, store.ErrInvalidConversationType) {

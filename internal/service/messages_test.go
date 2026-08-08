@@ -776,7 +776,7 @@ func TestConversationInviteSupportsPrivateChannelsAndCreatesActivity(t *testing.
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
-	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	s.SeedConversationMember("C1", "U1")
 	if _, err := (Messages{Store: s}).InviteConversationMembers(context.Background(), "T1", "U1", "C1", []domain.UserID{"U2"}); err != nil {
 		t.Fatal(err)
@@ -825,7 +825,7 @@ func TestAdminConversationConversionEnforcesConversationType(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "public"})
 	messages := Messages{Store: s}
 	value, err := messages.AdminConvertConversationToPrivate(context.Background(), "T1", "U1", "C1")
-	if err != nil || !value.IsPrivate {
+	if err != nil || !value.PrivateFlag() {
 		t.Fatalf("conversion=%+v err=%v", value, err)
 	}
 	if _, err := messages.AdminConvertConversationToPrivate(context.Background(), "T1", "U1", "C1"); err != ErrInvalidConversation {
@@ -897,7 +897,7 @@ func TestConversationAccessGroupsNormalizeAndPersist(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	seedWorkspaceAdmin(t, s, "T1", "U1")
-	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	messages := Messages{Store: s}
 	group, err := messages.CreateUserGroup(context.Background(), "T1", "U1", "Engineering", "engineering", "")
 	if err != nil {
@@ -1455,7 +1455,7 @@ func TestPrivateConversationRequiresMembership(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
-	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	if _, err := (Messages{Store: s}).Post(context.Background(), "T1", "U1", "Cprivate", "secret", "", ""); err == nil {
 		t.Fatal("private conversation allowed non-member")
 	}
@@ -1668,7 +1668,7 @@ func TestSearchNormalizesTermsAndHidesPrivateConversations(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
-	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	messages := Messages{Store: s}
 	if _, err := messages.Post(context.Background(), "T1", "U1", "C1", "Hello durable search", "", ""); err != nil {
 		t.Fatal(err)
@@ -1758,7 +1758,7 @@ func TestFileListingAndSearchApplyViewerVisibilityBeforePagination(t *testing.T)
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
 	s.SeedConversation(domain.Conversation{ID: "Cpublic", WorkspaceID: "T1", Name: "general"})
-	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "secret", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "secret", Kind: domain.ConversationTypePrivate})
 	s.SeedConversationMember("Cprivate", "U2")
 	files := []domain.File{
 		{ID: "FOWN", WorkspaceID: "T1", Uploader: "U1", Name: "release-notes.txt", Title: "Release notes", MIMEType: "text/plain", BlobKey: "own", CreatedAt: time.Unix(10, 0).UTC()},
@@ -2109,7 +2109,7 @@ func TestSentMessagesHidesPrivateHistoryAfterLeaving(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
-	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 
@@ -2212,7 +2212,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expanded.ID == source.ID || !expanded.IsGroupDirect || !expanded.IsPrivate {
+	if expanded.ID == source.ID || expanded.Kind != domain.ConversationTypeMPIM || !expanded.PrivateFlag() {
 		t.Fatalf("expanded conversation = %+v", expanded)
 	}
 	sourceMembers, err := messages.ConversationMembers(ctx, "T1", "U1", source.ID, domain.PageRequest{Limit: 10})
@@ -2239,7 +2239,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil {
 		t.Fatal(err)
 	}
-	if converted.ID != expanded.ID || !converted.IsPrivate || converted.IsDirectOrGroup() || converted.Name != "project-room" {
+	if converted.ID != expanded.ID || !converted.PrivateFlag() || converted.IsDirectOrGroup() || converted.Name != "project-room" {
 		t.Fatalf("converted conversation = %+v", converted)
 	}
 	convertedHistory, err := messages.History(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
@@ -2269,7 +2269,7 @@ func TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation(t *testin
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
-	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 	scheduled, err := messages.ScheduleMessage(ctx, "T1", "U1", "C1", "cancel me", time.Now().UTC().Add(time.Hour))
@@ -2531,7 +2531,7 @@ func TestDeletingTheSharingMessageEndsTheShareAndAnnouncesIt(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
-	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general", Kind: domain.ConversationTypePrivate})
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)

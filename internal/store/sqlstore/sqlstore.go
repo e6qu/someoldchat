@@ -1306,15 +1306,15 @@ func (s *Store) SeedToken(ctx context.Context, token string, record domain.Token
 
 func (s *Store) SeedConversation(ctx context.Context, value domain.Conversation) error {
 	private := 0
-	if value.IsPrivate {
+	if value.PrivateFlag() {
 		private = 1
 	}
 	direct := 0
-	if value.IsDirect {
+	if value.Kind == domain.ConversationTypeIM {
 		direct = 1
 	}
 	groupDirect := 0
-	if value.IsGroupDirect {
+	if value.Kind == domain.ConversationTypeMPIM {
 		groupDirect = 1
 	}
 	archived := 0
@@ -5395,9 +5395,7 @@ func (s *Store) GetConversation(ctx context.Context, id domain.ConversationID) (
 	var private, direct, groupDirect, archived int
 	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect)
 	value.Archived = archived != 0
-	value.IsPrivate = private != 0
-	value.IsDirect = direct != 0
-	value.IsGroupDirect = groupDirect != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	return value, translateNotFound(err)
 }
 
@@ -5418,14 +5416,12 @@ func (s *Store) FindDirectConversation(ctx context.Context, workspaceID domain.W
 	var private, direct, groupDirect, archived int
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect)
 	value.Archived = archived != 0
-	value.IsPrivate = private != 0
-	value.IsDirect = direct != 0
-	value.IsGroupDirect = groupDirect != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	return value, translateNotFound(err)
 }
 
 func (s *Store) CreateDirectConversation(ctx context.Context, conversation domain.Conversation, members []domain.UserID, event events.Event) error {
-	if !conversation.IsPrivate || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
+	if !conversation.PrivateFlag() || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -5434,10 +5430,10 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	}
 	defer tx.Rollback()
 	direct, groupDirect := 0, 0
-	if conversation.IsDirect {
+	if conversation.Kind == domain.ConversationTypeIM {
 		direct = 1
 	}
-	if conversation.IsGroupDirect {
+	if conversation.Kind == domain.ConversationTypeMPIM {
 		groupDirect = 1
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO conversations(id, workspace_id, name, is_private, is_direct, is_group_direct, direct_key, name_folded) VALUES (?, ?, ?, 1, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, conversation.ID, conversation.WorkspaceID, conversation.Name, direct, groupDirect, domain.DirectConversationKey(conversation.WorkspaceID, members), domain.FoldSearchText(conversation.Name))
@@ -5478,7 +5474,7 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 }
 
 func (s *Store) ExpandDirectConversation(ctx context.Context, expansion domain.DirectConversationExpansion, emitted []events.Event) error {
-	if !expansion.History.Valid() || len(emitted) != 3 || !expansion.Target.IsPrivate || expansion.Target.IsDirect || !expansion.Target.IsGroupDirect || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
+	if !expansion.History.Valid() || len(emitted) != 3 || expansion.Target.Kind != domain.ConversationTypeMPIM || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
 		return store.InvalidArgument("invalid direct conversation expansion")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -5690,7 +5686,7 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	}
 	defer tx.Rollback()
 	private := 0
-	if conversation.IsPrivate {
+	if conversation.PrivateFlag() {
 		private = 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversations(id, workspace_id, name, is_private, name_folded) VALUES (?, ?, ?, ?, ?)`, conversation.ID, conversation.WorkspaceID, conversation.Name, private, domain.FoldSearchText(conversation.Name)); err != nil {
@@ -5745,7 +5741,8 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	value.Archived = archived != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	if err := tx.Commit(); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -5782,7 +5779,8 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	value.Archived = archived != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	if err := tx.Commit(); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -5819,7 +5817,8 @@ func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	value.Archived = archived != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	if err := tx.Commit(); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -5855,7 +5854,8 @@ func (s *Store) SetConversationArchived(ctx context.Context, conversation domain
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &storedArchived, &private, &direct, &groupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = storedArchived != 0, private != 0, direct != 0, groupDirect != 0
+	value.Archived = storedArchived != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	if err := tx.Commit(); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -8173,7 +8173,8 @@ func scanConversationRow(row rowScanner) (domain.Conversation, error) {
 	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	value.Archived = archived != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	return value, nil
 }
 
@@ -9583,7 +9584,8 @@ func (s *Store) setConversationVisibility(ctx context.Context, conversation doma
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &storedPrivate, &storedDirect, &storedGroupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, storedPrivate != 0, storedDirect != 0, storedGroupDirect != 0
+	value.Archived = archived != 0
+	value.Kind = domain.ConversationKindFor(storedPrivate != 0, storedDirect != 0, storedGroupDirect != 0)
 	if err := tx.Commit(); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -9639,7 +9641,8 @@ func (s *Store) ConvertGroupDirectToPrivate(ctx context.Context, conversion doma
 		Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
-	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	value.Archived = archived != 0
+	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	if err := tx.Commit(); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -11567,9 +11570,7 @@ func (s *Store) ListConversations(ctx context.Context, workspace domain.Workspac
 			return domain.ConversationPage{}, err
 		}
 		conversation.Archived = archived != 0
-		conversation.IsPrivate = private != 0
-		conversation.IsDirect = direct != 0
-		conversation.IsGroupDirect = groupDirect != 0
+		conversation.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 		conversation.UnreadCount, err = s.unreadCount(ctx, workspace, user, conversation.ID)
 		if err != nil {
 			return domain.ConversationPage{}, err
@@ -11627,7 +11628,8 @@ func (s *Store) SearchConversations(ctx context.Context, workspace domain.Worksp
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
 			return domain.ConversationPage{}, err
 		}
-		value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+		value.Archived = archived != 0
+		value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {

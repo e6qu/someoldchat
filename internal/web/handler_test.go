@@ -386,7 +386,7 @@ func TestChannelVisibilityChangesBothWaysForAnAdministrator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if conversation.IsPrivate {
+	if conversation.PrivateFlag() {
 		t.Fatalf("channel = %+v, want it public again", conversation)
 	}
 
@@ -1058,7 +1058,7 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
 	s.SeedConversation(domain.Conversation{ID: "Cother", WorkspaceID: "T1", Name: "release"})
-	s.SeedConversation(domain.Conversation{ID: "Cdm", WorkspaceID: "T1", Name: "direct", IsDirect: true, IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "Cdm", WorkspaceID: "T1", Name: "direct", Kind: domain.ConversationTypeIM})
 	s.SeedConversationMember("Cdm", "U1")
 	s.SeedConversationMember("Cdm", "U2")
 	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
@@ -1092,7 +1092,7 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "Emention", WorkspaceID: "T1", Topic: "message.created", Payload: "Mmention", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
-	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "launch-room", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "launch-room", Kind: domain.ConversationTypePrivate})
 	s.SeedConversationMember("Cprivate", "U2")
 	if err := s.InviteConversationMembers(context.Background(), "Cprivate", []domain.UserID{"U1"}, events.Event{
 		ID: "Einvitation", WorkspaceID: "T1", ActorID: "U2", Topic: "conversation.members_invited", CreatedAt: created.Add(time.Minute),
@@ -1617,7 +1617,7 @@ func TestWorkspaceCanCreateAChannel(t *testing.T) {
 	}
 	channel := domain.ConversationID(target.Query().Get("channel"))
 	conversation, err := s.GetConversation(context.Background(), channel)
-	if err != nil || conversation.Name != "product-launch" || !conversation.IsPrivate {
+	if err != nil || conversation.Name != "product-launch" || !conversation.PrivateFlag() {
 		t.Fatalf("conversation=%+v err=%v", conversation, err)
 	}
 	member, err := s.IsConversationMember(context.Background(), channel, "U1")
@@ -3390,7 +3390,7 @@ func TestSearchRecentHistoryAndTypeaheadUseRealVisibleDestinations(t *testing.T)
 	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "private-owner"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "leadership", IsPrivate: true}); err != nil {
+	if err := s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "leadership", Kind: domain.ConversationTypePrivate}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SeedConversationMember("Cprivate", "U2"); err != nil {
@@ -3799,7 +3799,7 @@ func TestMemberDirectoryDoesNotOfferProfileWritesWithoutScope(t *testing.T) {
 func TestSearchNamesDirectMessagesAfterTheirParticipants(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
-	s.SeedConversation(domain.Conversation{ID: "Cdm", WorkspaceID: "T1", Name: "direct", IsDirect: true, IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "Cdm", WorkspaceID: "T1", Name: "direct", Kind: domain.ConversationTypeIM})
 	s.SeedConversationMember("Cdm", "U1")
 	s.SeedConversationMember("Cdm", "U2")
 	created := time.Unix(1700000000, 123456000).UTC()
@@ -4184,11 +4184,11 @@ func TestWebOpensNormalizedDirectConversation(t *testing.T) {
 	}
 	var direct domain.Conversation
 	for _, conversation := range conversations.Conversations {
-		if conversation.IsDirect {
+		if conversation.Kind == domain.ConversationTypeIM {
 			direct = conversation
 		}
 	}
-	if direct.ID == "" || !direct.IsPrivate {
+	if direct.ID == "" || !direct.PrivateFlag() {
 		t.Fatalf("direct conversation=%+v", direct)
 	}
 }
@@ -4216,7 +4216,7 @@ func TestDirectMessagesSurfaceCreatesNamesClosesAndReopensCanonicalGroup(t *test
 		t.Fatalf("open group status=%d body=%s", opened.Code, opened.Body)
 	}
 	group, err := s.FindDirectConversation(ctx, "T1", []domain.UserID{"U1", "U2", "U3"})
-	if err != nil || group.Name != "Design launch" || !group.IsGroupDirect {
+	if err != nil || group.Name != "Design launch" || group.Kind != domain.ConversationTypeMPIM {
 		t.Fatalf("group=%+v err=%v", group, err)
 	}
 	recent := get(t, mux, "/app/dms")
@@ -4301,7 +4301,7 @@ func TestDirectMessageDetailsReviewHistoryExpansionAndConvertInPlace(t *testing.
 		t.Fatalf("confirm status=%d body=%s", confirmed.Code, confirmed.Body)
 	}
 	group, err := s.FindDirectConversation(ctx, "T1", []domain.UserID{"U1", "U2", "U3"})
-	if err != nil || !group.IsGroupDirect {
+	if err != nil || group.Kind != domain.ConversationTypeMPIM {
 		t.Fatalf("expanded group=%+v err=%v", group, err)
 	}
 	if !strings.Contains(confirmed.Header().Get("Location"), "channel="+string(group.ID)) {
@@ -4321,7 +4321,7 @@ func TestDirectMessageDetailsReviewHistoryExpansionAndConvertInPlace(t *testing.
 		t.Fatalf("conversion status=%d location=%q body=%s", convertedResponse.Code, convertedResponse.Header().Get("Location"), convertedResponse.Body)
 	}
 	converted, err := s.GetConversation(ctx, group.ID)
-	if err != nil || converted.Name != "project-room" || !converted.IsPrivate || converted.IsDirectOrGroup() {
+	if err != nil || converted.Name != "project-room" || !converted.PrivateFlag() || converted.IsDirectOrGroup() {
 		t.Fatalf("converted=%+v err=%v", converted, err)
 	}
 	history, err := messages.History(ctx, "T1", "U1", group.ID, domain.PageRequest{Limit: 10})

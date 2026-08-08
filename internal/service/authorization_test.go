@@ -36,7 +36,7 @@ func twoMemberWorkspace(t *testing.T) (*memory.Store, Messages) {
 	if err := s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SeedConversation(domain.Conversation{ID: "CPRIV", WorkspaceID: "T1", Name: "secret", IsPrivate: true}); err != nil {
+	if err := s.SeedConversation(domain.Conversation{ID: "CPRIV", WorkspaceID: "T1", Name: "secret", Kind: domain.ConversationTypePrivate}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SeedConversationMember("CPRIV", "U2"); err != nil {
@@ -312,7 +312,7 @@ func TestAdminSetConversationTeamsRefusesAForeignWorkspace(t *testing.T) {
 func TestJoinConversationRefusesPrivateAndDirectConversations(t *testing.T) {
 	ctx := context.Background()
 	s, messages := twoMemberWorkspace(t)
-	if err := s.SeedConversation(domain.Conversation{ID: "CDM", WorkspaceID: "T1", Name: "dm", IsDirect: true}); err != nil {
+	if err := s.SeedConversation(domain.Conversation{ID: "CDM", WorkspaceID: "T1", Name: "dm", Kind: domain.ConversationTypeIM}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []domain.ConversationID{"CPRIV", "CDM"} {

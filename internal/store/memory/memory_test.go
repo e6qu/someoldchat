@@ -242,7 +242,7 @@ func TestListUsersAndConversationsAreBoundedAndAuthorized(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
-	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	membership, err := s.GetWorkspaceMembership(ctx, "T1", "U1")
 	if err != nil || membership.Role != "member" || !membership.Active {
 		t.Fatalf("membership=%+v err=%v", membership, err)
@@ -301,7 +301,7 @@ func TestConversationListFiltersBeforePagination(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "public"})
-	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true, Archived: true})
+	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate, Archived: true})
 	s.SeedConversationMember("C2", "U1")
 	public, err := s.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 1, Types: []domain.ConversationType{domain.ConversationTypePublic}})
 	if err != nil || len(public.Conversations) != 1 || public.Conversations[0].ID != "C1" || public.HasMore {
