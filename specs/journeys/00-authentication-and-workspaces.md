@@ -72,15 +72,14 @@ the initial channel visibility matches workspace policy.
 
 ## Evidence
 
-- Browser: direct entry, protected permalink return, workspace switch, sign-out
-  history/reconnect, session expiry with a non-empty composer, and invitation
-  variants.
+- Browser: direct entry, protected permalink return, workspace switch, sign-
+  out history/reconnect, session expiry with a non-empty composer, and
+  invitation variants.
 - Backend: durable nonce/replay protection, workspace-bound authorization,
   concurrent identity convergence, and revocation across local and distributed
   composition.
 - Differential: perform equivalent entry, switching, and sign-out observations
   in a dedicated Slack workspace.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

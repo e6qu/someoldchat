@@ -73,15 +73,15 @@ more present.
 
 ## Evidence
 
-- Real browser/media qualification uses synthetic devices in Chromium, Firefox,
-  and WebKit where supported and records explicit unsupported boundaries.
-- Multi-client tests prove join/leave/reconnect/invite/end state and accessible
-  mute/video/share announcements.
+- Real browser/media qualification uses synthetic devices in Chromium,
+  Firefox, and WebKit where supported and records explicit unsupported
+  boundaries.
+- Multi-client tests prove join/leave/reconnect/invite/end state and
+  accessible mute/video/share announcements.
 - Official SDKs exercise `calls.*` with app ownership and error variants.
-- A live Slack sandbox records conversation events and metadata behavior; media
-  quality comparison is separately bounded and MUST not be inferred from API
-  success.
-
+- A live Slack sandbox records conversation events and metadata behavior;
+  media quality comparison is separately bounded and MUST not be inferred from
+  API success.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

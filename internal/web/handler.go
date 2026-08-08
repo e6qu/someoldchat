@@ -2999,96 +2999,53 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // page: submit forms without losing the page, keep the composer usable, keep
 // the live stream open, and re-render the message regions the server owns.
 //
-// Four properties are load-bearing and each replaced a defect:
+// The script carries no JavaScript comments on purpose. html/template elides
+// them in a script context, so the bytes the browser receives would stop
+// matching the Content-Security-Policy hash computed from this constant and the
+// whole client would be silently blocked. Hence the length of this one.
 //
-//   - bursts collapse into one refresh, and a refresh aborts the one before it
-//     and drops any response that lands after a newer one started. Ten events
-//     used to issue ten concurrent full-conversation scans per open tab, whose
-//     responses could land out of order and visibly revert the timeline.
+// Load-bearing properties, each of which replaced a defect:
+//
+//   - bursts collapse into one refresh; a refresh aborts the one before it and
+//     drops any response that lands after a newer one started. Ten events used
+//     to issue ten concurrent scans whose responses could land out of order and
+//     visibly revert the timeline.
 //   - a submit takes a lock and disables its button, and success clears only
-//     the exact text that was sent. Holding Enter used to post twice, and the
-//     response used to reset the form over whatever was typed while it was in
-//     flight.
-//   - the stream reports its own failure. A 401 closes an EventSource
-//     permanently, and the page used to keep looking live forever.
-//   - every URL the client fetches must be a path on this origin. The values
-//     come from mutationURL/fragmentURL today, but nothing else in the document
-//     enforced it, and these fetches carry credentials.
+//     the exact text that was sent. Holding Enter used to post twice.
+//   - the stream reports its own failure: a 401 closes an EventSource for good,
+//     and the page used to keep looking live forever.
+//   - every URL the client fetches must be a path on this origin. These fetches
+//     carry credentials.
+//   - a refresh the reader caused is not cancelled by one nobody asked for.
+//     While a forced refresh is in flight a background one yields, because the
+//     event that provoked it will be in the response already being fetched.
+//   - a region is not re-rendered from markup identical to what it was last
+//     given: that cannot add information and can destroy focus, caret, scroll
+//     anchor and open disclosures. The remembered markup is cleared wherever
+//     something other than refresh() writes to a region.
 //
-// Two behaviours in it are not obvious from the code. `refresh(force)` is
-// forced only for a change the reader themselves made: it then re-renders every
-// message region, including one that is not following the live conversation,
-// and does not step aside for focus, because the reader is waiting. A refresh
-// caused by somebody else's event leaves a focused region alone. And a
-// successful post from a window that is not the newest one navigates to the
-// newest window instead of appending, because the message it just stored cannot
-// appear in the window on screen — which is how a sent message used to flash up
-// and then vanish.
+// refresh(force) is forced only for a change the reader made: it re-renders
+// every message region and does not step aside for focus, because the reader is
+// waiting. Somebody else's event leaves a focused region alone. A post from a
+// window that is not the newest navigates to the newest instead of appending,
+// because the stored message cannot appear in the window on screen.
 //
-// Arriving from a permalink lands on the message the link names, rather than at
-// the bottom of the conversation. The link already carried both halves — a
-// window cursor ending just after the message and a fragment naming it — but
-// the page finished loading by scrolling the timeline to its newest message,
-// which undid the browser's own jump to the fragment. So a search result opened
-// the right window and then looked at the wrong end of it.
-//
-// The message is focused rather than only scrolled to, because a fragment moves
-// the viewport and not the keyboard, and it is marked so the eye finds it
-// without comparing timestamps. The mark clears on the first interaction rather
-// than on a timer: a highlight that vanishes while the reader is still finding
-// their place is worse than one that waits, and "until you engage" is a state
-// the page can observe while "three seconds" is a guess.
-//
-// The composer keeps its focus only when the link named nothing.
-//
-// A refresh the reader caused is not cancelled by one nobody asked for. Every
-// refresh used to abort the fetches in flight and invalidate their generation,
-// including a forced refresh a mutation had just issued — the audit named this
-// as a way a mutation's own refresh can be discarded, and a background refresh
-// twelve milliseconds behind one is exactly the shape CI keeps capturing. While
-// a forced refresh is in flight, a background refresh now yields instead of
-// superseding it: the reader is waiting for their own action, and the event
-// that provoked the background refresh will still be in the response the forced
-// one is already fetching.
-//
-// A region is not re-rendered when the server returns exactly the markup it was
-// last given. Replacing a region with identical HTML cannot add information and
-// can only destroy state the DOM was holding: the focused message, the caret,
-// the scroll anchor, an open details disclosure. CI caught a keyboard journey
-// losing message focus with a trace showing two timeline fetches 490 ms apart
-// returning the same 52922 bytes, the second unforced; the failure has not been
-// reproduced, so this is not offered as its diagnosis. It is worth doing on its
-// own terms, and it closes that whole class of loss rather than one instance.
-// The remembered markup is cleared wherever something other than refresh()
-// writes to a region, which is the composer appending its own sent message.
-//
-// The script carries no JavaScript comments on purpose: html/template elides
-// them when it renders a script context, so the bytes the browser receives
-// would no longer match the Content-Security-Policy hash computed from this
-// constant, and the whole client would be silently blocked.
-//
-// Copying a message link is an enhancement layered on a real anchor: the
-// control is an <a> pointing at the permalink, and the handler below only
-// intercepts it where the clipboard API exists. A browser without clipboard
-// access, or one that refuses the write, follows the link instead of doing
+// Arriving from a permalink lands on the message the link names. The link
+// carries a window cursor ending just after it and a fragment naming it; the
+// message is focused rather than only scrolled to, because a fragment moves the
+// viewport and not the keyboard, and the mark clears on first interaction
+// rather than on a timer. The composer keeps focus only when the link named
 // nothing.
-// The script's notify() raises a desktop notification for messages that
-// arrived while the tab was not being looked at.
 //
-// Its text comes from the timeline this client just fetched under its own
-// session, never from the event frame: the durable payloads carry identifiers
-// and no content by design, and a notification is not a reason to start
-// shipping message text to every consumer of the stream.
+// Copying a message link is layered on a real anchor, so a browser without
+// clipboard access follows the link instead of doing nothing.
 //
-// Three things must all be true, and each is somebody else's decision: the
-// person turned the preference on, the browser granted permission, and
-// notifications are not paused. Do Not Disturb was fetched for the preferences
-// page and consulted nowhere else, so a paused workspace still raised every
-// banner it could.
-//
-// The comments live here rather than in the script because html/template
-// elides JavaScript comments in a script context, which changes the bytes the
-// browser receives and so breaks the hash the policy pins.
+// notify() raises a desktop notification for messages that arrived while the
+// tab was not looked at. Its text comes from the timeline this client fetched
+// under its own session, never from the event frame: durable payloads carry
+// identifiers and no content by design. Three things must be true, each
+// somebody else's decision — the preference is on, the browser granted
+// permission, and Do Not Disturb is not active.
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');

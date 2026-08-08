@@ -2072,6 +2072,63 @@ func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.Worksp
 	return m.Store.AssignUser(ctx, workspaceID, targetID, normalized, event)
 }
 
+// AdminUninstallApps removes apps from the workspace.
+//
+// UninstallApp already existed and is the app's own: it is proven by the
+// client credentials, which is how an app removes itself. An administrator
+// holds no app's client secret, so until now the workspace could approve an
+// app and never take it back — the one direction a governance surface most
+// needs.
+//
+// Every named app is checked before any is removed, for the reason a bulk
+// sign-out is: an administrator acting on a list finds out they were wrong
+// rather than discovering later that an arbitrary prefix of it was applied.
+// An app that is not installed is not an error — it is the state that was
+// asked for.
+func (m Messages) AdminUninstallApps(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appIDs []domain.AppID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(appIDs) == 0 {
+		return ErrInvalidAppApproval
+	}
+	installed := make([]domain.AppID, 0, len(appIDs))
+	for _, appID := range appIDs {
+		if strings.TrimSpace(string(appID)) == "" {
+			return ErrInvalidAppApproval
+		}
+		if _, _, err := m.Store.GetApp(ctx, appID); err != nil {
+			return err
+		}
+		installations, err := m.Store.ListAppInstallations(ctx, appID)
+		if err != nil {
+			return err
+		}
+		for _, installation := range installations {
+			if installation.WorkspaceID == workspaceID && installation.Enabled {
+				installed = append(installed, appID)
+				break
+			}
+		}
+	}
+	for _, appID := range installed {
+		// The same announcement the app's own uninstall commits, for the same
+		// reason: the app can still receive the one event that explains why
+		// everything else stopped, whoever ended the installation.
+		announcement, err := newEvent(workspaceID, actorID, events.NewPayload("app.uninstalled",
+			events.String("app_id", string(appID)),
+			events.String("target_app_id", string(appID)),
+		), time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := m.Store.UninstallApp(ctx, workspaceID, appID, announcement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m Messages) AdminApproveApp(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
 	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalApproved)
 }

@@ -81,33 +81,23 @@ and message projections.
 ## Evidence
 
 - Images are rendered in the timeline rather than linked, and the uploader may
-  describe one. The description is the alt text, the title is the fallback, and
-  the file name is deliberately not a second fallback: an alt text repeating
-  "IMG_4032.png" adds nothing and prevents a screen reader skipping the image,
-  so an undescribed and untitled image carries an empty alt. Writing a
-  description is the uploader's alone, matching deletion, and the permission is
-  part of the storage write rather than a check before it. Slack exposes this
-  control in its client and the pinned Web API snapshot predates the `alt_txt`
-  parameter that would carry it, so the field is first-party durable state.
-
-
+  describe one. The description is the alt text, the title is the fallback,
+  and the file name is deliberately not a second fallback: an alt text
+  repeating "IMG_4032.png" adds nothing and prevents a screen reader skipping
+  the image, so an undescribed and untitled image carries an empty alt.
 - Real browser uploads cover chooser, drag/drop, paste, multiple files,
   progress/cancel/retry, preview, description, download, share, delete, and
   narrow layout.
 - Official Node, Python, and Java SDKs execute the current external upload
   protocol against real HTTP transfer, plus remote-file methods where exposed.
-- Persistence qualification verifies metadata/blob atomicity and reconciliation
-  across SQLite, PostgreSQL, and dqlite.
-- Differential tests compare count/size limits, message projection, errors, and
-  file events in a dedicated Slack workspace.
+- Persistence qualification verifies metadata/blob atomicity and
+  reconciliation across SQLite, PostgreSQL, and dqlite.
+- Differential tests compare count/size limits, message projection, errors,
+  and file events in a dedicated Slack workspace.
 - Memory and shared SQL persistence apply viewer visibility before file-list
   and file-search pagination; SQL persists folded file name/title columns for
   Unicode-insensitive matching after reopen. Generated gRPC parity tests carry
-  the viewer, filters, totals, and order. Official Node, Python, and Java SDK
-  qualification invokes both `search.files` and legacy combined `search.all`,
-  and browser qualification searches a real hosted upload through the Files
-  result type before following its authenticated link.
-
+  the viewer, filters, totals, and order.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

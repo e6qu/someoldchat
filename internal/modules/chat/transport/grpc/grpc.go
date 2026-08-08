@@ -2286,6 +2286,21 @@ func (r Remote) AcceptInvitationForEmail(ctx context.Context, workspaceID domain
 	return decodeProtoUser(out)
 }
 
+func (r Remote) AdminUninstallApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appIDs []domain.AppID) error {
+	ids := make([]string, 0, len(appIDs))
+	for _, id := range appIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.directory.AdminUninstallApps(ctx, &chatv1.AdminUninstallAppsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppIds: ids})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app uninstall was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) AdminApproveApp(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
 	out, err := r.directory.AdminApproveApp(ctx, &chatv1.AppApprovalMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), RequestId: string(requestID)})
 	if err != nil {
@@ -5828,6 +5843,17 @@ func (s *Server) AdminListInviteRequests(ctx context.Context, input *chatv1.Invi
 		values = append(values, encodeProtoInviteRequest(value))
 	}
 	return &chatv1.InviteRequestPage{Requests: values, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) AdminUninstallApps(ctx context.Context, input *chatv1.AdminUninstallAppsRequest) (*chatv1.MutationResponse, error) {
+	ids := make([]domain.AppID, 0, len(input.GetAppIds()))
+	for _, id := range input.GetAppIds() {
+		ids = append(ids, domain.AppID(id))
+	}
+	if err := s.implementation.AdminUninstallApps(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
 func (s *Server) AdminApproveApp(ctx context.Context, input *chatv1.AppApprovalMutationRequest) (*chatv1.MutationResponse, error) {

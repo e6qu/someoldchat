@@ -36,27 +36,20 @@ import (
 
 // This file is the differential harness for the seam.
 //
-// The architecture claims that "the same module interfaces support direct Go
-// calls in monolith mode and generated gRPC adapters in distributed mode". No
-// test asserted it: every existing transport test drives the Remote alone and
-// compares it against absolute expectations, so a behaviour that the adapter
-// changed — an error class the client could not restore, a field a decoder
-// dropped, a parameter the client ignored — was invisible until it reached a
-// deployment. Ten defects of exactly that shape accumulated behind the gap.
+// The architecture claims the same module interfaces support direct Go calls in
+// monolith mode and generated gRPC adapters in distributed mode. Nothing
+// asserted it: every other transport test drives the Remote alone against
+// absolute expectations, so an error class the client could not restore, a
+// field a decoder dropped or a parameter the client ignored stayed invisible
+// until it reached a deployment. Ten defects of that shape accumulated.
 //
-// A case here runs one operation twice: once against service.Messages called
-// directly, and once against the same implementation behind a real gRPC server
-// and client over a bufconn listener, with two independently seeded stores that
-// start in the same state. Both outcomes must agree on
-//
-//   - success or failure,
-//   - the classification of a failure against *every* sentinel in the error table
-//     (not only the sentinel a case expects, which is what makes a case reject a
-//     wrong-but-plausible sentinel such as reactions.add answering
-//     service.ErrEmojiAlreadyExists instead of store.ErrAlreadyExists),
-//   - the gRPC code the remote failure carries, which must be the code the local
-//     failure maps to, and
-//   - the value the operation projects.
+// A case runs one operation twice — against service.Messages directly, and
+// against the same implementation behind a real gRPC server over bufconn — with
+// two independently seeded stores starting in the same state. Both outcomes
+// must agree on success or failure, on the classification of a failure against
+// every sentinel in the error table (not only the one the case expects, which
+// is what rejects a wrong-but-plausible sentinel), on the gRPC code the remote
+// failure carries, and on the value the operation projects.
 
 // chatCaller is everything a caller holds of the chat module.
 //
@@ -698,6 +691,43 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{afterAdd.ManagerIDs, stranger, member, empty, afterRemove.ManagerIDs}, nil
+			},
+		},
+		{
+			// An administrator holds no app's client secret, so removing an app
+			// is a different operation from the app removing itself. Both
+			// compositions have to agree on who may do it and on what an app
+			// that is not installed means.
+			name: "an administrator uninstalls an app the workspace installed",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// A member cannot, and neither request may name nothing.
+				member := chat.AdminUninstallApps(ctx, "T1", "U1", []domain.AppID{"A1"}) != nil
+				empty := chat.AdminUninstallApps(ctx, "T1", "UA", nil) != nil
+				// An app nobody has heard of stops the whole request.
+				absent := chat.AdminUninstallApps(ctx, "T1", "UA", []domain.AppID{"A1", "A-not-here"}) != nil
+				before, err := chat.ListAppInstallations(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminUninstallApps(ctx, "T1", "UA", []domain.AppID{"A1"}); err != nil {
+					return nil, err
+				}
+				after, err := chat.ListAppInstallations(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				// Uninstalling an app that is already gone is the state that
+				// was asked for rather than a failure.
+				again := chat.AdminUninstallApps(ctx, "T1", "UA", []domain.AppID{"A1"}) == nil
+				enabled := func(values []domain.AppInstallation) []bool {
+					states := make([]bool, 0, len(values))
+					for _, value := range values {
+						states = append(states, value.Enabled)
+					}
+					return states
+				}
+				return []any{member, empty, absent, enabled(before), enabled(after), again}, nil
 			},
 		},
 		{
@@ -3493,7 +3523,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 175
+const parityGapCeiling = 174
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -3602,7 +3632,6 @@ var parityGaps = map[string]struct{}{
 	"ListWorkspaceApps":                       {},
 	"ListAppEventsAfter":                      {},
 	"ListUserEventsAfter":                     {},
-	"ListAppInstallations":                    {},
 	"ListEventsAfter":                         {},
 	"LookupAppToken":                          {},
 	"LookupCanvasSections":                    {},

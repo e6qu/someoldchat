@@ -156,162 +156,80 @@ for later steps and conditions to read.
 
 - An administrator can hand a workflow over, one name at a time. The builder
   submits the whole manager list, which is right for a form that shows it and
-  sends it back, and wrong for "add this person": two administrators each adding
-  somebody would each submit a list computed before the other's change, and the
-  second write would silently drop the first. Adding and removing are applied
-  against the list as it stands at the moment of the write, keeping the order it
-  already had. Adding somebody who already manages it, or removing somebody who
-  never did, is the state that was asked for rather than an error; somebody who
-  is not a member of the workspace is refused, because a manager list naming a
-  person the workspace cannot resolve is a list nobody can act on.
+  wrong for "add this person": two administrators each adding somebody would
+  submit lists computed before the other's change. Adding and removing apply
+  against the list as it stands. Adding somebody already there, or removing
+  somebody who was not, is the state asked for; a non-member is refused.
 - A workspace administrator can find every workflow and take one out of
   service. The member-facing directory answers what one member may see, which
-  is the wrong question when the workflow to stop belongs to somebody else, is
-  an unpublished draft, or is owned by an app nobody maintains — exactly the
-  ones worth finding. The administrative view is opt-in rather than the default
-  even for an administrator, because a directory that silently showed every
-  draft in the workspace would make somebody else's unfinished work look like
-  theirs. Stopping is deliberately not the owner's unpublish with a different
-  caller: that path is an edit, so it revalidates the steps and requires the
-  owning app to still be installed, and the workflows most worth stopping are
-  the ones that would fail those checks. It changes the status and nothing
-  else — the content stays as its author left it, and the version does not
-  move, because runs pin the published version and a bumped version would make
-  a stop look like a revision nobody wrote. A workflow named in the request that
-  is not in this workspace stops the whole thing before anything is stopped, and
-  one that is already out of service is the state that was asked for rather than
-  an error.
-
-- Who a canvas is shared with is now visible and changeable from the canvas
-  itself. Anyone who may open it sees the list: they can already see who
-  commented on it and who edited it, so who else may open it is not a further
-  secret, and someone about to share a canvas needs to know it is not already
-  shared. Changing the list belongs to the owner alone, which is the rule the
-  grant already enforced — write access is not enough to hand a canvas to
-  somebody else — so a reader is told that rather than shown a control that
-  would be refused. The owner heads the list even when nothing is shared,
-  because "shared with nobody" and "shared with everyone" must not render the
-  same. A channel's own canvas tab appears as a grant and is not offered for
-  removal: revoking it would leave the channel with a tab pointing at a document
-  nobody in it may open. A canvas that is not this workspace's canvas answers
-  the sharing read as missing rather than as unshared, on both storage profiles.
+  is the wrong question when the workflow to stop is somebody else's draft or
+  owned by an app nobody maintains. The administrative view is opt-in, so a
+  directory does not make other people's unfinished work look like yours.
+- Who a canvas is shared with is visible to anyone who may open it — they can
+  already see who commented and who edited — and changeable only by its owner,
+  which is the rule the grant already enforced. The owner heads the list even
+  when nothing is shared, because "shared with nobody" and "shared with
+  everyone" must not read the same.
 - An item is named by its own primary column. It used to be looked up under
-  "title", which is the column this client substitutes for a list created
-  without a schema, so every list that declared its own primary column — which
-  is every list built through the column editor or through the API — rendered
-  its items blank the moment the row was not drawn as cells. Removing a column
-  exposed it; the defect needed no removal to reach.
-- A list item can be deleted, separately from being completed. Completing hides
-  an item and can be undone; deleting cannot, so it is its own control saying so
-  rather than a second meaning for the same button, and an item added by mistake
-  no longer has to stay in the list forever with a line through it. Deleting a
-  batch is all or nothing on every profile: a batch naming one item that is not
-  there removes none of them, because a half-applied delete would leave a member
-  unable to say what they had removed. An assignment already announced in
-  Activity survives the item it pointed at and reports that its source has gone
+  "title", the column substituted for a schema-less list, so every list that
+  declared its own primary column rendered items blank whenever the row was
+  not drawn as cells.
+- A list item can be deleted, separately from being completed: completing
+  hides it reversibly, deleting does not, so it is its own control saying so.
+  A batch naming an item that is not there deletes none of them. An assignment
+  already announced in Activity survives the item and reports its source gone
   — the news that somebody gave you work is still true after the work is
-  deleted, and a row that vanished would leave the member wondering what they
-  had been told.
-- A conversation's own canvas is reachable from the conversation. It is a
-  different thing from a canvas shared into the channel: a conversation has
-  exactly one, membership is what grants access to it, and leaving takes that
-  access away without anybody revoking a grant. Opening the link when there is
-  no canvas says so instead of creating one, because a canvas appearing because
-  somebody followed a link would put an edit in the conversation's history that
-  nobody made. A second creation is not the member's mistake — somebody else
-  made it first — so it arrives at the canvas that exists rather than at an
-  error. The sharing surface shows the conversation's grant and does not offer
-  to revoke it: without it the conversation would have a canvas nobody in it
-  could open.
+  deleted.
+- A conversation's own canvas is reachable from the conversation. It is not a
+  canvas shared into the channel: there is exactly one, membership grants
+  access, and leaving takes it away with no grant revoked. Opening the link
+  when there is none says so instead of creating one, because a canvas
+  appearing because somebody followed a link would put an edit in the history
+  that nobody made. A second creation lands on the canvas that exists.
 - The sharing surface is one surface. A list carries the same grant model a
-  canvas does, so it answers the same two questions the same way: anyone who may
-  open it sees who else may, and only its owner changes that. Writing it twice
-  would have been two chances to disagree about who may see a grant, which is
-  the question the whole model exists to answer.
+  canvas does, so it answers the same two questions the same way: anyone who
+  may open it sees who else may, and only its owner changes that. Writing it
+  twice would have been two chances to disagree about who may see a grant,
+  which is the question the whole model exists to answer.
 - A canvas section can be commented on. Read access is enough to add one:
   commenting is taking part in a document rather than editing it, and a canvas
-  shared for review that only its editors could discuss would defeat the reason
-  it was shared. Deleting a comment belongs to its author alone — an editor who
-  could remove what others said about their own document would make the comments
-  worth less than silence — and a stranger's attempt answers exactly as a
-  missing comment does, so it cannot be used to learn that one exists. The
-  anchor is a record of what was being discussed rather than a foreign key: a
-  comment survives its section being rewritten or removed, which is usually why
-  it went, and the client says the section has gone rather than pointing at
-  nothing.
+  shared for review that only its editors could discuss would defeat the
+  reason it was shared.
 - A canvas keeps the revision each edit replaced, written in the same
   transaction as the edit so a canvas cannot change without the record of what
-  it was. A revision records the state it *superseded* rather than the one that
-  arrived, which is what lets the history be read backwards; it is numbered by
-  the version the canvas held while that content was current, so restoring
-  revision 3 puts revision 3's content back rather than making every reader
-  subtract one. Restoring is an ordinary edit — the current content becomes a
-  revision of its own, so restoring the wrong one is itself undoable and the
-  version keeps counting forward. History is readable exactly when the canvas
-  is, by the canvas's own visibility rule rather than a second one, and a
-  deleted canvas takes its history with it. The count is bounded, and the
-  oldest rows are dropped by the write that creates one rather than by a worker.
-- A list declares typed columns — text, number, date, select, checkbox, person —
-  and an item is checked against them. Each type is a promise about what a cell
-  contains, so a value the column cannot mean is refused rather than stored for
-  the next reader to discover. A cell naming an undeclared column is refused
-  too, because it would be invisible to every reader of the list. A missing cell
-  is not an error: a row with a blank status is an ordinary row, and demanding
-  every column would make a list unusable exactly while it is being filled in.
-  A list created without a schema is given one primary text column so the client
-  has something to show; that substitution is the product's convenience rather
-  than the member's declaration, so it is not enforced and such lists stay
-  free-form. A column can be declared from the list page as well as through the
-  API. Declaring one appends rather than rewriting the schema, because every
-  cell references a column by key and a wholesale rewrite would let one edit
-  orphan every value in the list; the key is minted from the name and made
-  unique, so two columns called "Status" are survivable rather than a
-  collision. Declaring a column on a list already used free-form does not
-  strand its items: a cell the item already held is accepted, because the member
-  did not introduce an invisible cell but merely did not delete one, while a
-  newly invented column is still refused. A column can also be removed, which is the deletion
-  that claim was deferring: it takes what every item recorded under that column
-  with it, in the same transaction as the schema change, because a schema that
-  no longer declares a column while items still carry values under it is a list
-  nobody can read correctly — the values are invisible, every later edit carries
-  them, and a new column minting the same key would bring them back. The control
-  says what goes. The column that names the item stays, because a list without
-  one renders as unlabelled cells, and the row says why rather than offering a
-  control that would be refused. An item that never held the removed cell is
-  left byte-identical, so reshaping a list does not rewrite every row in it.
-- A list item carries an assignee and a due date as columns of their own rather
-  than cells inside the free-form fields, because the product asks both
+  it was. A revision records the state it *superseded* rather than the one
+  that arrived, which is what lets the history be read backwards;
+- A list declares typed columns — text, number, date, select, checkbox, person
+  — and items are checked against them: a cell under a column nobody declared
+  is invisible to every reader, so accepting it silently would lose the
+  member's work while looking saved.
+- A list item carries an assignee and a due date as columns of their own
+  rather than cells inside the free-form fields, because the product asks both
   questions itself — who is this for, is it late — and a value buried in JSON
-  cannot answer them without every reader parsing it. The assignee is told in
-  Activity by the same machinery a canvas share uses, and only when it is news:
-  a due date moved on work someone already holds is not an assignment, and
-  nobody is told about their own. Assigning to a member who cannot open the list
-  is refused, so the picker offers only members who can — a control that always
-  fails is worse than no control. An archived item is never overdue.
-
-
-- The first-party HTTP journey creates a durable canvas, reloads it, atomically
-  changes its title and body, creates a durable to-do list and item, completes
-  and restores that item, and then reopens both directory views. It does not
-  assert decorative cards.
-- Current official Node and Python Slack SDK clients exercise workflow function
-  completion, function distribution permissions, trigger permissions, featured
-  workflows, and workflow-step listing through the real HTTP boundary.
+  cannot answer them without every reader parsing it.
+- The first-party HTTP journey creates a durable canvas, reloads it,
+  atomically changes its title and body, creates a durable to-do list and
+  item, completes and restores that item, and then reopens both directory
+  views. It does not assert decorative cards.
+- Current official Node and Python Slack SDK clients exercise workflow
+  function completion, function distribution permissions, trigger permissions,
+  featured workflows, and workflow-step listing through the real HTTP
+  boundary.
 - Shared event-contract and HTTP delivery tests prove that an app-owned
   `function_executed` callback is translated and dispatched through Events API
   without a manifest event subscription, while remaining isolated from every
   other app and from RTM.
-- Shared memory, SQLite, PostgreSQL, and dqlite persistence qualification covers
-  workflow revisions, triggers, permissions, featured workflows, execution
-  idempotency, step advancement, terminal state, staged-change discard, and
-  run/step cancellation on unpublish. SQLite additionally closes
+- Shared memory, SQLite, PostgreSQL, and dqlite persistence qualification
+  covers workflow revisions, triggers, permissions, featured workflows,
+  execution idempotency, step advancement, terminal state, staged-change
+  discard, and run/step cancellation on unpublish. SQLite additionally closes
   and reopens the database before asserting the workflow and run.
 - The first-party Playwright journey creates and installs a remote-function
   app, creates a two-step draft, publishes it, creates a link trigger, starts
-  one durable execution, reloads the run, stages and discards edits, unpublishes
-  and observes the cancelled run, creates a webhook trigger, invokes
-  its secret URL over real HTTP, observes the indistinguishable 404 for a wrong
-  secret, and checks accessibility.
+  one durable execution, reloads the run, stages and discards edits,
+  unpublishes and observes the cancelled run, creates a webhook trigger,
+  invokes its secret URL over real HTTP, observes the indistinguishable 404
+  for a wrong secret, and checks accessibility.
 - Deterministic service, scheduler, memory, SQLite, PostgreSQL, and dqlite
   evidence fires scheduled triggers from a durable compare-and-set queue and
   message, reaction, join, and list triggers from a durable event cursor;
@@ -319,7 +237,6 @@ for later steps and conditions to read.
   sleeping in CI.
 - Differential fixtures compare live Slack object schemas, supported controls,
   and run-state transitions.
-
 ## Current SameOldChat boundary
 
 CANVAS-01 and the basic persistence portion of CANVAS-02 now have a real

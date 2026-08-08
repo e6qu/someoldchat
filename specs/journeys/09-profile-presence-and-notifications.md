@@ -150,14 +150,14 @@ that does nothing:
   generated gRPC converter-property, and local-versus-gRPC differential tests
   cover inheritance and routing.
 - The first-party UI exposes the workspace settings, an exceptions list,
-  channel controls, follow/unfollow in the thread pane, and preset/custom
-  DND with early resume. DND reuses the Slack-compatible `dnd.*` service model
-  and suppresses delivery state without deleting messages or Activity.
+  channel controls, follow/unfollow in the thread pane, and preset/custom DND
+  with early resume. DND reuses the Slack-compatible `dnd.*` service model and
+  suppresses delivery state without deleting messages or Activity.
 - `make external-contract-qualification` checks Slack's current workspace
   trigger, keyword, Activity inclusion, conversation override, exception-list,
   and follow-every-thread text before this behavior can remain claimed.
-- Deterministic-clock and persistence tests cover current-status and DND expiry
-  through restart and hibernation.
+- Deterministic-clock and persistence tests cover current-status and DND
+  expiry through restart and hibernation.
 - Future status scheduling is a typed first-party journey across the browser,
   service, generated gRPC seam, memory and SQL repositories, and lifecycle
   worker. Tests cover the five-item limit, create/edit/cancel, chronological
@@ -167,11 +167,10 @@ that does nothing:
 - Official SDK tests exercise `users.profile.*`, `users.setPresence`, and
   `dnd.*` with user tokens and permission/error variants.
 - Controlled live-Slack comparison for advance status scheduling remains
-  required. Browser/push/email/sound
-  delivery, per-platform timing and appearance, notification schedules,
-  group-DM overrides, urgent sender override, VIPs, and notification deep-link
-  reconciliation are explicit gaps; the web UI does not claim those controls.
-
+  required. Browser/push/email/sound delivery, per-platform timing and
+  appearance, notification schedules, group-DM overrides, urgent sender
+  override, VIPs, and notification deep-link reconciliation are explicit gaps;
+  the web UI does not claim those controls.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

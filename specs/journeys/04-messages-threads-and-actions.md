@@ -106,14 +106,13 @@ copy-text contains the message content Slack exposes rather than hidden HTML.
 
 ## Evidence
 
-- Browser tests cover every action from mouse, keyboard, and touch-sized narrow
-  layout, including reaction picker search, standard/custom rendering, and
-  focus return after menus/dialogs.
-- API/event/SDK tests prove edit/delete/reply/reaction/pin/share projections and
-  permission failures.
+- Browser tests cover every action from mouse, keyboard, and touch-sized
+  narrow layout, including reaction picker search, standard/custom rendering,
+  and focus return after menus/dialogs.
+- API/event/SDK tests prove edit/delete/reply/reaction/pin/share projections
+  and permission failures.
 - Differential fixtures record Slack's shortcut context, confirmation,
   tombstone, broadcast, and cursor behavior.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

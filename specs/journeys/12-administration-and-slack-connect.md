@@ -170,17 +170,14 @@ Absent, and named on the page rather than rendered as an inert control:
   external member, bot, disabled user, and wrong workspace.
 - Current official SDKs exercise applicable `admin.*`, `team.*`, `users.*`,
   `apps.*`, and Slack Connect `conversations.*` methods.
-- The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey creates and installs a
-  hosted app, opens its manifest-declared datastore from app administration,
-  queries persisted items with Slack's expression semantics, replaces and
-  merges one item, deletes it, and inspects the payload-redacted durable Socket
-  Mode cursor before cleaning up the app. Service, memory/SQL, generated-gRPC,
-  official Node SDK, and automated accessibility qualifications cover the same
-  boundaries.
+- The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey creates and
+  installs a hosted app, opens its manifest-declared datastore from app
+  administration, queries persisted items with Slack's expression semantics,
+  replaces and merges one item, deletes it, and inspects the payload-redacted
+  durable Socket Mode cursor before cleaning up the app.
 - Opt-in Slack Enterprise/sandbox evidence is required before claiming plan-
   restricted administration equivalence; unavailable live evidence remains a
   named gap.
-
 ## Journey-source map
 
 | Journey | Official source | Behavior established |
