@@ -19,6 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AppsService_SetAppIcon_FullMethodName                    = "/sameoldchat.chat.v1.AppsService/SetAppIcon"
+	AppsService_ExternalAuthToken_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ExternalAuthToken"
+	AppsService_DeleteExternalAuthToken_FullMethodName       = "/sameoldchat.chat.v1.AppsService/DeleteExternalAuthToken"
+	AppsService_UpdateUserAppConnection_FullMethodName       = "/sameoldchat.chat.v1.AppsService/UpdateUserAppConnection"
+	AppsService_AssistantSearchAvailability_FullMethodName   = "/sameoldchat.chat.v1.AppsService/AssistantSearchAvailability"
+	AppsService_AssistantSearchContext_FullMethodName        = "/sameoldchat.chat.v1.AppsService/AssistantSearchContext"
 	AppsService_AppActivities_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AppActivities"
 	AppsService_AdminAppActivities_FullMethodName            = "/sameoldchat.chat.v1.AppsService/AdminAppActivities"
 	AppsService_AdminAppConfigs_FullMethodName               = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
@@ -50,6 +56,12 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AppsServiceClient interface {
+	SetAppIcon(ctx context.Context, in *AppIconRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	ExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*ExternalAuthTokenValue, error)
+	DeleteExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	UpdateUserAppConnection(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	AssistantSearchAvailability(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AssistantSearchAvailabilityValue, error)
+	AssistantSearchContext(ctx context.Context, in *AssistantSearchRequest, opts ...grpc.CallOption) (*MessagePage, error)
 	AppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error)
 	AdminAppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error)
 	AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error)
@@ -83,6 +95,66 @@ type appsServiceClient struct {
 
 func NewAppsServiceClient(cc grpc.ClientConnInterface) AppsServiceClient {
 	return &appsServiceClient{cc}
+}
+
+func (c *appsServiceClient) SetAppIcon(ctx context.Context, in *AppIconRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_SetAppIcon_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) ExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*ExternalAuthTokenValue, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExternalAuthTokenValue)
+	err := c.cc.Invoke(ctx, AppsService_ExternalAuthToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) DeleteExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_DeleteExternalAuthToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) UpdateUserAppConnection(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_UpdateUserAppConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AssistantSearchAvailability(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AssistantSearchAvailabilityValue, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AssistantSearchAvailabilityValue)
+	err := c.cc.Invoke(ctx, AppsService_AssistantSearchAvailability_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AssistantSearchContext(ctx context.Context, in *AssistantSearchRequest, opts ...grpc.CallOption) (*MessagePage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MessagePage)
+	err := c.cc.Invoke(ctx, AppsService_AssistantSearchContext_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *appsServiceClient) AppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error) {
@@ -339,6 +411,12 @@ func (c *appsServiceClient) AuthorizeOAuth(ctx context.Context, in *OAuthAuthori
 // All implementations should embed UnimplementedAppsServiceServer
 // for forward compatibility.
 type AppsServiceServer interface {
+	SetAppIcon(context.Context, *AppIconRequest) (*AppMutationResponse, error)
+	ExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*ExternalAuthTokenValue, error)
+	DeleteExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*AppMutationResponse, error)
+	UpdateUserAppConnection(context.Context, *UserConnectionRequest) (*AppMutationResponse, error)
+	AssistantSearchAvailability(context.Context, *UserConnectionRequest) (*AssistantSearchAvailabilityValue, error)
+	AssistantSearchContext(context.Context, *AssistantSearchRequest) (*MessagePage, error)
 	AppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error)
 	AdminAppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error)
 	AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error)
@@ -373,6 +451,24 @@ type AppsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAppsServiceServer struct{}
 
+func (UnimplementedAppsServiceServer) SetAppIcon(context.Context, *AppIconRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetAppIcon not implemented")
+}
+func (UnimplementedAppsServiceServer) ExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*ExternalAuthTokenValue, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExternalAuthToken not implemented")
+}
+func (UnimplementedAppsServiceServer) DeleteExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteExternalAuthToken not implemented")
+}
+func (UnimplementedAppsServiceServer) UpdateUserAppConnection(context.Context, *UserConnectionRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateUserAppConnection not implemented")
+}
+func (UnimplementedAppsServiceServer) AssistantSearchAvailability(context.Context, *UserConnectionRequest) (*AssistantSearchAvailabilityValue, error) {
+	return nil, status.Error(codes.Unimplemented, "method AssistantSearchAvailability not implemented")
+}
+func (UnimplementedAppsServiceServer) AssistantSearchContext(context.Context, *AssistantSearchRequest) (*MessagePage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AssistantSearchContext not implemented")
+}
 func (UnimplementedAppsServiceServer) AppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method AppActivities not implemented")
 }
@@ -466,6 +562,114 @@ func RegisterAppsServiceServer(s grpc.ServiceRegistrar, srv AppsServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AppsService_ServiceDesc, srv)
+}
+
+func _AppsService_SetAppIcon_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppIconRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).SetAppIcon(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_SetAppIcon_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).SetAppIcon(ctx, req.(*AppIconRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_ExternalAuthToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExternalAuthTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).ExternalAuthToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_ExternalAuthToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).ExternalAuthToken(ctx, req.(*ExternalAuthTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_DeleteExternalAuthToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExternalAuthTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).DeleteExternalAuthToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_DeleteExternalAuthToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).DeleteExternalAuthToken(ctx, req.(*ExternalAuthTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_UpdateUserAppConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).UpdateUserAppConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_UpdateUserAppConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).UpdateUserAppConnection(ctx, req.(*UserConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AssistantSearchAvailability_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AssistantSearchAvailability(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AssistantSearchAvailability_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AssistantSearchAvailability(ctx, req.(*UserConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AssistantSearchContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssistantSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AssistantSearchContext(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AssistantSearchContext_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AssistantSearchContext(ctx, req.(*AssistantSearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AppsService_AppActivities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -925,6 +1129,30 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sameoldchat.chat.v1.AppsService",
 	HandlerType: (*AppsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SetAppIcon",
+			Handler:    _AppsService_SetAppIcon_Handler,
+		},
+		{
+			MethodName: "ExternalAuthToken",
+			Handler:    _AppsService_ExternalAuthToken_Handler,
+		},
+		{
+			MethodName: "DeleteExternalAuthToken",
+			Handler:    _AppsService_DeleteExternalAuthToken_Handler,
+		},
+		{
+			MethodName: "UpdateUserAppConnection",
+			Handler:    _AppsService_UpdateUserAppConnection_Handler,
+		},
+		{
+			MethodName: "AssistantSearchAvailability",
+			Handler:    _AppsService_AssistantSearchAvailability_Handler,
+		},
+		{
+			MethodName: "AssistantSearchContext",
+			Handler:    _AppsService_AssistantSearchContext_Handler,
+		},
 		{
 			MethodName: "AppActivities",
 			Handler:    _AppsService_AppActivities_Handler,

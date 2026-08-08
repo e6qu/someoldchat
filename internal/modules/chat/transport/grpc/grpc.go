@@ -12528,6 +12528,108 @@ func decodeProtoAppFunctions(values []*chatv1.AppFunction) []domain.AppFunction 
 	return functions
 }
 
+func (r Remote) SetAppIcon(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, iconURL string) error {
+	out, err := r.apps.SetAppIcon(ctx, &chatv1.AppIconRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), IconUrl: iconURL,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app icon change was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) ExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, id string) (domain.ExternalAuthToken, error) {
+	out, err := r.apps.ExternalAuthToken(ctx, &chatv1.ExternalAuthTokenRequest{
+		WorkspaceId: string(workspaceID), AppId: string(appID), ExternalTokenId: id,
+	})
+	if err != nil {
+		return domain.ExternalAuthToken{}, err
+	}
+	return decodeProtoExternalAuthToken(out), nil
+}
+
+func (r Remote) DeleteExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, id string) error {
+	out, err := r.apps.DeleteExternalAuthToken(ctx, &chatv1.ExternalAuthTokenRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), ExternalTokenId: id,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed external credential revocation was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) UpdateUserAppConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) error {
+	out, err := r.apps.UpdateUserAppConnection(ctx, &chatv1.UserConnectionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app connection refresh was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AssistantSearchAvailability(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.AssistantSearchAvailability, error) {
+	out, err := r.apps.AssistantSearchAvailability(ctx, &chatv1.UserConnectionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+	})
+	if err != nil {
+		return domain.AssistantSearchAvailability{}, err
+	}
+	return decodeProtoAssistantSearchAvailability(out), nil
+}
+
+func (r Remote) AssistantSearchContext(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
+	out, err := r.apps.AssistantSearchContext(ctx, &chatv1.AssistantSearchRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Query: query,
+		Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.MessagePage{}, err
+	}
+	return decodeProtoMessagePage(out)
+}
+
+func encodeProtoExternalAuthToken(value domain.ExternalAuthToken) *chatv1.ExternalAuthTokenValue {
+	// The ciphertext is deliberately absent: an external credential's secret
+	// belongs to the store, in the same way an app's signing secret does.
+	return &chatv1.ExternalAuthTokenValue{
+		Id: value.ID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
+		UserId: string(value.UserID), Provider: value.Provider,
+		ExpiresAt: optionalUnixNano(value.ExpiresAt), CreatedAt: optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoExternalAuthToken(value *chatv1.ExternalAuthTokenValue) domain.ExternalAuthToken {
+	return domain.ExternalAuthToken{
+		ID: value.GetId(), AppID: domain.AppID(value.GetAppId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
+		Provider:  value.GetProvider(),
+		ExpiresAt: optionalTimeFromUnixNano(value.GetExpiresAt()),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
+func encodeProtoAssistantSearchAvailability(value domain.AssistantSearchAvailability) *chatv1.AssistantSearchAvailabilityValue {
+	return &chatv1.AssistantSearchAvailabilityValue{
+		Enabled: value.Enabled, SearchableSources: append([]string{}, value.SearchableSources...),
+	}
+}
+
+func decodeProtoAssistantSearchAvailability(value *chatv1.AssistantSearchAvailabilityValue) domain.AssistantSearchAvailability {
+	return domain.AssistantSearchAvailability{
+		Enabled: value.GetEnabled(), SearchableSources: append([]string{}, value.GetSearchableSources()...),
+	}
+}
+
 func (r Remote) AppActivities(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
 	out, err := r.apps.AppActivities(ctx, appActivitiesRequest(workspaceID, "", appID, filter, request))
 	if err != nil {
@@ -12853,6 +12955,56 @@ func (s *Server) AdminFunctions(ctx context.Context, input *chatv1.AppListReques
 	return &chatv1.AppFunctionListResponse{Functions: encodeProtoAppFunctions(functions)}, nil
 }
 
+func (s *Server) SetAppIcon(ctx context.Context, input *chatv1.AppIconRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.SetAppIcon(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetIconUrl()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ExternalAuthToken(ctx context.Context, input *chatv1.ExternalAuthTokenRequest) (*chatv1.ExternalAuthTokenValue, error) {
+	value, err := s.implementation.ExternalAuthToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()),
+		domain.AppID(input.GetAppId()), input.GetExternalTokenId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoExternalAuthToken(value), nil
+}
+
+func (s *Server) DeleteExternalAuthToken(ctx context.Context, input *chatv1.ExternalAuthTokenRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.DeleteExternalAuthToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetExternalTokenId()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) UpdateUserAppConnection(ctx context.Context, input *chatv1.UserConnectionRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.UpdateUserAppConnection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AssistantSearchAvailability(ctx context.Context, input *chatv1.UserConnectionRequest) (*chatv1.AssistantSearchAvailabilityValue, error) {
+	value, err := s.implementation.AssistantSearchAvailability(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAssistantSearchAvailability(value), nil
+}
+
+func (s *Server) AssistantSearchContext(ctx context.Context, input *chatv1.AssistantSearchRequest) (*chatv1.MessagePage, error) {
+	page, err := s.implementation.AssistantSearchContext(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetQuery(), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessagePage(page), nil
+}
+
 func (s *Server) AppActivities(ctx context.Context, input *chatv1.AppActivitiesRequest) (*chatv1.AppActivityPage, error) {
 	page, err := s.implementation.AppActivities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()),
 		appActivityFilter(input), protoPageRequest(input.GetLimit(), input.GetCursor()))
@@ -13041,7 +13193,7 @@ func decodeProtoAppConfigurationCredentials(value *chatv1.AppConfigurationCreden
 }
 
 func encodeProtoDeveloperApp(value domain.App) *chatv1.DeveloperApp {
-	return &chatv1.DeveloperApp{Id: string(value.ID), DevelopmentWorkspaceId: string(value.DevelopmentWorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, Description: value.Description, ClientId: value.ClientID, ManifestVersion: value.ManifestVersion, Distribution: value.Distribution, SocketModeEnabled: value.SocketModeEnabled, TokenRotationEnabled: value.TokenRotationEnabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted}
+	return &chatv1.DeveloperApp{Id: string(value.ID), DevelopmentWorkspaceId: string(value.DevelopmentWorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, Description: value.Description, ClientId: value.ClientID, ManifestVersion: value.ManifestVersion, Distribution: value.Distribution, SocketModeEnabled: value.SocketModeEnabled, TokenRotationEnabled: value.TokenRotationEnabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, IconUrl: value.IconURL}
 }
 
 func decodeProtoDeveloperApp(value *chatv1.DeveloperApp) (domain.App, error) {
@@ -13056,7 +13208,7 @@ func decodeProtoDeveloperApp(value *chatv1.DeveloperApp) (domain.App, error) {
 	if err != nil {
 		return domain.App{}, err
 	}
-	return domain.App{ID: domain.AppID(value.GetId()), DevelopmentWorkspaceID: domain.WorkspaceID(value.GetDevelopmentWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), Description: value.GetDescription(), ClientID: value.GetClientId(), ManifestVersion: value.GetManifestVersion(), Distribution: value.GetDistribution(), SocketModeEnabled: value.GetSocketModeEnabled(), TokenRotationEnabled: value.GetTokenRotationEnabled(), Deleted: value.GetDeleted(), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}, nil
+	return domain.App{ID: domain.AppID(value.GetId()), DevelopmentWorkspaceID: domain.WorkspaceID(value.GetDevelopmentWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), Description: value.GetDescription(), ClientID: value.GetClientId(), ManifestVersion: value.GetManifestVersion(), Distribution: value.GetDistribution(), SocketModeEnabled: value.GetSocketModeEnabled(), TokenRotationEnabled: value.GetTokenRotationEnabled(), Deleted: value.GetDeleted(), IconURL: value.GetIconUrl(), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}, nil
 }
 
 func encodeProtoAppDeliveryHealth(value domain.AppDeliveryHealth) *chatv1.AppDeliveryHealth {

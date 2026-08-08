@@ -285,6 +285,12 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	SetAppIcon(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string) error
+	ExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.ExternalAuthToken, error)
+	DeleteExternalAuthToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string) error
+	UpdateUserAppConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
+	AssistantSearchAvailability(context.Context, domain.WorkspaceID, domain.UserID) (domain.AssistantSearchAvailability, error)
+	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	AdminRequestExport(context.Context, domain.WorkspaceID, domain.UserID, string, map[string]int64) error
 	RequestWorkflowStepResponsesExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) error
 	AdminAnomalyAllowList(context.Context, domain.WorkspaceID, domain.UserID) (domain.AnomalyAllowList, error)

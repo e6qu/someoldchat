@@ -790,6 +790,39 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An external credential's secret belongs to the store, so neither
+			// composition may hand it back, and an assistant's context is the
+			// member's own search rather than a wider one.
+			name: "app icons, external credentials, and assistant search agree",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.SetAppIcon(ctx, "T1", "U1", "A1", "https://example.invalid/icon.png"); err != nil {
+					return nil, err
+				}
+				notAURL := chat.SetAppIcon(ctx, "T1", "U1", "A1", "an icon")
+				unknownApp := chat.SetAppIcon(ctx, "T1", "U1", "A-nobody", "https://example.invalid/icon.png")
+				_, missingToken := chat.ExternalAuthToken(ctx, "T1", "A1", "Et-nobody")
+				_, unnamedToken := chat.ExternalAuthToken(ctx, "T1", "A1", "")
+				missingRevocation := chat.DeleteExternalAuthToken(ctx, "T1", "U1", "A1", "Et-nobody")
+				connection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A1")
+				unknownConnection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A-nobody")
+				availability, err := chat.AssistantSearchAvailability(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				found, err := chat.AssistantSearchContext(ctx, "T1", "U1", "hello", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				_, emptyQuery := chat.AssistantSearchContext(ctx, "T1", "U1", "  ", domain.PageRequest{Limit: 10})
+				return []any{
+					availability.Enabled, availability.SearchableSources, len(found.Messages),
+					notAURL != nil, unknownApp != nil, missingToken != nil, unnamedToken != nil,
+					missingRevocation != nil, connection != nil, unknownConnection != nil, emptyQuery != nil,
+				}, nil
+			},
+		},
+		{
 			// An empty allow list is the state a workspace starts in, not a
 			// missing one, and an address without a reason is refused. Both
 			// compositions must answer the same on each.

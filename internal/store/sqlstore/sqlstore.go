@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 157
+const schemaVersion = 158
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3148,6 +3148,31 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 158 {
+		// An app's icon, and the credentials an app holds with services outside
+		// this deployment. The secret is a ciphertext column for the same
+		// reason a signing secret is: it must never be readable from a dump.
+		columns, err := s.tableColumns(ctx, db, "slack_apps")
+		if err != nil {
+			return err
+		}
+		if !columns["icon_url"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE slack_apps ADD COLUMN icon_url TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate app icon: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_external_tokens (
+			id TEXT PRIMARY KEY, app_id TEXT NOT NULL REFERENCES slack_apps(id),
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '', ciphertext TEXT NOT NULL,
+			expires_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate app external tokens: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS app_external_tokens_app ON app_external_tokens(workspace_id, app_id, id)`); err != nil {
+			return fmt.Errorf("index app external tokens: %w", err)
 		}
 	}
 	if version < 157 {
@@ -6988,6 +7013,93 @@ func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.Workspace
 // day already holds. Nothing is precomputed: an aggregate stored nightly would
 // be a second copy of the truth, and the two would disagree the first time a
 // message was deleted.
+func (s *Store) SetAppIcon(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID, iconURL string, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE slack_apps SET icon_url = ?, updated_at = ? WHERE id = ? AND deleted = 0`,
+		iconURL, domain.NewStoredTime(event.CreatedAt), app)
+	if err != nil {
+		return classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetExternalAuthToken(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID, id string) (domain.ExternalAuthToken, error) {
+	var value domain.ExternalAuthToken
+	var expires, created int64
+	err := s.db.QueryRowContext(ctx, `SELECT id, app_id, workspace_id, user_id, provider, ciphertext, expires_at, created_at
+		FROM app_external_tokens WHERE workspace_id = ? AND app_id = ? AND id = ?`, workspace, app, id).
+		Scan(&value.ID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Provider, &value.Ciphertext, &expires, &created)
+	if err := translateNotFound(err); err != nil {
+		return domain.ExternalAuthToken{}, err
+	}
+	value.ExpiresAt = timeFromUnixNanoOrZero(expires)
+	value.CreatedAt = timeFromUnixNanoOrZero(created)
+	return value, nil
+}
+
+func (s *Store) SetExternalAuthToken(ctx context.Context, value domain.ExternalAuthToken, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_external_tokens(id, app_id, workspace_id, user_id, provider, ciphertext, expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET provider = excluded.provider, ciphertext = excluded.ciphertext, expires_at = excluded.expires_at`,
+		value.ID, value.AppID, value.WorkspaceID, value.UserID, value.Provider, value.Ciphertext,
+		value.ExpiresAt.UTC().UnixNano(), value.CreatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteExternalAuthToken(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID, id string, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// An empty identifier means every credential this app holds, which is what
+	// Slack does when an app is disconnected rather than one token revoked.
+	query, arguments := `DELETE FROM app_external_tokens WHERE workspace_id = ? AND app_id = ?`, []any{workspace, app}
+	if id != "" {
+		query += ` AND id = ?`
+		arguments = append(arguments, id)
+	}
+	result, err := tx.ExecContext(ctx, query, arguments...)
+	if err != nil {
+		return classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) GetAnomalyAllowList(ctx context.Context, workspace domain.WorkspaceID) (domain.AnomalyAllowList, error) {
 	value := domain.AnomalyAllowList{WorkspaceID: workspace, IPAddresses: []string{}, Reasons: []string{}}
 	var addresses, reasons string

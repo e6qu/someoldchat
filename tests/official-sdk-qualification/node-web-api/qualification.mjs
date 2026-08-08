@@ -1348,6 +1348,28 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const externalCredential = await client.apiCall("apps.auth.external.get", {
+	external_token_id: "Et-qualification",
+});
+assert.equal(externalCredential.ok, true);
+assert.equal(externalCredential.external_token.provider_name, "example");
+assert.equal(JSON.stringify(externalCredential.external_token).includes("sealed"), false);
+assert.equal((await client.apiCall("apps.auth.external.delete", {
+	external_token_id: "Et-qualification",
+})).ok, true);
+
+assert.equal((await client.apiCall("apps.icon.set", {
+	app_id: "A1",
+	image_url: "https://example.invalid/icon.png",
+})).ok, true);
+assert.equal((await client.apiCall("apps.user.connection.update", { app_id: "A1" })).ok, true);
+const assistantInfo = await client.apiCall("assistant.search.info");
+assert.equal(assistantInfo.ok, true);
+assert.equal(assistantInfo.enabled, true);
+const assistantContext = await client.apiCall("assistant.search.context", { query: "hello" });
+assert.equal(assistantContext.ok, true);
+assert.ok(Array.isArray(assistantContext.results.messages));
+
 const anomalyAllowList = await client.apiCall("admin.audit.anomaly.allow.getItem");
 assert.equal(anomalyAllowList.ok, true);
 assert.equal(anomalyAllowList.anomaly_allow_updated_item.ips.length, 0);

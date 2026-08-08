@@ -128,6 +128,7 @@ type Store struct {
 	conversationObjects           map[string]domain.LinkedObject
 	appActivities                 []domain.AppActivity
 	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
+	externalAuthTokens            map[string]domain.ExternalAuthToken
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -318,6 +319,7 @@ func New() *Store {
 		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
 		conversationObjects:           make(map[string]domain.LinkedObject),
 		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
+		externalAuthTokens:            make(map[string]domain.ExternalAuthToken),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -1833,6 +1835,61 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) SetAppIcon(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, iconURL string, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, exists := s.apps[appID]
+	if !exists || app.Deleted {
+		return store.ErrNotFound
+	}
+	app.IconURL, app.UpdatedAt = iconURL, event.CreatedAt
+	s.apps[appID] = app
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetExternalAuthToken(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, id string) (domain.ExternalAuthToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.externalAuthTokens[id]
+	if !exists || value.WorkspaceID != workspace || value.AppID != appID {
+		return domain.ExternalAuthToken{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) SetExternalAuthToken(_ context.Context, value domain.ExternalAuthToken, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.apps[value.AppID]; !exists {
+		return store.ErrNotFound
+	}
+	s.externalAuthTokens[value.ID] = value
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteExternalAuthToken(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, id string, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for key, value := range s.externalAuthTokens {
+		if value.WorkspaceID != workspace || value.AppID != appID {
+			continue
+		}
+		if id != "" && key != id {
+			continue
+		}
+		delete(s.externalAuthTokens, key)
+		removed++
+	}
+	if removed == 0 {
+		return store.ErrNotFound
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
 }
 
 func (s *Store) GetAnomalyAllowList(_ context.Context, workspace domain.WorkspaceID) (domain.AnomalyAllowList, error) {

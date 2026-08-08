@@ -3616,6 +3616,117 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// SetAppIcon records what a client draws beside an app's messages. The owner
+// sets it, because the icon is part of how the app presents itself.
+func (m Messages) SetAppIcon(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, iconURL string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	app, _, err := m.Store.GetApp(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if app.OwnerID != actorID {
+		if adminErr := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); adminErr != nil {
+			return adminErr
+		}
+	}
+	iconURL = strings.TrimSpace(iconURL)
+	if _, err := url.ParseRequestURI(iconURL); err != nil {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.icon_set",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetAppIcon(ctx, workspaceID, appID, iconURL, event)
+}
+
+// ExternalAuthToken reports one of an app's external credentials without its
+// secret. The ciphertext never leaves the store, in the same way an app's
+// signing secret does not: a caller needs to know the credential exists and
+// when it lapses, not what it is.
+func (m Messages) ExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, id string) (domain.ExternalAuthToken, error) {
+	if appID == "" || strings.TrimSpace(id) == "" {
+		return domain.ExternalAuthToken{}, ErrInvalidWorkspace
+	}
+	value, err := m.Store.GetExternalAuthToken(ctx, workspaceID, appID, strings.TrimSpace(id))
+	if err != nil {
+		return domain.ExternalAuthToken{}, err
+	}
+	value.Ciphertext = ""
+	return value, nil
+}
+
+// DeleteExternalAuthToken revokes one external credential, or every one the app
+// holds when no identifier is named.
+func (m Messages) DeleteExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, id string) error {
+	if appID == "" {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.external_token_deleted",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteExternalAuthToken(ctx, workspaceID, appID, strings.TrimSpace(id), event)
+}
+
+// UpdateUserAppConnection records that a member has re-authorised an app. Slack
+// answers ok and refreshes the connection rather than reporting one, so the
+// membership check is the whole contract: a member who is not here cannot hold
+// a connection to anything.
+func (m Messages) UpdateUserAppConnection(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if appID == "" {
+		return ErrInvalidWorkspace
+	}
+	installations, err := m.Store.ListAppInstallations(ctx, appID)
+	if err != nil {
+		return err
+	}
+	installed := false
+	for _, installation := range installations {
+		if installation.WorkspaceID == workspaceID && installation.Enabled {
+			installed = true
+			break
+		}
+	}
+	if !installed {
+		return store.ErrNotFound
+	}
+	event, eventErr := newEvent(workspaceID, actorID, events.NewPayload("app.user_connection_updated",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if eventErr != nil {
+		return eventErr
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// AssistantSearchAvailability reports what an assistant may search here.
+func (m Messages) AssistantSearchAvailability(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.AssistantSearchAvailability, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return domain.AssistantSearchAvailability{}, err
+	}
+	// Messages are the one source this deployment indexes. Naming a source it
+	// cannot search would promise a result it can never return.
+	return domain.AssistantSearchAvailability{Enabled: true, SearchableSources: []string{"messages"}}, nil
+}
+
+// AssistantSearchContext answers the messages an assistant may quote. It is the
+// member's own search, so it can never reach a conversation the member cannot
+// read: an assistant answering on somebody's behalf must see what they see and
+// no more.
+func (m Messages) AssistantSearchContext(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
+	if strings.TrimSpace(query) == "" {
+		return domain.MessagePage{}, ErrInvalidWorkspace
+	}
+	return m.SearchMessages(ctx, workspaceID, actorID, domain.MessageSearchRequest{Query: query, Page: request})
+}
+
 // AdminRequestExport records a request for a report the workspace will build
 // and send. Slack acknowledges the request rather than answering the report, so
 // the acknowledgement has to leave a trace: an export nobody can find later is

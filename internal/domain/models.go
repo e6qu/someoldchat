@@ -2282,8 +2282,31 @@ type App struct {
 	SocketModeEnabled           bool
 	TokenRotationEnabled        bool
 	Deleted                     bool
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
+	// IconURL is what a client draws beside the app's messages. It is a URL and
+	// not blob bytes: the icon is set from a URL the app already serves.
+	IconURL   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ExternalAuthToken is an app's credential with a service outside this
+// deployment. The secret is stored encrypted and never crosses the public
+// boundary, in the same way an app's signing secret does not.
+type ExternalAuthToken struct {
+	ID          string
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Provider    string
+	Ciphertext  string
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+}
+
+// AssistantSearchAvailability is what an assistant may search here.
+type AssistantSearchAvailability struct {
+	Enabled           bool
+	SearchableSources []string
 }
 
 type AppManifestRevision struct {

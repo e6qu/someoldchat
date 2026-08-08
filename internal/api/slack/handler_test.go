@@ -2648,6 +2648,82 @@ func TestAdminAuditBillingAndExports(t *testing.T) {
 	}
 }
 
+// TestAppCredentialsAndAssistantSearch holds apps.icon.set,
+// apps.auth.external.*, apps.user.connection.update and assistant.search.*. An
+// external credential's secret never reaches the caller, and the assistant's
+// context is the member's own search rather than a wider one.
+func TestAppCredentialsAndAssistantSearch(t *testing.T) {
+	handler, target := testHandlerWithStore()
+	now := time.Now().UTC()
+	if err := target.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
+		ID: "Et1", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
+		Ciphertext: "sealed", ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}, events.Event{ID: "evt-external", WorkspaceID: "T1", Topic: "app.external_token_set", Payload: "Et1", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if icon := call(t, http.MethodPost, "apps.icon.set", "app_id=A1&image_url=https://example.invalid/icon.png"); icon["ok"] != true {
+		t.Fatalf("icon=%v", icon)
+	}
+	for _, body := range []string{"app_id=A1&image_url=an icon", "app_id=A1", "image_url=https://example.invalid/icon.png"} {
+		if refused := call(t, http.MethodPost, "apps.icon.set", body); refused["ok"] == true {
+			t.Fatalf("body=%q was accepted: %v", body, refused)
+		}
+	}
+	external := call(t, http.MethodPost, "apps.auth.external.get", "external_token_id=Et1")
+	token, ok := external["external_token"].(map[string]any)
+	if !ok || token["external_token_id"] != "Et1" || token["provider_name"] != "example" {
+		t.Fatalf("external=%v", external)
+	}
+	// The secret is not in the reply under any name.
+	for name, value := range token {
+		if text, isText := value.(string); isText && strings.Contains(text, "sealed") {
+			t.Fatalf("the credential's secret reached the caller in %q", name)
+		}
+	}
+	if missing := call(t, http.MethodPost, "apps.auth.external.get", "external_token_id=Et-nobody"); missing["error"] != "token_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+	if unnamed := call(t, http.MethodPost, "apps.auth.external.get", ""); unnamed["error"] != "invalid_arguments" {
+		t.Fatalf("unnamed=%v", unnamed)
+	}
+	if revoked := call(t, http.MethodPost, "apps.auth.external.delete", "external_token_id=Et1"); revoked["ok"] != true {
+		t.Fatalf("revoked=%v", revoked)
+	}
+	if again := call(t, http.MethodPost, "apps.auth.external.delete", "external_token_id=Et1"); again["error"] != "token_not_found" {
+		t.Fatalf("again=%v", again)
+	}
+	if connection := call(t, http.MethodPost, "apps.user.connection.update", ""); connection["ok"] != true {
+		t.Fatalf("connection=%v", connection)
+	}
+	info := call(t, http.MethodGet, "assistant.search.info", "")
+	if info["enabled"] != true || len(info["searchable_sources"].([]any)) == 0 {
+		t.Fatalf("info=%v", info)
+	}
+	found := call(t, http.MethodPost, "assistant.search.context", "query=hello")
+	if _, ok := found["results"].(map[string]any)["messages"].([]any); !ok {
+		t.Fatalf("found=%v", found)
+	}
+	if empty := call(t, http.MethodPost, "assistant.search.context", "query=%20"); empty["error"] != "invalid_arguments" {
+		t.Fatalf("empty=%v", empty)
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))

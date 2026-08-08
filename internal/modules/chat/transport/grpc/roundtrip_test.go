@@ -589,8 +589,14 @@ func conversionCases() map[string]conversionCase {
 		"AppActivityPage":    {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
 		"AnalyticsRow":       {sample: &domain.AnalyticsRow{}, through: throughInfallible(encodeProtoAnalyticsRow, decodeProtoAnalyticsRow)},
 		"AnomalyAllowList":   {sample: &domain.AnomalyAllowList{}, through: throughInfallible(encodeProtoAnomalyAllowList, decodeProtoAnomalyAllowList)},
-		"AppApproval":        {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
-		"RTMConnection":      {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
+		"ExternalAuthToken": {
+			sample:  &domain.ExternalAuthToken{},
+			through: throughInfallible(encodeProtoExternalAuthToken, decodeProtoExternalAuthToken),
+			omitted: map[string]string{"Ciphertext": "an external credential's secret belongs to the store, in the same way an app's signing secret does"},
+		},
+		"AssistantSearchAvailability": {sample: &domain.AssistantSearchAvailability{}, through: throughInfallible(encodeProtoAssistantSearchAvailability, decodeProtoAssistantSearchAvailability)},
+		"AppApproval":                 {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
+		"RTMConnection":               {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
 		"IncomingWebhook": {
 			sample: &domain.IncomingWebhook{},
 			omitted: map[string]string{

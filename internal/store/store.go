@@ -340,6 +340,15 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// SetAppIcon records what a client draws beside an app's messages.
+	SetAppIcon(context.Context, domain.WorkspaceID, domain.AppID, string, events.Event) error
+	// GetExternalAuthToken reads one of an app's external credentials.
+	GetExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.ExternalAuthToken, error)
+	// SetExternalAuthToken stores one.
+	SetExternalAuthToken(context.Context, domain.ExternalAuthToken, events.Event) error
+	// DeleteExternalAuthToken removes one, or every one the app holds when the
+	// identifier is empty.
+	DeleteExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string, events.Event) error
 	// GetAnomalyAllowList reports what audit is told not to flag. A workspace
 	// that has set nothing answers an empty list rather than not found: an
 	// empty allow list is the state a workspace starts in.

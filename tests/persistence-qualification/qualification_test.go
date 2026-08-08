@@ -148,6 +148,7 @@ func runQualification(t *testing.T, open opener) {
 		{"app activity filters by rank on every profile", appActivityFiltersByRank},
 		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
 		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
+		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2534,5 +2535,88 @@ func anomalyAllowListIsEmptyNotMissing(t *testing.T, open opener) {
 	missing := events.Event{ID: domain.EventID("evt-anomaly-absent-" + suffix), WorkspaceID: absent.WorkspaceID, Topic: "audit.anomaly_allow_list_set", Payload: "{}", CreatedAt: now}
 	if err := repository.SetAnomalyAllowList(ctx, absent, missing); err == nil {
 		t.Fatal("an allow list was stored for a workspace that does not exist")
+	}
+}
+
+// externalCredentialKeepsItsSecret holds the storage contract for
+// apps.auth.external.* and apps.icon.set. Revoking with no identifier revokes
+// every credential the app holds, which is what disconnecting an app means;
+// revoking one leaves the others.
+func externalCredentialKeepsItsSecret(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-external-" + suffix)
+	userID := domain.UserID("U-external-" + suffix)
+	appID := domain.AppID("A-external-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "External"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	app := domain.App{
+		ID: appID, DevelopmentWorkspaceID: workspaceID, OwnerID: userID, Name: "External app",
+		ClientID: "external-" + suffix, SigningSecretHash: "hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}
+	revision := domain.AppManifestRevision{AppID: appID, Version: 1, Manifest: `{"display_information":{"name":"External app"}}`, CreatedBy: userID, CreatedAt: now}
+	if err := repository.CreateApp(ctx, app, revision, domain.OAuthClient{ID: app.ClientID, SecretHash: "secret", AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetAppIcon(ctx, workspaceID, appID, "https://example.invalid/icon.png", event("icon", "app.icon_set")); err != nil {
+		t.Fatal(err)
+	}
+	stored, _, err := repository.GetApp(ctx, appID)
+	if err != nil || stored.IconURL != "https://example.invalid/icon.png" {
+		t.Fatalf("icon=%+v err=%v", stored, err)
+	}
+	if err := repository.SetAppIcon(ctx, workspaceID, domain.AppID("A-absent-"+suffix), "https://example.invalid/icon.png", event("icon-absent", "app.icon_set")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("icon on a missing app error=%v, want %v", err, store.ErrNotFound)
+	}
+	first := domain.ExternalAuthToken{
+		ID: "Et1-" + suffix, AppID: appID, WorkspaceID: workspaceID, UserID: userID,
+		Provider: "example", Ciphertext: "sealed-1", ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}
+	second := first
+	second.ID, second.Ciphertext = "Et2-"+suffix, "sealed-2"
+	for _, value := range []domain.ExternalAuthToken{first, second} {
+		if err := repository.SetExternalAuthToken(ctx, value, event("token-"+value.ID, "app.external_token_set")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, first.ID)
+	if err != nil || read.Ciphertext != "sealed-1" || read.Provider != "example" {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	// Another app cannot read this app's credential.
+	if _, err := repository.GetExternalAuthToken(ctx, workspaceID, domain.AppID("A-other-"+suffix), first.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-app read error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.DeleteExternalAuthToken(ctx, workspaceID, appID, first.ID, event("revoke-one", "app.external_token_deleted")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, first.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revoked credential error=%v, want %v", err, store.ErrNotFound)
+	}
+	if survivor, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, second.ID); err != nil || survivor.Ciphertext != "sealed-2" {
+		t.Fatalf("revoking one took the other: %+v err=%v", survivor, err)
+	}
+	// No identifier revokes every credential the app holds.
+	if err := repository.DeleteExternalAuthToken(ctx, workspaceID, appID, "", event("revoke-all", "app.external_token_deleted")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, second.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after revoking every credential error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.DeleteExternalAuthToken(ctx, workspaceID, appID, "", event("revoke-again", "app.external_token_deleted")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revoking nothing error=%v, want %v", err, store.ErrNotFound)
 	}
 }

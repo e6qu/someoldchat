@@ -201,6 +201,15 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("POST /api/apps.icon.set", h.appsIconSet)
+	mux.HandleFunc("GET /api/apps.auth.external.get", h.appsAuthExternalGet)
+	mux.HandleFunc("POST /api/apps.auth.external.get", h.appsAuthExternalGet)
+	mux.HandleFunc("POST /api/apps.auth.external.delete", h.appsAuthExternalDelete)
+	mux.HandleFunc("POST /api/apps.user.connection.update", h.appsUserConnectionUpdate)
+	mux.HandleFunc("GET /api/assistant.search.info", h.assistantSearchInfo)
+	mux.HandleFunc("POST /api/assistant.search.info", h.assistantSearchInfo)
+	mux.HandleFunc("GET /api/assistant.search.context", h.assistantSearchContext)
+	mux.HandleFunc("POST /api/assistant.search.context", h.assistantSearchContext)
 	mux.HandleFunc("GET /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
 	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
 	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.updateItem", h.adminAuditAnomalyAllowUpdateItem)
@@ -3276,6 +3285,188 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apps.icon.set records what a client draws beside an app's messages.
+func (h Handler) appsIconSet(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	iconURL := strings.TrimSpace(fields["image_url"])
+	if appID == "" || iconURL == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.SetAppIcon(r.Context(), principal.WorkspaceID, principal.UserID, appID, iconURL); err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apps.auth.external.get and delete govern an app's credentials with services
+// outside this deployment. The secret never leaves the store: a caller needs to
+// know the credential exists and when it lapses, not what it is.
+func (h Handler) appsAuthExternalGet(w http.ResponseWriter, r *http.Request) {
+	principal, appID, fields, ok := h.appCredentialRequest(w, r)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(fields["external_token_id"])
+	if id == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value, err := h.Messages.ExternalAuthToken(r.Context(), principal.WorkspaceID, appID, id)
+	if err != nil {
+		writeError(w, mapServiceError(err, "token_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "external_token": map[string]any{
+		"external_token_id": value.ID,
+		"app_id":            string(value.AppID),
+		"provider_name":     value.Provider,
+		"date_updated":      value.CreatedAt.UTC().Unix(),
+		"expires_at":        value.ExpiresAt.UTC().Unix(),
+	}})
+}
+
+func (h Handler) appsAuthExternalDelete(w http.ResponseWriter, r *http.Request) {
+	principal, appID, fields, ok := h.appCredentialRequest(w, r)
+	if !ok {
+		return
+	}
+	// Slack takes either one credential or the whole app's set, so an absent
+	// identifier revokes every credential rather than none.
+	if err := h.Messages.DeleteExternalAuthToken(r.Context(), principal.WorkspaceID, principal.UserID, appID, fields["external_token_id"]); err != nil {
+		writeError(w, mapServiceError(err, "token_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// appCredentialRequest resolves which app the caller speaks for. A credential
+// that carries an app speaks for that app and no other, so an app_id argument
+// cannot widen it: an app that could name another app could read its secrets.
+func (h Handler) appCredentialRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, domain.AppID, map[string]string, bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return auth.Principal{}, "", nil, false
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return auth.Principal{}, "", nil, false
+	}
+	appID := principal.AppID
+	if appID == "" {
+		appID = domain.AppID(strings.TrimSpace(fields["app_id"]))
+	}
+	if appID == "" {
+		writeError(w, "invalid_arguments")
+		return auth.Principal{}, "", nil, false
+	}
+	return principal, appID, fields, true
+}
+
+// apps.user.connection.update refreshes a member's connection to an app.
+func (h Handler) appsUserConnectionUpdate(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuthorizationsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := principal.AppID
+	if appID == "" {
+		appID = domain.AppID(strings.TrimSpace(fields["app_id"]))
+	}
+	if appID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.UpdateUserAppConnection(r.Context(), principal.WorkspaceID, principal.UserID, appID); err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// assistant.search.info reports what an assistant may search here, and
+// assistant.search.context answers the messages it may quote. The context is
+// the member's own search, so an assistant answering on somebody's behalf sees
+// what they see and no more.
+func (h Handler) assistantSearchInfo(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if _, err := decodeFields(w, r); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	availability, err := h.Messages.AssistantSearchAvailability(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "enabled": availability.Enabled, "searchable_sources": availability.SearchableSources,
+	})
+}
+
+func (h Handler) assistantSearchContext(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	query := strings.TrimSpace(fields["query"])
+	if query == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AssistantSearchContext(r.Context(), principal.WorkspaceID, principal.UserID, query, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	results := make([]map[string]any, 0, len(page.Messages))
+	for _, message := range page.Messages {
+		results = append(results, map[string]any{
+			"author_user_id": string(message.AuthorID),
+			"channel_id":     string(message.Conversation),
+			"content":        message.Text,
+			"message_ts":     slackTimestamp(message.CreatedAt),
+			"is_author_bot":  message.AppID != "",
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": map[string]any{"messages": results},
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
 // admin.audit.anomaly.allow.getItem and updateItem govern what audit does not

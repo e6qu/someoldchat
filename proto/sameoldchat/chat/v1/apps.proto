@@ -4,6 +4,8 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/messages.proto";
+
 message AppConfigurationTokenRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -52,6 +54,7 @@ message DeveloperApp {
   string created_at = 11;
   string updated_at = 12;
   bool deleted = 13;
+  string icon_url = 14;
 }
 
 message AppCredentials {
@@ -199,6 +202,49 @@ message OAuthAuthorization {
   string code_challenge_method = 14;
 }
 
+message ExternalAuthTokenValue {
+  string id = 1;
+  string app_id = 2;
+  string workspace_id = 3;
+  string user_id = 4;
+  string provider = 5;
+  int64 expires_at = 6;
+  int64 created_at = 7;
+}
+
+message AppIconRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string icon_url = 4;
+}
+
+message ExternalAuthTokenRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string external_token_id = 4;
+}
+
+message UserConnectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
+message AssistantSearchAvailabilityValue {
+  bool enabled = 1;
+  repeated string searchable_sources = 2;
+}
+
+message AssistantSearchRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
 message AppActivity {
   int64 id = 1;
   string app_id = 2;
@@ -266,6 +312,12 @@ message AppResolutionRequest {
 }
 
 service AppsService {
+  rpc SetAppIcon(AppIconRequest) returns (AppMutationResponse);
+  rpc ExternalAuthToken(ExternalAuthTokenRequest) returns (ExternalAuthTokenValue);
+  rpc DeleteExternalAuthToken(ExternalAuthTokenRequest) returns (AppMutationResponse);
+  rpc UpdateUserAppConnection(UserConnectionRequest) returns (AppMutationResponse);
+  rpc AssistantSearchAvailability(UserConnectionRequest) returns (AssistantSearchAvailabilityValue);
+  rpc AssistantSearchContext(AssistantSearchRequest) returns (MessagePage);
   rpc AppActivities(AppActivitiesRequest) returns (AppActivityPage);
   rpc AdminAppActivities(AppActivitiesRequest) returns (AppActivityPage);
   rpc AdminAppConfigs(AppConfigsRequest) returns (AppConfigsResponse);

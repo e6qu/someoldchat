@@ -1406,13 +1406,21 @@ operations:
     deviations:
       - Entries come from function executions the platform runs; an app cannot write its own log entry, and Slack declares no method for one either.
   - method: apps.auth.external.delete
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.auth.external.delete/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: apps.auth.external.get
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.auth.external.get/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: apps.datastore.bulkDelete
     status: behavior-compatible
     provenance: slack-reference
@@ -1464,21 +1472,39 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.update/
   - method: apps.icon.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.icon.set/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: apps.user.connection.update
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.user.connection.update/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: assistant.search.context
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.search.context/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Messages are the only source this deployment indexes, so the assistant searches messages and nothing else.
   - method: assistant.search.info
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.search.info/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Messages are the only source this deployment indexes, so the assistant searches messages and nothing else.
   - method: assistant.threads.setStatus
     status: sdk-compatible
     evidence:

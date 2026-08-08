@@ -177,9 +177,9 @@ func (s *Store) CreateApp(ctx context.Context, app domain.App, revision domain.A
 			return err
 		}
 		defer tx.Rollback()
-		result, err := tx.ExecContext(ctx, `INSERT INTO slack_apps(id, development_workspace_id, owner_id, name, description, client_id, signing_secret_hash, signing_secret_ciphertext, verification_token_hash, verification_token_ciphertext, manifest_version, distribution, socket_mode_enabled, token_rotation_enabled, deleted, created_at, updated_at)
-			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ? WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0)`,
-			app.ID, app.DevelopmentWorkspaceID, app.OwnerID, app.Name, app.Description, app.ClientID, app.SigningSecretHash, app.SigningSecretCiphertext, app.VerificationTokenHash, app.VerificationTokenCiphertext, app.ManifestVersion, app.Distribution, boolInt(app.SocketModeEnabled), boolInt(app.TokenRotationEnabled), domain.NewStoredTime(app.CreatedAt), domain.NewStoredTime(app.UpdatedAt), app.OwnerID, app.DevelopmentWorkspaceID)
+		result, err := tx.ExecContext(ctx, `INSERT INTO slack_apps(id, development_workspace_id, owner_id, name, description, client_id, signing_secret_hash, signing_secret_ciphertext, verification_token_hash, verification_token_ciphertext, manifest_version, distribution, socket_mode_enabled, token_rotation_enabled, deleted, icon_url, created_at, updated_at)
+			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ? WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0)`,
+			app.ID, app.DevelopmentWorkspaceID, app.OwnerID, app.Name, app.Description, app.ClientID, app.SigningSecretHash, app.SigningSecretCiphertext, app.VerificationTokenHash, app.VerificationTokenCiphertext, app.ManifestVersion, app.Distribution, boolInt(app.SocketModeEnabled), boolInt(app.TokenRotationEnabled), app.IconURL, domain.NewStoredTime(app.CreatedAt), domain.NewStoredTime(app.UpdatedAt), app.OwnerID, app.DevelopmentWorkspaceID)
 		if err != nil {
 			return classify(err)
 		}
@@ -213,9 +213,9 @@ func (s *Store) getApp(ctx context.Context, predicate string, argument any) (dom
 	var revision domain.AppManifestRevision
 	var socketMode, tokenRotation, deleted int
 	var appCreated, appUpdated, revisionCreated string
-	err := s.db.QueryRowContext(ctx, `SELECT a.id, a.development_workspace_id, a.owner_id, a.name, a.description, a.client_id, a.signing_secret_hash, a.signing_secret_ciphertext, a.verification_token_hash, a.verification_token_ciphertext, a.manifest_version, a.distribution, a.socket_mode_enabled, a.token_rotation_enabled, a.deleted, a.created_at, a.updated_at, r.app_id, r.version, r.manifest, r.created_by, r.created_at
+	err := s.db.QueryRowContext(ctx, `SELECT a.id, a.development_workspace_id, a.owner_id, a.name, a.description, a.client_id, a.signing_secret_hash, a.signing_secret_ciphertext, a.verification_token_hash, a.verification_token_ciphertext, a.manifest_version, a.distribution, a.socket_mode_enabled, a.token_rotation_enabled, a.deleted, a.icon_url, a.created_at, a.updated_at, r.app_id, r.version, r.manifest, r.created_by, r.created_at
 		FROM slack_apps a JOIN app_manifest_revisions r ON r.app_id = a.id AND r.version = a.manifest_version WHERE `+predicate+` AND a.deleted = 0`, argument).
-		Scan(&app.ID, &app.DevelopmentWorkspaceID, &app.OwnerID, &app.Name, &app.Description, &app.ClientID, &app.SigningSecretHash, &app.SigningSecretCiphertext, &app.VerificationTokenHash, &app.VerificationTokenCiphertext, &app.ManifestVersion, &app.Distribution, &socketMode, &tokenRotation, &deleted, &appCreated, &appUpdated, &revision.AppID, &revision.Version, &revision.Manifest, &revision.CreatedBy, &revisionCreated)
+		Scan(&app.ID, &app.DevelopmentWorkspaceID, &app.OwnerID, &app.Name, &app.Description, &app.ClientID, &app.SigningSecretHash, &app.SigningSecretCiphertext, &app.VerificationTokenHash, &app.VerificationTokenCiphertext, &app.ManifestVersion, &app.Distribution, &socketMode, &tokenRotation, &deleted, &app.IconURL, &appCreated, &appUpdated, &revision.AppID, &revision.Version, &revision.Manifest, &revision.CreatedBy, &revisionCreated)
 	if err := translateNotFound(err); err != nil {
 		return domain.App{}, domain.AppManifestRevision{}, err
 	}
@@ -236,7 +236,7 @@ func (s *Store) ListDeveloperApps(ctx context.Context, workspaceID domain.Worksp
 	if workspaceID == "" || userID == "" {
 		return nil, store.InvalidArgument("developer workspace and user are required")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, development_workspace_id, owner_id, name, description, client_id, signing_secret_hash, signing_secret_ciphertext, verification_token_hash, verification_token_ciphertext, manifest_version, distribution, socket_mode_enabled, token_rotation_enabled, deleted, created_at, updated_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id, development_workspace_id, owner_id, name, description, client_id, signing_secret_hash, signing_secret_ciphertext, verification_token_hash, verification_token_ciphertext, manifest_version, distribution, socket_mode_enabled, token_rotation_enabled, deleted, icon_url, created_at, updated_at
 		FROM slack_apps WHERE development_workspace_id = ? AND owner_id = ? AND deleted = 0 ORDER BY LOWER(name), id`, workspaceID, userID)
 	if err != nil {
 		return nil, err
@@ -247,7 +247,7 @@ func (s *Store) ListDeveloperApps(ctx context.Context, workspaceID domain.Worksp
 		var app domain.App
 		var socketMode, tokenRotation, deleted int
 		var created, updated string
-		if err := rows.Scan(&app.ID, &app.DevelopmentWorkspaceID, &app.OwnerID, &app.Name, &app.Description, &app.ClientID, &app.SigningSecretHash, &app.SigningSecretCiphertext, &app.VerificationTokenHash, &app.VerificationTokenCiphertext, &app.ManifestVersion, &app.Distribution, &socketMode, &tokenRotation, &deleted, &created, &updated); err != nil {
+		if err := rows.Scan(&app.ID, &app.DevelopmentWorkspaceID, &app.OwnerID, &app.Name, &app.Description, &app.ClientID, &app.SigningSecretHash, &app.SigningSecretCiphertext, &app.VerificationTokenHash, &app.VerificationTokenCiphertext, &app.ManifestVersion, &app.Distribution, &socketMode, &tokenRotation, &deleted, &app.IconURL, &created, &updated); err != nil {
 			return nil, err
 		}
 		app.SocketModeEnabled = socketMode != 0
@@ -266,7 +266,7 @@ func (s *Store) ListDeveloperApps(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (s *Store) ListInstalledApps(ctx context.Context) ([]domain.AppManifestSnapshot, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT a.id, a.development_workspace_id, a.owner_id, a.name, a.description, a.client_id, a.signing_secret_hash, a.signing_secret_ciphertext, a.verification_token_hash, a.verification_token_ciphertext, a.manifest_version, a.distribution, a.socket_mode_enabled, a.token_rotation_enabled, a.deleted, a.created_at, a.updated_at, r.manifest
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT a.id, a.development_workspace_id, a.owner_id, a.name, a.description, a.client_id, a.signing_secret_hash, a.signing_secret_ciphertext, a.verification_token_hash, a.verification_token_ciphertext, a.manifest_version, a.distribution, a.socket_mode_enabled, a.token_rotation_enabled, a.deleted, a.icon_url, a.created_at, a.updated_at, r.manifest
 		FROM slack_apps a
 		JOIN app_installations i ON i.app_id = a.id AND i.enabled = 1
 		JOIN app_manifest_revisions r ON r.app_id = a.id AND r.version = a.manifest_version
@@ -280,7 +280,7 @@ func (s *Store) ListInstalledApps(ctx context.Context) ([]domain.AppManifestSnap
 		var snapshot domain.AppManifestSnapshot
 		var socketMode, tokenRotation, deleted int
 		var created, updated string
-		if err := rows.Scan(&snapshot.App.ID, &snapshot.App.DevelopmentWorkspaceID, &snapshot.App.OwnerID, &snapshot.App.Name, &snapshot.App.Description, &snapshot.App.ClientID, &snapshot.App.SigningSecretHash, &snapshot.App.SigningSecretCiphertext, &snapshot.App.VerificationTokenHash, &snapshot.App.VerificationTokenCiphertext, &snapshot.App.ManifestVersion, &snapshot.App.Distribution, &socketMode, &tokenRotation, &deleted, &created, &updated, &snapshot.Manifest); err != nil {
+		if err := rows.Scan(&snapshot.App.ID, &snapshot.App.DevelopmentWorkspaceID, &snapshot.App.OwnerID, &snapshot.App.Name, &snapshot.App.Description, &snapshot.App.ClientID, &snapshot.App.SigningSecretHash, &snapshot.App.SigningSecretCiphertext, &snapshot.App.VerificationTokenHash, &snapshot.App.VerificationTokenCiphertext, &snapshot.App.ManifestVersion, &snapshot.App.Distribution, &socketMode, &tokenRotation, &deleted, &snapshot.App.IconURL, &created, &updated, &snapshot.Manifest); err != nil {
 			return nil, err
 		}
 		snapshot.App.SocketModeEnabled = socketMode != 0
