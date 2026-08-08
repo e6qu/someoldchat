@@ -813,7 +813,7 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 		}
 		canRun := false
 		if trigger.Enabled && value.Status == domain.WorkflowPublished &&
-			(trigger.Type == "link" || trigger.Type == "shortcut") {
+			(trigger.Type == domain.WorkflowTriggerLink || trigger.Type == domain.WorkflowTriggerShortcut) {
 			permission, err := h.Messages.GetTriggerPermission(r.Context(), principal.WorkspaceID, principal.UserID, value.AppID, trigger.ID)
 			if err != nil {
 				h.writeStoreError(w, err, "Workflow permissions are temporarily unavailable.")
@@ -833,7 +833,7 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 			if !trigger.NextRunAt.IsZero() {
 				view.NextRun = trigger.NextRunAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 			}
-			if trigger.Type == "webhook" {
+			if trigger.Type == domain.WorkflowTriggerWebhook {
 				invokeURL, err := h.Messages.WebhookTriggerURL(r.Context(), principal.WorkspaceID, principal.UserID, trigger.ID)
 				if err != nil {
 					h.writeStoreError(w, err, "The webhook URL is temporarily unavailable.")

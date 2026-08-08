@@ -1762,7 +1762,7 @@ func (h Handler) mutateFunctionPermission(w http.ResponseWriter, r *http.Request
 		writeFunctionPermissionError(w, err)
 		return
 	}
-	if current.PermissionType != "named_entities" {
+	if current.PermissionType != domain.PermissionNamedEntities {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -1927,7 +1927,7 @@ func (h Handler) mutateTriggerPermission(w http.ResponseWriter, r *http.Request,
 		writeTriggerPermissionError(w, err)
 		return
 	}
-	if current.PermissionType != "named_entities" {
+	if current.PermissionType != domain.PermissionNamedEntities {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -7264,7 +7264,7 @@ func (h Handler) addBookmark(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	bookmark, err := h.Messages.AddBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["title"], fields["type"], fields["link"], fields["emoji"], fields["entity_id"], fields["access_level"], fields["parent_id"])
+	bookmark, err := h.Messages.AddBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["title"], domain.BookmarkType(fields["type"]), fields["link"], fields["emoji"], fields["entity_id"], fields["access_level"], fields["parent_id"])
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return

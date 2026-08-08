@@ -2657,7 +2657,7 @@ func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.W
 // current developer-app model has one collaborator (the owner); when that
 // model grows, this one projection point can return the full collaborator set.
 func (m Messages) withAppCollaboratorOwner(ctx context.Context, value domain.AutomationPermission) (domain.AutomationPermission, error) {
-	if value.PermissionType != "app_collaborators" {
+	if value.PermissionType != domain.PermissionAppCollaborators {
 		return value, nil
 	}
 	app, _, err := m.Store.GetApp(ctx, value.AppID)
@@ -2672,7 +2672,7 @@ func (m Messages) withAppCollaboratorOwner(ctx context.Context, value domain.Aut
 }
 
 func (m Messages) validateAutomationEntities(ctx context.Context, value *domain.AutomationPermission) error {
-	if value.PermissionType != "named_entities" {
+	if value.PermissionType != domain.PermissionNamedEntities {
 		value.UserIDs = nil
 		value.ChannelIDs = nil
 		value.TeamIDs = nil
@@ -2720,7 +2720,7 @@ func (m Messages) SetFeaturedWorkflows(ctx context.Context, workspaceID domain.W
 		if err != nil {
 			return err
 		}
-		if trigger.Type != "link" {
+		if trigger.Type != domain.WorkflowTriggerLink {
 			return ErrInvalidWorkflowStep
 		}
 		workflow, err := m.Store.GetWorkflow(ctx, workspaceID, trigger.WorkflowID)

@@ -381,7 +381,7 @@ type Service interface {
 	SavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemState, domain.PageRequest) (domain.SavedItemPage, error)
 	SetSavedItemState(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID, domain.SavedItemState) (domain.SavedItem, error)
 	RemoveSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) error
-	AddBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, string, string, string, string) (domain.Bookmark, error)
+	AddBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.BookmarkType, string, string, string, string, string) (domain.Bookmark, error)
 	EditBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID, domain.BookmarkUpdate) (domain.Bookmark, error)
 	Bookmarks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.Bookmark, error)
 	RemoveBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID) error

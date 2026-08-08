@@ -8027,7 +8027,7 @@ func canvasEditor(value domain.Canvas) (body, sectionID string, editable bool) {
 	if len(document.Sections) == 0 {
 		return "", "", true
 	}
-	if len(document.Sections) == 1 && document.Sections[0].Type == "markdown" {
+	if len(document.Sections) == 1 && document.Sections[0].Type == domain.CanvasSectionMarkdown {
 		section := document.Sections[0]
 		return section.Text, section.ID, true
 	}

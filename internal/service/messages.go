@@ -6478,15 +6478,15 @@ func (m Messages) savedItemWithSource(ctx context.Context, item domain.SavedItem
 	return item, nil
 }
 
-func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
+func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title string, bookmarkType domain.BookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Bookmark{}, err
 	}
 	title = strings.TrimSpace(title)
-	bookmarkType = strings.TrimSpace(bookmarkType)
+	bookmarkType = domain.BookmarkType(strings.TrimSpace(string(bookmarkType)))
 	link = strings.TrimSpace(link)
 	accessLevel = strings.TrimSpace(accessLevel)
-	if title == "" || len(title) > 255 || bookmarkType != "link" || link == "" || accessLevel != "" && accessLevel != "read" && accessLevel != "write" {
+	if title == "" || len(title) > 255 || !bookmarkType.Valid() || link == "" || accessLevel != "" && accessLevel != "read" && accessLevel != "write" {
 		return domain.Bookmark{}, ErrInvalidBookmark
 	}
 	id, err := domain.NewBookmarkID()
@@ -6522,7 +6522,7 @@ func (m Messages) EditBookmark(ctx context.Context, workspaceID domain.Workspace
 	if update.SetEmoji {
 		bookmark.Emoji = strings.TrimSpace(update.Emoji)
 	}
-	if bookmark.Title == "" || len(bookmark.Title) > 255 || bookmark.Type != "link" || bookmark.Link == "" {
+	if bookmark.Title == "" || len(bookmark.Title) > 255 || !bookmark.Type.Valid() || bookmark.Link == "" {
 		return domain.Bookmark{}, ErrInvalidBookmark
 	}
 	bookmark.UpdatedAt = time.Now().UTC()

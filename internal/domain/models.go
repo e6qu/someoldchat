@@ -1604,12 +1604,21 @@ type SavedItemPage struct {
 	HasMore    bool
 }
 
+// BookmarkType is what a bookmark points at. Slack defines the link and
+// nothing else today, and the value was a bare string compared against "link"
+// in the one place that validates it.
+type BookmarkType string
+
+const BookmarkLink BookmarkType = "link"
+
+func (kind BookmarkType) Valid() bool { return kind == BookmarkLink }
+
 type Bookmark struct {
 	ID           BookmarkID
 	WorkspaceID  WorkspaceID
 	Conversation ConversationID
 	Title        string
-	Type         string
+	Type         BookmarkType
 	Link         string
 	Emoji        string
 	EntityID     string
