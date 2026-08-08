@@ -963,19 +963,40 @@ type ConversationPrefs struct {
 	WhoCanPost     ConversationPreferenceList
 }
 
-func MatchesConversationType(conversation Conversation, typeValue ConversationType) bool {
-	switch typeValue {
-	case ConversationTypePublic:
-		return !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect
-	case ConversationTypePrivate:
-		return conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect
-	case ConversationTypeIM:
-		return conversation.IsDirect
-	case ConversationTypeMPIM:
-		return conversation.IsGroupDirect
-	default:
-		return false
+// Kind is what a conversation is, decided in one place.
+//
+// The three booleans admit eight combinations and only four mean anything. Every
+// layer used to read them directly and in its own order, so "is this a direct
+// conversation" was written as `IsDirect || IsGroupDirect` in three dozen places
+// and "is this a public channel" as a three-term negation in several more.
+//
+// The precedence here is the one those readers implied, made explicit and
+// applied once: a conversation between people is a conversation between people
+// whatever else is set, a group DM before a one-to-one because the group flag is
+// the more specific claim, and a channel is private if it says so. Nothing can
+// be two kinds any more, whatever the flags say.
+func (c Conversation) Kind() ConversationType {
+	switch {
+	case c.IsGroupDirect:
+		return ConversationTypeMPIM
+	case c.IsDirect:
+		return ConversationTypeIM
+	case c.IsPrivate:
+		return ConversationTypePrivate
 	}
+	return ConversationTypePublic
+}
+
+// IsDirectOrGroup reports whether this is a conversation between people rather
+// than a channel. It is the question three dozen call sites asked by combining
+// two booleans, each free to get the combination wrong.
+func (c Conversation) IsDirectOrGroup() bool {
+	kind := c.Kind()
+	return kind == ConversationTypeIM || kind == ConversationTypeMPIM
+}
+
+func MatchesConversationType(conversation Conversation, typeValue ConversationType) bool {
+	return conversation.Kind() == typeValue
 }
 
 type ReadCursor struct {

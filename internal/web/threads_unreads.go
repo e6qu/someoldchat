@@ -227,7 +227,7 @@ func (h Handler) unreadMessages(r *http.Request, principal auth.Principal, conve
 // unreadPrefix names the conversation the way the sidebar does, so the two
 // surfaces do not disagree about what a conversation is called.
 func unreadPrefix(conversation domain.Conversation) string {
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		return "@"
 	}
 	return "#"

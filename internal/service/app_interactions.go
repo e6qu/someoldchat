@@ -1371,7 +1371,7 @@ func (m Messages) escapeSlashCommandText(ctx context.Context, workspaceID domain
 			return "", err
 		}
 		for _, conversation := range page.Conversations {
-			if conversation.Name != "" && !conversation.IsDirect && !conversation.IsGroupDirect {
+			if conversation.Name != "" && !conversation.IsDirectOrGroup() {
 				channels[strings.ToLower(conversation.Name)] = conversation
 			}
 		}

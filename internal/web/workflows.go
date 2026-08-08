@@ -620,7 +620,7 @@ func (h Handler) workflowTriggerOptions(ctx context.Context, principal auth.Prin
 			return nil, nil, err
 		}
 		for _, conversation := range page.Conversations {
-			if conversation.IsDirect || conversation.IsGroupDirect {
+			if conversation.IsDirectOrGroup() {
 				continue
 			}
 			channels = append(channels, workflowChannelOption{ID: string(conversation.ID), Name: conversationName(conversation)})

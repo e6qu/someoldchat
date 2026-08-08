@@ -1157,7 +1157,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	}
 	defer s.Close()
 	converted, err = s.GetConversation(ctx, "D2")
-	if err != nil || converted.Name != "project-room-2" || !converted.IsPrivate || converted.IsDirect || converted.IsGroupDirect {
+	if err != nil || converted.Name != "project-room-2" || !converted.IsPrivate || converted.IsDirectOrGroup() {
 		t.Fatalf("reopened conversion=%+v err=%v", converted, err)
 	}
 	history, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
@@ -1903,7 +1903,7 @@ func TestSQLiteLegacyConversationMigrationAddsDirectKeyAfterColumn(t *testing.T)
 		t.Fatal(err)
 	}
 	conversation, err := selected.GetConversation(ctx, "C1")
-	if err != nil || conversation.IsDirect || conversation.IsGroupDirect {
+	if err != nil || conversation.IsDirectOrGroup() {
 		t.Fatalf("conversation=%+v err=%v", conversation, err)
 	}
 }

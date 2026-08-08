@@ -50,7 +50,7 @@ func (m Messages) StartMessageStream(ctx context.Context, workspaceID domain.Wor
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Message{}, store.ErrNotFound
 	}
-	if !conversation.IsDirect && !conversation.IsGroupDirect {
+	if !conversation.IsDirectOrGroup() {
 		if request.RecipientTeamID == "" {
 			return domain.Message{}, ErrMissingStreamRecipientTeam
 		}
