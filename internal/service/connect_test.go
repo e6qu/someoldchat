@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -121,4 +122,74 @@ func TestASecondOutstandingInvitationIsRefused(t *testing.T) {
 	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", ""); err == nil {
 		t.Fatal("a second outstanding invitation was recorded for the same organization")
 	}
+}
+
+// CONNECT-01 requires the expired state to be explicit. Expiry used to be
+// spelled out inside SharedInvite.Acceptable, which made acceptance the only
+// operation that knew about the deadline: an invitation could be approved long
+// after it lapsed, and the approval recorded a live invitation that nothing
+// could ever accept.
+func TestALapsedInvitationCannotBeApprovedButCanBeWithdrawn(t *testing.T) {
+	ctx := context.Background()
+	newFixture := func(t *testing.T) (*memory.Store, Messages) {
+		t.Helper()
+		store := memory.New()
+		store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "host"})
+		store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "host-admin"})
+		if err := store.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleAdmin); err != nil {
+			t.Fatal(err)
+		}
+		store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "shared"})
+		store.SeedConversationMember("C1", "U1")
+		store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "guest"})
+		return store, Messages{Store: store}
+	}
+	// The deadline is written directly: InviteShared always dates it fourteen
+	// days out, and waiting is not a test.
+	lapsed := func(t *testing.T, store *memory.Store, id domain.SharedInviteID) {
+		t.Helper()
+		past := time.Now().UTC().Add(-time.Hour)
+		invite := domain.SharedInvite{
+			ID: id, WorkspaceID: "T1", ConversationID: "C1", TargetWorkspaceID: "T2",
+			InvitedBy: "U1", Status: domain.SharedInvitePending,
+			CreatedAt: past.Add(-SharedInviteLifetime), ExpiresAt: past,
+		}
+		event, err := events.New(domain.EventID("E"+string(id)), "T1", "U1",
+			events.NewPayload("shared_invite.created", events.String("invite_id", string(id))), past)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CreateSharedInvite(ctx, invite, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("approval is refused", func(t *testing.T) {
+		store, messages := newFixture(t)
+		lapsed(t, store, "SI_lapsed")
+		if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", "SI_lapsed"); !errors.Is(err, ErrInvitationExpired) {
+			t.Fatalf("approving a lapsed invitation err=%v, want ErrInvitationExpired", err)
+		}
+		// The refusal changed nothing: the invitation is still pending, not
+		// approved and not silently settled.
+		stored, err := store.GetSharedInvite(ctx, "SI_lapsed")
+		if err != nil || stored.Status != domain.SharedInvitePending {
+			t.Fatalf("invitation=%+v err=%v, want it still pending", stored, err)
+		}
+	})
+
+	// Withdrawing stays available, because clearing a queue of dead
+	// invitations is the remaining useful action and refusing it would leave
+	// them there permanently.
+	t.Run("withdrawal is allowed", func(t *testing.T) {
+		store, messages := newFixture(t)
+		lapsed(t, store, "SI_withdrawn")
+		invite, err := messages.DenySharedInvite(ctx, "T1", "U1", "SI_withdrawn")
+		if err != nil {
+			t.Fatalf("withdrawing a lapsed invitation: %v", err)
+		}
+		if invite.Status != domain.SharedInviteRevoked {
+			t.Fatalf("status=%q, want revoked", invite.Status)
+		}
+	})
 }

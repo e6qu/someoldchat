@@ -4996,3 +4996,23 @@ func TestEveryJSONRouteRefusesInJSON(t *testing.T) {
 		})
 	}
 }
+
+// The presence heartbeat answers no body when it succeeds and its caller
+// discards the response, so a refusal that renders a workspace error page is
+// work nobody can ever read — repeated on every beat for as long as a
+// signed-out tab stays open.
+func TestTheHeartbeatRefusesWithoutRenderingAPage(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+
+	request := httptest.NewRequest(http.MethodPost, "/app/active", strings.NewReader(""))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want 401", response.Code)
+	}
+	if body := strings.TrimSpace(response.Body.String()); body != "" {
+		t.Fatalf("refusal carried a body: %s", body)
+	}
+}

@@ -105,6 +105,12 @@ func (h Handler) writeConnectError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, service.ErrSharedInviteSettled):
 		h.writeMutationError(w, r, http.StatusConflict, "That invitation was already decided",
 			"Someone else answered it first. Reload to see where it stands.")
+	// Expiry is not a decision anyone took, so it is not "already decided".
+	// Approving a lapsed invitation would record it as live and send nobody
+	// anything, because acceptance refuses it on the deadline.
+	case errors.Is(err, service.ErrInvitationExpired):
+		h.writeMutationError(w, r, http.StatusConflict, "That invitation has expired",
+			"Nobody accepted it within 14 days, so it can no longer be approved. Withdraw it and send a new one.")
 	case errors.Is(err, store.ErrAlreadyExists):
 		h.writeMutationError(w, r, http.StatusConflict, "That organization already has an invitation",
 			"Withdraw the outstanding one before sending another.")

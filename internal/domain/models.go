@@ -960,10 +960,21 @@ type SharedInvite struct {
 
 // Acceptable reports whether the invitation can still be accepted or declined.
 func (invite SharedInvite) Acceptable(at time.Time) bool {
-	if invite.Status != SharedInviteApproved {
-		return false
-	}
-	return invite.ExpiresAt.IsZero() || !at.After(invite.ExpiresAt)
+	return invite.Status == SharedInviteApproved && !invite.Expired(at)
+}
+
+// Expired is the single definition of a lapsed invitation. It used to be
+// spelled out inside Acceptable, which meant acceptance was the only operation
+// that knew about the deadline: an invitation could be approved a month after
+// it lapsed, and the approval queue offered the control to do it. The result
+// was an invitation recorded as approved that nothing could ever accept, which
+// is the state CONNECT-01 requires to be explicit rather than implied by a
+// date sitting in the past.
+//
+// An invitation with no deadline never expires, which is what a zero ExpiresAt
+// means on a row written before the lifetime existed.
+func (invite SharedInvite) Expired(at time.Time) bool {
+	return !invite.ExpiresAt.IsZero() && at.After(invite.ExpiresAt)
 }
 
 type SharedInvitePage struct {
