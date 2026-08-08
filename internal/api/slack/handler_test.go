@@ -2736,24 +2736,38 @@ func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	}
 }
 
-func TestAdminConversationMutationsAreRegistered(t *testing.T) {
-	for _, test := range []struct {
-		endpoint string
-		body     string
-	}{
-		{endpoint: "admin.conversations.rename", body: "channel_id=C1&name=renamed"},
-		{endpoint: "admin.conversations.archive", body: "channel_id=C1"},
-		{endpoint: "admin.conversations.unarchive", body: "channel_id=C2"},
-	} {
-		handler := testHandler()
-		request := httptest.NewRequest(http.MethodPost, "/api/"+test.endpoint, strings.NewReader(test.body))
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		request.Header.Set("Authorization", "Bearer token")
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
-			t.Fatalf("%s status=%d body=%s", test.endpoint, response.Code, response.Body)
-		}
+// TestAdminConversationRenameArchiveAndUnarchiveTakeEffect holds
+// admin.conversations.rename, archive and unarchive. It used to assert only
+// that each answered ok, which a handler that acknowledged and changed nothing
+// would also have satisfied; the state is read back now.
+func TestAdminConversationRenameArchiveAndUnarchiveTakeEffect(t *testing.T) {
+	handler := testHandler()
+	read := func(t *testing.T, channel string) map[string]any {
+		t.Helper()
+		return adminCall(t, handler, http.MethodPost, "conversations.info", "channel="+channel)["channel"].(map[string]any)
+	}
+	if renamed := adminCall(t, handler, http.MethodPost, "admin.conversations.rename", "channel_id=C1&name=renamed"); renamed["ok"] != true {
+		t.Fatalf("rename=%v", renamed)
+	}
+	if name := read(t, "C1")["name"]; name != "renamed" {
+		t.Fatalf("the channel is still called %v after a rename", name)
+	}
+	if archived := adminCall(t, handler, http.MethodPost, "admin.conversations.archive", "channel_id=C1"); archived["ok"] != true {
+		t.Fatalf("archive=%v", archived)
+	}
+	if read(t, "C1")["is_archived"] != true {
+		t.Fatalf("the channel was acknowledged and not archived")
+	}
+	// C2 starts archived, so unarchive has something to undo. An unarchive that
+	// changed nothing would pass an ok check on an already-open channel.
+	if read(t, "C2")["is_archived"] != true {
+		t.Fatal("the fixture channel is not archived, so unarchive proves nothing")
+	}
+	if unarchived := adminCall(t, handler, http.MethodPost, "admin.conversations.unarchive", "channel_id=C2"); unarchived["ok"] != true {
+		t.Fatalf("unarchive=%v", unarchived)
+	}
+	if read(t, "C2")["is_archived"] == true {
+		t.Fatalf("the channel is still archived after unarchive")
 	}
 }
 
@@ -2787,25 +2801,38 @@ func TestAdminConversationCreateUsesDurableConversationBoundary(t *testing.T) {
 	}
 }
 
-func TestAdminConversationInviteIsRegistered(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.invite", strings.NewReader("channel_id=C1&users=U2"))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Authorization", "Bearer token")
-	response := httptest.NewRecorder()
-	testHandler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+// TestAdminConversationInviteAddsTheMember holds admin.conversations.invite.
+// Asserting ok alone said nothing about whether anybody joined.
+func TestAdminConversationInviteAddsTheMember(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	store.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
+	if invited := adminCall(t, handler, http.MethodPost, "admin.conversations.invite", "channel_id=C1&users=U3"); invited["ok"] != true {
+		t.Fatalf("invite=%v", invited)
+	}
+	member, err := store.IsConversationMember(context.Background(), "C1", "U3")
+	if err != nil || !member {
+		t.Fatalf("the member was acknowledged and not added: member=%t err=%v", member, err)
+	}
+	if missing := adminCall(t, handler, http.MethodPost, "admin.conversations.invite", "channel_id=C1&users=U-nobody"); missing["ok"] == true {
+		t.Fatalf("a member that does not exist was invited: %v", missing)
 	}
 }
 
-func TestAdminConversationConvertToPrivateIsRegistered(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.convertToPrivate", strings.NewReader("channel_id=C1"))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Authorization", "Bearer token")
-	response := httptest.NewRecorder()
-	testHandler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"is_private":true`) {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+// TestAdminConversationConvertToPrivateTakesEffect holds
+// admin.conversations.convertToPrivate. The reply saying is_private is not the
+// same as the channel being private afterwards, so the state is read back.
+func TestAdminConversationConvertToPrivateTakesEffect(t *testing.T) {
+	handler := testHandler()
+	converted := adminCall(t, handler, http.MethodPost, "admin.conversations.convertToPrivate", "channel_id=C1")
+	if converted["channel"].(map[string]any)["is_private"] != true {
+		t.Fatalf("convertToPrivate=%v", converted)
+	}
+	info := adminCall(t, handler, http.MethodPost, "conversations.info", "channel=C1")
+	if info["channel"].(map[string]any)["is_private"] != true {
+		t.Fatalf("the channel is not private after conversion: %v", info)
+	}
+	if again := adminCall(t, handler, http.MethodPost, "admin.conversations.convertToPrivate", "channel_id=C1"); again["ok"] == true {
+		t.Fatalf("a private channel was converted to private: %v", again)
 	}
 }
 
@@ -2978,7 +3005,7 @@ func TestPostEphemeralReturnsMessageTimestamp(t *testing.T) {
 }
 
 func TestRenameConversationNormalizesAndPersists(t *testing.T) {
-	handler := testHandler()
+	handler, repository := testHandlerWithStore()
 	req := httptest.NewRequest(http.MethodPost, "/api/conversations.rename", strings.NewReader("channel=C1&name= New Room "))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer token")
@@ -3026,6 +3053,12 @@ func TestRenameConversationNormalizesAndPersists(t *testing.T) {
 	handler.ServeHTTP(kickResult, kick)
 	if kickResult.Code != http.StatusOK {
 		t.Fatalf("kick status=%d body=%s", kickResult.Code, kickResult.Body)
+	}
+	// Status 200 is not removal. A kick that answered ok and left the member in
+	// the channel would have satisfied this test as it stood.
+	member, err := repository.IsConversationMember(context.Background(), "C1", "U2")
+	if err != nil || member {
+		t.Fatalf("the member was acknowledged and not removed: member=%t err=%v", member, err)
 	}
 }
 

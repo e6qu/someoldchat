@@ -73,56 +73,84 @@ sources:
 operations:
   - method: api.test
     status: behavior-compatible
+    evidence:
+      - go-test:internal/api/slack:TestAPITestEchoesTheSameErrorForJSONAndForm
   - method: bookmarks.add
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/bookmarks.add/
+    evidence:
+      - go-test:internal/api/slack:TestBookmarkLifecycleUsesChannelIDAndDurableResponse
   - method: bookmarks.edit
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/bookmarks.edit/
+    evidence:
+      - go-test:internal/api/slack:TestBookmarkLifecycleUsesChannelIDAndDurableResponse
   - method: bookmarks.list
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/bookmarks.list/
+    evidence:
+      - go-test:internal/api/slack:TestBookmarkLifecycleUsesChannelIDAndDurableResponse
   - method: bookmarks.remove
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/bookmarks.remove/
+    evidence:
+      - go-test:internal/api/slack:TestBookmarkLifecycleUsesChannelIDAndDurableResponse
   - method: apps.connections.open
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.connections.open/
+    evidence:
+      - go-test:internal/api/slack:TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection
   - method: apps.manifest.create
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.create/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManifestLifecycleMatchesCurrentSlackResponseShapes
   - method: apps.manifest.delete
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.delete/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManifestLifecycleMatchesCurrentSlackResponseShapes
   - method: apps.manifest.export
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.export/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManifestLifecycleMatchesCurrentSlackResponseShapes
   - method: apps.manifest.update
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.update/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManifestLifecycleMatchesCurrentSlackResponseShapes
   - method: apps.manifest.validate
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.validate/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManifestLifecycleMatchesCurrentSlackResponseShapes
   - method: auth.revoke
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAuthRevokeDurablyInvalidatesToken
   - method: auth.test
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAuthTestIncludesContractIdentityFields
   - method: chat.postMessage
     status: schema-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/chat.postMessage/
+    evidence:
+      - go-test:internal/api/slack:TestPostMessageForm
     deviations:
       - >-
         The full current payload is validated and persisted, but link-name
@@ -141,12 +169,18 @@ operations:
   - method: chat.meMessage
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestMeMessageUsesNarrowResponse
   - method: chat.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUpdateAndDeleteMessage
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUpdateAndDeleteMessage
   - method: canvases.access.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -163,6 +197,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.create/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasAccessAndDeletionTakeEffect
   - method: canvases.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -173,40 +209,64 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.edit/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasAccessAndDeletionTakeEffect
   - method: canvases.sections.lookup
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.sections.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasHTTPMethodsUseCurrentSlackFields
   - method: chat.getPermalink
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestGetPermalink
   - method: conversations.history
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestHistoryPostForm
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestConversationRepliesReturnsRootAndThread
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAddGetAndRemoveReaction
   - method: reactions.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAddGetAndRemoveReaction
   - method: reactions.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAddGetAndRemoveReaction
   - method: reactions.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAddGetAndRemoveReaction
   - method: pins.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAddListAndRemovePin
   - method: pins.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAddListAndRemovePin
   - method: pins.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAddListAndRemovePin
   - method: search.messages
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -228,24 +288,38 @@ operations:
   - method: users.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestConversationAndUserInfo
   - method: conversations.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestConversationAndUserInfo
   - method: conversations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersAndConversationsList
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersAndConversationsList
   - method: conversations.members
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestConversationMembers
   - method: team.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestTeamInfo
   - method: team.profile.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestTeamProfileGet
   - method: emoji.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -262,15 +336,23 @@ operations:
   - method: users.identity
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersIdentity
   - method: users.deletePhoto
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersDeletePhoto
   - method: conversations.create
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestCreatePrivateConversation
   - method: conversations.join
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestJoinPublicConversation
   - method: conversations.invite
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -295,46 +377,74 @@ operations:
   - method: conversations.leave
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestLeavePublicConversation
   - method: conversations.kick
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
   - method: conversations.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
   - method: conversations.setTopic
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
   - method: conversations.setPurpose
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
   - method: conversations.archive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
   - method: conversations.unarchive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
   - method: conversations.close
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestConversationsOpenReusesDirectConversation
   - method: conversations.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestConversationsOpenReusesDirectConversation
   - method: conversations.mark
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestMarkConversation
   - method: files.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestFileMetadataEndpoints
   - method: files.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestFileMetadataEndpoints
   - method: files.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestFilesListNamesAMissingUser
   - method: files.upload
     status: schema-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/files.upload/
+    evidence:
+      - go-test:internal/api/slack:TestMultipartUploadsAcceptATokenInTheRequestBody
     deviations:
       - >-
         The compatibility route uploads one hosted file but rejects the
@@ -353,16 +463,24 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/files.getUploadURLExternal/
+    evidence:
+      - go-test:internal/api/slack:TestExternalUploadHTTPBatchCompletion
   - method: files.completeUploadExternal
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/files.completeUploadExternal/
+    evidence:
+      - go-test:internal/api/slack:TestExternalUploadHTTPBatchCompletion
   - method: users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersAndConversationsList
   - method: users.lookupByEmail
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestLookupUserByEmail
   - method: users.getPresence
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -443,216 +561,358 @@ operations:
   - method: admin.apps.approve
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsApprovalHTTPWorkflow
   - method: admin.apps.approved.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsApprovalHTTPWorkflow
   - method: admin.apps.requests.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppRequestsList
   - method: admin.apps.restrict
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsApprovalHTTPWorkflow
   - method: admin.apps.restricted.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsApprovalHTTPWorkflow
   - method: admin.conversations.archive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationRenameArchiveAndUnarchiveTakeEffect
   - method: admin.conversations.convertToPrivate
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationConvertToPrivateTakesEffect
   - method: admin.conversations.create
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationCreateUsesDurableConversationBoundary
   - method: admin.conversations.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationDeleteRemovesPublicChannel
   - method: admin.conversations.disconnectShared
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationSharedDisconnectAndEKMInfo
   - method: admin.conversations.ekm.listOriginalConnectedChannelInfo
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationSharedDisconnectAndEKMInfo
   - method: admin.conversations.getConversationPrefs
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationPrefsLifecycle
   - method: admin.conversations.getTeams
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationTeamsAreExplicitlySingleWorkspace
   - method: admin.conversations.invite
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationInviteAddsTheMember
   - method: admin.conversations.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationRenameArchiveAndUnarchiveTakeEffect
   - method: admin.conversations.restrictAccess.addGroup
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: admin.conversations.restrictAccess.listGroups
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: admin.conversations.restrictAccess.removeGroup
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: admin.conversations.search
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationSearchIsRegistered
   - method: admin.conversations.setConversationPrefs
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationPrefsLifecycle
   - method: admin.conversations.setTeams
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationSharedDisconnectAndEKMInfo
   - method: admin.conversations.unarchive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationRenameArchiveAndUnarchiveTakeEffect
   - method: admin.emoji.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminEmojiLifecycle
   - method: admin.emoji.addAlias
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminEmojiLifecycle
   - method: admin.emoji.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminEmojiListAcceptsAReadOnlyAdminToken
   - method: admin.emoji.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminEmojiLifecycle
   - method: admin.emoji.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminEmojiLifecycle
   - method: admin.inviteRequests.approve
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminInviteRequestLifecycle
   - method: admin.inviteRequests.approved.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminInviteRequestLifecycle
   - method: admin.inviteRequests.denied.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminInviteRequestLifecycle
   - method: admin.inviteRequests.deny
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminInviteRequestLifecycle
   - method: admin.inviteRequests.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminInviteRequestLifecycle
   - method: admin.teams.admins.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersSetActiveAndAdminTeamRoleLists
   - method: admin.teams.create
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamsCreatePersistsNewWorkspace
   - method: admin.teams.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamListIsRegistered
   - method: admin.teams.owners.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersSetActiveAndAdminTeamRoleLists
   - method: admin.teams.settings.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamSettingsIconLifecycle
   - method: admin.teams.settings.setDefaultChannels
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamSettingsDefaultChannelsLifecycle
   - method: admin.teams.settings.setDescription
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamSettingsDescriptionLifecycle
   - method: admin.teams.settings.setDiscoverability
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamSettingsDiscoverabilityLifecycle
   - method: admin.teams.settings.setIcon
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamSettingsIconLifecycle
   - method: admin.teams.settings.setName
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminTeamSettingsNameLifecycle
   - method: admin.usergroups.addChannels
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupChannelMembershipIsRegistered
   - method: admin.usergroups.addTeams
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupAddTeamsValidatesWorkspaceTopology
   - method: admin.usergroups.listChannels
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupChannelMembershipIsRegistered
   - method: admin.usergroups.removeChannels
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: admin.users.assign
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersAssignReactivatesAndJoinsChannels
   - method: admin.users.invite
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersInvitePersistsRequiredInviteParameters
   - method: admin.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersListReturnsTheAdminProjection
   - method: admin.users.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
   - method: admin.users.session.invalidate
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionInvalidateRevokesSession
   - method: admin.users.session.reset
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionResetIsRegistered
   - method: admin.users.setAdmin
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsUseTypedRoles
   - method: admin.users.setExpiration
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSetExpirationAcceptsEpochAndClear
   - method: admin.users.setOwner
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsUseTypedRoles
   - method: admin.users.setRegular
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsUseTypedRoles
   - method: apps.event.authorizations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes
   - method: apps.permissions.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAppPermissionIntrospectionUsesAuthenticatedScopes
   - method: apps.permissions.request
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAppPermissionIntrospectionUsesAuthenticatedScopes
   - method: apps.permissions.resources.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAppPermissionIntrospectionUsesAuthenticatedScopes
   - method: apps.permissions.scopes.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAppPermissionIntrospectionUsesAuthenticatedScopes
   - method: apps.permissions.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAppPermissionIntrospectionUsesAuthenticatedScopes
   - method: apps.permissions.users.request
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAppPermissionIntrospectionUsesAuthenticatedScopes
   - method: apps.uninstall
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAppsUninstallRevokesTheWholeMatchingInstallation
   - method: bots.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestBotsInfoHTTPUsesRegisteredBot
   - method: calls.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestCallsLifecycle
   - method: calls.end
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestCallsLifecycle
   - method: calls.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestCallsLifecycle
   - method: calls.participants.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestCallsLifecycle
   - method: calls.participants.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestCallsLifecycle
   - method: calls.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestCallsLifecycle
   - method: chat.deleteScheduledMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -672,6 +932,8 @@ operations:
   - method: chat.postEphemeral
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestPostEphemeralReturnsMessageTimestamp
   - method: chat.scheduleMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -711,27 +973,43 @@ operations:
   - method: chat.unfurl
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestChatUnfurlPersistsMetadata
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestDialogOpenHTTP
   - method: dnd.endDnd
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestDoNotDisturbEndClearsEnabledState
   - method: dnd.endSnooze
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestDoNotDisturbLifecycle
   - method: dnd.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestDoNotDisturbLifecycle
   - method: dnd.setSnooze
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestDoNotDisturbLifecycle
   - method: dnd.teamInfo
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestDndTeamInfoNamesEveryMemberOfALargeWorkspace
   - method: files.comments.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestFileCommentDeleteIsDurable
   - method: functions.completeSuccess
     status: behavior-compatible
     provenance: slack-reference
@@ -749,39 +1027,63 @@ operations:
   - method: files.remote.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRemoteFileLifecycle
   - method: files.remote.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRemoteFileLifecycle
   - method: files.remote.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRemoteFileLifecycle
   - method: files.remote.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRemoteFileLifecycle
   - method: files.remote.share
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRemoteFileLifecycle
   - method: files.remote.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRemoteFileLifecycle
   - method: files.revokePublicURL
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestFileMetadataEndpoints
   - method: files.sharedPublicURL
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestFileMetadataEndpoints
   - method: migration.exchange
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestMigrationExchangeHTTP
   - method: oauth.access
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestOAuthAccessAndTokenHTTPExchangeCodes
   - method: oauth.token
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestOAuthAccessAndTokenHTTPExchangeCodes
   - method: oauth.v2.access
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestOAuthV2AccessHTTPExchangesCode
   - method: oauth.v2.exchange
     status: sdk-compatible
     provenance: slack-reference
@@ -887,72 +1189,118 @@ operations:
   - method: rtm.connect
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestRTMConnectReturnsDurableEventStreamURL
   - method: stars.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestStarsMessageLifecycle
   - method: stars.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestStarsListEmitsTheCursorThatReachesPageTwo
   - method: stars.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestStarsMessageLifecycle
   - method: team.accessLogs
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestAccessLogsRequireAdminAndExposeRecordedAccess
   - method: team.billableInfo
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestTeamBillableInfoUsesDurableMembershipState
   - method: team.integrationLogs
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestIntegrationLogsHTTPExposeActorAttribution
   - method: usergroups.create
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: usergroups.disable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: usergroups.enable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: usergroups.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupListBooleansAcceptEveryDocumentedForm
   - method: usergroups.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupLifecycle
   - method: usergroups.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupUsersUpdateRequiresItsMandatoryArguments
   - method: usergroups.users.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUserGroupUsersUpdateRequiresItsMandatoryArguments
   - method: users.setActive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersSetActiveAndAdminTeamRoleLists
   - method: users.setPhoto
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestUsersSetPhotoAcceptsOfficialMultipartField
   - method: views.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
   - method: views.publish
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
   - method: views.push
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
   - method: views.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
   - method: workflows.stepCompleted
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestWorkflowMethodsHTTPPersistLifecycle
   - method: workflows.stepFailed
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestWorkflowMethodsHTTPPersistLifecycle
   - method: workflows.updateStep
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    evidence:
+      - go-test:internal/api/slack:TestWorkflowMethodsHTTPPersistLifecycle
   - method: slackLists.access.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -969,6 +1317,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.create/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.download.get
     status: behavior-compatible
     provenance: slack-reference
@@ -979,14 +1329,20 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.download.start/
+    evidence:
+      - go-test:internal/api/slack:TestListDownloadStreamsCSVAndPreservesArchiveOption
   - method: slackLists.items.create
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.items.create/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.items.delete
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.items.delete/
+    evidence:
+      - go-test:internal/api/slack:TestListItemDeleteRefusesAListInTheSingleIDField
   - method: slackLists.items.deleteMultiple
     status: behavior-compatible
     provenance: slack-reference
@@ -1003,6 +1359,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.items.list/
+    evidence:
+      - go-test:internal/api/slack:TestListItemsValidatesItsCursor
   - method: slackLists.items.update
     status: behavior-compatible
     provenance: slack-reference
@@ -1019,22 +1377,32 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/entity.acknowledgeCommentAction/
+    evidence:
+      - go-test:internal/api/slack:TestEntityMethodsAcceptStructuredWorkObjectPayloads
   - method: entity.presentComments
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/entity.presentComments/
+    evidence:
+      - go-test:internal/api/slack:TestEntityMethodsAcceptStructuredWorkObjectPayloads
   - method: entity.presentDetails
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/entity.presentDetails/
+    evidence:
+      - go-test:internal/api/slack:TestEntityMethodsAcceptStructuredWorkObjectPayloads
   - method: openid.connect.token
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/openid.connect.token/
+    evidence:
+      - go-test:internal/api/slack:TestOpenIDConnectTokenRefusesCredentialsInTheURL
   - method: openid.connect.userInfo
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/openid.connect.userInfo/
+    evidence:
+      - go-test:internal/api/slack:TestOpenIDConnectMethodsExchangeAndReturnUserInfo
   - method: admin.analytics.getFile
     status: behavior-compatible
     provenance: slack-reference
@@ -1371,10 +1739,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminSessionListShowsSessionsWithoutTheirTokens
   - method: admin.users.session.resetBulk
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.resetBulk/
+    evidence:
+      - go-test:internal/api/slack:TestAdminSessionListShowsSessionsWithoutTheirTokens
   - method: admin.users.session.setSettings
     status: behavior-compatible
     provenance: slack-reference
@@ -1415,6 +1787,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.search/
+    evidence:
+      - go-test:internal/api/slack:TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot
   - method: admin.workflows.triggers.types.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
@@ -1433,6 +1807,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.unpublish/
+    evidence:
+      - go-test:internal/api/slack:TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot
   - method: apps.activities.list
     status: behavior-compatible
     provenance: slack-reference
@@ -1463,14 +1839,20 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.bulkDelete/
+    evidence:
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
   - method: apps.datastore.bulkGet
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.bulkGet/
+    evidence:
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
   - method: apps.datastore.bulkPut
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.bulkPut/
+    evidence:
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
   - method: apps.datastore.count
     status: sdk-compatible
     provenance: slack-reference
@@ -1486,14 +1868,20 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.delete/
+    evidence:
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
   - method: apps.datastore.get
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.get/
+    evidence:
+      - go-test:internal/api/slack:TestAppsDatastoreUserTokensRequireAnInstalledAppID
   - method: apps.datastore.put
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.put/
+    evidence:
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
   - method: apps.datastore.query
     status: sdk-compatible
     provenance: slack-reference
@@ -1509,6 +1897,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.update/
+    evidence:
+      - go-test:internal/api/slack:TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes
   - method: apps.icon.set
     status: behavior-compatible
     provenance: slack-reference
@@ -1595,14 +1985,20 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.appendStream/
+    evidence:
+      - go-test:internal/api/slack:TestChatStreamMethodsFollowOfficialBotTokenLifecycle
   - method: chat.startStream
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.startStream/
+    evidence:
+      - go-test:internal/api/slack:TestChatStreamMethodsFollowOfficialBotTokenLifecycle
   - method: chat.stopStream
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.stopStream/
+    evidence:
+      - go-test:internal/api/slack:TestChatStreamMethodsFollowOfficialBotTokenLifecycle
   - method: conversations.acceptSharedInvite
     status: behavior-compatible
     provenance: slack-reference
@@ -1808,10 +2204,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.externalTeams.disconnect/
+    evidence:
+      - go-test:internal/api/slack:TestExternalTeamsListAndDisconnectSpanEveryChannel
   - method: team.externalTeams.list
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.externalTeams.list/
+    evidence:
+      - go-test:internal/api/slack:TestExternalTeamsListAndDisconnectSpanEveryChannel
   - method: team.preferences.list
     status: sdk-compatible
     provenance: slack-reference
@@ -1824,6 +2224,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/tooling.tokens.rotate/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManifestLifecycleMatchesCurrentSlackResponseShapes
   - method: users.discoverableContacts.lookup
     status: behavior-compatible
     provenance: slack-reference
