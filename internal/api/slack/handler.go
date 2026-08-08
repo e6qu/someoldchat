@@ -201,6 +201,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("POST /api/admin.users.session.setSettings", h.adminUsersSessionSetSettings)
+	mux.HandleFunc("POST /api/admin.users.session.clearSettings", h.adminUsersSessionClearSettings)
+	mux.HandleFunc("GET /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
+	mux.HandleFunc("POST /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
 	mux.HandleFunc("POST /api/admin.auth.policy.assignEntities", h.adminAuthPolicyAssignEntities)
 	mux.HandleFunc("POST /api/admin.auth.policy.removeEntities", h.adminAuthPolicyRemoveEntities)
 	mux.HandleFunc("GET /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
@@ -3231,6 +3235,131 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.users.session.setSettings, getSettings and clearSettings govern how
+// long the named members stay signed in. Slack refuses a duration under eight
+// hours, and so does this: a duration that silently became the floor would tell
+// the administrator something untrue.
+func (h Handler) adminUsersSessionSetSettings(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	targets := parseIDList[domain.UserID](fields["user_ids"])
+	if len(targets) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	duration, err := sessionSettingsDuration(fields["duration"])
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	flags, err := parseBoolFields(fields, "desktop_app_browser_quit", "mobile_device_check")
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	settings := domain.SessionSettings{Duration: duration, DesktopAppBrowserQuit: flags[0], MobileDeviceCheck: flags[1]}
+	if err := h.Messages.AdminSetSessionSettings(r.Context(), principal.WorkspaceID, principal.UserID, targets, settings); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) adminUsersSessionClearSettings(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	targets := parseIDList[domain.UserID](fields["user_ids"])
+	if len(targets) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminClearSessionSettings(r.Context(), principal.WorkspaceID, principal.UserID, targets); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// adminUsersSessionGetSettings answers the members who carry settings and,
+// separately, the ones who carry none. A member on the workspace default is not
+// a member with zeroed settings, and reporting them as one would read as an
+// eight-second session rather than as no override.
+func (h Handler) adminUsersSessionGetSettings(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	targets := parseIDList[domain.UserID](fields["user_ids"])
+	if len(targets) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	settings, err := h.Messages.AdminSessionSettings(r.Context(), principal.WorkspaceID, principal.UserID, targets)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	applied := make(map[domain.UserID]struct{}, len(settings))
+	values := make([]map[string]any, 0, len(settings))
+	for _, value := range settings {
+		applied[value.UserID] = struct{}{}
+		values = append(values, map[string]any{
+			"user_id":                  string(value.UserID),
+			"duration":                 int64(value.Duration),
+			"desktop_app_browser_quit": value.DesktopAppBrowserQuit,
+			"mobile_device_check":      value.MobileDeviceCheck,
+		})
+	}
+	none := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if _, ok := applied[target]; !ok {
+			none = append(none, string(target))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session_settings": values, "no_settings_applied": none})
+}
+
+// sessionSettingsDuration reads Slack's duration in seconds. An absent duration
+// means the workspace default; anything above zero and under eight hours is
+// refused rather than rounded up.
+func sessionSettingsDuration(value string) (domain.SessionDuration, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	seconds, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || seconds < 0 {
+		return 0, errors.New("invalid_arguments")
+	}
+	duration := domain.SessionDuration(seconds)
+	if !duration.Valid() {
+		return 0, errors.New("invalid_arguments")
+	}
+	return duration, nil
 }
 
 // admin.auth.policy.assignEntities and admin.auth.policy.removeEntities put

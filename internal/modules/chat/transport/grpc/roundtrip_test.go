@@ -581,6 +581,7 @@ func conversionCases() map[string]conversionCase {
 		"InviteRequest":    {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
 		"RoleAssignment":   {sample: &domain.RoleAssignment{}, through: throughInfallible(encodeProtoRoleAssignment, decodeProtoRoleAssignment)},
 		"AuthPolicyEntity": {sample: &domain.AuthPolicyEntity{}, through: throughInfallible(encodeProtoAuthPolicyEntity, decodeProtoAuthPolicyEntity)},
+		"SessionSettings":  {sample: &domain.SessionSettings{}, through: throughInfallible(encodeProtoSessionSettings, decodeProtoSessionSettings)},
 		"AppApproval":      {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
 		"RTMConnection":    {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
 		"IncomingWebhook": {

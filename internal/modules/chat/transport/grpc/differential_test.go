@@ -774,6 +774,36 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A member on the workspace default carries no settings row, so
+			// both compositions must leave that member out of the answer rather
+			// than reporting zeros.
+			name: "session settings are written, read back, and cleared identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				settings := domain.SessionSettings{Duration: 12 * 60 * 60, DesktopAppBrowserQuit: true}
+				if err := chat.AdminSetSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"}, settings); err != nil {
+					return nil, err
+				}
+				tooShort := chat.AdminSetSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"}, domain.SessionSettings{Duration: 60 * 60})
+				stranger := chat.AdminSetSessionSettings(ctx, "T1", "UA", []domain.UserID{"U-nobody"}, settings)
+				read, err := chat.AdminSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1", "U2"})
+				if err != nil {
+					return nil, err
+				}
+				described := make([]string, 0, len(read))
+				for _, value := range read {
+					described = append(described, fmt.Sprintf("%s/%d/%t/%t", value.UserID, value.Duration, value.DesktopAppBrowserQuit, value.MobileDeviceCheck))
+				}
+				if err := chat.AdminClearSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				cleared, err := chat.AdminSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"})
+				if err != nil {
+					return nil, err
+				}
+				return []any{described, len(cleared), tooShort != nil, stranger != nil}, nil
+			},
+		},
+		{
 			// An authentication policy this deployment does not hold cannot be
 			// assigned, and both compositions must refuse the same names.
 			name: "authentication policy entities are assigned, paged, and refused identically",

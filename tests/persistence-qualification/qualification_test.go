@@ -141,6 +141,7 @@ func runQualification(t *testing.T, open opener) {
 		{"a Slack Connect decision reaches its requester", connectDecisionReachesItsRequester},
 		{"role assignments agree on every profile", roleAssignmentsAgreeOnEveryProfile},
 		{"authentication policy entities agree on every profile", authPolicyEntitiesAgreeOnEveryProfile},
+		{"session settings are absent rather than zero", sessionSettingsAreAbsentRatherThanZero},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2001,5 +2002,64 @@ func authPolicyEntitiesAgreeOnEveryProfile(t *testing.T, open opener) {
 	unknown := []domain.AuthPolicyEntity{{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: "U-absent-" + suffix, WorkspaceID: workspaceID, CreatedAt: now}}
 	if err := repository.SetAuthPolicyEntities(ctx, unknown, event("policy-unknown", "auth.policy_entities_assigned")); err == nil {
 		t.Fatal("an entity outside the workspace was stored")
+	}
+}
+
+// sessionSettingsAreAbsentRatherThanZero holds the storage contract for
+// admin.users.session.*Settings. A member on the workspace default carries no
+// row, and a read must leave that member out rather than answer zeros, because
+// zeros read as a session that ends at once.
+func sessionSettingsAreAbsentRatherThanZero(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-session-" + suffix)
+	first := domain.UserID("U-session-a-" + suffix)
+	second := domain.UserID("U-session-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Sessions"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.UserID{first, second} {
+		if err := repository.SeedUser(ctx, domain.User{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings := domain.SessionSettings{UserID: first, WorkspaceID: workspaceID, Duration: 12 * 60 * 60, MobileDeviceCheck: true, UpdatedAt: now}
+	if err := repository.SetSessionSettings(ctx, []domain.SessionSettings{settings}, event("session-set", "user.session_settings_set")); err != nil {
+		t.Fatal(err)
+	}
+	read, err := repository.ListSessionSettings(ctx, workspaceID, []domain.UserID{first, second})
+	if err != nil || len(read) != 1 || read[0].UserID != first || read[0].Duration != 12*60*60 || !read[0].MobileDeviceCheck || read[0].DesktopAppBrowserQuit {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	// Writing again replaces rather than adds, and every flag is replaced.
+	settings.Duration, settings.MobileDeviceCheck, settings.DesktopAppBrowserQuit = 24*60*60, false, true
+	if err := repository.SetSessionSettings(ctx, []domain.SessionSettings{settings}, event("session-again", "user.session_settings_set")); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := repository.ListSessionSettings(ctx, workspaceID, []domain.UserID{first})
+	if err != nil || len(replaced) != 1 || replaced[0].Duration != 24*60*60 || replaced[0].MobileDeviceCheck || !replaced[0].DesktopAppBrowserQuit {
+		t.Fatalf("replaced=%+v err=%v", replaced, err)
+	}
+	if err := repository.ClearSessionSettings(ctx, workspaceID, []domain.UserID{first}, event("session-clear", "user.session_settings_cleared")); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repository.ListSessionSettings(ctx, workspaceID, []domain.UserID{first, second})
+	if err != nil || len(cleared) != 0 {
+		t.Fatalf("cleared=%+v err=%v", cleared, err)
+	}
+	// Clearing a member who carries nothing is not an error.
+	if err := repository.ClearSessionSettings(ctx, workspaceID, []domain.UserID{second}, event("session-clear-again", "user.session_settings_cleared")); err != nil {
+		t.Fatal(err)
+	}
+	absent := []domain.SessionSettings{{UserID: domain.UserID("U-absent-" + suffix), WorkspaceID: workspaceID, Duration: 12 * 60 * 60, UpdatedAt: now}}
+	if err := repository.SetSessionSettings(ctx, absent, event("session-absent", "user.session_settings_set")); err == nil {
+		t.Fatal("settings for a member outside the workspace were stored")
 	}
 }

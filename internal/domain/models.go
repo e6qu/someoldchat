@@ -2291,6 +2291,37 @@ type RoleAssignmentPage struct {
 	HasMore     bool
 }
 
+// SessionDuration is how long a session lives, counted in seconds. Slack states
+// the duration in seconds and refuses anything under eight hours, so a value
+// finer than a second means nothing. Holding it as time.Duration let one be
+// written and then truncated to zero at the transport boundary; this type
+// cannot express one.
+type SessionDuration int64
+
+// MinimumSessionDuration is the shortest session Slack accepts.
+const MinimumSessionDuration SessionDuration = 8 * 60 * 60
+
+// Valid accepts the floor and anything above it. Zero means the workspace
+// default; anything between zero and the floor is not valid, because storing it
+// would silently make it the floor.
+func (duration SessionDuration) Valid() bool {
+	return duration == 0 || duration >= MinimumSessionDuration
+}
+
+func (duration SessionDuration) Duration() time.Duration {
+	return time.Duration(duration) * time.Second
+}
+
+// SessionSettings is how long one member's sessions live and what ends them.
+type SessionSettings struct {
+	UserID                UserID
+	WorkspaceID           WorkspaceID
+	Duration              SessionDuration
+	DesktopAppBrowserQuit bool
+	MobileDeviceCheck     bool
+	UpdatedAt             time.Time
+}
+
 // AuthPolicyName names one authentication policy. Slack defines exactly one,
 // and a name this deployment does not hold cannot be assigned to anybody.
 type AuthPolicyName string

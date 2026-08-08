@@ -3614,6 +3614,62 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminSetSessionSettings writes session settings for the named members. A
+// duration Slack refuses is refused here, so a caller never stores a setting
+// that silently becomes something else.
+func (m Messages) AdminSetSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID, settings domain.SessionSettings) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(targets) == 0 || !settings.Duration.Valid() {
+		return ErrInvalidWorkspace
+	}
+	now := time.Now().UTC()
+	values := make([]domain.SessionSettings, 0, len(targets))
+	for _, target := range targets {
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, target); err != nil {
+			return store.ErrNotFound
+		}
+		value := settings
+		value.UserID, value.WorkspaceID, value.UpdatedAt = target, workspaceID, now
+		values = append(values, value)
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.session_settings_set",
+		events.Int("members", int64(len(values)))), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.SetSessionSettings(ctx, values, event)
+}
+
+// AdminClearSessionSettings puts the named members back on the workspace
+// default.
+func (m Messages) AdminClearSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.session_settings_cleared",
+		events.Int("members", int64(len(targets)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.ClearSessionSettings(ctx, workspaceID, targets, event)
+}
+
+// AdminSessionSettings reports the settings the named members hold.
+func (m Messages) AdminSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID) ([]domain.SessionSettings, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	return m.Store.ListSessionSettings(ctx, workspaceID, targets)
+}
+
 // AdminAssignAuthPolicy puts members under an authentication policy. Every
 // named member is checked before one row is written, so a request that names
 // somebody outside the workspace leaves nothing behind.

@@ -32,6 +32,9 @@ const (
 	DirectoryService_AdminAddRoleAssignments_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminAddRoleAssignments"
 	DirectoryService_AdminRemoveRoleAssignments_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveRoleAssignments"
 	DirectoryService_AdminListRoleAssignments_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminListRoleAssignments"
+	DirectoryService_AdminSetSessionSettings_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminSetSessionSettings"
+	DirectoryService_AdminClearSessionSettings_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AdminClearSessionSettings"
+	DirectoryService_AdminSessionSettings_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminSessionSettings"
 	DirectoryService_AdminAssignAuthPolicy_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/AdminAssignAuthPolicy"
 	DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveAuthPolicyEntities"
 	DirectoryService_AdminAuthPolicyEntities_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminAuthPolicyEntities"
@@ -93,6 +96,9 @@ type DirectoryServiceClient interface {
 	AdminAddRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRemoveRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListRoleAssignments(ctx context.Context, in *RoleAssignmentsRequest, opts ...grpc.CallOption) (*RoleAssignmentPage, error)
+	AdminSetSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminClearSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*SessionSettingsResponse, error)
 	AdminAssignAuthPolicy(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRemoveAuthPolicyEntities(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminAuthPolicyEntities(ctx context.Context, in *AuthPolicyEntitiesRequest, opts ...grpc.CallOption) (*AuthPolicyEntityPage, error)
@@ -269,6 +275,36 @@ func (c *directoryServiceClient) AdminListRoleAssignments(ctx context.Context, i
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RoleAssignmentPage)
 	err := c.cc.Invoke(ctx, DirectoryService_AdminListRoleAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminSetSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminSetSessionSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminClearSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminClearSessionSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*SessionSettingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionSettingsResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminSessionSettings_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -712,6 +748,9 @@ type DirectoryServiceServer interface {
 	AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
 	AdminRemoveRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
 	AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error)
+	AdminSetSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error)
+	AdminClearSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error)
+	AdminSessionSettings(context.Context, *SessionSettingsMutationRequest) (*SessionSettingsResponse, error)
 	AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
 	AdminRemoveAuthPolicyEntities(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
 	AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error)
@@ -801,6 +840,15 @@ func (UnimplementedDirectoryServiceServer) AdminRemoveRoleAssignments(context.Co
 }
 func (UnimplementedDirectoryServiceServer) AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminListRoleAssignments not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminSetSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetSessionSettings not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminClearSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminClearSessionSettings not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminSessionSettings(context.Context, *SessionSettingsMutationRequest) (*SessionSettingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSessionSettings not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminAssignAuthPolicy not implemented")
@@ -1178,6 +1226,60 @@ func _DirectoryService_AdminListRoleAssignments_Handler(srv interface{}, ctx con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).AdminListRoleAssignments(ctx, req.(*RoleAssignmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminSetSessionSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionSettingsMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminSetSessionSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminSetSessionSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminSetSessionSettings(ctx, req.(*SessionSettingsMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminClearSessionSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionSettingsMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminClearSessionSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminClearSessionSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminClearSessionSettings(ctx, req.(*SessionSettingsMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminSessionSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionSettingsMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminSessionSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminSessionSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminSessionSettings(ctx, req.(*SessionSettingsMutationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1996,6 +2098,18 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminListRoleAssignments",
 			Handler:    _DirectoryService_AdminListRoleAssignments_Handler,
+		},
+		{
+			MethodName: "AdminSetSessionSettings",
+			Handler:    _DirectoryService_AdminSetSessionSettings_Handler,
+		},
+		{
+			MethodName: "AdminClearSessionSettings",
+			Handler:    _DirectoryService_AdminClearSessionSettings_Handler,
+		},
+		{
+			MethodName: "AdminSessionSettings",
+			Handler:    _DirectoryService_AdminSessionSettings_Handler,
 		},
 		{
 			MethodName: "AdminAssignAuthPolicy",

@@ -340,6 +340,15 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// SetSessionSettings writes one member's session settings, replacing what
+	// was there. A zero value clears them back to the workspace default.
+	SetSessionSettings(context.Context, []domain.SessionSettings, events.Event) error
+	// ClearSessionSettings drops the rows, so the members fall back to the
+	// workspace default.
+	ClearSessionSettings(context.Context, domain.WorkspaceID, []domain.UserID, events.Event) error
+	// ListSessionSettings reports the settings the named members hold. A member
+	// with none is absent from the result rather than present with zeros.
+	ListSessionSettings(context.Context, domain.WorkspaceID, []domain.UserID) ([]domain.SessionSettings, error)
 	SetAuthPolicyEntities(context.Context, []domain.AuthPolicyEntity, events.Event) error
 	// DeleteAuthPolicyEntities takes them back out.
 	DeleteAuthPolicyEntities(context.Context, []domain.AuthPolicyEntity, events.Event) error

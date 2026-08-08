@@ -121,6 +121,7 @@ type Store struct {
 	canvasComments                map[domain.CanvasCommentID]domain.CanvasComment
 	roleAssignments               map[string]domain.RoleAssignment
 	authPolicyEntities            map[string]domain.AuthPolicyEntity
+	sessionSettings               map[string]domain.SessionSettings
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -305,6 +306,7 @@ func New() *Store {
 		canvasComments:                make(map[domain.CanvasCommentID]domain.CanvasComment),
 		roleAssignments:               make(map[string]domain.RoleAssignment),
 		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
+		sessionSettings:               make(map[string]domain.SessionSettings),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -1820,6 +1822,55 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) SetSessionSettings(_ context.Context, settings []domain.SessionSettings, event events.Event) error {
+	if len(settings) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, value := range settings {
+		if _, exists := s.users[value.UserID]; !exists {
+			return store.ErrNotFound
+		}
+		s.sessionSettings[sessionSettingsKey(value.WorkspaceID, value.UserID)] = value
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ClearSessionSettings(_ context.Context, workspace domain.WorkspaceID, users []domain.UserID, event events.Event) error {
+	if len(users) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, user := range users {
+		delete(s.sessionSettings, sessionSettingsKey(workspace, user))
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListSessionSettings(_ context.Context, workspace domain.WorkspaceID, users []domain.UserID) ([]domain.SessionSettings, error) {
+	if len(users) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	settings := make([]domain.SessionSettings, 0, len(users))
+	for _, user := range users {
+		if value, exists := s.sessionSettings[sessionSettingsKey(workspace, user)]; exists {
+			settings = append(settings, value)
+		}
+	}
+	sort.Slice(settings, func(left, right int) bool { return settings[left].UserID < settings[right].UserID })
+	return settings, nil
+}
+
+func sessionSettingsKey(workspace domain.WorkspaceID, user domain.UserID) string {
+	return string(workspace) + "\x00" + string(user)
 }
 
 func (s *Store) SetAuthPolicyEntities(_ context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {

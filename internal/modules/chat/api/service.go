@@ -285,6 +285,9 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	AdminSetSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, domain.SessionSettings) error
+	AdminClearSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) error
+	AdminSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) ([]domain.SessionSettings, error)
 	AdminAssignAuthPolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminRemoveAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)

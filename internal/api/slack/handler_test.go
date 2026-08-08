@@ -2112,6 +2112,64 @@ func TestAdminAuthPolicyEntities(t *testing.T) {
 	}
 }
 
+// TestAdminUsersSessionSettings holds the admin.users.session.*Settings
+// contract. A member on the workspace default is named in no_settings_applied
+// and not reported with zeros, and a duration under eight hours is refused.
+func TestAdminUsersSessionSettings(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if set := call(t, http.MethodPost, "admin.users.session.setSettings", "user_ids=U1&duration=43200&mobile_device_check=true"); set["ok"] != true {
+		t.Fatalf("set=%v", set)
+	}
+	read := call(t, http.MethodPost, "admin.users.session.getSettings", "user_ids=U1,U2")
+	applied, ok := read["session_settings"].([]any)
+	if !ok || len(applied) != 1 {
+		t.Fatalf("read=%v", read)
+	}
+	first := applied[0].(map[string]any)
+	if first["user_id"] != "U1" || first["duration"].(float64) != 43200 || first["mobile_device_check"] != true || first["desktop_app_browser_quit"] != false {
+		t.Fatalf("first=%v", first)
+	}
+	if none := read["no_settings_applied"].([]any); len(none) != 1 || none[0] != "U2" {
+		t.Fatalf("no_settings_applied=%v", read["no_settings_applied"])
+	}
+	// Eight hours is the floor, so 28800 stands and 28799 is refused rather
+	// than rounded up to it.
+	if floor := call(t, http.MethodPost, "admin.users.session.setSettings", "user_ids=U1&duration=28800"); floor["ok"] != true {
+		t.Fatalf("floor=%v", floor)
+	}
+	for _, body := range []string{"user_ids=U1&duration=28799", "user_ids=U1&duration=-1", "user_ids=U1&duration=soon", "duration=43200"} {
+		if refused := call(t, http.MethodPost, "admin.users.session.setSettings", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if stranger := call(t, http.MethodPost, "admin.users.session.setSettings", "user_ids=U-nobody&duration=43200"); stranger["error"] != "user_not_found" {
+		t.Fatalf("stranger=%v", stranger)
+	}
+	if cleared := call(t, http.MethodPost, "admin.users.session.clearSettings", "user_ids=U1"); cleared["ok"] != true {
+		t.Fatalf("cleared=%v", cleared)
+	}
+	after := call(t, http.MethodGet, "admin.users.session.getSettings?user_ids=U1", "")
+	if len(after["session_settings"].([]any)) != 0 || len(after["no_settings_applied"].([]any)) != 1 {
+		t.Fatalf("after=%v", after)
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))

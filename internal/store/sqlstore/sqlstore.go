@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 151
+const schemaVersion = 152
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,18 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 152 {
+		// Per-member session settings. A member with no row falls back to the
+		// workspace default, so absence is the default and not a zero row.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_session_settings (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			duration_seconds INTEGER NOT NULL DEFAULT 0, desktop_app_browser_quit INTEGER NOT NULL DEFAULT 0,
+			mobile_device_check INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, user_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate user session settings: %w", err)
+		}
+	}
 	if version < 151 {
 		// Which entities one authentication policy applies to. Slack names only
 		// the member, so entity_id carries the foreign key to users.
@@ -4658,6 +4670,87 @@ func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.Worksp
 		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
 	}
 	return page, err
+}
+
+func (s *Store) SetSessionSettings(ctx context.Context, settings []domain.SessionSettings, event events.Event) error {
+	if len(settings) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, value := range settings {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_session_settings(workspace_id, user_id, duration_seconds, desktop_app_browser_quit, mobile_device_check, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(workspace_id, user_id) DO UPDATE SET duration_seconds = excluded.duration_seconds,
+				desktop_app_browser_quit = excluded.desktop_app_browser_quit,
+				mobile_device_check = excluded.mobile_device_check, updated_at = excluded.updated_at`,
+			value.WorkspaceID, value.UserID, int64(value.Duration),
+			boolInt(value.DesktopAppBrowserQuit), boolInt(value.MobileDeviceCheck),
+			value.UpdatedAt.UTC().UnixNano()); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ClearSessionSettings(ctx context.Context, workspace domain.WorkspaceID, users []domain.UserID, event events.Event) error {
+	if len(users) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, user := range users {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM user_session_settings WHERE workspace_id = ? AND user_id = ?`, workspace, user); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListSessionSettings(ctx context.Context, workspace domain.WorkspaceID, users []domain.UserID) ([]domain.SessionSettings, error) {
+	if len(users) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	placeholders := make([]string, 0, len(users))
+	arguments := make([]any, 0, len(users)+1)
+	arguments = append(arguments, workspace)
+	for _, user := range users {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, user)
+	}
+	query := `SELECT workspace_id, user_id, duration_seconds, desktop_app_browser_quit, mobile_device_check, updated_at
+		FROM user_session_settings WHERE workspace_id = ? AND user_id IN (` + strings.Join(placeholders, ", ") + `) ORDER BY user_id`
+	rows, err := s.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	settings := make([]domain.SessionSettings, 0, len(users))
+	for rows.Next() {
+		var value domain.SessionSettings
+		var seconds, updated int64
+		var quit, check int
+		if err := rows.Scan(&value.WorkspaceID, &value.UserID, &seconds, &quit, &check, &updated); err != nil {
+			return nil, err
+		}
+		value.Duration = domain.SessionDuration(seconds)
+		value.DesktopAppBrowserQuit, value.MobileDeviceCheck = quit != 0, check != 0
+		value.UpdatedAt = timeFromUnixNanoOrZero(updated)
+		settings = append(settings, value)
+	}
+	return settings, rows.Err()
 }
 
 func (s *Store) SetAuthPolicyEntities(ctx context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {

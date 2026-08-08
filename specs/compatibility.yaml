@@ -1221,13 +1221,21 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.getExpiration/
   - method: admin.users.session.clearSettings
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.clearSettings/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionSettings
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
   - method: admin.users.session.getSettings
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.getSettings/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionSettings
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
   - method: admin.users.session.list
     status: behavior-compatible
     provenance: slack-reference
@@ -1237,9 +1245,13 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.resetBulk/
   - method: admin.users.session.setSettings
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.setSettings/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionSettings
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
   - method: admin.users.unsupportedVersions.export
     status: unimplemented
     provenance: slack-reference

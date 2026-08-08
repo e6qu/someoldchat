@@ -1344,6 +1344,18 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+assert.equal((await client.apiCall("admin.users.session.setSettings", {
+	user_ids: "U2",
+	duration: 43200,
+	mobile_device_check: true,
+})).ok, true);
+const sessionSettings = await client.apiCall("admin.users.session.getSettings", { user_ids: "U2" });
+assert.equal(sessionSettings.ok, true);
+assert.equal(sessionSettings.session_settings.length, 1);
+assert.equal(sessionSettings.session_settings[0].duration, 43200);
+assert.equal(sessionSettings.no_settings_applied.length, 0);
+assert.equal((await client.apiCall("admin.users.session.clearSettings", { user_ids: "U2" })).ok, true);
+
 assert.equal((await client.apiCall("admin.auth.policy.assignEntities", {
 	policy_name: "email_password",
 	entity_type: "USER",

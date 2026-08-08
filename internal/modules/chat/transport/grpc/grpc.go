@@ -1631,6 +1631,72 @@ func (r Remote) DiscoverableContacts(ctx context.Context, workspaceID domain.Wor
 	return users, nil
 }
 
+func (r Remote) AdminSetSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID, settings domain.SessionSettings) error {
+	request := sessionSettingsMutation(workspaceID, userID, targets)
+	request.Settings = encodeProtoSessionSettings(settings)
+	out, err := r.directory.AdminSetSessionSettings(ctx, request)
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed session settings write was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminClearSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) error {
+	out, err := r.directory.AdminClearSessionSettings(ctx, sessionSettingsMutation(workspaceID, userID, targets))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed session settings clearance was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) ([]domain.SessionSettings, error) {
+	out, err := r.directory.AdminSessionSettings(ctx, sessionSettingsMutation(workspaceID, userID, targets))
+	if err != nil {
+		return nil, err
+	}
+	settings := make([]domain.SessionSettings, 0, len(out.GetSettings()))
+	for _, encoded := range out.GetSettings() {
+		settings = append(settings, decodeProtoSessionSettings(encoded))
+	}
+	return settings, nil
+}
+
+func sessionSettingsMutation(workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) *chatv1.SessionSettingsMutationRequest {
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, string(target))
+	}
+	return &chatv1.SessionSettingsMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserIds: ids}
+}
+
+func encodeProtoSessionSettings(value domain.SessionSettings) *chatv1.SessionSettings {
+	return &chatv1.SessionSettings{
+		UserId:                string(value.UserID),
+		WorkspaceId:           string(value.WorkspaceID),
+		DurationSeconds:       int64(value.Duration),
+		DesktopAppBrowserQuit: value.DesktopAppBrowserQuit,
+		MobileDeviceCheck:     value.MobileDeviceCheck,
+		UpdatedAt:             optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoSessionSettings(value *chatv1.SessionSettings) domain.SessionSettings {
+	return domain.SessionSettings{
+		UserID:                domain.UserID(value.GetUserId()),
+		WorkspaceID:           domain.WorkspaceID(value.GetWorkspaceId()),
+		Duration:              domain.SessionDuration(value.GetDurationSeconds()),
+		DesktopAppBrowserQuit: value.GetDesktopAppBrowserQuit(),
+		MobileDeviceCheck:     value.GetMobileDeviceCheck(),
+		UpdatedAt:             optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
 func (r Remote) AdminAssignAuthPolicy(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
 	out, err := r.directory.AdminAssignAuthPolicy(ctx, authPolicyMutation(workspaceID, userID, policy, kind, entityIDs))
 	if err != nil {
@@ -5434,6 +5500,35 @@ func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleReque
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminSetSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminSetSessionSettings(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeUserIDs(input.GetTargetUserIds()), decodeProtoSessionSettings(input.GetSettings())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminClearSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminClearSessionSettings(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeUserIDs(input.GetTargetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.SessionSettingsResponse, error) {
+	settings, err := s.implementation.AdminSessionSettings(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeUserIDs(input.GetTargetUserIds()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.SessionSettings, 0, len(settings))
+	for _, value := range settings {
+		encoded = append(encoded, encodeProtoSessionSettings(value))
+	}
+	return &chatv1.SessionSettingsResponse{Settings: encoded}, nil
 }
 
 func (s *Server) AdminAssignAuthPolicy(ctx context.Context, input *chatv1.AuthPolicyMutationRequest) (*chatv1.MutationResponse, error) {

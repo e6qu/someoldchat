@@ -475,6 +475,26 @@ message RoleAssignmentPage {
   bool has_more = 3;
 }
 
+message SessionSettings {
+  string user_id = 1;
+  string workspace_id = 2;
+  int64 duration_seconds = 3;
+  bool desktop_app_browser_quit = 4;
+  bool mobile_device_check = 5;
+  int64 updated_at = 6;
+}
+
+message SessionSettingsMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string target_user_ids = 3;
+  SessionSettings settings = 4;
+}
+
+message SessionSettingsResponse {
+  repeated SessionSettings settings = 1;
+}
+
 message AuthPolicyEntity {
   string policy_name = 1;
   string entity_type = 2;
@@ -521,6 +541,9 @@ service DirectoryService {
   rpc AdminAddRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminRemoveRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminListRoleAssignments(RoleAssignmentsRequest) returns (RoleAssignmentPage);
+  rpc AdminSetSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
+  rpc AdminClearSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
+  rpc AdminSessionSettings(SessionSettingsMutationRequest) returns (SessionSettingsResponse);
   rpc AdminAssignAuthPolicy(AuthPolicyMutationRequest) returns (MutationResponse);
   rpc AdminRemoveAuthPolicyEntities(AuthPolicyMutationRequest) returns (MutationResponse);
   rpc AdminAuthPolicyEntities(AuthPolicyEntitiesRequest) returns (AuthPolicyEntityPage);
