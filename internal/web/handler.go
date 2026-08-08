@@ -7591,7 +7591,7 @@ func searchHistoryViews(values []domain.SearchHistoryEntry, channel string) []se
 func (h Handler) searchSuggestions(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeSearchRead)
 	if err != nil {
-		h.writeAuthError(w, r, err)
+		writeJSONAuthError(w, err)
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -7754,22 +7754,22 @@ func (h Handler) visibleChannelOptions(ctx context.Context, principal auth.Princ
 func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
 	if err != nil {
-		h.writeAuthError(w, r, err)
+		writeJSONAuthError(w, err)
 		return
 	}
 	if !principal.HasScope(auth.ScopeEmojiRead) && !principal.HasScope(auth.ScopeChatWrite) && !principal.HasScope(auth.ScopeReactionsWrite) {
-		h.writeAuthError(w, r, auth.ErrMissingScope)
+		writeJSONAuthError(w, auth.ErrMissingScope)
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	if len(query) > 100 {
-		http.Error(w, "emoji search is too long", http.StatusBadRequest)
+		writeJSONRefusal(w, http.StatusBadRequest, "query_too_long")
 		return
 	}
 	custom, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		http.Error(w, "emoji are temporarily unavailable", http.StatusServiceUnavailable)
+		writeJSONRefusal(w, http.StatusServiceUnavailable, "emoji_unavailable")
 		return
 	}
 	recent := strings.Split(r.URL.Query().Get("recent"), ",")
@@ -11698,6 +11698,50 @@ func (h Handler) writeAuthError(w http.ResponseWriter, r *http.Request, err erro
 		return
 	}
 	http.Error(w, "not authenticated", http.StatusUnauthorized)
+}
+
+// writeJSONAuthError refuses a request to a route whose answers are JSON.
+//
+// writeAuthError above is built for pages, and its GET branch answers 303 to
+// the sign-in page. fetch follows a redirect transparently, so a script asking
+// a JSON route for data got the sign-in page back with status 200: the guard
+// clause every one of these callers has — "if the response is not ok, give
+// up" — never fired, and the failure surfaced one step later as a JSON parse
+// error. The member was told the emoji, or the suggestions, could not be
+// loaded, when what had actually happened was that their session ended and
+// signing in again would have fixed it.
+//
+// Routing every JSON refusal through one function is what keeps the page
+// redirect out of them: a JSON route does not reach writeAuthError at all.
+func writeJSONAuthError(w http.ResponseWriter, err error) {
+	writeJSONRefusal(w, jsonAuthStatus(err), "not_authenticated")
+}
+
+// jsonAuthStatus keeps the distinctions writeAuthError draws, because they are
+// the difference between "sign in again" and "this will work in a moment": a
+// credential store that did not answer says nothing about the session, and
+// answering 401 to it sends a signed-in member back through sign-in for a
+// transient backend failure.
+func jsonAuthStatus(err error) int {
+	switch {
+	case errors.Is(err, auth.ErrCredentialStoreUnavailable):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, auth.ErrMissingScope):
+		return http.StatusForbidden
+	default:
+		return http.StatusUnauthorized
+	}
+}
+
+// writeJSONRefusal is the one refusal shape the JSON routes answer. The code
+// is a fixed identifier chosen by the caller, never anything derived from the
+// request, so there is nothing to escape.
+func writeJSONRefusal(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(`{"ok":false,"error":"` + code + `"}`))
 }
 
 // userNames resolves author display names once per request. Message authors are

@@ -4897,3 +4897,102 @@ func TestADeliveredReminderIsVisibleWithItsText(t *testing.T) {
 	}
 	_ = reminder
 }
+
+// The signalling route is called by a script, never by a form, so every answer
+// it gives has to be readable by that script. It used to answer three shapes:
+// JSON where the handler wrote the body itself, plain text from the shared
+// authentication helper, and a whole rendered HTML error page from the shared
+// form decoder, whose failure path is built for a form post. A caller cannot
+// rely on a body whose shape depends on which guard rejected the request, and
+// a page rendered into an XHR response is a page nobody will ever see.
+func TestEverySignallingRefusalAnswersTheSameShape(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+
+	refusals := []struct {
+		name string
+		body string
+		// unauthenticated builds the request without a session, which is the
+		// only way to reach the refusals the shared helpers used to answer in
+		// their own shapes. postForm always carries a valid session and a valid
+		// CSRF header, so those paths are unreachable through it.
+		unauthenticated bool
+		want            int
+	}{
+		// A live call is never started here: the point is the refusals, and
+		// every one of them is reached before the call is looked up.
+		{name: "no session", unauthenticated: true, body: url.Values{"call_id": {"Cx"}, "to": {"U2"}, "signal": {"offer"}, "payload": {"{}"}}.Encode(), want: http.StatusUnauthorized},
+		{name: "missing fields", body: url.Values{"_csrf": {csrf}}.Encode(), want: http.StatusBadRequest},
+		{name: "unknown signal kind", body: url.Values{"_csrf": {csrf}, "call_id": {"Cx"}, "to": {"U2"}, "signal": {"semaphore"}, "payload": {"{}"}}.Encode(), want: http.StatusBadRequest},
+		{name: "repeated field", body: "_csrf=" + csrf + "&to=U2&to=U3", want: http.StatusBadRequest},
+		{name: "no such call", body: url.Values{"_csrf": {csrf}, "call_id": {"Cx"}, "to": {"U2"}, "signal": {"offer"}, "payload": {"{}"}}.Encode(), want: http.StatusConflict},
+	}
+	for _, refusal := range refusals {
+		t.Run(refusal.name, func(t *testing.T) {
+			var response *httptest.ResponseRecorder
+			if refusal.unauthenticated {
+				request := httptest.NewRequest(http.MethodPost, "/app/huddle/signal", strings.NewReader(refusal.body))
+				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				response = httptest.NewRecorder()
+				mux.ServeHTTP(response, request)
+			} else {
+				response = postForm(t, mux, "/app/huddle/signal", refusal.body, false)
+			}
+			if response.Code != refusal.want {
+				t.Fatalf("status=%d, want %d: %s", response.Code, refusal.want, response.Body)
+			}
+			if contentType := response.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
+				t.Fatalf("content type=%q, want JSON", contentType)
+			}
+			var decoded struct {
+				OK    bool   `json:"ok"`
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("body is not JSON (%v): %s", err, response.Body)
+			}
+			if decoded.OK || decoded.Error == "" {
+				t.Fatalf("refusal did not name itself: %s", response.Body)
+			}
+		})
+	}
+}
+
+// A JSON route must refuse in JSON. The shared authentication helper is built
+// for pages: on a GET without a session it answers 303 to the sign-in page,
+// and fetch follows a redirect transparently, so a script asking one of these
+// routes for data received the sign-in page with status 200. Every one of the
+// callers guards on "if the response is not ok, give up", and that guard never
+// fired; the failure surfaced one step later as a JSON parse error, and the
+// member was told the data could not be loaded when their session had ended.
+//
+// The routes are listed here rather than discovered because the list is the
+// claim: these are the routes whose answers are JSON, and any route added to
+// that set belongs in this test.
+func TestEveryJSONRouteRefusesInJSON(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+	for _, target := range []string{
+		"/app/emoji/options?q=smile",
+		"/app/search/suggestions?q=release",
+	} {
+		t.Run(target, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, target, nil)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("status=%d, want 401: %s", response.Code, response.Header().Get("Location"))
+			}
+			if location := response.Header().Get("Location"); location != "" {
+				t.Fatalf("refusal redirects to %q; fetch follows it and the caller parses a page as JSON", location)
+			}
+			if contentType := response.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
+				t.Fatalf("content type=%q, want JSON", contentType)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("body is not JSON (%v): %s", err, response.Body)
+			}
+		})
+	}
+}

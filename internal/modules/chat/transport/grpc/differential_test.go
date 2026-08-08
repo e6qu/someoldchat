@@ -2893,6 +2893,73 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Both connection families hand out a single-use ticket and then hold
+			// a slot against a limit. What matters, and what a single read cannot
+			// show, is that the slot is actually given back: if release did not
+			// free one, an app that reconnected normally would be locked out
+			// after its quota of reconnections, which is a failure that only
+			// appears in production and only after a while.
+			name: "connection tickets are single use and their slots are returned",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				ticket, err := chat.CreateRTMConnection(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				consumed, err := chat.ConsumeRTMConnection(ctx, ticket.ID)
+				if err != nil {
+					return nil, err
+				}
+				// A ticket is a one-time credential: dialling it twice must not
+				// open two streams from one grant.
+				_, reuseErr := chat.ConsumeRTMConnection(ctx, ticket.ID)
+				expiry := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
+				// Fill the socket mode quota exactly, then give one slot back and
+				// take it again.
+				for index := range domain.SocketModeConnectionLimit {
+					identifier := fmt.Sprintf("release-socket-%d", index)
+					if err := chat.CreateSocketModeConnection(ctx, domain.SocketModeConnection{
+						ID: identifier, AppID: "A1", ExpiresAt: expiry,
+					}); err != nil {
+						return nil, err
+					}
+					if _, err := chat.ConsumeSocketModeConnection(ctx, identifier); err != nil {
+						return nil, err
+					}
+				}
+				atLimit, err := chat.CountSocketModeConnections(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.ReleaseSocketModeConnection(ctx, "release-socket-0"); err != nil {
+					return nil, err
+				}
+				afterRelease, err := chat.CountSocketModeConnections(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CreateSocketModeConnection(ctx, domain.SocketModeConnection{
+					ID: "release-socket-replacement", AppID: "A1", ExpiresAt: expiry,
+				}); err != nil {
+					return nil, err
+				}
+				_, replacementErr := chat.ConsumeSocketModeConnection(ctx, "release-socket-replacement")
+				// Renewal extends a live connection rather than opening another,
+				// so the count must not move.
+				renewErr := chat.RenewSocketModeConnection(ctx, "release-socket-replacement", expiry.Add(time.Hour))
+				afterRenew, err := chat.CountSocketModeConnections(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					ticket.WorkspaceID, ticket.UserID, ticket.ExpiresAt.After(time.Now().UTC()),
+					consumed.ID == ticket.ID, consumed.UserID, consumed.Cursor == ticket.Cursor,
+					reuseErr != nil, errors.Is(reuseErr, storepkg.ErrNotFound),
+					atLimit, afterRelease, atLimit - afterRelease,
+					replacementErr == nil, renewErr == nil, afterRenew,
+				}, nil
+			},
+		},
+		{
 			name:         "upload without blob storage",
 			wantSentinel: service.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
@@ -5178,7 +5245,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 71
+const parityGapCeiling = 67
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5216,10 +5283,8 @@ var parityGaps = map[string]struct{}{
 	"AdminTeamUsers":                    {},
 	"BotInfo":                           {},
 	"CompleteExternalUploads":           {},
-	"ConsumeRTMConnection":              {},
 	"CreateAppInstallation":             {},
 	"CreateExternalIdentity":            {},
-	"CreateRTMConnection":               {},
 	"CreateSession":                     {},
 	"DeleteCanvas":                      {},
 	// These three credential-aware methods share the scheduled-message RPCs
@@ -5251,9 +5316,7 @@ var parityGaps = map[string]struct{}{
 	"PublishView":                  {},
 	"PushView":                     {},
 	"RecordAccess":                 {},
-	"ReleaseSocketModeConnection":  {},
 	"RemoveUser":                   {},
-	"RenewSocketModeConnection":    {},
 	"RequestAppPermissions":        {},
 	"ResetUserSessions":            {},
 	"RevokeSession":                {},
