@@ -1713,6 +1713,16 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	return user, nil
 }
 
+func (s *Store) GetUserExpiration(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.users[user]
+	if !exists || value.WorkspaceID != workspace {
+		return time.Time{}, store.ErrNotFound
+	}
+	return s.userExpirations[user], nil
+}
+
 func (s *Store) SetUserExpiration(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expiration time.Time, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

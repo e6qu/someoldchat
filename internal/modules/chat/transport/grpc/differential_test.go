@@ -774,6 +774,29 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A guest account lapses at a stored instant. A member who never
+			// received one reads the zero time, which must not decode as an
+			// instant in 1754.
+			name: "an administrator reads when a guest account lapses",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				none, err := chat.UserExpiration(ctx, "T1", "UA", "U1")
+				if err != nil {
+					return nil, err
+				}
+				lapses := time.Unix(1_900_000_000, 0).UTC()
+				if err := chat.SetUserExpiration(ctx, "T1", "UA", "U1", lapses); err != nil {
+					return nil, err
+				}
+				stored, err := chat.UserExpiration(ctx, "T1", "UA", "U1")
+				if err != nil {
+					return nil, err
+				}
+				_, memberErr := chat.UserExpiration(ctx, "T1", "U1", "U1")
+				_, missing := chat.UserExpiration(ctx, "T1", "UA", "U-not-here")
+				return []any{none.IsZero(), stored.Equal(lapses), memberErr != nil, missing != nil}, nil
+			},
+		},
+		{
 			// An administrator archives or deletes several channels in one
 			// request. The service checks every channel first, so a name that
 			// is not here stops the request before it changes anything.
@@ -3549,7 +3572,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 173
+const parityGapCeiling = 172
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -3715,7 +3738,6 @@ var parityGaps = map[string]struct{}{
 	"SetConversationTopic":                    {},
 	"SetExternalInvitePermissions":            {},
 	"SetSocketModeCursor":                     {},
-	"SetUserExpiration":                       {},
 	"SetUserGroupEnabled":                     {},
 	"SetWorkspaceRetention":                   {},
 	"ShareFilePublic":                         {},

@@ -330,6 +330,9 @@ type Store interface {
 	// state, not something a consumer needs delivered.
 	TouchUserActivity(context.Context, domain.WorkspaceID, domain.UserID, time.Time) error
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
+	// GetUserExpiration reports when a guest account lapses. A zero time means
+	// the account does not lapse.
+	GetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
 	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
 	SetWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error

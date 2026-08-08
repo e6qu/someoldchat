@@ -1648,6 +1648,15 @@ func (m Messages) setWorkspaceRole(ctx context.Context, workspaceID domain.Works
 	return m.Store.SetWorkspaceRole(ctx, workspaceID, targetID, role, event)
 }
 
+// UserExpiration reports when a guest account lapses. A zero time means the
+// account does not lapse.
+func (m Messages) UserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) (time.Time, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return time.Time{}, err
+	}
+	return m.Store.GetUserExpiration(ctx, workspaceID, targetID)
+}
+
 func (m Messages) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, expiration time.Time) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err

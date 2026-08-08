@@ -196,6 +196,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/admin.users.getExpiration", h.adminUsersGetExpiration)
+	mux.HandleFunc("POST /api/admin.users.getExpiration", h.adminUsersGetExpiration)
 	mux.HandleFunc("POST /api/admin.users.invite", h.adminUsersInvite)
 	mux.HandleFunc("POST /api/admin.users.assign", h.adminUsersAssign)
 	mux.HandleFunc("POST /api/admin.inviteRequests.approve", h.adminInviteRequestApprove)
@@ -3134,6 +3136,36 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.users.getExpiration reports when a guest account lapses. An account
+// that does not lapse reports 0, which is what Slack reports for one.
+func (h Handler) adminUsersGetExpiration(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	teamID, targetID := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"]))
+	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	expiration, err := h.Messages.UserExpiration(r.Context(), principal.WorkspaceID, principal.UserID, targetID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	timestamp := int64(0)
+	if !expiration.IsZero() {
+		timestamp = expiration.UTC().Unix()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "expiration_ts": timestamp})
 }
 
 // admin.users.session.list reports one member's live sessions. Each session is

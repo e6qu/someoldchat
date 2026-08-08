@@ -135,6 +135,10 @@ message SetUserRoleRequest {
   string role = 4;
 }
 
+message UserExpirationResponse {
+  int64 expiration_unix_nano = 1;
+}
+
 message SetUserExpirationRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -440,6 +444,7 @@ service DirectoryService {
   rpc RemoveUser(RemoveUserRequest) returns (MutationResponse);
   rpc SetUserRole(SetUserRoleRequest) returns (MutationResponse);
   rpc SetUserExpiration(SetUserExpirationRequest) returns (MutationResponse);
+  rpc UserExpiration(SetUserExpirationRequest) returns (UserExpirationResponse);
   rpc ResetUserSessions(ResetUserSessionsRequest) returns (MutationResponse);
   rpc UserSessions(ResetUserSessionsRequest) returns (UserSessionsResponse);
   rpc ResetUserSessionsBulk(ResetUserSessionsBulkRequest) returns (MutationResponse);

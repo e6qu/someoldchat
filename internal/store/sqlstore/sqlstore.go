@@ -4548,6 +4548,28 @@ func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.Workspac
 	return user, nil
 }
 
+func (s *Store) GetUserExpiration(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (time.Time, error) {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id = ? AND workspace_id = ?`, user, workspace).Scan(&exists); err != nil {
+		return time.Time{}, err
+	}
+	if exists == 0 {
+		return time.Time{}, store.ErrNotFound
+	}
+	var expiration int64
+	err := s.db.QueryRowContext(ctx, `SELECT expiration_ts FROM user_expirations WHERE user_id = ? AND workspace_id = ?`, user, workspace).Scan(&expiration)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if expiration == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(expiration, 0).UTC(), nil
+}
+
 func (s *Store) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expiration time.Time, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -1187,7 +1187,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.roles.removeAssignments/
   - method: admin.users.getExpiration
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.getExpiration/
   - method: admin.users.session.clearSettings

@@ -129,6 +129,7 @@ func runQualification(t *testing.T, open opener) {
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},
 		{"external connections are derived and end everywhere", externalConnectionsAreDerivedAndEndEverywhere},
 		{"sessions are listed without their tokens", sessionsAreListedWithoutTheirTokens},
+		{"a guest expiration reads back or stays zero", aGuestExpirationReadsBackOrStaysZero},
 		{"stopping a workflow is not an edit", stoppingAWorkflowIsNotAnEdit},
 		{"a channel converts both ways and says which kind it is not", aChannelConvertsBothWaysAndSaysWhichKindItIsNot},
 		{"search modifiers mean the same on every profile", searchModifiersMeanTheSame},

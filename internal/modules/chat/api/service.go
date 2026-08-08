@@ -139,6 +139,7 @@ type Service interface {
 	ProvisionExternalUser(context.Context, domain.WorkspaceID, string, string, domain.WorkspaceRole) (domain.User, error)
 	SynchronizeExternalUserRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole) error
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, time.Time) error
+	UserExpiration(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (time.Time, error)
 	AdminRenameConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)
 	AdminSetConversationArchived(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool) (domain.Conversation, error)
 	AdminDeleteConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error

@@ -272,6 +272,12 @@ await assert.rejects(
   (error) => String(error).includes("workflow_not_found"),
 );
 
+// The pinned client exposes no typed method for this one, so the walk issues
+// it through apiCall. A genuine client still sends the request.
+const expiration = await client.apiCall("admin.users.getExpiration", { user_id: "U1" });
+assert.equal(expiration.ok, true);
+assert.equal(typeof expiration.expiration_ts, "number");
+
 // Bulk channel administration. The walk pins the refusal for a channel that is
 // not here; archiving the fixture's channels would take the rest of the walk
 // with them.

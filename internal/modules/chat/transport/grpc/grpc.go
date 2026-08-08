@@ -1615,6 +1615,14 @@ func (r Remote) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceID,
 	return nil
 }
 
+func (r Remote) UserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) (time.Time, error) {
+	out, err := r.directory.UserExpiration(ctx, &chatv1.SetUserExpirationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return optionalTimeFromUnixNano(out.GetExpirationUnixNano()), nil
+}
+
 func (r Remote) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, expiration time.Time) error {
 	seconds := int64(0)
 	if !expiration.IsZero() {
@@ -5271,6 +5279,14 @@ func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleReque
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) UserExpiration(ctx context.Context, input *chatv1.SetUserExpirationRequest) (*chatv1.UserExpirationResponse, error) {
+	expiration, err := s.implementation.UserExpiration(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.UserExpirationResponse{ExpirationUnixNano: optionalUnixNano(expiration)}, nil
 }
 
 func (s *Server) SetUserExpiration(ctx context.Context, input *chatv1.SetUserExpirationRequest) (*chatv1.MutationResponse, error) {
