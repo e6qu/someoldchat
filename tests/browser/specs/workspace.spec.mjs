@@ -3582,7 +3582,7 @@ test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', a
   await expectNoSeriousAccessibilityViolations(page);
 });
 
-test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it asked for', async ({ page, context }) => {
+test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it asked for', async ({ page, context, request }) => {
   await signIn(context);
   await page.goto('/app');
   await expect(page.locator('.channel-title')).toHaveText('# general');
@@ -3596,32 +3596,29 @@ test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it
   const counter = async (name) => Number(await page.locator('html').getAttribute(`data-${name}`));
   expect(await counter('discarded-refreshes'), 'the counter is not exposed').toBe(0);
 
+  // A refresh runs when the live stream delivers an event, so the journey has
+  // to cause one rather than wait and hope. Posting from outside the page is
+  // what a colleague typing looks like to this client, and three in quick
+  // succession is the shape most likely to make one refresh overtake another.
   for (let round = 0; round < 3; round += 1) {
-    const composer = page.locator('form.composer textarea[name="text"]');
-    const text = `refresh discipline ${round} ${Date.now()}`;
-    await composer.fill(text);
-    const posted = page.waitForResponse((response) =>
-      response.url().includes('/app/message') && response.request().method() === 'POST',
-    );
-    await page.getByRole('button', { name: 'Send' }).click();
-    expect((await posted).status()).toBe(200);
-    await expect(page.locator('.message-text').last()).toHaveText(text);
-  }
-
-  // Moving between conversations is what starts refreshes in quick succession,
-  // so it is the shape most likely to produce a discard.
-  for (const name of ['random', 'general']) {
-    const link = page.locator(`.sidebar a:has-text("${name}")`).first();
-    if (await link.count()) {
-      await link.click();
-      await expect(page.locator('.channel-title')).toHaveText(new RegExp(name));
-    }
+    const posted = await request.post('/api/chat.postMessage', {
+      headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+      data: { channel: CHANNEL, text: `refresh discipline ${round} ${Date.now()}` },
+    });
+    expect((await posted.json()).ok).toBe(true);
   }
 
   // The denominator is what makes the zero mean something. Without it a client
   // that never refreshed at all would report zero discards and look perfect.
+  // The refresh is driven by the realtime stream rather than a fixed poll, so
+  // how long it takes to arrive depends on the transport the browser chose.
+  // The wait is generous on purpose: a short one would make this journey report
+  // a transport that was merely slow as a client that never refreshed.
   await expect
-    .poll(async () => counter('refresh-responses'), { message: 'no refresh completed, so zero discards proves nothing' })
+    .poll(async () => counter('refresh-responses'), {
+      timeout: 20000,
+      message: 'no refresh completed, so zero discards proves nothing',
+    })
     .toBeGreaterThan(0);
   expect(await counter('discarded-refreshes'), 'the client paid for a response it discarded').toBe(0);
   await expectNoSeriousAccessibilityViolations(page);

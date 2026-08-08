@@ -2221,7 +2221,10 @@ func (m Messages) AdminCancelAppRequest(ctx context.Context, workspaceID domain.
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
-	current, err := m.Store.GetAppApproval(ctx, workspaceID, domain.AppID(strings.TrimSpace(string(appID))))
+	// The identifier has to be resolved the same way the write resolves it, or
+	// the guard reads one row and the write changes another. A request named by
+	// its own identifier alone is stored under a synthesised app id.
+	current, err := m.Store.GetAppApproval(ctx, workspaceID, appApprovalKey(appID, requestID))
 	if err != nil {
 		return err
 	}
@@ -2229,6 +2232,17 @@ func (m Messages) AdminCancelAppRequest(ctx context.Context, workspaceID domain.
 		return ErrInvalidAppApproval
 	}
 	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalCancelled)
+}
+
+// appApprovalKey is where one approval row lives. A request named only by its
+// own identifier is stored under a synthesised app id, and every reader and
+// writer has to agree on that or they touch different rows.
+func appApprovalKey(appID domain.AppID, requestID domain.AppRequestID) domain.AppID {
+	appID = domain.AppID(strings.TrimSpace(string(appID)))
+	if appID != "" {
+		return appID
+	}
+	return domain.AppID("request:" + strings.TrimSpace(string(requestID)))
 }
 
 func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID, status domain.AppApprovalStatus) error {
@@ -2240,9 +2254,7 @@ func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.Work
 	if appID == "" && requestID == "" {
 		return ErrInvalidAppApproval
 	}
-	if appID == "" {
-		appID = domain.AppID("request:" + string(requestID))
-	}
+	appID = appApprovalKey(appID, requestID)
 	now := time.Now().UTC()
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("app."+string(status), events.String("app_id", string(appID)), events.String("app_request_id", string(requestID))), now)
 	if err != nil {

@@ -181,6 +181,13 @@ func main() {
 	if err := store.CreateAppConfigurationToken(context.Background(), "xoxe.xoxp-qualification", "xoxe-qualification", domain.AppConfigurationToken{WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().UTC().Add(12 * time.Hour)}); err != nil {
 		panic(err)
 	}
+	// A request the walk withdraws. Cancelling applies only to a request nobody
+	// has decided, so the walk needs one that is really open.
+	if err := store.SetAppApproval(context.Background(), "T1", "request:Rq-sdk", "Rq-sdk", domain.AppApprovalRequested, now, events.Event{
+		ID: "evt-app-request-sdk", WorkspaceID: "T1", ActorID: "U1", Topic: "app.requested", Payload: "Rq-sdk", CreatedAt: now,
+	}); err != nil {
+		panic(err)
+	}
 	// An external credential for the walk to read and revoke. The ciphertext is
 	// here so the walk can prove the secret does not come back out.
 	if err := store.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
