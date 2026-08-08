@@ -14,6 +14,7 @@ import (
 	"net"
 	"path"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -841,6 +842,478 @@ func parityCases() []parityCase {
 					notAURL != nil, unknownApp != nil, missingToken != nil, unnamedToken != nil,
 					missingRevocation != nil, connection != nil, unknownConnection != nil, emptyQuery != nil,
 				}, nil
+			},
+		},
+		{
+			// Socket Mode's durable delivery: a response is recorded, claimed
+			// under a lease, renewed, and acknowledged. This is the machinery
+			// most likely to disagree between compositions, because every step
+			// is about who holds what and until when.
+			name: "Socket Mode responses are claimed, renewed, and acknowledged identically",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				received := time.Unix(1_700_000_500, 0).UTC()
+				first := domain.SocketModeResponse{AppID: "A1", EnvelopeID: "env-1", Payload: `{"ok":true}`, ReceivedAt: received}
+				second := domain.SocketModeResponse{AppID: "A1", EnvelopeID: "env-2", Payload: `{"ok":true}`, ReceivedAt: received.Add(time.Second)}
+				for _, response := range []domain.SocketModeResponse{first, second} {
+					if err := chat.RecordSocketModeResponse(ctx, response); err != nil {
+						return nil, err
+					}
+				}
+				// The same envelope twice is one response, not two: an app that
+				// retries must not have its answer delivered again.
+				repeat := chat.RecordSocketModeResponse(ctx, first)
+
+				claimed, err := chat.ClaimSocketModeResponses(ctx, "A1", "owner-one", 10, time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				envelopes := make([]string, 0, len(claimed))
+				for _, response := range claimed {
+					envelopes = append(envelopes, response.EnvelopeID)
+				}
+				sort.Strings(envelopes)
+				// A second owner finds nothing, because the first holds them.
+				contended, err := chat.ClaimSocketModeResponses(ctx, "A1", "owner-two", 10, time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				renewed := chat.RenewSocketModeResponses(ctx, "owner-one", claimed, 2*time.Minute)
+				strangerRenews := chat.RenewSocketModeResponses(ctx, "owner-two", claimed, time.Minute)
+				if err := chat.AckSocketModeResponses(ctx, "owner-one", claimed[:1]); err != nil {
+					return nil, err
+				}
+				strangerAcks := chat.AckSocketModeResponses(ctx, "owner-two", claimed[1:])
+				released := chat.ReleaseSocketModeResponses(ctx, "owner-one", claimed[1:], received)
+				// What is released comes back to whoever claims next; what was
+				// acknowledged does not.
+				afterRelease, err := chat.ClaimSocketModeResponses(ctx, "A1", "owner-three", 10, time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				returned := make([]string, 0, len(afterRelease))
+				for _, response := range afterRelease {
+					returned = append(returned, response.EnvelopeID)
+				}
+				sort.Strings(returned)
+
+				cursor, err := chat.GetSocketModeCursor(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetSocketModeCursor(ctx, "A1", 42); err != nil {
+					return nil, err
+				}
+				moved, err := chat.GetSocketModeCursor(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				connections, err := chat.CountSocketModeConnections(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					envelopes, len(contended), returned, cursor, moved, connections,
+					repeat != nil, renewed != nil, strangerRenews != nil, strangerAcks != nil, released != nil,
+				}, nil
+			},
+		},
+		{
+			// A list, its rows, and the export of them. The cells update names
+			// the rows it changes, so the order it answers in is part of the
+			// contract: the two compositions have to agree on it, and a map
+			// iteration would make them disagree at random.
+			name: "a list is updated, its cells written, and its rows exported identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				list, err := chat.CreateList(ctx, "T1", "U1", "Incidents", "[]",
+					`[{"key":"title","name":"Title","type":"text"}]`, "", false, false)
+				if err != nil {
+					return nil, err
+				}
+				renamed, err := chat.UpdateList(ctx, "T1", "U1", list.ID, "Outages", "[]", false, false)
+				if err != nil {
+					return nil, err
+				}
+				_, missingList := chat.UpdateList(ctx, "T1", "U1", "F-nobody", "Nothing", "[]", false, false)
+
+				first, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"one"}]`)
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"two"}]`)
+				if err != nil {
+					return nil, err
+				}
+				// Named in the order second then first, so the answer proves
+				// the request's order is kept rather than the store's.
+				cells := `[{"row_id":"` + string(second.ID) + `","column_id":"title","text":"second"},` +
+					`{"row_id":"` + string(first.ID) + `","column_id":"title","text":"first"}]`
+				updated, err := chat.UpdateListCells(ctx, "T1", "U1", list.ID, cells)
+				if err != nil {
+					return nil, err
+				}
+				order := make([]string, 0, len(updated))
+				for _, item := range updated {
+					order = append(order, map[bool]string{true: "second", false: "first"}[item.ID == second.ID])
+				}
+				_, malformed := chat.UpdateListCells(ctx, "T1", "U1", list.ID, "not json")
+				_, empty := chat.UpdateListCells(ctx, "T1", "U1", list.ID, "[]")
+
+				started, err := chat.StartListDownload(ctx, "T1", "U1", list.ID, true)
+				if err != nil {
+					return nil, err
+				}
+				fetched, err := chat.GetListDownload(ctx, "T1", "U1", started.ID)
+				if err != nil {
+					return nil, err
+				}
+				_, missingJob := chat.GetListDownload(ctx, "T1", "U1", "export-nobody")
+
+				if err := chat.DeleteListItems(ctx, "T1", "U1", list.ID, []domain.ListItemID{first.ID, second.ID}); err != nil {
+					return nil, err
+				}
+				deletedTwice := chat.DeleteListItems(ctx, "T1", "U1", list.ID, []domain.ListItemID{first.ID})
+				return []any{
+					renamed.Name, order, fetched.Status, fetched.IncludeArchived, started.ListID == list.ID,
+					missingList != nil, malformed != nil, empty != nil, missingJob != nil, deletedTwice != nil,
+				}, nil
+			},
+		},
+		{
+			// A remote file is a pointer to something this deployment does not
+			// hold. It is added, updated field by field, shared, listed and
+			// removed, and every one of those is addressed either by its own
+			// identifier or by the external one, which is the pair most likely
+			// to drift between compositions.
+			name: "a remote file is added, updated, shared, and removed identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				added, err := chat.AddRemoteFile(ctx, "T1", "U1", domain.RemoteFile{
+					ExternalID: "ext-1", Title: "Design", FileType: "sketch",
+					ExternalURL: "https://example.invalid/design", IndexableContents: "wireframes",
+				})
+				if err != nil {
+					return nil, err
+				}
+				duplicate := func() bool {
+					_, err := chat.AddRemoteFile(ctx, "T1", "U1", domain.RemoteFile{
+						ExternalID: "ext-1", Title: "Again", ExternalURL: "https://example.invalid/again",
+					})
+					return err != nil
+				}()
+				// Reading by the external identifier has to find the same file
+				// as reading by the one this deployment minted.
+				byExternal, err := chat.RemoteFileInfo(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"})
+				if err != nil {
+					return nil, err
+				}
+				byID, err := chat.RemoteFileInfo(ctx, "T1", "U1", domain.RemoteFileLookup{ID: added.ID})
+				if err != nil {
+					return nil, err
+				}
+				_, missing := chat.RemoteFileInfo(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-nobody"})
+				_, unaddressed := chat.RemoteFileInfo(ctx, "T1", "U1", domain.RemoteFileLookup{})
+
+				// An update names which fields it sets, so a field it does not
+				// name has to survive untouched.
+				updated, err := chat.UpdateRemoteFile(ctx, "T1", "U1", domain.RemoteFileUpdate{
+					Lookup: domain.RemoteFileLookup{ExternalID: "ext-1"}, SetTitle: true, Title: "Design v2",
+				})
+				if err != nil {
+					return nil, err
+				}
+				shared, err := chat.ShareRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"}, []domain.ConversationID{"C1"})
+				if err != nil {
+					return nil, err
+				}
+				_, sharedNowhere := chat.ShareRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"}, []domain.ConversationID{"C-nobody"})
+				listed, err := chat.RemoteFiles(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"}); err != nil {
+					return nil, err
+				}
+				removedTwice := chat.RemoveRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"})
+				after, err := chat.RemoteFiles(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					added.Title, byExternal.ID == added.ID, byID.ExternalID,
+					updated.Title, updated.FileType, updated.ExternalURL,
+					shared.SharedChannels, len(listed.Files), len(after.Files),
+					duplicate, missing != nil, unaddressed != nil, sharedNowhere != nil, removedTwice != nil,
+				}, nil
+			},
+		},
+		{
+			// A hosted file: shared to a public link, revoked again, and
+			// deleted. A public link that outlived its revocation would be the
+			// worst kind of disagreement between the two compositions.
+			name: "a hosted file is published, revoked, and deleted identically",
+			seed: seedFileParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				published, err := chat.ShareFilePublic(ctx, "T1", "U1", "Fparity-description")
+				if err != nil {
+					return nil, err
+				}
+				publishedTwice, err := chat.ShareFilePublic(ctx, "T1", "U1", "Fparity-description")
+				if err != nil {
+					return nil, err
+				}
+				revoked, err := chat.RevokeFilePublic(ctx, "T1", "U1", "Fparity-description")
+				if err != nil {
+					return nil, err
+				}
+				revokedTwice, err := chat.RevokeFilePublic(ctx, "T1", "U1", "Fparity-description")
+				if err != nil {
+					return nil, err
+				}
+				_, missing := chat.ShareFilePublic(ctx, "T1", "U1", "F-nobody")
+				comment := chat.DeleteFileComment(ctx, "T1", "U1", "Fparity-description", "FC-nobody")
+				commentTwice := chat.DeleteFileComment(ctx, "T1", "U1", "Fparity-description", "FC-nobody")
+				deleted := chat.DeleteFile(ctx, "T1", "U1", "Fparity-description")
+				deletedTwice := chat.DeleteFile(ctx, "T1", "U1", "Fparity-description")
+				return []any{
+					published.PublicToken != "", publishedTwice.PublicToken == published.PublicToken,
+					revoked.PublicToken == "", revokedTwice.PublicToken == "",
+					missing != nil, comment != nil, commentTwice != nil, deleted != nil, deletedTwice != nil,
+				}, nil
+			},
+		},
+		{
+			// A channel's own lifecycle: renaming it, saying what it is for,
+			// who is in it, and archiving it. Archiving is the interesting one,
+			// because an archived channel refuses the writes an open one takes.
+			name: "a channel is renamed, described, staffed, and archived identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				renamed, err := chat.RenameConversation(ctx, "T1", "U1", "C1", " New Room ")
+				if err != nil {
+					return nil, err
+				}
+				topic, err := chat.SetConversationTopic(ctx, "T1", "U1", "C1", "what we are doing")
+				if err != nil {
+					return nil, err
+				}
+				purpose, err := chat.SetConversationPurpose(ctx, "T1", "U1", "C1", "why we are here")
+				if err != nil {
+					return nil, err
+				}
+				// C2 has one member, so joining, inviting and kicking have
+				// somewhere to happen that does not disturb C1.
+				joined, err := chat.JoinConversation(ctx, "T1", "U2", "C2")
+				if err != nil {
+					return nil, err
+				}
+				invited, err := chat.InviteConversationMembers(ctx, "T1", "U1", "C2", []domain.UserID{"UA"})
+				if err != nil {
+					return nil, err
+				}
+				_, invitedNobody := chat.InviteConversationMembers(ctx, "T1", "U1", "C2", []domain.UserID{"U-nobody"})
+				kicked := chat.KickConversationMember(ctx, "T1", "U1", "C2", "UA")
+				kickedTwice := chat.KickConversationMember(ctx, "T1", "U1", "C2", "UA")
+				left := chat.LeaveConversation(ctx, "T1", "U2", "C2")
+				leftTwice := chat.LeaveConversation(ctx, "T1", "U2", "C2")
+
+				archived, err := chat.SetConversationArchived(ctx, "T1", "U1", "C1", true)
+				if err != nil {
+					return nil, err
+				}
+				// An archived channel takes no more writes, which is the whole
+				// point of archiving rather than hiding.
+				_, renameArchived := chat.RenameConversation(ctx, "T1", "U1", "C1", "later")
+				_, archivedTwice := chat.SetConversationArchived(ctx, "T1", "U1", "C1", true)
+				reopened, err := chat.SetConversationArchived(ctx, "T1", "U1", "C1", false)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					renamed.Name, topic.Topic, purpose.Purpose,
+					joined.ID, invited.ID, archived.Archived, reopened.Archived,
+					invitedNobody != nil, kicked != nil, kickedTwice != nil, left != nil, leftTwice != nil,
+					renameArchived != nil, archivedTwice != nil,
+				}, nil
+			},
+		},
+		{
+			// Custom emoji: add, alias, rename, remove, and what the workspace
+			// lists afterwards. An alias points at another emoji, so removing
+			// the target and renaming it both have to answer the same way on
+			// each composition.
+			name: "custom emoji are added, aliased, renamed, and removed identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminAddEmoji(ctx, "T1", "UA", "party", "https://example.invalid/party.png"); err != nil {
+					return nil, err
+				}
+				duplicate := chat.AdminAddEmoji(ctx, "T1", "UA", "party", "https://example.invalid/other.png")
+				if err := chat.AdminAddEmojiAlias(ctx, "T1", "UA", "celebrate", "party"); err != nil {
+					return nil, err
+				}
+				aliasOfNothing := chat.AdminAddEmojiAlias(ctx, "T1", "UA", "ghost", "nobody")
+				if err := chat.AdminRenameEmoji(ctx, "T1", "UA", "party", "parrot"); err != nil {
+					return nil, err
+				}
+				renameMissing := chat.AdminRenameEmoji(ctx, "T1", "UA", "nobody", "somebody")
+				member := chat.AdminAddEmoji(ctx, "T1", "U1", "members-only", "https://example.invalid/m.png")
+				listed, err := chat.Emojis(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				names := make([]string, 0, len(listed))
+				for _, emoji := range listed {
+					names = append(names, emoji.Name+"="+emoji.AliasFor)
+				}
+				sort.Strings(names)
+				if err := chat.AdminRemoveEmoji(ctx, "T1", "UA", "parrot"); err != nil {
+					return nil, err
+				}
+				removeMissing := chat.AdminRemoveEmoji(ctx, "T1", "UA", "parrot")
+				after, err := chat.Emojis(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{names, len(after), duplicate != nil, aliasOfNothing != nil,
+					renameMissing != nil, member != nil, removeMissing != nil}, nil
+			},
+		},
+		{
+			// The three things a member attaches to one message: a reaction, a
+			// pin, and a star. Each is added, listed, and taken away, and each
+			// refuses the same second attempt.
+			name: "reactions, pins, and stars attach to one message identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				message, err := chat.Post(ctx, "T1", "U1", "C1", "something to mark", "", "")
+				if err != nil {
+					return nil, err
+				}
+				at := timestampOf(message)
+				if err := chat.AddReaction(ctx, "T1", "U1", "C1", at, "eyes"); err != nil {
+					return nil, err
+				}
+				twice := chat.AddReaction(ctx, "T1", "U1", "C1", at, "eyes")
+				if err := chat.AddPin(ctx, "T1", "U1", "C1", at); err != nil {
+					return nil, err
+				}
+				pinnedTwice := chat.AddPin(ctx, "T1", "U1", "C1", at)
+				if err := chat.AddStar(ctx, "T1", "U1", "C1", at); err != nil {
+					return nil, err
+				}
+				starredTwice := chat.AddStar(ctx, "T1", "U1", "C1", at)
+
+				reactions, err := chat.UserReactions(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				marked := make([]string, 0, len(reactions.Items))
+				for _, item := range reactions.Items {
+					marked = append(marked, item.Reaction.Name)
+				}
+
+				if err := chat.RemoveReaction(ctx, "T1", "U1", "C1", at, "eyes"); err != nil {
+					return nil, err
+				}
+				if err := chat.RemovePin(ctx, "T1", "U1", "C1", at); err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveStar(ctx, "T1", "U1", "C1", at); err != nil {
+					return nil, err
+				}
+				// Taking away what is no longer there is the same answer on
+				// both compositions, whatever that answer is.
+				reactionGone := chat.RemoveReaction(ctx, "T1", "U1", "C1", at, "eyes")
+				pinGone := chat.RemovePin(ctx, "T1", "U1", "C1", at)
+				starGone := chat.RemoveStar(ctx, "T1", "U1", "C1", at)
+				left, err := chat.UserReactions(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{marked, len(left.Items), twice != nil, pinnedTwice != nil, starredTwice != nil,
+					reactionGone != nil, pinGone != nil, starGone != nil}, nil
+			},
+		},
+		{
+			// A user group's whole shape: renaming it, the channels it reaches,
+			// the workspaces it spans, and disabling it without deleting it.
+			name: "a user group is updated, scoped, and disabled identically",
+			seed: seedUserGroupParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				updated, err := chat.UpdateUserGroup(ctx, "T1", "UA", "S1", "Traders desk", "traders-desk", "Front office")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AddUserGroupChannels(ctx, "T1", "UA", "S1", []domain.ConversationID{"C1", "C2"}); err != nil {
+					return nil, err
+				}
+				missingChannel := chat.AddUserGroupChannels(ctx, "T1", "UA", "S1", []domain.ConversationID{"C-nobody"})
+				channels, err := chat.UserGroupChannels(ctx, "T1", "UA", "S1")
+				if err != nil {
+					return nil, err
+				}
+				sort.Slice(channels, func(left, right int) bool { return channels[left] < channels[right] })
+				if err := chat.RemoveUserGroupChannels(ctx, "T1", "UA", "S1", []domain.ConversationID{"C2"}); err != nil {
+					return nil, err
+				}
+				remaining, err := chat.UserGroupChannels(ctx, "T1", "UA", "S1")
+				if err != nil {
+					return nil, err
+				}
+				teams := chat.AdminAddUserGroupTeams(ctx, "T1", "UA", "S1", []domain.WorkspaceID{"T1"})
+				members, err := chat.UserGroupUsers(ctx, "T1", "UA", "S1")
+				if err != nil {
+					return nil, err
+				}
+				disabled, err := chat.SetUserGroupEnabled(ctx, "T1", "UA", "S1", false)
+				if err != nil {
+					return nil, err
+				}
+				enabled, err := chat.SetUserGroupEnabled(ctx, "T1", "UA", "S1", true)
+				if err != nil {
+					return nil, err
+				}
+				_, missingGroup := chat.SetUserGroupEnabled(ctx, "T1", "UA", "S-nobody", false)
+				return []any{
+					updated.Name, updated.Handle, updated.Description,
+					channels, remaining, len(members),
+					disabled.Enabled, enabled.Enabled,
+					missingChannel != nil, teams != nil, missingGroup != nil,
+				}, nil
+			},
+		},
+		{
+			// A reminder is read, completed, and deleted. Completing one that
+			// is already complete and deleting one that is gone are the two
+			// answers most likely to drift between compositions.
+			name: "a reminder is read, completed, and deleted identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				due := time.Unix(1_900_000_000, 0).UTC()
+				created, err := chat.AddReminder(ctx, "T1", "U1", "U1", "water the plants", due)
+				if err != nil {
+					return nil, err
+				}
+				read, err := chat.ReminderInfo(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				_, somebodyElse := chat.ReminderInfo(ctx, "T1", "U2", created.ID)
+				_, missing := chat.ReminderInfo(ctx, "T1", "U1", "Rm-nobody")
+				if err := chat.CompleteReminder(ctx, "T1", "U1", created.ID); err != nil {
+					return nil, err
+				}
+				completedTwice := chat.CompleteReminder(ctx, "T1", "U1", created.ID)
+				listed, err := chat.Reminders(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteReminder(ctx, "T1", "U1", created.ID); err != nil {
+					return nil, err
+				}
+				deletedTwice := chat.DeleteReminder(ctx, "T1", "U1", created.ID)
+				after, err := chat.Reminders(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{read.Text, read.Time.Equal(due), len(listed.Reminders), len(after.Reminders),
+					somebodyElse != nil, missing != nil, completedTwice != nil, deletedTwice != nil}, nil
 			},
 		},
 		{
@@ -4161,7 +4634,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 166
+const parityGapCeiling = 117
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -4178,15 +4651,10 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 
 var parityGaps = map[string]struct{}{
 	"AcceptSharedInvite":                 {},
-	"AckSocketModeResponses":             {},
 	"AcknowledgeEntityCommentAction":     {},
 	"AddCall":                            {},
 	"AddCallParticipants":                {},
-	"AddRemoteFile":                      {},
-	"AddUserGroupChannels":               {},
 	"AdminAddConversationAccessGroup":    {},
-	"AdminAddEmojiAlias":                 {},
-	"AdminAddUserGroupTeams":             {},
 	"AdminApproveApp":                    {},
 	"AdminApproveInviteRequest":          {},
 	"AdminAssignUser":                    {},
@@ -4208,9 +4676,7 @@ var parityGaps = map[string]struct{}{
 	"DenySharedInvite":                   {},
 	"InvitationPreview":                  {},
 	"AdminRemoveConversationAccessGroup": {},
-	"AdminRemoveEmoji":                   {},
 	"AdminRenameConversation":            {},
-	"AdminRenameEmoji":                   {},
 	"AdminRestrictApp":                   {},
 	"AdminSearchConversations":           {},
 	"AdminSetConversationArchived":       {},
@@ -4222,20 +4688,13 @@ var parityGaps = map[string]struct{}{
 	"AdminSetWorkspaceIcon":              {},
 	"AdminTeamUsers":                     {},
 	"BotInfo":                            {},
-	"ClaimSocketModeResponses":           {},
 	"CompleteExternalUploads":            {},
-	"CompleteReminder":                   {},
 	"ConsumeRTMConnection":               {},
-	"CountSocketModeConnections":         {},
 	"CreateAppInstallation":              {},
 	"CreateExternalIdentity":             {},
 	"CreateRTMConnection":                {},
 	"CreateSession":                      {},
 	"DeleteCanvas":                       {},
-	"DeleteFile":                         {},
-	"DeleteFileComment":                  {},
-	"DeleteListItems":                    {},
-	"DeleteReminder":                     {},
 	"DeleteScheduledMessage":             {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
@@ -4247,20 +4706,13 @@ var parityGaps = map[string]struct{}{
 	"DispatchBlockAction":                     {},
 	"DispatchViewBlockAction":                 {},
 	"DispatchSlashCommand":                    {},
-	"Emojis":                                  {},
 	"EndCall":                                 {},
 	"EndDND":                                  {},
 	"GetAuthMethod":                           {},
 	"GetCall":                                 {},
-	"GetListDownload":                         {},
-	"GetSocketModeCursor":                     {},
 	"HandleAppResponse":                       {},
-	"InviteConversationMembers":               {},
 	"InviteShared":                            {},
-	"JoinConversation":                        {},
-	"KickConversationMember":                  {},
 	"LastRetentionSweep":                      {},
-	"LeaveConversation":                       {},
 	"ListWorkspaceApps":                       {},
 	"ListAppEventsAfter":                      {},
 	"ListUserEventsAfter":                     {},
@@ -4287,28 +4739,15 @@ var parityGaps = map[string]struct{}{
 	"PublishView":                             {},
 	"PushView":                                {},
 	"RecordAccess":                            {},
-	"RecordSocketModeResponse":                {},
 	"ReleaseSocketModeConnection":             {},
-	"ReleaseSocketModeResponses":              {},
-	"ReminderInfo":                            {},
-	"RemoteFileInfo":                          {},
-	"RemoteFiles":                             {},
 	"RemoveBookmark":                          {},
 	"RemoveCallParticipants":                  {},
 	"RemoveConversationRetention":             {},
-	"RemovePin":                               {},
-	"RemoveReaction":                          {},
-	"RemoveRemoteFile":                        {},
-	"RemoveStar":                              {},
 	"RemoveUser":                              {},
-	"RemoveUserGroupChannels":                 {},
-	"RenameConversation":                      {},
 	"RenewSocketModeConnection":               {},
-	"RenewSocketModeResponses":                {},
 	"Replies":                                 {},
 	"RequestAppPermissions":                   {},
 	"ResetUserSessions":                       {},
-	"RevokeFilePublic":                        {},
 	"RevokeSession":                           {},
 	"RevokeSharedInvite":                      {},
 	"RevokeToken":                             {},
@@ -4316,32 +4755,17 @@ var parityGaps = map[string]struct{}{
 	"ScheduleMessageWithBlocksAndAttachments": {},
 	"ScheduledMessagesForCredential":          {},
 	"SetAuthMethod":                           {},
-	"SetConversationArchived":                 {},
-	"SetConversationPurpose":                  {},
 	"SetConversationRetention":                {},
-	"SetConversationTopic":                    {},
 	"SetExternalInvitePermissions":            {},
-	"SetSocketModeCursor":                     {},
-	"SetUserGroupEnabled":                     {},
 	"SetWorkspaceRetention":                   {},
-	"ShareFilePublic":                         {},
-	"ShareRemoteFile":                         {},
-	"StartListDownload":                       {},
 	"TeamBillableInfo":                        {},
 	"Unfurl":                                  {},
 	"UninstallApp":                            {},
 	"UpdateCall":                              {},
-	"UpdateList":                              {},
-	"UpdateListCells":                         {},
-	"UpdateRemoteFile":                        {},
-	"UpdateUserGroup":                         {},
 	"UpdateView":                              {},
 	"UpdateWithBlocks":                        {},
 	"UpdateWithBlocksAndAttachments":          {},
 	"UpdateMessage":                           {},
-	"UserGroupChannels":                       {},
-	"UserGroupUsers":                          {},
-	"UserReactions":                           {},
 	"UserWorkspaces":                          {},
 	"WorkflowStepCompleted":                   {},
 	"WorkflowStepFailed":                      {},
