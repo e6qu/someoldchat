@@ -369,6 +369,43 @@ func (m Messages) ListDeveloperApps(ctx context.Context, workspaceID domain.Work
 	return m.Store.ListDeveloperApps(ctx, workspaceID, userID)
 }
 
+// AdminFunctions lists the functions the workspace's installed apps declare.
+// It reads each app's manifest, which is where a function exists; the product
+// stores no separate function record.
+func (m Messages) AdminFunctions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) ([]domain.AppFunction, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	installed, err := m.ListWorkspaceApps(ctx, workspaceID, actorID)
+	if err != nil {
+		return nil, err
+	}
+	functions := make([]domain.AppFunction, 0, len(installed))
+	for _, app := range installed {
+		_, revision, err := m.Store.GetApp(ctx, app.ID)
+		if err != nil {
+			continue
+		}
+		parsed, problems := appmanifest.Parse(revision.Manifest)
+		if len(problems) != 0 {
+			continue
+		}
+		for callback, function := range parsed.Functions {
+			functions = append(functions, domain.AppFunction{
+				AppID: app.ID, AppName: app.Name, CallbackID: callback,
+				Title: function.Title, Description: function.Description,
+			})
+		}
+	}
+	sort.Slice(functions, func(left, right int) bool {
+		if functions[left].AppID != functions[right].AppID {
+			return functions[left].AppID < functions[right].AppID
+		}
+		return functions[left].CallbackID < functions[right].CallbackID
+	})
+	return functions, nil
+}
+
 func (m Messages) ListWorkspaceApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.InstalledApp, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return nil, err

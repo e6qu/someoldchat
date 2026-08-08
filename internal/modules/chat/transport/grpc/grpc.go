@@ -11554,6 +11554,47 @@ func (r Remote) ListDeveloperApps(ctx context.Context, workspaceID domain.Worksp
 	return result, nil
 }
 
+func (r Remote) AdminFunctions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.AppFunction, error) {
+	out, err := r.apps.AdminFunctions(ctx, &chatv1.AppListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoAppFunctions(out.GetFunctions()), nil
+}
+
+func encodeProtoAppFunction(value domain.AppFunction) *chatv1.AppFunction {
+	return &chatv1.AppFunction{
+		AppId: string(value.AppID), AppName: value.AppName, CallbackId: value.CallbackID,
+		Title: value.Title, Description: value.Description,
+	}
+}
+
+func decodeProtoAppFunction(value *chatv1.AppFunction) domain.AppFunction {
+	if value == nil {
+		return domain.AppFunction{}
+	}
+	return domain.AppFunction{
+		AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), CallbackID: value.GetCallbackId(),
+		Title: value.GetTitle(), Description: value.GetDescription(),
+	}
+}
+
+func encodeProtoAppFunctions(values []domain.AppFunction) []*chatv1.AppFunction {
+	functions := make([]*chatv1.AppFunction, 0, len(values))
+	for _, value := range values {
+		functions = append(functions, encodeProtoAppFunction(value))
+	}
+	return functions
+}
+
+func decodeProtoAppFunctions(values []*chatv1.AppFunction) []domain.AppFunction {
+	functions := make([]domain.AppFunction, 0, len(values))
+	for _, value := range values {
+		functions = append(functions, decodeProtoAppFunction(value))
+	}
+	return functions
+}
+
 func (r Remote) ListWorkspaceApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.InstalledApp, error) {
 	out, err := r.apps.ListWorkspaceApps(ctx, &chatv1.AppListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -11744,6 +11785,14 @@ func (s *Server) ListDeveloperApps(ctx context.Context, input *chatv1.AppListReq
 		result.Apps = append(result.Apps, encodeProtoDeveloperApp(app))
 	}
 	return result, nil
+}
+
+func (s *Server) AdminFunctions(ctx context.Context, input *chatv1.AppListRequest) (*chatv1.AppFunctionListResponse, error) {
+	functions, err := s.implementation.AdminFunctions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppFunctionListResponse{Functions: encodeProtoAppFunctions(functions)}, nil
 }
 
 func (s *Server) ListWorkspaceApps(ctx context.Context, input *chatv1.AppListRequest) (*chatv1.InstalledAppListResponse, error) {

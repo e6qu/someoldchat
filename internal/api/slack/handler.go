@@ -185,6 +185,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
 	mux.HandleFunc("POST /api/admin.apps.uninstall", h.adminAppsUninstall)
 	mux.HandleFunc("POST /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
+	mux.HandleFunc("GET /api/admin.functions.list", h.adminFunctionsList)
+	mux.HandleFunc("POST /api/admin.functions.list", h.adminFunctionsList)
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
@@ -2994,6 +2996,33 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.functions.list reports the functions the installed apps declare. A
+// function lives in a manifest, so the read parses the manifests.
+func (h Handler) adminFunctionsList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	functions, err := h.Messages.AdminFunctions(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "not_an_admin"))
+		return
+	}
+	payload := make([]map[string]any, 0, len(functions))
+	for _, function := range functions {
+		payload = append(payload, map[string]any{
+			"app_id": string(function.AppID), "app_name": function.AppName,
+			"callback_id": function.CallbackID, "title": function.Title,
+			"description": function.Description, "type": "app",
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "functions": payload,
+		"response_metadata": map[string]any{"next_cursor": ""},
+	})
 }
 
 // admin.apps.requests.cancel withdraws a request nobody has decided.

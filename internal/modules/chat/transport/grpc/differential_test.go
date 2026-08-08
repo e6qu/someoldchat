@@ -774,6 +774,24 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// admin.functions.list reads the manifests of the installed apps,
+			// because a function exists in a manifest and nowhere else.
+			name: "an administrator lists the functions the installed apps declare",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				functions, err := chat.AdminFunctions(ctx, "T1", "UA")
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(functions))
+				for _, function := range functions {
+					listed = append(listed, string(function.AppID)+":"+function.CallbackID+":"+function.Title)
+				}
+				_, memberErr := chat.AdminFunctions(ctx, "T1", "U1")
+				return []any{listed, memberErr != nil}, nil
+			},
+		},
+		{
 			// A member withdraws an app request. Cancelling records that nobody
 			// decided it, which is a third state beside approved and
 			// restricted.

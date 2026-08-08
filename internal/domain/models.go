@@ -2274,6 +2274,15 @@ type AppManifestSnapshot struct {
 // InstalledApp is the user-facing, non-secret projection of an app installed
 // in one workspace. It deliberately excludes developer credentials and the raw
 // manifest from the process boundary.
+// AppFunction is one function an installed app declares in its manifest.
+type AppFunction struct {
+	AppID       AppID
+	AppName     string
+	CallbackID  string
+	Title       string
+	Description string
+}
+
 type InstalledApp struct {
 	ID                  AppID
 	Name                string

@@ -377,8 +377,17 @@ func conversionCases() map[string]conversionCase {
 		},
 		"ExternalTeam":     {sample: &domain.ExternalTeam{}, through: throughInfallible(encodeProtoExternalTeam, decodeProtoExternalTeam)},
 		"ExternalTeamPage": {sample: &domain.ExternalTeamPage{Teams: []domain.ExternalTeam{{}}}, through: throughInfallible(encodeProtoExternalTeamPage, decodeProtoExternalTeamPage)},
-		"CanvasGrant":      {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
-		"ListGrant":        {sample: &domain.ListAccess{}, through: throughInfallible(encodeProtoListGrant, decodeProtoListGrant)},
+		"AppFunction":      {sample: &domain.AppFunction{}, through: throughInfallible(encodeProtoAppFunction, decodeProtoAppFunction)},
+		"AppFunctions": {
+			sample: &appFunctionsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				value := filled.(*appFunctionsRoundTrip)
+				wire := &chatv1.AppFunctionListResponse{Functions: encodeProtoAppFunctions(value.Functions)}
+				return &appFunctionsRoundTrip{Functions: decodeProtoAppFunctions(wire.GetFunctions())}, wire, nil
+			},
+		},
+		"CanvasGrant": {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
+		"ListGrant":   {sample: &domain.ListAccess{}, through: throughInfallible(encodeProtoListGrant, decodeProtoListGrant)},
 		"ListGrants": {
 			sample: &listGrantsRoundTrip{},
 			through: func(t *testing.T, filled any) (any, proto.Message, error) {
@@ -691,6 +700,10 @@ type typingSignalsRoundTrip struct {
 // would read as a session opened before the workspace existed.
 type workspaceSessionsRoundTrip struct {
 	Sessions []domain.WorkspaceSession
+}
+
+type appFunctionsRoundTrip struct {
+	Functions []domain.AppFunction
 }
 
 type canvasGrantsRoundTrip struct {

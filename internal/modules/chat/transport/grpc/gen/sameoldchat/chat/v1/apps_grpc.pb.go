@@ -28,6 +28,7 @@ const (
 	AppsService_DeleteDeveloperApp_FullMethodName            = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
 	AppsService_ListDeveloperApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
 	AppsService_ListWorkspaceApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
+	AppsService_AdminFunctions_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AdminFunctions"
 	AppsService_PutAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
 	AppsService_GetAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
 	AppsService_QueryAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
@@ -53,6 +54,7 @@ type AppsServiceClient interface {
 	DeleteDeveloperApp(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	ListDeveloperApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*AppListResponse, error)
 	ListWorkspaceApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*InstalledAppListResponse, error)
+	AdminFunctions(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*AppFunctionListResponse, error)
 	PutAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	QueryAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
@@ -157,6 +159,16 @@ func (c *appsServiceClient) ListWorkspaceApps(ctx context.Context, in *AppListRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InstalledAppListResponse)
 	err := c.cc.Invoke(ctx, AppsService_ListWorkspaceApps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminFunctions(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*AppFunctionListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppFunctionListResponse)
+	err := c.cc.Invoke(ctx, AppsService_AdminFunctions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +288,7 @@ type AppsServiceServer interface {
 	DeleteDeveloperApp(context.Context, *AppManifestRequest) (*AppMutationResponse, error)
 	ListDeveloperApps(context.Context, *AppListRequest) (*AppListResponse, error)
 	ListWorkspaceApps(context.Context, *AppListRequest) (*InstalledAppListResponse, error)
+	AdminFunctions(context.Context, *AppListRequest) (*AppFunctionListResponse, error)
 	PutAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	QueryAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
@@ -321,6 +334,9 @@ func (UnimplementedAppsServiceServer) ListDeveloperApps(context.Context, *AppLis
 }
 func (UnimplementedAppsServiceServer) ListWorkspaceApps(context.Context, *AppListRequest) (*InstalledAppListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListWorkspaceApps not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminFunctions(context.Context, *AppListRequest) (*AppFunctionListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminFunctions not implemented")
 }
 func (UnimplementedAppsServiceServer) PutAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PutAppDatastoreItems not implemented")
@@ -530,6 +546,24 @@ func _AppsService_ListWorkspaceApps_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AppsServiceServer).ListWorkspaceApps(ctx, req.(*AppListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminFunctions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminFunctions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminFunctions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminFunctions(ctx, req.(*AppListRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -756,6 +790,10 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorkspaceApps",
 			Handler:    _AppsService_ListWorkspaceApps_Handler,
+		},
+		{
+			MethodName: "AdminFunctions",
+			Handler:    _AppsService_AdminFunctions_Handler,
 		},
 		{
 			MethodName: "PutAppDatastoreItems",

@@ -127,6 +127,18 @@ message InstalledApp {
   string bot_user_id = 8;
 }
 
+message AppFunction {
+  string app_id = 1;
+  string app_name = 2;
+  string callback_id = 3;
+  string title = 4;
+  string description = 5;
+}
+
+message AppFunctionListResponse {
+  repeated AppFunction functions = 1;
+}
+
 message InstalledAppListResponse {
   repeated InstalledApp apps = 1;
 }
@@ -197,6 +209,7 @@ service AppsService {
   rpc DeleteDeveloperApp(AppManifestRequest) returns (AppMutationResponse);
   rpc ListDeveloperApps(AppListRequest) returns (AppListResponse);
   rpc ListWorkspaceApps(AppListRequest) returns (InstalledAppListResponse);
+  rpc AdminFunctions(AppListRequest) returns (AppFunctionListResponse);
   rpc PutAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc GetAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc QueryAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);

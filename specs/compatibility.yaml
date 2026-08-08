@@ -1163,7 +1163,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.unlinkObjects/
   - method: admin.functions.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.list/
   - method: admin.functions.permissions.lookup

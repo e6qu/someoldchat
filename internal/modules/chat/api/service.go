@@ -27,6 +27,7 @@ type Service interface {
 	DeleteDeveloperApp(context.Context, string, domain.AppID) error
 	ListDeveloperApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.App, error)
 	ListWorkspaceApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.InstalledApp, error)
+	AdminFunctions(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.AppFunction, error)
 	PutAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string, bool) ([]string, error)
 	GetAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) ([]string, error)
 	QueryAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.AppDatastoreQuery) (domain.AppDatastoreQueryPage, error)

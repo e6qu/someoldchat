@@ -120,6 +120,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/admin.conversations.bulkDelete", auth.ScopeAdminConversationsWrite},
 		{http.MethodPost, "/api/admin.apps.uninstall", auth.ScopeAdminAppsWrite},
 		{http.MethodPost, "/api/admin.apps.requests.cancel", auth.ScopeAdminAppsWrite},
+		{http.MethodPost, "/api/admin.functions.list", auth.ScopeAdminAppsRead},
 		{http.MethodPost, "/api/admin.workflows.search", auth.ScopeAdminWorkflowsRead},
 		{http.MethodPost, "/api/admin.workflows.unpublish", auth.ScopeAdminWorkflowsWrite},
 		{http.MethodPost, "/api/admin.workflows.collaborators.add", auth.ScopeAdminWorkflowsWrite},
