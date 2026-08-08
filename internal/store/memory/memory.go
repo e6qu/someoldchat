@@ -119,6 +119,16 @@ type Store struct {
 	canvasAccess                  map[string]domain.CanvasAccess
 	canvasRevisions               map[domain.CanvasID][]domain.CanvasRevision
 	canvasComments                map[domain.CanvasCommentID]domain.CanvasComment
+	roleAssignments               map[string]domain.RoleAssignment
+	authPolicyEntities            map[string]domain.AuthPolicyEntity
+	sessionSettings               map[string]domain.SessionSettings
+	barriers                      map[domain.BarrierID]domain.InformationBarrier
+	appConfigs                    map[string]domain.AppConfig
+	aiExcludedConversations       map[domain.ConversationID]struct{}
+	conversationObjects           map[string]domain.LinkedObject
+	appActivities                 []domain.AppActivity
+	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
+	externalAuthTokens            map[string]domain.ExternalAuthToken
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -196,7 +206,124 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), sharedInvites: make(map[domain.SharedInviteID]domain.SharedInvite), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), retentionPolicies: make(map[domain.WorkspaceID]domain.RetentionPolicy), conversationRetention: make(map[domain.ConversationID]domain.ConversationRetention), retentionSweptAt: make(map[domain.ConversationID]time.Time), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), assistantThreads: make(map[string]domain.AssistantThread), typing: make(map[string]domain.TypingSignal), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess), canvasRevisions: make(map[domain.CanvasID][]domain.CanvasRevision), canvasComments: make(map[domain.CanvasCommentID]domain.CanvasComment)}
+	// One field per line, and TestNewInitialisesEveryMap holds it: this used to
+	// be a single 103-field literal, and a map field added to Store but not
+	// here compiles and panics on the first write to it.
+	return &Store{
+		lists:                         make(map[domain.ListID]domain.List),
+		listItems:                     make(map[domain.ListID]map[domain.ListItemID]domain.ListItem),
+		listAccess:                    make(map[string]domain.ListAccess),
+		listDownloads:                 make(map[domain.ListDownloadID]domain.ListDownload),
+		fileShares:                    make(map[domain.FileID][]domain.ConversationID),
+		externalUploads:               make(map[domain.ExternalUploadID]domain.ExternalUpload),
+		incomingWebhooks:              make(map[domain.IncomingWebhookID]domain.IncomingWebhook),
+		appDatastoreItems:             make(map[string]domain.AppDatastoreItem),
+		appInstallations:              make(map[string]domain.AppInstallation),
+		apps:                          make(map[domain.AppID]domain.App),
+		appManifestRevisions:          make(map[domain.AppID][]domain.AppManifestRevision),
+		appTriggers:                   make(map[string]domain.AppTrigger),
+		appResponseURLs:               make(map[string]domain.AppResponseURL),
+		appConfigurationTokens:        make(map[string]domain.AppConfigurationToken),
+		appConfigurationRefreshTokens: make(map[string]string),
+		openidRefreshTokens:           make(map[string]domain.OpenIDRefreshToken),
+		workspaces:                    make(map[domain.WorkspaceID]domain.Workspace),
+		members:                       make(map[string]domain.WorkspaceMembership),
+		users:                         make(map[domain.UserID]domain.User),
+		userExpirations:               make(map[domain.UserID]time.Time),
+		conversations:                 make(map[domain.ConversationID]domain.Conversation),
+		conversationPrefs:             make(map[domain.ConversationID]domain.ConversationPrefs),
+		conversationAccess:            make(map[domain.ConversationID][]domain.UserGroupID),
+		conversationTeams:             make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}),
+		sharedInvites:                 make(map[domain.SharedInviteID]domain.SharedInvite),
+		conversationOrg:               make(map[domain.ConversationID]bool),
+		closedDirects:                 make(map[string]struct{}),
+		inviteRequests:                make(map[domain.InviteRequestID]domain.InviteRequest),
+		appApprovals:                  make(map[domain.AppID]domain.AppApproval),
+		permissionRequests:            make(map[domain.AppRequestID]domain.AppPermissionRequest),
+		views:                         make(map[domain.ViewID]domain.View),
+		workflowSteps:                 make(map[domain.WorkflowStepID]domain.WorkflowStep),
+		workflows:                     make(map[domain.WorkflowID]domain.WorkflowDefinition),
+		workflowRevisions:             make(map[domain.WorkflowID][]domain.WorkflowRevision),
+		workflowTriggers:              make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger),
+		workflowEventCursor:           make(map[domain.WorkspaceID]uint64),
+		workflowRuns:                  make(map[domain.WorkflowRunID]domain.WorkflowRun),
+		automationPermissions:         make(map[string]domain.AutomationPermission),
+		featuredWorkflows:             make(map[domain.ConversationID][]domain.FeaturedWorkflow),
+		dialogs:                       make(map[domain.DialogID]domain.Dialog),
+		bots:                          make(map[domain.BotID]domain.Bot),
+		migrations:                    make(map[string]domain.UserMigration),
+		oauthClients:                  make(map[string]domain.OAuthClient),
+		oauthCodes:                    make(map[string]memoryOAuthCode),
+		oauthRefreshGrants:            make(map[string]domain.OAuthRefreshGrant),
+		rtmConnections:                make(map[string]domain.RTMConnection),
+		socketConnections:             make(map[string]domain.SocketModeConnection),
+		socketConnectionActive:        make(map[string]bool),
+		socketResponses:               make(map[string]domain.SocketModeResponse),
+		socketInteractions:            make(map[string]domain.SocketModeInteraction),
+		socketCursors:                 make(map[domain.AppID]uint64),
+		appEventCursors:               make(map[string]memoryAppEventCursor),
+		memberships:                   make(map[domain.ConversationID]map[domain.UserID]struct{}),
+		tokens:                        make(map[string]domain.TokenRecord),
+		appTokens:                     make(map[string]domain.AppTokenRecord),
+		sessions:                      make(map[string]domain.SessionRecord),
+		oidcLogoutTokens:              make(map[string]time.Time),
+		authMethods:                   make(map[string]domain.AuthMethod),
+		externalIdentities:            make(map[string]domain.ExternalIdentity),
+		messages:                      make(map[domain.ConversationID][]domain.Message),
+		outboxLeases:                  make(map[uint64]memoryLease),
+		delivered:                     make(map[uint64]bool),
+		idempotency:                   make(map[string]domain.MessageID),
+		retentionPolicies:             make(map[domain.WorkspaceID]domain.RetentionPolicy),
+		conversationRetention:         make(map[domain.ConversationID]domain.ConversationRetention),
+		retentionSweptAt:              make(map[domain.ConversationID]time.Time),
+		nextAttempt:                   make(map[uint64]time.Time),
+		readCursors:                   make(map[string]domain.ReadCursor),
+		workspaceNotificationPrefs:    make(map[string]domain.WorkspaceNotificationPreferences),
+		conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences),
+		threadFollows:                 make(map[string]bool),
+		assistantThreads:              make(map[string]domain.AssistantThread),
+		typing:                        make(map[string]domain.TypingSignal),
+		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
+		activityPreferences:           make(map[string]domain.ActivityPreferences),
+		reactions:                     make(map[domain.MessageID]map[string]domain.Reaction),
+		pins:                          make(map[domain.MessageID]map[domain.UserID]domain.Pin),
+		files:                         make(map[domain.FileID]domain.File),
+		fileComments:                  make(map[domain.FileCommentID]domain.FileComment),
+		remoteFiles:                   make(map[domain.FileID]domain.RemoteFile),
+		remoteFileShares:              make(map[domain.FileID][]domain.ConversationID),
+		dnd:                           make(map[domain.UserID]domain.DoNotDisturb),
+		stars:                         make(map[domain.UserID]map[domain.MessageID]domain.Star),
+		savedItems:                    make(map[domain.SavedItemID]domain.SavedItem),
+		reminders:                     make(map[domain.ReminderID]domain.Reminder),
+		laterReminders:                make(map[domain.LaterReminderID]domain.LaterReminder),
+		laterReminderLeases:           make(map[domain.LaterReminderID]memoryLease),
+		laterReminderNextAttempt:      make(map[domain.LaterReminderID]time.Time),
+		scheduled:                     make(map[domain.ScheduledMessageID]domain.ScheduledMessage),
+		scheduledLeases:               make(map[domain.ScheduledMessageID]memoryLease),
+		scheduledDelivered:            make(map[domain.ScheduledMessageID]bool),
+		scheduledNextAttempt:          make(map[domain.ScheduledMessageID]time.Time),
+		drafts:                        make(map[string]domain.Draft),
+		userGroups:                    make(map[domain.UserGroupID]domain.UserGroup),
+		calls:                         make(map[domain.CallID]domain.Call),
+		emojis:                        make(map[string]domain.CustomEmoji),
+		bookmarks:                     make(map[domain.BookmarkID]domain.Bookmark),
+		canvases:                      make(map[domain.CanvasID]domain.Canvas),
+		canvasAccess:                  make(map[string]domain.CanvasAccess),
+		canvasRevisions:               make(map[domain.CanvasID][]domain.CanvasRevision),
+		canvasComments:                make(map[domain.CanvasCommentID]domain.CanvasComment),
+		roleAssignments:               make(map[string]domain.RoleAssignment),
+		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
+		sessionSettings:               make(map[string]domain.SessionSettings),
+		barriers:                      make(map[domain.BarrierID]domain.InformationBarrier),
+		appConfigs:                    make(map[string]domain.AppConfig),
+		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
+		conversationObjects:           make(map[string]domain.LinkedObject),
+		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
+		externalAuthTokens:            make(map[string]domain.ExternalAuthToken),
+		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
+		appBotTokens:                  make(map[string]string),
+		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
+	}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -915,7 +1042,7 @@ func (s *Store) SeedToken(_ context.Context, token string, record domain.TokenRe
 		return nil
 	}
 	record.Scopes = domain.NormalizeScopes(record.Scopes)
-	if strings.TrimSpace(record.TokenType) == "" {
+	if strings.TrimSpace(string(record.TokenType)) == "" {
 		record.TokenType = "user"
 	}
 	s.tokens[key] = record
@@ -947,11 +1074,11 @@ func (s *Store) ListAppAuthorizations(_ context.Context, appID domain.AppID, wor
 		if token.AppID != appID || token.WorkspaceID != workspaceID || token.Revoked || (!token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now)) {
 			continue
 		}
-		tokenType := strings.TrimSpace(token.TokenType)
+		tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 		if tokenType != "bot" && tokenType != "user" {
 			continue
 		}
-		key := tokenType + "\x00" + string(token.UserID) + "\x00" + string(token.BotID)
+		key := string(tokenType) + "\x00" + string(token.UserID) + "\x00" + string(token.BotID)
 		value := byKey[key]
 		value.AppID = appID
 		value.WorkspaceID = workspaceID
@@ -1037,7 +1164,7 @@ func (s *Store) RevokeToken(_ context.Context, token string) error {
 	// application token produces one — a personal token has no app to tell —
 	// and re-revoking announces nothing.
 	if record.AppID != "" && !alreadyRevoked {
-		event, err := events.TokensRevokedEvent(record.WorkspaceID, record.UserID, record.AppID, record.TokenType, time.Now().UTC())
+		event, err := events.TokensRevokedEvent(record.WorkspaceID, record.UserID, record.AppID, string(record.TokenType), time.Now().UTC())
 		if err != nil {
 			return err
 		}
@@ -1361,7 +1488,7 @@ func (s *Store) SetWorkspaceDefaultChannels(_ context.Context, id domain.Workspa
 	}
 	for _, channel := range channels {
 		conversation, exists := s.conversations[channel]
-		if !exists || conversation.WorkspaceID != id || conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+		if !exists || conversation.WorkspaceID != id || conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 			return domain.Workspace{}, store.ErrNotFound
 		}
 	}
@@ -1548,9 +1675,6 @@ func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.Workspace
 func (s *Store) CreateScheduledStatus(_ context.Context, value domain.ScheduledStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.scheduledStatuses == nil {
-		s.scheduledStatuses = make(map[domain.ScheduledStatusID]domain.ScheduledStatus)
-	}
 	if _, exists := s.scheduledStatuses[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
@@ -1711,6 +1835,735 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) SetAppIcon(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, iconURL string, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, exists := s.apps[appID]
+	if !exists || app.Deleted {
+		return store.ErrNotFound
+	}
+	app.IconURL, app.UpdatedAt = iconURL, event.CreatedAt
+	s.apps[appID] = app
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetExternalAuthToken(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, id string) (domain.ExternalAuthToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.externalAuthTokens[id]
+	if !exists || value.WorkspaceID != workspace || value.AppID != appID {
+		return domain.ExternalAuthToken{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) SetExternalAuthToken(_ context.Context, value domain.ExternalAuthToken, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.apps[value.AppID]; !exists {
+		return store.ErrNotFound
+	}
+	s.externalAuthTokens[value.ID] = value
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteExternalAuthToken(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, id string, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for key, value := range s.externalAuthTokens {
+		if value.WorkspaceID != workspace || value.AppID != appID {
+			continue
+		}
+		if id != "" && key != id {
+			continue
+		}
+		delete(s.externalAuthTokens, key)
+		removed++
+	}
+	if removed == 0 {
+		return store.ErrNotFound
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetAnomalyAllowList(_ context.Context, workspace domain.WorkspaceID) (domain.AnomalyAllowList, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if value, exists := s.anomalyAllowLists[workspace]; exists {
+		return value, nil
+	}
+	return domain.AnomalyAllowList{WorkspaceID: workspace, IPAddresses: []string{}, Reasons: []string{}}, nil
+}
+
+func (s *Store) SetAnomalyAllowList(_ context.Context, value domain.AnomalyAllowList, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[value.WorkspaceID]; !exists {
+		return store.ErrNotFound
+	}
+	s.anomalyAllowLists[value.WorkspaceID] = value
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) AnalyticsRows(_ context.Context, workspace domain.WorkspaceID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
+	if !kind.Valid() {
+		return nil, store.InvalidArgument("unknown analytics kind")
+	}
+	start := day.UTC().Truncate(24 * time.Hour)
+	end := start.Add(24 * time.Hour)
+	date := domain.AnalyticsDate(start)
+	within := func(instant time.Time) bool {
+		return !instant.Before(start) && instant.Before(end)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.AnalyticsRow, 0)
+	if kind == domain.AnalyticsMember {
+		for id, user := range s.users {
+			if user.WorkspaceID != workspace {
+				continue
+			}
+			row := domain.AnalyticsRow{Kind: kind, Date: date, EntityID: string(id), Name: user.Name}
+			for conversationID, messages := range s.messages {
+				if conversation, exists := s.conversations[conversationID]; !exists || conversation.WorkspaceID != workspace {
+					continue
+				}
+				for _, message := range messages {
+					if message.AuthorID == id && !message.Deleted && within(message.CreatedAt) {
+						row.MessagesPosted++
+					}
+				}
+			}
+			for _, reactions := range s.reactions {
+				for _, reaction := range reactions {
+					if reaction.UserID == id && within(reaction.CreatedAt) {
+						row.ReactionsAdded++
+					}
+				}
+			}
+			row.IsActive = s.members[string(workspace)+"\x00"+string(id)].Active
+			values = append(values, row)
+		}
+		sort.Slice(values, func(left, right int) bool { return values[left].EntityID < values[right].EntityID })
+		return values, nil
+	}
+	for id, conversation := range s.conversations {
+		if conversation.WorkspaceID != workspace || conversation.IsDirectOrGroup() {
+			continue
+		}
+		if kind == domain.AnalyticsPublicChannel && conversation.PrivateFlag() {
+			continue
+		}
+		row := domain.AnalyticsRow{
+			Kind: kind, Date: date, EntityID: string(id), Name: conversation.Name,
+			MemberCount: len(s.memberships[id]), IsActive: true,
+		}
+		for _, message := range s.messages[id] {
+			if !message.Deleted && within(message.CreatedAt) {
+				row.MessagesPosted++
+			}
+		}
+		values = append(values, row)
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].EntityID < values[right].EntityID })
+	return values, nil
+}
+
+func (s *Store) RecordAppActivity(_ context.Context, activity domain.AppActivity) error {
+	if activity.AppID == "" || !activity.Level.Valid() {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.apps[activity.AppID]; !exists {
+		return store.ErrNotFound
+	}
+	activity.ID = int64(len(s.appActivities)) + 1
+	s.appActivities = append(s.appActivities, activity)
+	return nil
+}
+
+func (s *Store) ListAppActivities(_ context.Context, workspace domain.WorkspaceID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	afterID := int64(0)
+	if after != "" {
+		afterID, err = strconv.ParseInt(after, 10, 64)
+		if err != nil {
+			return domain.AppActivityPage{}, domain.ErrInvalidCursor
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	activities := make([]domain.AppActivity, 0, request.Limit+1)
+	for _, activity := range s.appActivities {
+		if activity.WorkspaceID != workspace || activity.ID <= afterID {
+			continue
+		}
+		if filter.AppID != "" && activity.AppID != filter.AppID {
+			continue
+		}
+		if filter.ComponentType != "" && activity.ComponentType != filter.ComponentType {
+			continue
+		}
+		if filter.ComponentID != "" && activity.ComponentID != filter.ComponentID {
+			continue
+		}
+		if filter.Source != "" && activity.Source != filter.Source {
+			continue
+		}
+		if filter.TraceID != "" && activity.TraceID != filter.TraceID {
+			continue
+		}
+		if !filter.MinCreatedAt.IsZero() && activity.CreatedAt.Before(filter.MinCreatedAt) {
+			continue
+		}
+		if !filter.MaxCreatedAt.IsZero() && activity.CreatedAt.After(filter.MaxCreatedAt) {
+			continue
+		}
+		if filter.MinLevel.Valid() && activity.Level.Rank() < filter.MinLevel.Rank() {
+			continue
+		}
+		activities = append(activities, activity)
+		if len(activities) > request.Limit {
+			break
+		}
+	}
+	hasMore := len(activities) > request.Limit
+	if hasMore {
+		activities = activities[:request.Limit]
+	}
+	page := domain.AppActivityPage{Activities: activities, HasMore: hasMore}
+	if hasMore && len(activities) > 0 {
+		page.NextCursor, err = domain.NewListCursor(strconv.FormatInt(activities[len(activities)-1].ID, 10))
+	}
+	return page, err
+}
+
+func (s *Store) SetConversationsExcludedFromAI(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, excluded bool, event events.Event) error {
+	if len(ids) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		if err := s.checkConversationOwnerLocked(workspace, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		if excluded {
+			s.aiExcludedConversations[id] = struct{}{}
+			continue
+		}
+		delete(s.aiExcludedConversations, id)
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ConversationsExcludedFromAI(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID) ([]domain.ConversationID, error) {
+	if len(ids) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	excluded := make([]domain.ConversationID, 0, len(ids))
+	for _, id := range ids {
+		conversation, exists := s.conversations[id]
+		if !exists || conversation.WorkspaceID != workspace {
+			continue
+		}
+		if _, out := s.aiExcludedConversations[id]; out {
+			excluded = append(excluded, id)
+		}
+	}
+	sort.Slice(excluded, func(left, right int) bool { return excluded[left] < excluded[right] })
+	return excluded, nil
+}
+
+func (s *Store) MoveConversations(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, target domain.WorkspaceID, event events.Event) error {
+	if len(ids) == 0 || target == "" {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[target]; !exists {
+		return store.ErrNotFound
+	}
+	for _, id := range ids {
+		if err := s.checkConversationOwnerLocked(workspace, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		conversation := s.conversations[id]
+		conversation.WorkspaceID = target
+		s.conversations[id] = conversation
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) LookupConversations(_ context.Context, workspace domain.WorkspaceID, lookup domain.ConversationLookup, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ConversationPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ConversationPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	workspaces := map[domain.WorkspaceID]struct{}{}
+	if len(lookup.TeamIDs) == 0 {
+		workspaces[workspace] = struct{}{}
+	}
+	for _, id := range lookup.TeamIDs {
+		workspaces[id] = struct{}{}
+	}
+	conversations := make([]domain.Conversation, 0, len(s.conversations))
+	for id, conversation := range s.conversations {
+		if _, held := workspaces[conversation.WorkspaceID]; !held {
+			continue
+		}
+		if conversation.IsDirectOrGroup() || string(id) <= after {
+			continue
+		}
+		if !lookup.LastMessageActivityBefore.IsZero() && s.conversationHasMessageSinceLocked(id, lookup.LastMessageActivityBefore) {
+			continue
+		}
+		if lookup.MaxMemberCount > 0 && len(s.memberships[id]) > lookup.MaxMemberCount {
+			continue
+		}
+		conversations = append(conversations, conversation)
+	}
+	sort.Slice(conversations, func(left, right int) bool { return conversations[left].ID < conversations[right].ID })
+	hasMore := len(conversations) > request.Limit
+	if hasMore {
+		conversations = conversations[:request.Limit]
+	}
+	page := domain.ConversationPage{Conversations: conversations, HasMore: hasMore}
+	if hasMore && len(conversations) > 0 {
+		page.NextCursor, err = domain.NewListCursor(string(conversations[len(conversations)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) conversationHasMessageSinceLocked(id domain.ConversationID, instant time.Time) bool {
+	for _, message := range s.messages[id] {
+		if !message.CreatedAt.Before(instant) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) LinkConversationObjects(_ context.Context, objects []domain.LinkedObject, event events.Event) error {
+	if len(objects) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, object := range objects {
+		if err := s.checkConversationOwnerLocked(object.WorkspaceID, object.ConversationID); err != nil {
+			return err
+		}
+	}
+	for _, object := range objects {
+		key := conversationObjectKey(object)
+		if _, exists := s.conversationObjects[key]; !exists {
+			s.conversationObjects[key] = object
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) UnlinkConversationObjects(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, event events.Event) error {
+	if len(ids) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		if err := s.checkConversationOwnerLocked(workspace, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		for key, object := range s.conversationObjects {
+			if object.ConversationID == id && object.WorkspaceID == workspace {
+				delete(s.conversationObjects, key)
+			}
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListConversationObjects(_ context.Context, workspace domain.WorkspaceID, id domain.ConversationID) ([]domain.LinkedObject, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	objects := make([]domain.LinkedObject, 0)
+	for _, object := range s.conversationObjects {
+		if object.ConversationID == id && object.WorkspaceID == workspace {
+			objects = append(objects, object)
+		}
+	}
+	sort.Slice(objects, func(left, right int) bool {
+		if objects[left].OrgID != objects[right].OrgID {
+			return objects[left].OrgID < objects[right].OrgID
+		}
+		return objects[left].RecordID < objects[right].RecordID
+	})
+	return objects, nil
+}
+
+func (s *Store) checkConversationOwnerLocked(workspace domain.WorkspaceID, id domain.ConversationID) error {
+	conversation, exists := s.conversations[id]
+	if !exists || conversation.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func conversationObjectKey(object domain.LinkedObject) string {
+	return string(object.ConversationID) + "\x00" + object.OrgID + "\x00" + object.RecordID
+}
+
+func (s *Store) SetAppConfig(_ context.Context, config domain.AppConfig, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.apps[config.AppID]; !exists {
+		return store.ErrNotFound
+	}
+	s.appConfigs[appConfigKey(config.WorkspaceID, config.AppID)] = config
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListAppConfigs(_ context.Context, workspace domain.WorkspaceID, apps []domain.AppID) ([]domain.AppConfig, error) {
+	if len(apps) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	configs := make([]domain.AppConfig, 0, len(apps))
+	for _, app := range apps {
+		if config, exists := s.appConfigs[appConfigKey(workspace, app)]; exists {
+			configs = append(configs, config)
+		}
+	}
+	sort.Slice(configs, func(left, right int) bool { return configs[left].AppID < configs[right].AppID })
+	return configs, nil
+}
+
+func (s *Store) ClearAppApproval(_ context.Context, workspace domain.WorkspaceID, app domain.AppID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.appApprovals[app]
+	if !exists || current.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.appApprovals, app)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func appConfigKey(workspace domain.WorkspaceID, app domain.AppID) string {
+	return string(workspace) + "\x00" + string(app)
+}
+
+func (s *Store) CreateBarrier(_ context.Context, barrier domain.InformationBarrier, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.barriers[barrier.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if _, exists := s.userGroups[barrier.PrimaryGroupID]; !exists {
+		return store.ErrNotFound
+	}
+	s.barriers[barrier.ID] = barrier
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) UpdateBarrier(_ context.Context, barrier domain.InformationBarrier, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.barriers[barrier.ID]
+	if !exists || current.WorkspaceID != barrier.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.userGroups[barrier.PrimaryGroupID]; !exists {
+		return store.ErrNotFound
+	}
+	s.barriers[barrier.ID] = barrier
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteBarrier(_ context.Context, workspace domain.WorkspaceID, id domain.BarrierID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.barriers[id]
+	if !exists || current.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.barriers, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListBarriers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.InformationBarrierPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	barriers := make([]domain.InformationBarrier, 0, len(s.barriers))
+	for _, barrier := range s.barriers {
+		if barrier.WorkspaceID != workspace || string(barrier.ID) <= after {
+			continue
+		}
+		barriers = append(barriers, barrier)
+	}
+	sort.Slice(barriers, func(left, right int) bool { return barriers[left].ID < barriers[right].ID })
+	hasMore := len(barriers) > request.Limit
+	if hasMore {
+		barriers = barriers[:request.Limit]
+	}
+	page := domain.InformationBarrierPage{Barriers: barriers, HasMore: hasMore}
+	if hasMore && len(barriers) > 0 {
+		page.NextCursor, err = domain.NewListCursor(string(barriers[len(barriers)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) SetSessionSettings(_ context.Context, settings []domain.SessionSettings, event events.Event) error {
+	if len(settings) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, value := range settings {
+		if _, exists := s.users[value.UserID]; !exists {
+			return store.ErrNotFound
+		}
+		s.sessionSettings[sessionSettingsKey(value.WorkspaceID, value.UserID)] = value
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ClearSessionSettings(_ context.Context, workspace domain.WorkspaceID, users []domain.UserID, event events.Event) error {
+	if len(users) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, user := range users {
+		delete(s.sessionSettings, sessionSettingsKey(workspace, user))
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListSessionSettings(_ context.Context, workspace domain.WorkspaceID, users []domain.UserID) ([]domain.SessionSettings, error) {
+	if len(users) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	settings := make([]domain.SessionSettings, 0, len(users))
+	for _, user := range users {
+		if value, exists := s.sessionSettings[sessionSettingsKey(workspace, user)]; exists {
+			settings = append(settings, value)
+		}
+	}
+	sort.Slice(settings, func(left, right int) bool { return settings[left].UserID < settings[right].UserID })
+	return settings, nil
+}
+
+func sessionSettingsKey(workspace domain.WorkspaceID, user domain.UserID) string {
+	return string(workspace) + "\x00" + string(user)
+}
+
+func (s *Store) SetAuthPolicyEntities(_ context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {
+	return s.changeAuthPolicyEntities(entities, event, true)
+}
+
+func (s *Store) DeleteAuthPolicyEntities(_ context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {
+	return s.changeAuthPolicyEntities(entities, event, false)
+}
+
+func (s *Store) changeAuthPolicyEntities(entities []domain.AuthPolicyEntity, event events.Event, adding bool) error {
+	if len(entities) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entity := range entities {
+		key := authPolicyEntityKey(entity)
+		if !adding {
+			delete(s.authPolicyEntities, key)
+			continue
+		}
+		// The SQL profile carries a foreign key from entity_id to users, so an
+		// entity the workspace does not hold is refused there. Refusing it here
+		// too keeps the two profiles answering the same thing.
+		if _, exists := s.users[domain.UserID(entity.EntityID)]; !exists {
+			return store.ErrNotFound
+		}
+		if _, exists := s.authPolicyEntities[key]; !exists {
+			s.authPolicyEntities[key] = entity
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListAuthPolicyEntities(_ context.Context, workspace domain.WorkspaceID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, request domain.PageRequest) (domain.AuthPolicyEntityPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entities := make([]domain.AuthPolicyEntity, 0, len(s.authPolicyEntities))
+	total := 0
+	for _, entity := range s.authPolicyEntities {
+		if entity.WorkspaceID != workspace || entity.Policy != policy || entity.EntityType != kind {
+			continue
+		}
+		total++
+		if entity.EntityID <= after {
+			continue
+		}
+		entities = append(entities, entity)
+	}
+	sort.Slice(entities, func(left, right int) bool { return entities[left].EntityID < entities[right].EntityID })
+	hasMore := len(entities) > request.Limit
+	if hasMore {
+		entities = entities[:request.Limit]
+	}
+	page := domain.AuthPolicyEntityPage{Entities: entities, TotalCount: total, HasMore: hasMore}
+	if hasMore && len(entities) > 0 {
+		page.NextCursor, err = domain.NewListCursor(entities[len(entities)-1].EntityID)
+	}
+	return page, err
+}
+
+func authPolicyEntityKey(entity domain.AuthPolicyEntity) string {
+	return string(entity.Policy) + "\x00" + string(entity.EntityType) + "\x00" + entity.EntityID
+}
+
+func (s *Store) SetRoleAssignments(_ context.Context, assignments []domain.RoleAssignment, event events.Event) error {
+	if len(assignments) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, assignment := range assignments {
+		// role_assignments.user_id carries a foreign key to users on the SQL
+		// profile; the same refusal belongs here.
+		if _, exists := s.users[assignment.UserID]; !exists {
+			return store.ErrNotFound
+		}
+		key := roleAssignmentKey(assignment)
+		if _, exists := s.roleAssignments[key]; exists {
+			continue
+		}
+		s.roleAssignments[key] = assignment
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteRoleAssignments(_ context.Context, assignments []domain.RoleAssignment, event events.Event) error {
+	if len(assignments) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, assignment := range assignments {
+		delete(s.roleAssignments, roleAssignmentKey(assignment))
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListRoleAssignments(_ context.Context, workspace domain.WorkspaceID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	after, err := domain.DecodePairCursor(request.Cursor)
+	if err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	assignments := make([]domain.RoleAssignment, 0, len(s.roleAssignments))
+	for _, assignment := range s.roleAssignments {
+		if assignment.WorkspaceID != workspace || assignment.RoleID != roleID {
+			continue
+		}
+		if after.First != "" && (string(assignment.UserID) < after.First ||
+			(string(assignment.UserID) == after.First && assignment.EntityID <= after.Second)) {
+			continue
+		}
+		assignments = append(assignments, assignment)
+	}
+	sort.Slice(assignments, func(left, right int) bool {
+		if assignments[left].UserID != assignments[right].UserID {
+			return assignments[left].UserID < assignments[right].UserID
+		}
+		return assignments[left].EntityID < assignments[right].EntityID
+	})
+	hasMore := len(assignments) > request.Limit
+	if hasMore {
+		assignments = assignments[:request.Limit]
+	}
+	page := domain.RoleAssignmentPage{Assignments: assignments, HasMore: hasMore}
+	if hasMore && len(assignments) > 0 {
+		last := assignments[len(assignments)-1]
+		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
+	}
+	return page, err
+}
+
+func roleAssignmentKey(assignment domain.RoleAssignment) string {
+	return assignment.RoleID + "\x00" + assignment.EntityID + "\x00" + string(assignment.UserID)
+}
+
+func (s *Store) GetUserExpiration(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.users[user]
+	if !exists || value.WorkspaceID != workspace {
+		return time.Time{}, store.ErrNotFound
+	}
+	return s.userExpirations[user], nil
 }
 
 func (s *Store) SetUserExpiration(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expiration time.Time, event events.Event) error {
@@ -2056,7 +2909,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.PrivateFlag() || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
+	if !conversation.IsDirectOrGroup() || len(members) < 2 {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
@@ -2762,7 +3615,7 @@ func (s *Store) AcceptInviteRequest(_ context.Context, acceptance domain.InviteR
 }
 
 func validAppApprovalStatus(status domain.AppApprovalStatus) bool {
-	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted
+	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted || status == domain.AppApprovalCancelled
 }
 
 func appInstallationKey(appID domain.AppID, workspaceID domain.WorkspaceID) string {
@@ -2800,9 +3653,6 @@ func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.appBotTokens == nil {
-		s.appBotTokens = make(map[string]string)
-	}
 	s.appBotTokens[string(appID)+"\x00"+string(workspace)] = tokenCiphertext
 	s.outbox = append(s.outbox, written...)
 	return nil
@@ -3481,7 +4331,7 @@ func (s *Store) DueScheduledWorkflowTriggers(_ context.Context, workspace domain
 	defer s.mu.RUnlock()
 	values := make([]domain.WorkflowTrigger, 0)
 	for _, value := range s.workflowTriggers {
-		if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || value.NextRunAt.IsZero() || value.NextRunAt.After(now) {
+		if value.Type != domain.WorkflowTriggerScheduled || !value.Enabled || value.NextRunAt.IsZero() || value.NextRunAt.After(now) {
 			continue
 		}
 		if workspace != "" && value.WorkspaceID != workspace {
@@ -3506,7 +4356,7 @@ func (s *Store) EarliestScheduledWorkflowTrigger(_ context.Context, workspace do
 	defer s.mu.RUnlock()
 	var earliest time.Time
 	for _, value := range s.workflowTriggers {
-		if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || value.NextRunAt.IsZero() {
+		if value.Type != domain.WorkflowTriggerScheduled || !value.Enabled || value.NextRunAt.IsZero() {
 			continue
 		}
 		if workspace != "" && value.WorkspaceID != workspace {
@@ -3529,7 +4379,7 @@ func (s *Store) CompleteScheduledWorkflowTrigger(_ context.Context, workspace do
 	if !exists || value.WorkspaceID != workspace {
 		return false, nil
 	}
-	if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || !value.NextRunAt.Equal(expectedNextRunAt) {
+	if value.Type != domain.WorkflowTriggerScheduled || !value.Enabled || !value.NextRunAt.Equal(expectedNextRunAt) {
 		return false, nil
 	}
 	value.NextRunAt = nextRunAt.UTC()
@@ -4345,9 +5195,9 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
-	tokenType := strings.TrimSpace(token.TokenType)
+	tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 	if tokenType == "" {
-		tokenType = "user"
+		tokenType = domain.TokenUser
 	}
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
@@ -4355,7 +5205,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if len(tokenScopes) == 0 {
 		tokenScopes = grant.Scopes
 	}
-	if tokenType == "bot" {
+	if tokenType == domain.TokenBot {
 		if grant.BotID == "" || grant.BotUserID == "" {
 			return domain.OAuthToken{}, store.ErrNotFound
 		}
@@ -4368,11 +5218,11 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	userScopes := domain.NormalizeScopes(grant.UserScopes)
-	if tokenType == "bot" && len(userScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
+	if tokenType == domain.TokenBot && len(userScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
 		return domain.OAuthToken{}, store.InvalidArgument("missing installer user access token")
 	}
 	rotating := strings.TrimSpace(token.RefreshToken) != ""
-	if rotating && (!token.ExpiresAt.After(now) || token.TokenType == "bot" && len(userScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
+	if rotating && (!token.ExpiresAt.After(now) || token.TokenType.IsBot() && len(userScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
 		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
 	}
 	accessHash := domain.HashToken(accessToken)
@@ -4383,7 +5233,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 		if _, exists := s.oauthRefreshGrants[domain.HashToken(token.RefreshToken)]; exists {
 			return domain.OAuthToken{}, store.ErrAlreadyExists
 		}
-		if tokenType == "bot" && len(userScopes) != 0 {
+		if tokenType == domain.TokenBot && len(userScopes) != 0 {
 			if _, exists := s.oauthRefreshGrants[domain.HashToken(token.AuthedUserRefreshToken)]; exists {
 				return domain.OAuthToken{}, store.ErrAlreadyExists
 			}
@@ -4410,7 +5260,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 		refreshHash := domain.HashToken(token.RefreshToken)
 		s.oauthRefreshGrants[refreshHash] = domain.OAuthRefreshGrant{TokenHash: refreshHash, AccessTokenHash: accessHash, ClientID: clientID, AppID: client.AppID, WorkspaceID: grant.WorkspaceID, UserID: subjectID, InstallerID: grant.UserID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType, AccessExpiresAt: token.ExpiresAt, CreatedAt: now}
 	}
-	if tokenType == "bot" && len(userScopes) != 0 {
+	if tokenType == domain.TokenBot && len(userScopes) != 0 {
 		userAccessHash := domain.HashToken(token.AuthedUserAccessToken)
 		s.tokens[userAccessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, AppID: client.AppID, Scopes: append([]string(nil), userScopes...), TokenType: "user", ExpiresAt: token.AuthedUserExpiresAt}
 		if rotating {
@@ -4492,7 +5342,7 @@ func (s *Store) ExchangeOAuthAccessToken(_ context.Context, clientID, secret, ol
 	now := time.Now().UTC()
 	oldAccessHash := domain.HashToken(strings.TrimSpace(oldAccessToken))
 	record, exists := s.tokens[oldAccessHash]
-	if !exists || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || record.TokenType != "bot" && record.TokenType != "user" || strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
+	if !exists || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || !record.TokenType.Valid() || strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	for _, grant := range s.oauthRefreshGrants {
@@ -5008,7 +5858,7 @@ func (s *Store) setConversationVisibility(conversation domain.ConversationID, pr
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if value.IsDirectOrGroup() || value.PrivateFlag() == private {
+	if value.IsDirectOrGroup() || (value.Kind == domain.ConversationTypePrivate) == private {
 		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
 	value.Kind = domain.ConversationTypePublic
@@ -6128,7 +6978,7 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				continue
 			}
 		}
-		if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+		if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 			_, viewerMember := s.memberships[conversation.ID][user]
 			_, subjectMember := s.memberships[conversation.ID][memberUser]
 			if !viewerMember || !subjectMember {
@@ -6469,7 +7319,7 @@ func (s *Store) canViewActivitySourceLocked(workspace domain.WorkspaceID, user d
 	if !ok || !membership.Active {
 		return false
 	}
-	private := conversation.PrivateFlag() || conversation.IsDirectOrGroup()
+	private := conversation.Kind.OrPublic() != domain.ConversationTypePublic
 	if !private {
 		return conversation.WorkspaceID == workspace
 	}
@@ -8617,9 +9467,6 @@ func (s *Store) RecordSearchHistory(_ context.Context, value domain.SearchHistor
 	value.SearchedAt = value.SearchedAt.UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.searchHistory == nil {
-		s.searchHistory = make(map[string]domain.SearchHistoryEntry)
-	}
 	s.searchHistory[searchHistoryKey(value.WorkspaceID, value.UserID, value.Query)] = value
 	owned := make([]domain.SearchHistoryEntry, 0)
 	for _, candidate := range s.searchHistory {

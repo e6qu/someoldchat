@@ -2,6 +2,7 @@ package slack
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -205,7 +206,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -1988,6 +1989,741 @@ func TestAdminUsersSetExpirationAcceptsEpochAndClear(t *testing.T) {
 	}
 }
 
+// TestAdminRoleAssignments holds the admin.roles.* contract: a role is written
+// over named entities, read back in one order, and taken away again. A member
+// outside the workspace is refused before any row lands, so a request that
+// names one leaves nothing behind.
+func TestAdminRoleAssignments(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if added := call(t, http.MethodPost, "admin.roles.addAssignments", "role_id=Rl0A&entity_ids=C2,C1&user_ids=U1,U2"); added["ok"] != true {
+		t.Fatalf("added=%v", added)
+	}
+	listed := call(t, http.MethodPost, "admin.roles.listAssignments", "role_id=Rl0A")
+	assignments, ok := listed["role_assignments"].([]any)
+	if !ok || len(assignments) != 4 {
+		t.Fatalf("listed=%v", listed)
+	}
+	order := make([]string, 0, len(assignments))
+	for _, value := range assignments {
+		assignment, isMap := value.(map[string]any)
+		if !isMap {
+			t.Fatalf("assignment=%v", value)
+		}
+		order = append(order, assignment["user_id"].(string)+"/"+assignment["entity_id"].(string))
+	}
+	if want := "U1/C1,U1/C2,U2/C1,U2/C2"; strings.Join(order, ",") != want {
+		t.Fatalf("order=%v want=%v", order, want)
+	}
+	// A member the workspace does not hold is refused, and the refusal is not
+	// a partial write: the rows the same request named must not appear.
+	stranger := call(t, http.MethodPost, "admin.roles.addAssignments", "role_id=Rl0B&entity_ids=C1&user_ids=U1,U-nobody")
+	if stranger["error"] != "user_not_found" {
+		t.Fatalf("stranger=%v", stranger)
+	}
+	if empty := call(t, http.MethodPost, "admin.roles.listAssignments", "role_id=Rl0B"); len(empty["role_assignments"].([]any)) != 0 {
+		t.Fatalf("partial write survived: %v", empty)
+	}
+	for _, body := range []string{"entity_ids=C1&user_ids=U1", "role_id=Rl0A&user_ids=U1", "role_id=Rl0A&entity_ids=C1"} {
+		if refused := call(t, http.MethodPost, "admin.roles.addAssignments", body); refused["error"] != "invalid_arg_name" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if removed := call(t, http.MethodPost, "admin.roles.removeAssignments", "role_id=Rl0A&entity_ids=C1&user_ids=U1,U2"); removed["ok"] != true {
+		t.Fatalf("removed=%v", removed)
+	}
+	left := call(t, http.MethodGet, "admin.roles.listAssignments?role_id=Rl0A", "")
+	if remaining := left["role_assignments"].([]any); len(remaining) != 2 {
+		t.Fatalf("left=%v", left)
+	}
+}
+
+// TestAdminAuthPolicyEntities holds the admin.auth.policy.* contract. Slack
+// names one policy and one entity type; anything else is refused rather than
+// stored as a policy nothing enforces.
+func TestAdminAuthPolicyEntities(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if assigned := call(t, http.MethodPost, "admin.auth.policy.assignEntities", "policy_name=email_password&entity_type=USER&entity_ids=U2,U1"); assigned["ok"] != true {
+		t.Fatalf("assigned=%v", assigned)
+	}
+	listed := call(t, http.MethodPost, "admin.auth.policy.getEntities", "policy_name=email_password&entity_type=USER")
+	entities, ok := listed["entities"].([]any)
+	if !ok || len(entities) != 2 || listed["entity_total_count"].(float64) != 2 {
+		t.Fatalf("listed=%v", listed)
+	}
+	if first := entities[0].(map[string]any); first["entity_id"] != "U1" || first["entity_type"] != "USER" {
+		t.Fatalf("first=%v", first)
+	}
+	// A lower-case entity type means the member too: Slack documents the upper
+	// case, and refusing the other spelling would be a difference nobody asked
+	// for.
+	if folded := call(t, http.MethodPost, "admin.auth.policy.getEntities", "policy_name=email_password&entity_type=user"); len(folded["entities"].([]any)) != 2 {
+		t.Fatalf("folded=%v", folded)
+	}
+	for _, body := range []string{
+		"policy_name=sso_only&entity_type=USER&entity_ids=U1",
+		"policy_name=email_password&entity_type=CHANNEL&entity_ids=U1",
+		"policy_name=email_password&entity_type=USER",
+		"entity_type=USER&entity_ids=U1",
+	} {
+		if refused := call(t, http.MethodPost, "admin.auth.policy.assignEntities", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if stranger := call(t, http.MethodPost, "admin.auth.policy.assignEntities", "policy_name=email_password&entity_type=USER&entity_ids=U-nobody"); stranger["error"] != "user_not_found" {
+		t.Fatalf("stranger=%v", stranger)
+	}
+	if removed := call(t, http.MethodPost, "admin.auth.policy.removeEntities", "policy_name=email_password&entity_type=USER&entity_ids=U1"); removed["ok"] != true {
+		t.Fatalf("removed=%v", removed)
+	}
+	left := call(t, http.MethodGet, "admin.auth.policy.getEntities?policy_name=email_password&entity_type=USER", "")
+	if len(left["entities"].([]any)) != 1 || left["entity_total_count"].(float64) != 1 {
+		t.Fatalf("left=%v", left)
+	}
+}
+
+// TestAdminUsersSessionSettings holds the admin.users.session.*Settings
+// contract. A member on the workspace default is named in no_settings_applied
+// and not reported with zeros, and a duration under eight hours is refused.
+func TestAdminUsersSessionSettings(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if set := call(t, http.MethodPost, "admin.users.session.setSettings", "user_ids=U1&duration=43200&mobile_device_check=true"); set["ok"] != true {
+		t.Fatalf("set=%v", set)
+	}
+	read := call(t, http.MethodPost, "admin.users.session.getSettings", "user_ids=U1,U2")
+	applied, ok := read["session_settings"].([]any)
+	if !ok || len(applied) != 1 {
+		t.Fatalf("read=%v", read)
+	}
+	first := applied[0].(map[string]any)
+	if first["user_id"] != "U1" || first["duration"].(float64) != 43200 || first["mobile_device_check"] != true || first["desktop_app_browser_quit"] != false {
+		t.Fatalf("first=%v", first)
+	}
+	if none := read["no_settings_applied"].([]any); len(none) != 1 || none[0] != "U2" {
+		t.Fatalf("no_settings_applied=%v", read["no_settings_applied"])
+	}
+	// Eight hours is the floor, so 28800 stands and 28799 is refused rather
+	// than rounded up to it.
+	if floor := call(t, http.MethodPost, "admin.users.session.setSettings", "user_ids=U1&duration=28800"); floor["ok"] != true {
+		t.Fatalf("floor=%v", floor)
+	}
+	for _, body := range []string{"user_ids=U1&duration=28799", "user_ids=U1&duration=-1", "user_ids=U1&duration=soon", "duration=43200"} {
+		if refused := call(t, http.MethodPost, "admin.users.session.setSettings", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if stranger := call(t, http.MethodPost, "admin.users.session.setSettings", "user_ids=U-nobody&duration=43200"); stranger["error"] != "user_not_found" {
+		t.Fatalf("stranger=%v", stranger)
+	}
+	if cleared := call(t, http.MethodPost, "admin.users.session.clearSettings", "user_ids=U1"); cleared["ok"] != true {
+		t.Fatalf("cleared=%v", cleared)
+	}
+	after := call(t, http.MethodGet, "admin.users.session.getSettings?user_ids=U1", "")
+	if len(after["session_settings"].([]any)) != 0 || len(after["no_settings_applied"].([]any)) != 1 {
+		t.Fatalf("after=%v", after)
+	}
+}
+
+// TestAdminBarriers holds the admin.barriers.* contract. A barrier restricts
+// every subject Slack declares or it is refused: one that stopped direct
+// messages but not calls would read as a barrier and leave a way through.
+func TestAdminBarriers(t *testing.T) {
+	handler, target := testHandlerWithStore()
+	now := time.Now().UTC()
+	for _, group := range []domain.UserGroup{
+		{ID: "S1", WorkspaceID: "T1", Name: "Traders", Handle: "traders", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+		{ID: "S2", WorkspaceID: "T1", Name: "Analysts", Handle: "analysts", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := target.CreateUserGroup(context.Background(), group, events.Event{ID: domain.EventID("evt-group-" + string(group.ID)), WorkspaceID: "T1", ActorID: "U1", Topic: "subteam.created", Payload: string(group.ID), CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	created := call(t, http.MethodPost, "admin.barriers.create", "primary_usergroup_id=S1&barriered_from_usergroup_ids=S2&restricted_subjects=im,mpim,call")
+	barrier, ok := created["barrier"].(map[string]any)
+	if !ok || barrier["primary_usergroup"] != "S1" {
+		t.Fatalf("created=%v", created)
+	}
+	id := barrier["id"].(string)
+	if subjects := barrier["restricted_subjects"].([]any); len(subjects) != 3 {
+		t.Fatalf("restricted_subjects=%v", subjects)
+	}
+	for _, body := range []string{
+		"primary_usergroup_id=S1&barriered_from_usergroup_ids=S2&restricted_subjects=im",
+		"primary_usergroup_id=S1&barriered_from_usergroup_ids=S2&restricted_subjects=im,mpim,call,email",
+		"primary_usergroup_id=S1&restricted_subjects=im,mpim,call",
+		"barriered_from_usergroup_ids=S2&restricted_subjects=im,mpim,call",
+	} {
+		if refused := call(t, http.MethodPost, "admin.barriers.create", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	// A group barriered from itself is not a barrier.
+	if itself := call(t, http.MethodPost, "admin.barriers.create", "primary_usergroup_id=S1&barriered_from_usergroup_ids=S1&restricted_subjects=im,mpim,call"); itself["ok"] == true {
+		t.Fatalf("a group was barriered from itself: %v", itself)
+	}
+	updated := call(t, http.MethodPost, "admin.barriers.update", "barrier_id="+id+"&primary_usergroup_id=S2&barriered_from_usergroup_ids=S1&restricted_subjects=im,mpim,call")
+	if updated["barrier"].(map[string]any)["primary_usergroup"] != "S2" {
+		t.Fatalf("updated=%v", updated)
+	}
+	if missing := call(t, http.MethodPost, "admin.barriers.update", "barrier_id=B-nobody&primary_usergroup_id=S2&barriered_from_usergroup_ids=S1&restricted_subjects=im,mpim,call"); missing["error"] != "barrier_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+	listed := call(t, http.MethodGet, "admin.barriers.list", "")
+	if len(listed["barriers"].([]any)) != 1 {
+		t.Fatalf("listed=%v", listed)
+	}
+	if deleted := call(t, http.MethodPost, "admin.barriers.delete", "barrier_id="+id); deleted["ok"] != true {
+		t.Fatalf("deleted=%v", deleted)
+	}
+	if again := call(t, http.MethodPost, "admin.barriers.delete", "barrier_id="+id); again["error"] != "barrier_not_found" {
+		t.Fatalf("again=%v", again)
+	}
+	if left := call(t, http.MethodPost, "admin.barriers.list", ""); len(left["barriers"].([]any)) != 0 {
+		t.Fatalf("left=%v", left)
+	}
+}
+
+// TestAdminAutomationPermissions holds the admin.*.permissions.* contract. A
+// resource nobody has set a permission on answers the default rather than being
+// left out of the reply, and named_entities naming nobody is refused: it would
+// read as a narrowing and open the resource to no one.
+func TestAdminAutomationPermissions(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	defaults := call(t, http.MethodPost, "admin.functions.permissions.lookup", "function_ids=Fn1,Fn2")
+	permissions, ok := defaults["permissions"].(map[string]any)
+	if !ok || len(permissions) != 2 {
+		t.Fatalf("defaults=%v", defaults)
+	}
+	if permissions["Fn1"].(map[string]any)["permission_type"] != "everyone" {
+		t.Fatalf("Fn1 default=%v", permissions["Fn1"])
+	}
+	set := call(t, http.MethodPost, "admin.functions.permissions.set", "function_id=Fn1&visibility=named_entities&user_ids=U1")
+	if set["permission_type"] != "named_entities" || len(set["user_ids"].([]any)) != 1 {
+		t.Fatalf("set=%v", set)
+	}
+	after := call(t, http.MethodGet, "admin.functions.permissions.lookup?function_ids=Fn1,Fn2", "")
+	stored := after["permissions"].(map[string]any)
+	if stored["Fn1"].(map[string]any)["permission_type"] != "named_entities" ||
+		stored["Fn2"].(map[string]any)["permission_type"] != "everyone" {
+		t.Fatalf("after=%v", after)
+	}
+	for _, body := range []string{
+		"function_id=Fn1&visibility=named_entities",
+		"function_id=Fn1&visibility=system",
+		"function_id=Fn1&visibility=nobody",
+		"visibility=everyone",
+	} {
+		if refused := call(t, http.MethodPost, "admin.functions.permissions.set", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if workflows := call(t, http.MethodPost, "admin.workflows.permissions.lookup", "workflow_ids=Wf1"); len(workflows["permissions"].(map[string]any)) != 1 {
+		t.Fatalf("workflows=%v", workflows)
+	}
+	if triggerSet := call(t, http.MethodPost, "admin.workflows.triggers.types.permissions.set", "trigger_type_id=scheduled&visibility=app_collaborators"); triggerSet["permission_type"] != "app_collaborators" {
+		t.Fatalf("triggerSet=%v", triggerSet)
+	}
+	if triggerRead := call(t, http.MethodGet, "admin.workflows.triggers.types.permissions.lookup?trigger_type_id=scheduled", ""); triggerRead["permission_type"] != "app_collaborators" {
+		t.Fatalf("triggerRead=%v", triggerRead)
+	}
+	// A trigger type the platform does not run cannot carry a permission.
+	for _, endpoint := range []string{"admin.workflows.triggers.types.permissions.set", "admin.workflows.triggers.types.permissions.lookup"} {
+		if refused := call(t, http.MethodPost, endpoint, "trigger_type_id=sundial&visibility=everyone"); refused["error"] != "invalid_arguments" {
+			t.Fatalf("%s refused=%v", endpoint, refused)
+		}
+	}
+}
+
+// TestAdminAppConfigAndResolution holds the admin.apps.config.* and
+// admin.apps.clearResolution contract. An app nobody has configured answers the
+// defaults, and clearing a resolution leaves the app undecided rather than
+// restricted.
+func TestAdminAppConfigAndResolution(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	defaults := call(t, http.MethodPost, "admin.apps.config.lookup", "app_ids=A1")
+	configs, ok := defaults["configs"].([]any)
+	if !ok || len(configs) != 1 {
+		t.Fatalf("defaults=%v", defaults)
+	}
+	first := configs[0].(map[string]any)
+	if first["workflow_auth_strategy"] != "builder_choice" {
+		t.Fatalf("default strategy=%v", first)
+	}
+	if urls := first["domain_restrictions"].(map[string]any)["urls"].([]any); len(urls) != 0 {
+		t.Fatalf("default urls=%v", urls)
+	}
+	set := call(t, http.MethodPost, "admin.apps.config.set",
+		`app_id=A1&workflow_auth_strategy=end_user_only&domain_restrictions={"urls":["https://example.invalid"],"emails":["ops@example.invalid"]}`)
+	config := set["config"].(map[string]any)
+	if config["workflow_auth_strategy"] != "end_user_only" {
+		t.Fatalf("set=%v", set)
+	}
+	after := call(t, http.MethodGet, "admin.apps.config.lookup?app_ids=A1", "")
+	stored := after["configs"].([]any)[0].(map[string]any)
+	restrictions := stored["domain_restrictions"].(map[string]any)
+	if len(restrictions["urls"].([]any)) != 1 || len(restrictions["emails"].([]any)) != 1 {
+		t.Fatalf("after=%v", after)
+	}
+	for _, body := range []string{
+		"app_id=A1&workflow_auth_strategy=whoever",
+		`app_id=A1&domain_restrictions={"urls":`,
+		"workflow_auth_strategy=end_user_only",
+	} {
+		if refused := call(t, http.MethodPost, "admin.apps.config.set", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	// Clearing a resolution leaves the app undecided, and clearing an undecided
+	// app is not found: undecided is not the same as restricted.
+	if cleared := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A1"); cleared["ok"] != true {
+		t.Fatalf("cleared=%v", cleared)
+	}
+	if again := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A1"); again["error"] != "app_not_found" {
+		t.Fatalf("again=%v", again)
+	}
+	if approved := call(t, http.MethodPost, "admin.apps.approve", "app_id=A1"); approved["ok"] != true {
+		t.Fatalf("approved=%v", approved)
+	}
+	if reCleared := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A1"); reCleared["ok"] != true {
+		t.Fatalf("reCleared=%v", reCleared)
+	}
+	if missing := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A-nobody"); missing["error"] != "app_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+}
+
+// TestAdminConversationAdministration holds the remaining
+// admin.conversations.* contract: the lookup, the two bulk settings and the
+// object links. A batch naming a channel that is not here changes nothing.
+func TestAdminConversationAdministration(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	everything := call(t, http.MethodPost, "admin.conversations.lookup", "")
+	channels, ok := everything["channels"].([]any)
+	if !ok || len(channels) == 0 {
+		t.Fatalf("a lookup naming no filter answered nothing: %v", everything)
+	}
+	// A member-count ceiling of zero is not a filter; it is the absence of one.
+	if unfiltered := call(t, http.MethodGet, "admin.conversations.lookup?max_member_count=0", ""); len(unfiltered["channels"].([]any)) != len(channels) {
+		t.Fatalf("a zero ceiling filtered: %v", unfiltered)
+	}
+	for _, body := range []string{"max_member_count=-1", "last_message_activity_before=-1", "last_message_activity_before=soon"} {
+		if refused := call(t, http.MethodPost, "admin.conversations.lookup", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if excluded := call(t, http.MethodPost, "admin.conversations.bulkSetExcludeFromSlackAi", "channel_ids=C1&exclude_from_slack_ai_value=true"); excluded["ok"] != true {
+		t.Fatalf("excluded=%v", excluded)
+	}
+	if missing := call(t, http.MethodPost, "admin.conversations.bulkSetExcludeFromSlackAi", "channel_ids=C1,C-nobody&exclude_from_slack_ai_value=true"); missing["error"] != "channel_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+	if linked := call(t, http.MethodPost, "admin.conversations.linkObjects", "channel=C1&salesforce_org_id=00D000&record_id=a01,a02"); linked["ok"] != true {
+		t.Fatalf("linked=%v", linked)
+	}
+	if unlinked := call(t, http.MethodPost, "admin.conversations.unlinkObjects", "channels=C1"); unlinked["ok"] != true {
+		t.Fatalf("unlinked=%v", unlinked)
+	}
+	made := call(t, http.MethodPost, "admin.conversations.createForObjects", "channel_name=record-channel&salesforce_org_id=00D000&object_id=a03")
+	if made["ok"] != true || made["channel_id"] == "" {
+		t.Fatalf("made=%v", made)
+	}
+	for _, body := range []string{"channel_name=other&salesforce_org_id=00D000", "salesforce_org_id=00D000&object_id=a04", "channel_name=other&object_id=a04"} {
+		if refused := call(t, http.MethodPost, "admin.conversations.createForObjects", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if noTarget := call(t, http.MethodPost, "admin.conversations.bulkMove", "channel_ids=C1"); noTarget["error"] != "invalid_arguments" {
+		t.Fatalf("noTarget=%v", noTarget)
+	}
+	if badTarget := call(t, http.MethodPost, "admin.conversations.bulkMove", "channel_ids=C1&target_team_id=T-nobody"); badTarget["error"] != "channel_not_found" {
+		t.Fatalf("badTarget=%v", badTarget)
+	}
+}
+
+// TestAppActivityLog holds the apps.activities.list and
+// admin.apps.activities.list contract. An app reads its own log from its
+// credential rather than from an argument, and a level the platform does not
+// emit is refused rather than ignored: ignoring it would answer every entry to
+// a caller that asked for a narrow set.
+func TestAppActivityLog(t *testing.T) {
+	handler, target := testHandlerWithStore()
+	now := time.Now().UTC()
+	for index, level := range []domain.ActivityLevel{domain.ActivityInfo, domain.ActivityError} {
+		if err := target.RecordAppActivity(context.Background(), domain.AppActivity{
+			AppID: "A1", WorkspaceID: "T1", ComponentType: "function", ComponentID: "triage",
+			Level: level, EventType: "function_execution", Source: "slack", Message: string(level),
+			TraceID: fmt.Sprintf("trace-%d", index), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	listed := call(t, http.MethodPost, "admin.apps.activities.list", "app_id=A1")
+	activities, ok := listed["activities"].([]any)
+	if !ok || len(activities) != 2 {
+		t.Fatalf("listed=%v", listed)
+	}
+	first := activities[0].(map[string]any)
+	if first["component_type"] != "function" || first["level"] != "info" || first["source"] != "slack" {
+		t.Fatalf("first=%v", first)
+	}
+	// warn and above is the error entry alone, though "error" sorts before
+	// "info" and "warn" by name.
+	errors := call(t, http.MethodGet, "admin.apps.activities.list?app_id=A1&min_log_level=warn", "")
+	if len(errors["activities"].([]any)) != 1 {
+		t.Fatalf("errors=%v", errors)
+	}
+	for _, body := range []string{"app_id=A1&min_log_level=shouted", "app_id=A1&min_date_created=soon", "app_id=A1&max_date_created=-1"} {
+		if refused := call(t, http.MethodPost, "admin.apps.activities.list", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if traced := call(t, http.MethodPost, "admin.apps.activities.list", "app_id=A1&trace_id=trace-1"); len(traced["activities"].([]any)) != 1 {
+		t.Fatalf("traced=%v", traced)
+	}
+	// The app's own read takes the app from the credential. Naming another app
+	// changes nothing, because an app that could name one could read its log.
+	own := call(t, http.MethodPost, "apps.activities.list", "app_id=A-somebody-else")
+	entries, ok := own["activities"].([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("own=%v", own)
+	}
+	for _, entry := range entries {
+		if entry.(map[string]any)["app_id"] != "A1" {
+			t.Fatalf("an app read another app's log: %v", entry)
+		}
+	}
+}
+
+// TestAdminAnalytics holds the admin.analytics.* contract. getFile answers a
+// gzipped stream of JSON lines, which is what Slack answers: the file is meant
+// to be piped to a store rather than parsed out of a JSON envelope.
+func TestAdminAnalytics(t *testing.T) {
+	handler := testHandler()
+	get := func(t *testing.T, endpoint, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		return response
+	}
+	decode := func(t *testing.T, response *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	file := get(t, "admin.analytics.getFile", "type=member&date=2023-11-14")
+	if got := file.Header().Get("Content-Type"); got != "application/gzip" {
+		t.Fatalf("content type=%q", got)
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(file.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("the stream is not gzip: %v", err)
+	}
+	lines := 0
+	decoder := json.NewDecoder(reader)
+	for {
+		var row map[string]any
+		if err := decoder.Decode(&row); err != nil {
+			break
+		}
+		if row["date"] != "2023-11-14" || row["user_id"] == nil {
+			t.Fatalf("row=%v", row)
+		}
+		lines++
+	}
+	if lines == 0 {
+		t.Fatal("a member file for a workspace with members held no lines")
+	}
+	// metadata_only describes the columns without reading anybody's day.
+	metadata := decode(t, get(t, "admin.analytics.getFile", "type=public_channel&metadata_only=true"))
+	fields, ok := metadata["fields"].([]any)
+	if !ok || len(fields) == 0 {
+		t.Fatalf("metadata=%v", metadata)
+	}
+	for _, body := range []string{"type=hourly", "type=member&date=14-11-2023", "date=2023-11-14"} {
+		if refused := decode(t, get(t, "admin.analytics.getFile", body)); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	activity := decode(t, get(t, "admin.analytics.messages.activity", "date=2023-11-14"))
+	if _, ok := activity["activity"].([]any); !ok || activity["ok"] != true {
+		t.Fatalf("activity=%v", activity)
+	}
+	if described := decode(t, get(t, "admin.analytics.messages.metadata", "")); len(described["fields"].([]any)) == 0 {
+		t.Fatalf("metadata=%v", described)
+	}
+}
+
+// TestAdminAuditBillingAndExports holds the audit allow list, the billing plan
+// and the two export requests. An empty allow list is the state a workspace
+// starts in, not a missing one, and an address without a reason is refused: an
+// exclusion nobody explained is one nobody can review later.
+func TestAdminAuditBillingAndExports(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	empty := call(t, http.MethodPost, "admin.audit.anomaly.allow.getItem", "")
+	item, ok := empty["anomaly_allow_updated_item"].(map[string]any)
+	if !ok || len(item["ips"].([]any)) != 0 {
+		t.Fatalf("empty=%v", empty)
+	}
+	updated := call(t, http.MethodPost, "admin.audit.anomaly.allow.updateItem", "ip_addresses=198.51.100.7,203.0.113.0/24&reasons=office")
+	stored := updated["anomaly_allow_updated_item"].(map[string]any)
+	if len(stored["ips"].([]any)) != 2 || len(stored["reasons"].([]any)) != 1 {
+		t.Fatalf("updated=%v", updated)
+	}
+	if read := call(t, http.MethodGet, "admin.audit.anomaly.allow.getItem", ""); len(read["anomaly_allow_updated_item"].(map[string]any)["ips"].([]any)) != 2 {
+		t.Fatalf("read=%v", read)
+	}
+	for _, body := range []string{"ip_addresses=198.51.100.7", "ip_addresses=the-office&reasons=office"} {
+		if refused := call(t, http.MethodPost, "admin.audit.anomaly.allow.updateItem", body); refused["ok"] == true {
+			t.Fatalf("body=%q was accepted: %v", body, refused)
+		}
+	}
+	if plan := call(t, http.MethodGet, "team.billing.info", ""); plan["ok"] != true {
+		t.Fatalf("plan=%v", plan)
+	}
+	if exported := call(t, http.MethodPost, "admin.users.unsupportedVersions.export", "date_end_of_support=1700000000"); exported["ok"] != true {
+		t.Fatalf("exported=%v", exported)
+	}
+	for _, body := range []string{"date_end_of_support=soon", "date_sessions_started=-1"} {
+		if refused := call(t, http.MethodPost, "admin.users.unsupportedVersions.export", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if noStep := call(t, http.MethodPost, "functions.workflows.steps.responses.export", "workflow_id=Wf1"); noStep["error"] != "invalid_arguments" {
+		t.Fatalf("noStep=%v", noStep)
+	}
+	if missing := call(t, http.MethodPost, "functions.workflows.steps.responses.export", "workflow_id=Wf-nobody&step_id=intake"); missing["ok"] == true {
+		t.Fatalf("an export was accepted for a workflow that is not here: %v", missing)
+	}
+}
+
+// TestAppCredentialsAndAssistantSearch holds apps.icon.set,
+// apps.auth.external.*, apps.user.connection.update and assistant.search.*. An
+// external credential's secret never reaches the caller, and the assistant's
+// context is the member's own search rather than a wider one.
+func TestAppCredentialsAndAssistantSearch(t *testing.T) {
+	handler, target := testHandlerWithStore()
+	now := time.Now().UTC()
+	if err := target.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
+		ID: "Et1", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
+		Ciphertext: "sealed", ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}, events.Event{ID: "evt-external", WorkspaceID: "T1", Topic: "app.external_token_set", Payload: "Et1", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if icon := call(t, http.MethodPost, "apps.icon.set", "app_id=A1&image_url=https://example.invalid/icon.png"); icon["ok"] != true {
+		t.Fatalf("icon=%v", icon)
+	}
+	for _, body := range []string{"app_id=A1&image_url=an icon", "app_id=A1", "image_url=https://example.invalid/icon.png"} {
+		if refused := call(t, http.MethodPost, "apps.icon.set", body); refused["ok"] == true {
+			t.Fatalf("body=%q was accepted: %v", body, refused)
+		}
+	}
+	external := call(t, http.MethodPost, "apps.auth.external.get", "external_token_id=Et1")
+	token, ok := external["external_token"].(map[string]any)
+	if !ok || token["external_token_id"] != "Et1" || token["provider_name"] != "example" {
+		t.Fatalf("external=%v", external)
+	}
+	// The secret is not in the reply under any name.
+	for name, value := range token {
+		if text, isText := value.(string); isText && strings.Contains(text, "sealed") {
+			t.Fatalf("the credential's secret reached the caller in %q", name)
+		}
+	}
+	if missing := call(t, http.MethodPost, "apps.auth.external.get", "external_token_id=Et-nobody"); missing["error"] != "token_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+	if unnamed := call(t, http.MethodPost, "apps.auth.external.get", ""); unnamed["error"] != "invalid_arguments" {
+		t.Fatalf("unnamed=%v", unnamed)
+	}
+	if revoked := call(t, http.MethodPost, "apps.auth.external.delete", "external_token_id=Et1"); revoked["ok"] != true {
+		t.Fatalf("revoked=%v", revoked)
+	}
+	if again := call(t, http.MethodPost, "apps.auth.external.delete", "external_token_id=Et1"); again["error"] != "token_not_found" {
+		t.Fatalf("again=%v", again)
+	}
+	if connection := call(t, http.MethodPost, "apps.user.connection.update", ""); connection["ok"] != true {
+		t.Fatalf("connection=%v", connection)
+	}
+	info := call(t, http.MethodGet, "assistant.search.info", "")
+	if info["enabled"] != true || len(info["searchable_sources"].([]any)) == 0 {
+		t.Fatalf("info=%v", info)
+	}
+	found := call(t, http.MethodPost, "assistant.search.context", "query=hello")
+	if _, ok := found["results"].(map[string]any)["messages"].([]any); !ok {
+		t.Fatalf("found=%v", found)
+	}
+	if empty := call(t, http.MethodPost, "assistant.search.context", "query=%20"); empty["error"] != "invalid_arguments" {
+		t.Fatalf("empty=%v", empty)
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))
@@ -3724,7 +4460,7 @@ func TestJoinPublicConversation(t *testing.T) {
 
 func TestJoinPublicConversationUsesCurrentTokenTypeScopes(t *testing.T) {
 	_, repository := testHandlerWithStore()
-	call := func(tokenType string, botID domain.BotID, scopes ...auth.Scope) string {
+	call := func(tokenType domain.TokenType, botID domain.BotID, scopes ...auth.Scope) string {
 		granted := make(map[auth.Scope]struct{}, len(scopes))
 		for _, scope := range scopes {
 			granted[scope] = struct{}{}

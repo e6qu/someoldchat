@@ -3681,6 +3681,178 @@ func (x *WorkflowStepVersionsResponse) GetStepsVersions() []*WorkflowStepVersion
 	return nil
 }
 
+type AdminPermissionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ResourceIds   []string               `protobuf:"bytes,3,rep,name=resource_ids,json=resourceIds,proto3" json:"resource_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminPermissionsRequest) Reset() {
+	*x = AdminPermissionsRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminPermissionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminPermissionsRequest) ProtoMessage() {}
+
+func (x *AdminPermissionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminPermissionsRequest.ProtoReflect.Descriptor instead.
+func (*AdminPermissionsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *AdminPermissionsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AdminPermissionsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AdminPermissionsRequest) GetResourceIds() []string {
+	if x != nil {
+		return x.ResourceIds
+	}
+	return nil
+}
+
+type AdminPermissionsResponse struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Permissions   []*AutomationPermission `protobuf:"bytes,1,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminPermissionsResponse) Reset() {
+	*x = AdminPermissionsResponse{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminPermissionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminPermissionsResponse) ProtoMessage() {}
+
+func (x *AdminPermissionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminPermissionsResponse.ProtoReflect.Descriptor instead.
+func (*AdminPermissionsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *AdminPermissionsResponse) GetPermissions() []*AutomationPermission {
+	if x != nil {
+		return x.Permissions
+	}
+	return nil
+}
+
+type AdminPermissionMutationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ResourceId    string                 `protobuf:"bytes,3,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	Permission    *AutomationPermission  `protobuf:"bytes,4,opt,name=permission,proto3" json:"permission,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminPermissionMutationRequest) Reset() {
+	*x = AdminPermissionMutationRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminPermissionMutationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminPermissionMutationRequest) ProtoMessage() {}
+
+func (x *AdminPermissionMutationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminPermissionMutationRequest.ProtoReflect.Descriptor instead.
+func (*AdminPermissionMutationRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *AdminPermissionMutationRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AdminPermissionMutationRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AdminPermissionMutationRequest) GetResourceId() string {
+	if x != nil {
+		return x.ResourceId
+	}
+	return ""
+}
+
+func (x *AdminPermissionMutationRequest) GetPermission() *AutomationPermission {
+	if x != nil {
+		return x.Permission
+	}
+	return nil
+}
+
 var File_sameoldchat_chat_v1_workflows_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
@@ -4016,7 +4188,21 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"is_deleted\x18\x04 \x01(\bR\tisDeleted\x128\n" +
 	"\x18workflow_version_created\x18\x05 \x01(\tR\x16workflowVersionCreated\"o\n" +
 	"\x1cWorkflowStepVersionsResponse\x12O\n" +
-	"\x0esteps_versions\x18\x01 \x03(\v2(.sameoldchat.chat.v1.WorkflowStepVersionR\rstepsVersions2\xfb#\n" +
+	"\x0esteps_versions\x18\x01 \x03(\v2(.sameoldchat.chat.v1.WorkflowStepVersionR\rstepsVersions\"x\n" +
+	"\x17AdminPermissionsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\fresource_ids\x18\x03 \x03(\tR\vresourceIds\"g\n" +
+	"\x18AdminPermissionsResponse\x12K\n" +
+	"\vpermissions\x18\x01 \x03(\v2).sameoldchat.chat.v1.AutomationPermissionR\vpermissions\"\xc8\x01\n" +
+	"\x1eAdminPermissionMutationRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
+	"\vresource_id\x18\x03 \x01(\tR\n" +
+	"resourceId\x12I\n" +
+	"\n" +
+	"permission\x18\x04 \x01(\v2).sameoldchat.chat.v1.AutomationPermissionR\n" +
+	"permission2\xe3(\n" +
 	"\x10WorkflowsService\x12l\n" +
 	"\rStepCompleted\x12(.sameoldchat.chat.v1.WorkflowStepRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12i\n" +
 	"\n" +
@@ -4051,7 +4237,12 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\x1dDispatchWorkflowEventTriggers\x121.sameoldchat.chat.v1.WorkflowEventDispatchRequest\x1a2.sameoldchat.chat.v1.WorkflowEventDispatchResponse\x12^\n" +
 	"\x0eGetWorkflowRun\x12*.sameoldchat.chat.v1.WorkflowRunGetRequest\x1a .sameoldchat.chat.v1.WorkflowRun\x12u\n" +
 	"\x10CompleteFunction\x12..sameoldchat.chat.v1.FunctionCompletionRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12r\n" +
-	"\x15GetFunctionPermission\x12..sameoldchat.chat.v1.FunctionPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12r\n" +
+	"\x15GetFunctionPermission\x12..sameoldchat.chat.v1.FunctionPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12w\n" +
+	"\x18AdminFunctionPermissions\x12,.sameoldchat.chat.v1.AdminPermissionsRequest\x1a-.sameoldchat.chat.v1.AdminPermissionsResponse\x12w\n" +
+	"\x18AdminWorkflowPermissions\x12,.sameoldchat.chat.v1.AdminPermissionsRequest\x1a-.sameoldchat.chat.v1.AdminPermissionsResponse\x12u\n" +
+	"\x1aAdminTriggerTypePermission\x12,.sameoldchat.chat.v1.AdminPermissionsRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12|\n" +
+	"\x1aAdminSetFunctionPermission\x123.sameoldchat.chat.v1.AdminPermissionMutationRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12\x7f\n" +
+	"\x1dAdminSetTriggerTypePermission\x123.sameoldchat.chat.v1.AdminPermissionMutationRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12r\n" +
 	"\x15SetFunctionPermission\x12..sameoldchat.chat.v1.FunctionPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12p\n" +
 	"\x14GetTriggerPermission\x12-.sameoldchat.chat.v1.TriggerPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12p\n" +
 	"\x14SetTriggerPermission\x12-.sameoldchat.chat.v1.TriggerPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12r\n" +
@@ -4073,7 +4264,7 @@ func file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_workflows_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
+var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_sameoldchat_chat_v1_workflows_proto_goTypes = []any{
 	(*WorkflowStepRequest)(nil),              // 0: sameoldchat.chat.v1.WorkflowStepRequest
 	(*WorkflowStepUpdateRequest)(nil),        // 1: sameoldchat.chat.v1.WorkflowStepUpdateRequest
@@ -4126,6 +4317,9 @@ var file_sameoldchat_chat_v1_workflows_proto_goTypes = []any{
 	(*FunctionWorkflowStepsRequest)(nil),     // 48: sameoldchat.chat.v1.FunctionWorkflowStepsRequest
 	(*WorkflowStepVersion)(nil),              // 49: sameoldchat.chat.v1.WorkflowStepVersion
 	(*WorkflowStepVersionsResponse)(nil),     // 50: sameoldchat.chat.v1.WorkflowStepVersionsResponse
+	(*AdminPermissionsRequest)(nil),          // 51: sameoldchat.chat.v1.AdminPermissionsRequest
+	(*AdminPermissionsResponse)(nil),         // 52: sameoldchat.chat.v1.AdminPermissionsResponse
+	(*AdminPermissionMutationRequest)(nil),   // 53: sameoldchat.chat.v1.AdminPermissionMutationRequest
 }
 var file_sameoldchat_chat_v1_workflows_proto_depIdxs = []int32{
 	3,  // 0: sameoldchat.chat.v1.WorkflowMutationRequest.workflow:type_name -> sameoldchat.chat.v1.WorkflowDefinition
@@ -4142,91 +4336,103 @@ var file_sameoldchat_chat_v1_workflows_proto_depIdxs = []int32{
 	41, // 11: sameoldchat.chat.v1.WorkflowPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
 	46, // 12: sameoldchat.chat.v1.FeaturedWorkflowsResponse.workflows:type_name -> sameoldchat.chat.v1.FeaturedWorkflow
 	49, // 13: sameoldchat.chat.v1.WorkflowStepVersionsResponse.steps_versions:type_name -> sameoldchat.chat.v1.WorkflowStepVersion
-	0,  // 14: sameoldchat.chat.v1.WorkflowsService.StepCompleted:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
-	0,  // 15: sameoldchat.chat.v1.WorkflowsService.StepFailed:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
-	1,  // 16: sameoldchat.chat.v1.WorkflowsService.UpdateStep:input_type -> sameoldchat.chat.v1.WorkflowStepUpdateRequest
-	4,  // 17: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowMutationRequest
-	5,  // 18: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
-	6,  // 19: sameoldchat.chat.v1.WorkflowsService.DiscardWorkflowStagedChanges:input_type -> sameoldchat.chat.v1.WorkflowDiscardStagedRequest
-	19, // 20: sameoldchat.chat.v1.WorkflowsService.WorkflowStepChanges:input_type -> sameoldchat.chat.v1.WorkflowStepChangesRequest
-	5,  // 21: sameoldchat.chat.v1.WorkflowsService.DuplicateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
-	7,  // 22: sameoldchat.chat.v1.WorkflowsService.DeleteWorkflow:input_type -> sameoldchat.chat.v1.WorkflowDeleteRequest
-	5,  // 23: sameoldchat.chat.v1.WorkflowsService.WorkflowActivity:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
-	11, // 24: sameoldchat.chat.v1.WorkflowsService.SubmitWorkflowForm:input_type -> sameoldchat.chat.v1.WorkflowFormSubmitRequest
-	12, // 25: sameoldchat.chat.v1.WorkflowsService.CompleteWorkflowButton:input_type -> sameoldchat.chat.v1.WorkflowButtonRequest
-	39, // 26: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
-	5,  // 27: sameoldchat.chat.v1.WorkflowsService.WorkflowRunExport:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
-	5,  // 28: sameoldchat.chat.v1.WorkflowsService.WorkflowFormResponseExport:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
-	8,  // 29: sameoldchat.chat.v1.WorkflowsService.SetWorkflowManagers:input_type -> sameoldchat.chat.v1.WorkflowManagersRequest
-	5,  // 30: sameoldchat.chat.v1.WorkflowsService.CanManageWorkflow:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
-	4,  // 31: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowMutationRequest
-	21, // 32: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:input_type -> sameoldchat.chat.v1.WorkflowListRequest
-	22, // 33: sameoldchat.chat.v1.WorkflowsService.AdminWorkflows:input_type -> sameoldchat.chat.v1.AdminWorkflowListRequest
-	24, // 34: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:input_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest
-	23, // 35: sameoldchat.chat.v1.WorkflowsService.ChangeWorkflowCollaborators:input_type -> sameoldchat.chat.v1.WorkflowCollaboratorsRequest
-	28, // 36: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:input_type -> sameoldchat.chat.v1.WorkflowTriggerMutationRequest
-	29, // 37: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:input_type -> sameoldchat.chat.v1.WorkflowTriggerListRequest
-	32, // 38: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:input_type -> sameoldchat.chat.v1.WorkflowRunRequest
-	33, // 39: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:input_type -> sameoldchat.chat.v1.AutomaticWorkflowRunRequest
-	34, // 40: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:input_type -> sameoldchat.chat.v1.WebhookWorkflowRunRequest
-	35, // 41: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:input_type -> sameoldchat.chat.v1.WebhookTriggerURLRequest
-	37, // 42: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:input_type -> sameoldchat.chat.v1.WorkflowEventDispatchRequest
-	39, // 43: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
-	40, // 44: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:input_type -> sameoldchat.chat.v1.FunctionCompletionRequest
-	42, // 45: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
-	42, // 46: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
-	43, // 47: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
-	43, // 48: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
-	44, // 49: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
-	44, // 50: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
-	45, // 51: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
-	45, // 52: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
-	48, // 53: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:input_type -> sameoldchat.chat.v1.FunctionWorkflowStepsRequest
-	2,  // 54: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2,  // 55: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2,  // 56: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	3,  // 57: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	3,  // 58: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	2,  // 59: sameoldchat.chat.v1.WorkflowsService.DiscardWorkflowStagedChanges:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	20, // 60: sameoldchat.chat.v1.WorkflowsService.WorkflowStepChanges:output_type -> sameoldchat.chat.v1.WorkflowStepChangesResponse
-	3,  // 61: sameoldchat.chat.v1.WorkflowsService.DuplicateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	2,  // 62: sameoldchat.chat.v1.WorkflowsService.DeleteWorkflow:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	10, // 63: sameoldchat.chat.v1.WorkflowsService.WorkflowActivity:output_type -> sameoldchat.chat.v1.WorkflowActivitySummary
-	2,  // 64: sameoldchat.chat.v1.WorkflowsService.SubmitWorkflowForm:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2,  // 65: sameoldchat.chat.v1.WorkflowsService.CompleteWorkflowButton:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	14, // 66: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:output_type -> sameoldchat.chat.v1.WorkflowInteraction
-	15, // 67: sameoldchat.chat.v1.WorkflowsService.WorkflowRunExport:output_type -> sameoldchat.chat.v1.WorkflowRunListResponse
-	17, // 68: sameoldchat.chat.v1.WorkflowsService.WorkflowFormResponseExport:output_type -> sameoldchat.chat.v1.WorkflowFormResponseListResponse
-	3,  // 69: sameoldchat.chat.v1.WorkflowsService.SetWorkflowManagers:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	9,  // 70: sameoldchat.chat.v1.WorkflowsService.CanManageWorkflow:output_type -> sameoldchat.chat.v1.WorkflowManagePermissionResponse
-	3,  // 71: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
-	26, // 72: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
-	26, // 73: sameoldchat.chat.v1.WorkflowsService.AdminWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
-	25, // 74: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:output_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
-	25, // 75: sameoldchat.chat.v1.WorkflowsService.ChangeWorkflowCollaborators:output_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
-	27, // 76: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:output_type -> sameoldchat.chat.v1.WorkflowTrigger
-	30, // 77: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:output_type -> sameoldchat.chat.v1.WorkflowTriggerListResponse
-	31, // 78: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
-	31, // 79: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
-	31, // 80: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:output_type -> sameoldchat.chat.v1.WorkflowRun
-	36, // 81: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:output_type -> sameoldchat.chat.v1.WebhookTriggerURLResponse
-	38, // 82: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:output_type -> sameoldchat.chat.v1.WorkflowEventDispatchResponse
-	31, // 83: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:output_type -> sameoldchat.chat.v1.WorkflowRun
-	2,  // 84: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	41, // 85: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	41, // 86: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	41, // 87: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	41, // 88: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	41, // 89: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	41, // 90: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
-	2,  // 91: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	47, // 92: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:output_type -> sameoldchat.chat.v1.FeaturedWorkflowsResponse
-	50, // 93: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:output_type -> sameoldchat.chat.v1.WorkflowStepVersionsResponse
-	54, // [54:94] is the sub-list for method output_type
-	14, // [14:54] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	41, // 14: sameoldchat.chat.v1.AdminPermissionsResponse.permissions:type_name -> sameoldchat.chat.v1.AutomationPermission
+	41, // 15: sameoldchat.chat.v1.AdminPermissionMutationRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
+	0,  // 16: sameoldchat.chat.v1.WorkflowsService.StepCompleted:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
+	0,  // 17: sameoldchat.chat.v1.WorkflowsService.StepFailed:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
+	1,  // 18: sameoldchat.chat.v1.WorkflowsService.UpdateStep:input_type -> sameoldchat.chat.v1.WorkflowStepUpdateRequest
+	4,  // 19: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowMutationRequest
+	5,  // 20: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
+	6,  // 21: sameoldchat.chat.v1.WorkflowsService.DiscardWorkflowStagedChanges:input_type -> sameoldchat.chat.v1.WorkflowDiscardStagedRequest
+	19, // 22: sameoldchat.chat.v1.WorkflowsService.WorkflowStepChanges:input_type -> sameoldchat.chat.v1.WorkflowStepChangesRequest
+	5,  // 23: sameoldchat.chat.v1.WorkflowsService.DuplicateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
+	7,  // 24: sameoldchat.chat.v1.WorkflowsService.DeleteWorkflow:input_type -> sameoldchat.chat.v1.WorkflowDeleteRequest
+	5,  // 25: sameoldchat.chat.v1.WorkflowsService.WorkflowActivity:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
+	11, // 26: sameoldchat.chat.v1.WorkflowsService.SubmitWorkflowForm:input_type -> sameoldchat.chat.v1.WorkflowFormSubmitRequest
+	12, // 27: sameoldchat.chat.v1.WorkflowsService.CompleteWorkflowButton:input_type -> sameoldchat.chat.v1.WorkflowButtonRequest
+	39, // 28: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
+	5,  // 29: sameoldchat.chat.v1.WorkflowsService.WorkflowRunExport:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
+	5,  // 30: sameoldchat.chat.v1.WorkflowsService.WorkflowFormResponseExport:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
+	8,  // 31: sameoldchat.chat.v1.WorkflowsService.SetWorkflowManagers:input_type -> sameoldchat.chat.v1.WorkflowManagersRequest
+	5,  // 32: sameoldchat.chat.v1.WorkflowsService.CanManageWorkflow:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
+	4,  // 33: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowMutationRequest
+	21, // 34: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:input_type -> sameoldchat.chat.v1.WorkflowListRequest
+	22, // 35: sameoldchat.chat.v1.WorkflowsService.AdminWorkflows:input_type -> sameoldchat.chat.v1.AdminWorkflowListRequest
+	24, // 36: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:input_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsRequest
+	23, // 37: sameoldchat.chat.v1.WorkflowsService.ChangeWorkflowCollaborators:input_type -> sameoldchat.chat.v1.WorkflowCollaboratorsRequest
+	28, // 38: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:input_type -> sameoldchat.chat.v1.WorkflowTriggerMutationRequest
+	29, // 39: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:input_type -> sameoldchat.chat.v1.WorkflowTriggerListRequest
+	32, // 40: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:input_type -> sameoldchat.chat.v1.WorkflowRunRequest
+	33, // 41: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:input_type -> sameoldchat.chat.v1.AutomaticWorkflowRunRequest
+	34, // 42: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:input_type -> sameoldchat.chat.v1.WebhookWorkflowRunRequest
+	35, // 43: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:input_type -> sameoldchat.chat.v1.WebhookTriggerURLRequest
+	37, // 44: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:input_type -> sameoldchat.chat.v1.WorkflowEventDispatchRequest
+	39, // 45: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
+	40, // 46: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:input_type -> sameoldchat.chat.v1.FunctionCompletionRequest
+	42, // 47: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
+	51, // 48: sameoldchat.chat.v1.WorkflowsService.AdminFunctionPermissions:input_type -> sameoldchat.chat.v1.AdminPermissionsRequest
+	51, // 49: sameoldchat.chat.v1.WorkflowsService.AdminWorkflowPermissions:input_type -> sameoldchat.chat.v1.AdminPermissionsRequest
+	51, // 50: sameoldchat.chat.v1.WorkflowsService.AdminTriggerTypePermission:input_type -> sameoldchat.chat.v1.AdminPermissionsRequest
+	53, // 51: sameoldchat.chat.v1.WorkflowsService.AdminSetFunctionPermission:input_type -> sameoldchat.chat.v1.AdminPermissionMutationRequest
+	53, // 52: sameoldchat.chat.v1.WorkflowsService.AdminSetTriggerTypePermission:input_type -> sameoldchat.chat.v1.AdminPermissionMutationRequest
+	42, // 53: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
+	43, // 54: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
+	43, // 55: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
+	44, // 56: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
+	44, // 57: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:input_type -> sameoldchat.chat.v1.WorkflowPermissionRequest
+	45, // 58: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	45, // 59: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	48, // 60: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:input_type -> sameoldchat.chat.v1.FunctionWorkflowStepsRequest
+	2,  // 61: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 62: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 63: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	3,  // 64: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	3,  // 65: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	2,  // 66: sameoldchat.chat.v1.WorkflowsService.DiscardWorkflowStagedChanges:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	20, // 67: sameoldchat.chat.v1.WorkflowsService.WorkflowStepChanges:output_type -> sameoldchat.chat.v1.WorkflowStepChangesResponse
+	3,  // 68: sameoldchat.chat.v1.WorkflowsService.DuplicateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	2,  // 69: sameoldchat.chat.v1.WorkflowsService.DeleteWorkflow:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	10, // 70: sameoldchat.chat.v1.WorkflowsService.WorkflowActivity:output_type -> sameoldchat.chat.v1.WorkflowActivitySummary
+	2,  // 71: sameoldchat.chat.v1.WorkflowsService.SubmitWorkflowForm:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 72: sameoldchat.chat.v1.WorkflowsService.CompleteWorkflowButton:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	14, // 73: sameoldchat.chat.v1.WorkflowsService.WorkflowRunInteraction:output_type -> sameoldchat.chat.v1.WorkflowInteraction
+	15, // 74: sameoldchat.chat.v1.WorkflowsService.WorkflowRunExport:output_type -> sameoldchat.chat.v1.WorkflowRunListResponse
+	17, // 75: sameoldchat.chat.v1.WorkflowsService.WorkflowFormResponseExport:output_type -> sameoldchat.chat.v1.WorkflowFormResponseListResponse
+	3,  // 76: sameoldchat.chat.v1.WorkflowsService.SetWorkflowManagers:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	9,  // 77: sameoldchat.chat.v1.WorkflowsService.CanManageWorkflow:output_type -> sameoldchat.chat.v1.WorkflowManagePermissionResponse
+	3,  // 78: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	26, // 79: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
+	26, // 80: sameoldchat.chat.v1.WorkflowsService.AdminWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
+	25, // 81: sameoldchat.chat.v1.WorkflowsService.AdminUnpublishWorkflows:output_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
+	25, // 82: sameoldchat.chat.v1.WorkflowsService.ChangeWorkflowCollaborators:output_type -> sameoldchat.chat.v1.AdminUnpublishWorkflowsResponse
+	27, // 83: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:output_type -> sameoldchat.chat.v1.WorkflowTrigger
+	30, // 84: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:output_type -> sameoldchat.chat.v1.WorkflowTriggerListResponse
+	31, // 85: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
+	31, // 86: sameoldchat.chat.v1.WorkflowsService.RunAutomaticWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
+	31, // 87: sameoldchat.chat.v1.WorkflowsService.RunWebhookTrigger:output_type -> sameoldchat.chat.v1.WorkflowRun
+	36, // 88: sameoldchat.chat.v1.WorkflowsService.WebhookTriggerURL:output_type -> sameoldchat.chat.v1.WebhookTriggerURLResponse
+	38, // 89: sameoldchat.chat.v1.WorkflowsService.DispatchWorkflowEventTriggers:output_type -> sameoldchat.chat.v1.WorkflowEventDispatchResponse
+	31, // 90: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:output_type -> sameoldchat.chat.v1.WorkflowRun
+	2,  // 91: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	41, // 92: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	52, // 93: sameoldchat.chat.v1.WorkflowsService.AdminFunctionPermissions:output_type -> sameoldchat.chat.v1.AdminPermissionsResponse
+	52, // 94: sameoldchat.chat.v1.WorkflowsService.AdminWorkflowPermissions:output_type -> sameoldchat.chat.v1.AdminPermissionsResponse
+	41, // 95: sameoldchat.chat.v1.WorkflowsService.AdminTriggerTypePermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 96: sameoldchat.chat.v1.WorkflowsService.AdminSetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 97: sameoldchat.chat.v1.WorkflowsService.AdminSetTriggerTypePermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 98: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 99: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 100: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 101: sameoldchat.chat.v1.WorkflowsService.GetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	41, // 102: sameoldchat.chat.v1.WorkflowsService.SetWorkflowPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	2,  // 103: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	47, // 104: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:output_type -> sameoldchat.chat.v1.FeaturedWorkflowsResponse
+	50, // 105: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:output_type -> sameoldchat.chat.v1.WorkflowStepVersionsResponse
+	61, // [61:106] is the sub-list for method output_type
+	16, // [16:61] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_workflows_proto_init() }
@@ -4240,7 +4446,7 @@ func file_sameoldchat_chat_v1_workflows_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_workflows_proto_rawDesc), len(file_sameoldchat_chat_v1_workflows_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   51,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

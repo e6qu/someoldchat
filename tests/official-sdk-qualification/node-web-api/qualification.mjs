@@ -272,6 +272,35 @@ await assert.rejects(
   (error) => String(error).includes("workflow_not_found"),
 );
 
+// The pinned client exposes no typed method for this one, so the walk issues
+// it through apiCall. A genuine client still sends the request.
+const expiration = await client.apiCall("admin.users.getExpiration", { user_id: "U1" });
+assert.equal(expiration.ok, true);
+assert.equal(typeof expiration.expiration_ts, "number");
+
+const contacts = await client.apiCall("users.discoverableContacts.lookup", { emails: "alice@example.com" });
+assert.equal(contacts.ok, true);
+assert.equal(Array.isArray(contacts.contacts), true);
+
+const adminFunctions = await client.apiCall("admin.functions.list", {});
+assert.equal(adminFunctions.ok, true);
+assert.equal(Array.isArray(adminFunctions.functions), true);
+
+const cancelled = await client.apiCall("admin.apps.requests.cancel", { request_id: "Rq-sdk" });
+assert.equal(cancelled.ok, true);
+
+// Bulk channel administration. The walk pins the refusal for a channel that is
+// not here; archiving the fixture's channels would take the rest of the walk
+// with them.
+await assert.rejects(
+  () => client.admin.conversations.bulkArchive({ channel_ids: ["C-not-here"] }),
+  (error) => String(error).includes("channel_not_found"),
+);
+await assert.rejects(
+  () => client.admin.conversations.bulkDelete({ channel_ids: ["C-not-here"] }),
+  (error) => String(error).includes("channel_not_found"),
+);
+
 // An administrator removes an app without holding its client secret. The walk
 // pins the refusal for an app nobody has heard of; uninstalling the fixture's
 // own app would take the rest of the walk's app calls with it.
@@ -612,6 +641,10 @@ const functionSteps = await workflowClient.apiCall("functions.workflows.steps.li
 });
 assert.equal(functionSteps.ok, true);
 assert.equal(functionSteps.steps_versions[0].title, "Triage");
+assert.equal((await workflowClient.apiCall("functions.workflows.steps.responses.export", {
+  workflow_id: "WfQualification",
+  step_id: functionSteps.steps_versions[0].step_id ?? "triage",
+})).ok, true);
 assert.equal((await workflowClient.apiCall("functions.completeSuccess", {
   function_execution_id: "FxQualification",
   outputs: { result: "qualified by Node" },
@@ -1315,6 +1348,170 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const externalCredential = await client.apiCall("apps.auth.external.get", {
+	external_token_id: "Et-qualification",
+});
+assert.equal(externalCredential.ok, true);
+assert.equal(externalCredential.external_token.provider_name, "example");
+assert.equal(JSON.stringify(externalCredential.external_token).includes("sealed"), false);
+assert.equal((await client.apiCall("apps.auth.external.delete", {
+	external_token_id: "Et-qualification",
+})).ok, true);
+
+assert.equal((await client.apiCall("apps.icon.set", {
+	app_id: "A1",
+	image_url: "https://example.invalid/icon.png",
+})).ok, true);
+assert.equal((await client.apiCall("apps.user.connection.update", { app_id: "A1" })).ok, true);
+const assistantInfo = await client.apiCall("assistant.search.info");
+assert.equal(assistantInfo.ok, true);
+assert.equal(assistantInfo.enabled, true);
+const assistantContext = await client.apiCall("assistant.search.context", { query: "hello" });
+assert.equal(assistantContext.ok, true);
+assert.ok(Array.isArray(assistantContext.results.messages));
+
+const anomalyAllowList = await client.apiCall("admin.audit.anomaly.allow.getItem");
+assert.equal(anomalyAllowList.ok, true);
+assert.equal(anomalyAllowList.anomaly_allow_updated_item.ips.length, 0);
+assert.equal((await client.apiCall("admin.audit.anomaly.allow.updateItem", {
+	ip_addresses: "198.51.100.7",
+	reasons: "office",
+})).anomaly_allow_updated_item.ips.length, 1);
+assert.equal((await client.apiCall("team.billing.info")).ok, true);
+assert.equal((await client.apiCall("admin.users.unsupportedVersions.export", {
+	date_end_of_support: 1700000000,
+})).ok, true);
+
+const analyticsMetadata = await client.apiCall("admin.analytics.getFile", {
+	type: "public_channel",
+	metadata_only: true,
+});
+assert.equal(analyticsMetadata.ok, true);
+assert.ok(analyticsMetadata.fields.length > 0);
+assert.equal((await client.apiCall("admin.analytics.messages.activity", { date: "2023-11-14" })).ok, true);
+assert.equal((await client.apiCall("admin.analytics.messages.metadata")).ok, true);
+
+const adminActivities = await client.apiCall("admin.apps.activities.list", { app_id: "A1", limit: 10 });
+assert.equal(adminActivities.ok, true);
+assert.ok(Array.isArray(adminActivities.activities));
+assert.equal((await client.apiCall("apps.activities.list", { limit: 10 })).ok, true);
+
+const channelLookup = await client.apiCall("admin.conversations.lookup", { limit: 100 });
+assert.equal(channelLookup.ok, true);
+assert.ok(channelLookup.channels.length > 0);
+assert.equal((await client.apiCall("admin.conversations.bulkSetExcludeFromSlackAi", {
+	channel_ids: "C1",
+	exclude_from_slack_ai_value: true,
+})).ok, true);
+assert.equal((await client.apiCall("admin.conversations.linkObjects", {
+	channel: "C1",
+	salesforce_org_id: "00D000",
+	record_id: "a01",
+})).ok, true);
+assert.equal((await client.apiCall("admin.conversations.unlinkObjects", { channels: "C1" })).ok, true);
+const recordChannel = await client.apiCall("admin.conversations.createForObjects", {
+	channel_name: "sdk-record-channel",
+	salesforce_org_id: "00D000",
+	object_id: "a02",
+});
+assert.equal(recordChannel.ok, true);
+assert.equal(typeof recordChannel.channel_id, "string");
+assert.equal((await client.apiCall("admin.conversations.bulkMove", {
+	channel_ids: recordChannel.channel_id,
+	target_team_id: "T1",
+})).ok, true);
+
+const appConfigs = await client.apiCall("admin.apps.config.lookup", { app_ids: "A1" });
+assert.equal(appConfigs.ok, true);
+assert.equal(appConfigs.configs[0].workflow_auth_strategy, "builder_choice");
+assert.equal((await client.apiCall("admin.apps.config.set", {
+	app_id: "A1",
+	workflow_auth_strategy: "end_user_only",
+	domain_restrictions: JSON.stringify({ urls: ["https://example.invalid"], emails: [] }),
+})).config.workflow_auth_strategy, "end_user_only");
+assert.equal((await client.apiCall("admin.apps.clearResolution", { app_id: "A1" })).ok, true);
+
+const functionPermissions = await client.apiCall("admin.functions.permissions.lookup", { function_ids: "Fn1" });
+assert.equal(functionPermissions.ok, true);
+assert.equal(functionPermissions.permissions.Fn1.permission_type, "everyone");
+assert.equal((await client.apiCall("admin.functions.permissions.set", {
+	function_id: "Fn1",
+	visibility: "named_entities",
+	user_ids: "U1",
+})).permission_type, "named_entities");
+assert.equal((await client.apiCall("admin.workflows.permissions.lookup", { workflow_ids: "Wf1" })).ok, true);
+assert.equal((await client.apiCall("admin.workflows.triggers.types.permissions.set", {
+	trigger_type_id: "scheduled",
+	visibility: "app_collaborators",
+})).permission_type, "app_collaborators");
+assert.equal((await client.apiCall("admin.workflows.triggers.types.permissions.lookup", {
+	trigger_type_id: "scheduled",
+})).permission_type, "app_collaborators");
+
+const barrier = await client.apiCall("admin.barriers.create", {
+	primary_usergroup_id: usergroupId,
+	barriered_from_usergroup_ids: accessGroup.usergroup.id,
+	restricted_subjects: "im,mpim,call",
+});
+assert.equal(barrier.ok, true);
+assert.equal(barrier.barrier.restricted_subjects.length, 3);
+assert.equal((await client.apiCall("admin.barriers.update", {
+	barrier_id: barrier.barrier.id,
+	primary_usergroup_id: accessGroup.usergroup.id,
+	barriered_from_usergroup_ids: usergroupId,
+	restricted_subjects: "im,mpim,call",
+})).ok, true);
+assert.equal((await client.apiCall("admin.barriers.list")).barriers.length, 1);
+assert.equal((await client.apiCall("admin.barriers.delete", { barrier_id: barrier.barrier.id })).ok, true);
+
+assert.equal((await client.apiCall("admin.users.session.setSettings", {
+	user_ids: "U2",
+	duration: 43200,
+	mobile_device_check: true,
+})).ok, true);
+const sessionSettings = await client.apiCall("admin.users.session.getSettings", { user_ids: "U2" });
+assert.equal(sessionSettings.ok, true);
+assert.equal(sessionSettings.session_settings.length, 1);
+assert.equal(sessionSettings.session_settings[0].duration, 43200);
+assert.equal(sessionSettings.no_settings_applied.length, 0);
+assert.equal((await client.apiCall("admin.users.session.clearSettings", { user_ids: "U2" })).ok, true);
+
+assert.equal((await client.apiCall("admin.auth.policy.assignEntities", {
+	policy_name: "email_password",
+	entity_type: "USER",
+	entity_ids: "U2",
+})).ok, true);
+const policyEntities = await client.apiCall("admin.auth.policy.getEntities", {
+	policy_name: "email_password",
+	entity_type: "USER",
+});
+assert.equal(policyEntities.ok, true);
+assert.equal(policyEntities.entity_total_count, 1);
+assert.equal(policyEntities.entities[0].entity_id, "U2");
+assert.equal((await client.apiCall("admin.auth.policy.removeEntities", {
+	policy_name: "email_password",
+	entity_type: "USER",
+	entity_ids: "U2",
+})).ok, true);
+
+// admin.roles.* runs before the member leaves: a role assignment names a
+// member, so removing U2 first would make the walk unreachable.
+assert.equal((await client.apiCall("admin.roles.addAssignments", {
+	role_id: "Rl0A",
+	entity_ids: "C1,C2",
+	user_ids: "U2",
+})).ok, true);
+const roleAssignments = await client.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" });
+assert.equal(roleAssignments.ok, true);
+assert.equal(roleAssignments.role_assignments.length, 2);
+assert.equal(roleAssignments.role_assignments[0].user_id, "U2");
+assert.equal((await client.apiCall("admin.roles.removeAssignments", {
+	role_id: "Rl0A",
+	entity_ids: "C1,C2",
+	user_ids: "U2",
+})).ok, true);
+assert.equal((await client.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" })).role_assignments.length, 0);
+
 assert.equal((await client.admin.users.remove({ team_id: "T1", user_id: "U2" })).ok, true);
 
 // files.getUploadURLExternal hands back a file_id before any bytes exist, and

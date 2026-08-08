@@ -32,6 +32,7 @@ type Workspace struct {
 	Discoverability   WorkspaceDiscoverability
 	IconURL           string
 	DefaultChannelIDs []ConversationID
+	Plan              WorkspacePlan
 }
 
 type WorkspaceDiscoverability string
@@ -112,6 +113,36 @@ type WorkspaceMembershipSummary struct {
 type BillableUser struct {
 	UserID        UserID
 	BillingActive bool
+}
+
+// WorkspacePlan is which Slack plan a workspace is on. team.billing.info reports
+// it, and several enterprise surfaces are gated on it, so the value is a type
+// rather than a free string that could name a plan nobody sells.
+type WorkspacePlan string
+
+const (
+	PlanFree       WorkspacePlan = ""
+	PlanStandard   WorkspacePlan = "std"
+	PlanPlus       WorkspacePlan = "plus"
+	PlanEnterprise WorkspacePlan = "compliance"
+)
+
+func (plan WorkspacePlan) Valid() bool {
+	switch plan {
+	case PlanFree, PlanStandard, PlanPlus, PlanEnterprise:
+		return true
+	}
+	return false
+}
+
+// AnomalyAllowList is what an administrator has told audit not to flag. Slack
+// keeps the addresses and the reasons together, because a reason without the
+// address it excuses explains nothing.
+type AnomalyAllowList struct {
+	WorkspaceID WorkspaceID
+	IPAddresses []string
+	Reasons     []string
+	UpdatedAt   time.Time
 }
 
 type BillableInfo struct {
@@ -524,7 +555,7 @@ type OAuthToken struct {
 	InstallerID            UserID
 	BotID                  BotID
 	Scopes                 []string
-	TokenType              string
+	TokenType              TokenType
 	RefreshToken           string
 	ExpiresAt              time.Time
 	AuthedUserAccessToken  string
@@ -547,7 +578,7 @@ type OAuthRefreshGrant struct {
 	InstallerID     UserID
 	BotID           BotID
 	Scopes          []string
-	TokenType       string
+	TokenType       TokenType
 	AccessExpiresAt time.Time
 	CreatedAt       time.Time
 	Revoked         bool
@@ -633,7 +664,7 @@ type TokenRecord struct {
 	AppID       AppID
 	BotID       BotID
 	Scopes      []string
-	TokenType   string
+	TokenType   TokenType
 	ExpiresAt   time.Time
 	Revoked     bool
 }
@@ -1797,9 +1828,39 @@ type CanvasAccess struct {
 	Access     AccessLevel
 }
 
+// CanvasSectionType is what one canvas section holds. The set is deliberately
+// open: a document may carry a kind this deployment does not enumerate, and
+// refusing one would lose the author's content. What is named here is the two
+// rules that were inline string tests in three places - which kinds are headers,
+// and which the editor may edit.
+type CanvasSectionType string
+
+const (
+	CanvasSectionMarkdown CanvasSectionType = "markdown"
+	CanvasSectionHeading1 CanvasSectionType = "h1"
+	CanvasSectionHeading2 CanvasSectionType = "h2"
+	CanvasSectionHeading3 CanvasSectionType = "h3"
+	// CanvasSectionAnyHeader is a filter term rather than a stored kind: Slack
+	// accepts it in a section filter to mean every heading level at once.
+	CanvasSectionAnyHeader CanvasSectionType = "any_header"
+)
+
+// IsHeader reports whether this is a heading of any level. Slack numbers them
+// h1 upward, so the prefix is the rule rather than an enumeration that would
+// stop being true at h4.
+func (kind CanvasSectionType) IsHeader() bool {
+	return strings.HasPrefix(string(kind), "h")
+}
+
+// Editable reports whether the editor may change this section. An unset kind is
+// prose, which is what a section written before kinds existed holds.
+func (kind CanvasSectionType) Editable() bool {
+	return kind == CanvasSectionMarkdown || kind == ""
+}
+
 type CanvasSection struct {
 	ID   string
-	Type string
+	Type CanvasSectionType
 	Text string
 }
 
@@ -2153,6 +2214,9 @@ const (
 	AppApprovalRequested  AppApprovalStatus = "requested"
 	AppApprovalApproved   AppApprovalStatus = "approved"
 	AppApprovalRestricted AppApprovalStatus = "restricted"
+	// AppApprovalCancelled records that the member who asked withdrew the
+	// request. An administrator never decided it, so it is not a restriction.
+	AppApprovalCancelled AppApprovalStatus = "cancelled"
 )
 
 type AppApproval struct {
@@ -2187,7 +2251,7 @@ type AppAuthorization struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	BotID       BotID
-	TokenType   string
+	TokenType   TokenType
 	Scopes      []string
 }
 
@@ -2248,8 +2312,31 @@ type App struct {
 	SocketModeEnabled           bool
 	TokenRotationEnabled        bool
 	Deleted                     bool
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
+	// IconURL is what a client draws beside the app's messages. It is a URL and
+	// not blob bytes: the icon is set from a URL the app already serves.
+	IconURL   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ExternalAuthToken is an app's credential with a service outside this
+// deployment. The secret is stored encrypted and never crosses the public
+// boundary, in the same way an app's signing secret does not.
+type ExternalAuthToken struct {
+	ID          string
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Provider    string
+	Ciphertext  string
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+}
+
+// AssistantSearchAvailability is what an assistant may search here.
+type AssistantSearchAvailability struct {
+	Enabled           bool
+	SearchableSources []string
 }
 
 type AppManifestRevision struct {
@@ -2271,6 +2358,277 @@ type AppManifestSnapshot struct {
 // InstalledApp is the user-facing, non-secret projection of an app installed
 // in one workspace. It deliberately excludes developer credentials and the raw
 // manifest from the process boundary.
+// AppFunction is one function an installed app declares in its manifest.
+// RoleAssignment gives one member a system role over one entity. Slack scopes a
+// role to a channel or to the workspace, so the entity identifier carries which.
+type RoleAssignment struct {
+	RoleID      string
+	EntityID    string
+	UserID      UserID
+	WorkspaceID WorkspaceID
+	CreatedAt   time.Time
+}
+
+type RoleAssignmentPage struct {
+	Assignments []RoleAssignment
+	NextCursor  Cursor
+	HasMore     bool
+}
+
+// ActivityLevel is how severe one app activity entry is. Slack orders them, and
+// a caller asking for warnings and above needs the order rather than the names.
+type ActivityLevel string
+
+const (
+	ActivityTrace ActivityLevel = "trace"
+	ActivityDebug ActivityLevel = "debug"
+	ActivityInfo  ActivityLevel = "info"
+	ActivityWarn  ActivityLevel = "warn"
+	ActivityError ActivityLevel = "error"
+	ActivityFatal ActivityLevel = "fatal"
+)
+
+// Rank orders the levels. An unrecognised level ranks below trace, so a filter
+// asking for warnings and above never admits one by accident.
+func (level ActivityLevel) Rank() int {
+	switch level {
+	case ActivityTrace:
+		return 1
+	case ActivityDebug:
+		return 2
+	case ActivityInfo:
+		return 3
+	case ActivityWarn:
+		return 4
+	case ActivityError:
+		return 5
+	case ActivityFatal:
+		return 6
+	}
+	return 0
+}
+
+func (level ActivityLevel) Valid() bool { return level.Rank() > 0 }
+
+// AppActivity is one entry in an app's activity log: what the platform ran on
+// the app's behalf, and how it went.
+type AppActivity struct {
+	ID            int64
+	AppID         AppID
+	WorkspaceID   WorkspaceID
+	ComponentType string
+	ComponentID   string
+	Level         ActivityLevel
+	EventType     string
+	Source        string
+	Message       string
+	TraceID       string
+	CreatedAt     time.Time
+}
+
+type AppActivityPage struct {
+	Activities []AppActivity
+	NextCursor Cursor
+	HasMore    bool
+}
+
+// AppActivityFilter narrows an activity read. A zero field is not applied.
+type AppActivityFilter struct {
+	AppID         AppID
+	MinLevel      ActivityLevel
+	MinCreatedAt  time.Time
+	MaxCreatedAt  time.Time
+	ComponentType string
+	ComponentID   string
+	Source        string
+	TraceID       string
+}
+
+// LinkedObject is an external record a channel is linked to. Slack links a
+// channel to a Salesforce record, so the pair names the organization and the
+// record inside it.
+type LinkedObject struct {
+	ConversationID ConversationID
+	WorkspaceID    WorkspaceID
+	OrgID          string
+	RecordID       string
+	CreatedAt      time.Time
+}
+
+// ConversationLookup narrows a channel search to the channels an administrator
+// is looking for. Slack lets an administrator find channels that have gone
+// quiet or stayed small; a zero field means the filter is not applied, so a
+// lookup that names nothing answers every channel.
+type ConversationLookup struct {
+	TeamIDs                   []WorkspaceID
+	LastMessageActivityBefore time.Time
+	MaxMemberCount            int
+}
+
+// WorkflowAuthStrategy decides whose credentials a workflow step runs under.
+// Slack names two, and an unrecognised value would silently run a step as the
+// builder when the administrator asked for the end user.
+type WorkflowAuthStrategy string
+
+const (
+	WorkflowAuthBuilderChoice WorkflowAuthStrategy = "builder_choice"
+	WorkflowAuthEndUserOnly   WorkflowAuthStrategy = "end_user_only"
+)
+
+func (strategy WorkflowAuthStrategy) Valid() bool {
+	return strategy == WorkflowAuthBuilderChoice || strategy == WorkflowAuthEndUserOnly
+}
+
+// AppConfig is what an administrator decides about one installed app: which
+// destinations its steps may reach, and whose credentials they run under.
+type AppConfig struct {
+	AppID                AppID
+	WorkspaceID          WorkspaceID
+	DomainURLs           []string
+	DomainEmails         []string
+	WorkflowAuthStrategy WorkflowAuthStrategy
+	UpdatedAt            time.Time
+}
+
+// TokenType is which kind of credential a token is. It was a bare string
+// compared against "bot" in about fifteen authorisation decisions, so a
+// misspelling read as "not a bot" and sent a bot token down the user path.
+type TokenType string
+
+const (
+	TokenBot  TokenType = "bot"
+	TokenUser TokenType = "user"
+)
+
+func (kind TokenType) Valid() bool { return kind == TokenBot || kind == TokenUser }
+
+// IsBot is the question every one of those decisions was really asking.
+func (kind TokenType) IsBot() bool { return kind == TokenBot }
+
+type BarrierID string
+
+// BarrierSubject is what an information barrier stops. Slack declares three and
+// requires every barrier to restrict all three, so a barrier that restricts a
+// subset cannot be built.
+type BarrierSubject string
+
+const (
+	BarrierSubjectDirect      BarrierSubject = "im"
+	BarrierSubjectGroupDirect BarrierSubject = "mpim"
+	BarrierSubjectCall        BarrierSubject = "call"
+)
+
+// BarrierSubjects is every subject a barrier restricts, in the order Slack
+// reports them.
+func BarrierSubjects() []BarrierSubject {
+	return []BarrierSubject{BarrierSubjectDirect, BarrierSubjectGroupDirect, BarrierSubjectCall}
+}
+
+// ValidBarrierSubjects accepts exactly the three subjects, in any order and
+// without repeats. Slack refuses anything else, because a barrier that stops
+// direct messages but not calls is not a barrier.
+func ValidBarrierSubjects(subjects []BarrierSubject) bool {
+	seen := make(map[BarrierSubject]struct{}, len(subjects))
+	for _, subject := range subjects {
+		switch subject {
+		case BarrierSubjectDirect, BarrierSubjectGroupDirect, BarrierSubjectCall:
+			seen[subject] = struct{}{}
+		default:
+			return false
+		}
+	}
+	return len(seen) == len(BarrierSubjects())
+}
+
+// InformationBarrier stops one user group from reaching another. The barrier is
+// symmetric in effect but not in shape: Slack names one primary group and the
+// groups it is barriered from.
+type InformationBarrier struct {
+	ID               BarrierID
+	WorkspaceID      WorkspaceID
+	PrimaryGroupID   UserGroupID
+	BarrieredFromIDs []UserGroupID
+	Subjects         []BarrierSubject
+	UpdatedAt        time.Time
+}
+
+type InformationBarrierPage struct {
+	Barriers   []InformationBarrier
+	NextCursor Cursor
+	HasMore    bool
+}
+
+// SessionDuration is how long a session lives, counted in seconds. Slack states
+// the duration in seconds and refuses anything under eight hours, so a value
+// finer than a second means nothing. Holding it as time.Duration let one be
+// written and then truncated to zero at the transport boundary; this type
+// cannot express one.
+type SessionDuration int64
+
+// MinimumSessionDuration is the shortest session Slack accepts.
+const MinimumSessionDuration SessionDuration = 8 * 60 * 60
+
+// Valid accepts the floor and anything above it. Zero means the workspace
+// default; anything between zero and the floor is not valid, because storing it
+// would silently make it the floor.
+func (duration SessionDuration) Valid() bool {
+	return duration == 0 || duration >= MinimumSessionDuration
+}
+
+func (duration SessionDuration) Duration() time.Duration {
+	return time.Duration(duration) * time.Second
+}
+
+// SessionSettings is how long one member's sessions live and what ends them.
+type SessionSettings struct {
+	UserID                UserID
+	WorkspaceID           WorkspaceID
+	Duration              SessionDuration
+	DesktopAppBrowserQuit bool
+	MobileDeviceCheck     bool
+	UpdatedAt             time.Time
+}
+
+// AuthPolicyName names one authentication policy. Slack defines exactly one,
+// and a name this deployment does not hold cannot be assigned to anybody.
+type AuthPolicyName string
+
+const AuthPolicyEmailPassword AuthPolicyName = "email_password"
+
+func (name AuthPolicyName) Valid() bool { return name == AuthPolicyEmailPassword }
+
+// PolicyEntityType names what an authentication policy applies to. Slack
+// defines the member and nothing else, and the storage carries a foreign key to
+// users, so widening this type means widening that key in the same change.
+type PolicyEntityType string
+
+const PolicyEntityUser PolicyEntityType = "USER"
+
+func (kind PolicyEntityType) Valid() bool { return kind == PolicyEntityUser }
+
+type AuthPolicyEntity struct {
+	Policy      AuthPolicyName
+	EntityType  PolicyEntityType
+	EntityID    string
+	WorkspaceID WorkspaceID
+	CreatedAt   time.Time
+}
+
+type AuthPolicyEntityPage struct {
+	Entities   []AuthPolicyEntity
+	TotalCount int
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type AppFunction struct {
+	AppID       AppID
+	AppName     string
+	CallbackID  string
+	Title       string
+	Description string
+}
+
 type InstalledApp struct {
 	ID                  AppID
 	Name                string
@@ -2858,6 +3216,51 @@ type WorkspaceAnalytics struct {
 	// governs.
 	BusiestChannels []ChannelActivity
 	Since           time.Time
+}
+
+// AnalyticsKind is which analytics file an administrator asked for. Slack names
+// three and refuses anything else, so a report nobody can produce cannot be
+// requested.
+type AnalyticsKind string
+
+const (
+	AnalyticsMember        AnalyticsKind = "member"
+	AnalyticsPublicChannel AnalyticsKind = "public_channel"
+	AnalyticsConversations AnalyticsKind = "conversations"
+)
+
+func (kind AnalyticsKind) Valid() bool {
+	switch kind {
+	case AnalyticsMember, AnalyticsPublicChannel, AnalyticsConversations:
+		return true
+	}
+	return false
+}
+
+// AnalyticsDate renders the day an analytics row covers. Slack writes the day
+// as YYYY-MM-DD, and the layout lives here so the two storage profiles cannot
+// render it differently.
+func AnalyticsDate(day time.Time) string {
+	return day.UTC().Truncate(24 * time.Hour).Format(time.DateOnly)
+}
+
+// ParseAnalyticsDate reads the same rendering back.
+func ParseAnalyticsDate(value string) (time.Time, error) {
+	return time.Parse(time.DateOnly, value)
+}
+
+// AnalyticsRow is one line of an analytics file: what one member or one channel
+// did on one day. A field the row's kind does not describe stays zero, because
+// a member has no member count and a channel posts nothing itself.
+type AnalyticsRow struct {
+	Kind           AnalyticsKind
+	Date           string
+	EntityID       string
+	Name           string
+	MessagesPosted int
+	ReactionsAdded int
+	MemberCount    int
+	IsActive       bool
 }
 
 type ChannelActivity struct {

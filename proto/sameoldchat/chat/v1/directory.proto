@@ -58,6 +58,7 @@ message Workspace {
 	string icon_url = 5;
 	repeated string default_channel_ids = 6;
 	string domain = 7;
+	string plan = 8;
 }
 
 message WorkspaceRequest {
@@ -133,6 +134,20 @@ message SetUserRoleRequest {
   string user_id = 2;
   string target_user_id = 3;
   string role = 4;
+}
+
+message DiscoverableContactsResponse {
+  repeated User users = 1;
+}
+
+message DiscoverableContactsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string emails = 3;
+}
+
+message UserExpirationResponse {
+  int64 expiration_unix_nano = 1;
 }
 
 message SetUserExpirationRequest {
@@ -431,6 +446,168 @@ message AppApprovalPage {
   bool has_more = 3;
 }
 
+message ExportRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string kind = 3;
+  map<string, int64> bounds = 4;
+  string workflow_id = 5;
+  string step_id = 6;
+}
+
+message AnomalyAllowList {
+  string workspace_id = 1;
+  repeated string ip_addresses = 2;
+  repeated string reasons = 3;
+  int64 updated_at = 4;
+}
+
+message AnomalyAllowListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string ip_addresses = 3;
+  repeated string reasons = 4;
+}
+
+message BillingInfoResponse {
+  string plan = 1;
+}
+
+message AnalyticsRow {
+  string kind = 1;
+  string date = 2;
+  string entity_id = 3;
+  string name = 4;
+  int32 messages_posted = 5;
+  int32 reactions_added = 6;
+  int32 member_count = 7;
+  bool is_active = 8;
+}
+
+message AnalyticsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string kind = 3;
+  int64 day = 4;
+}
+
+message AnalyticsResponse {
+  repeated AnalyticsRow rows = 1;
+}
+
+message RoleAssignment {
+  string role_id = 1;
+  string entity_id = 2;
+  string user_id = 3;
+  string workspace_id = 4;
+  int64 created_at = 5;
+}
+
+message RoleAssignmentMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string role_id = 3;
+  repeated string entity_ids = 4;
+  repeated string target_user_ids = 5;
+}
+
+message RoleAssignmentsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string role_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message RoleAssignmentPage {
+  repeated RoleAssignment assignments = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message InformationBarrier {
+  string id = 1;
+  string workspace_id = 2;
+  string primary_usergroup_id = 3;
+  repeated string barriered_from_ids = 4;
+  repeated string subjects = 5;
+  int64 updated_at = 6;
+}
+
+message BarrierMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string barrier_id = 3;
+  string primary_usergroup_id = 4;
+  repeated string barriered_from_ids = 5;
+  repeated string subjects = 6;
+}
+
+message BarriersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message InformationBarrierPage {
+  repeated InformationBarrier barriers = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message SessionSettings {
+  string user_id = 1;
+  string workspace_id = 2;
+  int64 duration_seconds = 3;
+  bool desktop_app_browser_quit = 4;
+  bool mobile_device_check = 5;
+  int64 updated_at = 6;
+}
+
+message SessionSettingsMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string target_user_ids = 3;
+  SessionSettings settings = 4;
+}
+
+message SessionSettingsResponse {
+  repeated SessionSettings settings = 1;
+}
+
+message AuthPolicyEntity {
+  string policy_name = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string workspace_id = 4;
+  int64 created_at = 5;
+}
+
+message AuthPolicyMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string policy_name = 3;
+  string entity_type = 4;
+  repeated string entity_ids = 5;
+}
+
+message AuthPolicyEntitiesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string policy_name = 3;
+  string entity_type = 4;
+  int32 limit = 5;
+  string cursor = 6;
+}
+
+message AuthPolicyEntityPage {
+  repeated AuthPolicyEntity entities = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+  int32 total_count = 4;
+}
+
 service DirectoryService {
   rpc Users(UsersRequest) returns (UserPage);
   rpc ConversationMembers(ConversationMembersRequest) returns (UserPage);
@@ -440,6 +617,27 @@ service DirectoryService {
   rpc RemoveUser(RemoveUserRequest) returns (MutationResponse);
   rpc SetUserRole(SetUserRoleRequest) returns (MutationResponse);
   rpc SetUserExpiration(SetUserExpirationRequest) returns (MutationResponse);
+  rpc UserExpiration(SetUserExpirationRequest) returns (UserExpirationResponse);
+  rpc DiscoverableContacts(DiscoverableContactsRequest) returns (DiscoverableContactsResponse);
+  rpc AdminAnalytics(AnalyticsRequest) returns (AnalyticsResponse);
+  rpc AdminRequestExport(ExportRequest) returns (MutationResponse);
+  rpc RequestWorkflowStepResponsesExport(ExportRequest) returns (MutationResponse);
+  rpc AdminAnomalyAllowList(AnomalyAllowListRequest) returns (AnomalyAllowList);
+  rpc AdminSetAnomalyAllowList(AnomalyAllowListRequest) returns (AnomalyAllowList);
+  rpc TeamBillingInfo(WorkspaceRequest) returns (BillingInfoResponse);
+  rpc AdminAddRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
+  rpc AdminRemoveRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
+  rpc AdminListRoleAssignments(RoleAssignmentsRequest) returns (RoleAssignmentPage);
+  rpc AdminCreateBarrier(BarrierMutationRequest) returns (InformationBarrier);
+  rpc AdminUpdateBarrier(BarrierMutationRequest) returns (InformationBarrier);
+  rpc AdminDeleteBarrier(BarrierMutationRequest) returns (MutationResponse);
+  rpc AdminBarriers(BarriersRequest) returns (InformationBarrierPage);
+  rpc AdminSetSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
+  rpc AdminClearSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
+  rpc AdminSessionSettings(SessionSettingsMutationRequest) returns (SessionSettingsResponse);
+  rpc AdminAssignAuthPolicy(AuthPolicyMutationRequest) returns (MutationResponse);
+  rpc AdminRemoveAuthPolicyEntities(AuthPolicyMutationRequest) returns (MutationResponse);
+  rpc AdminAuthPolicyEntities(AuthPolicyEntitiesRequest) returns (AuthPolicyEntityPage);
   rpc ResetUserSessions(ResetUserSessionsRequest) returns (MutationResponse);
   rpc UserSessions(ResetUserSessionsRequest) returns (UserSessionsResponse);
   rpc ResetUserSessionsBulk(ResetUserSessionsBulkRequest) returns (MutationResponse);
@@ -472,6 +670,7 @@ service DirectoryService {
   rpc InvitationPreview(InvitationPreviewRequest) returns (InviteRequest);
   rpc AcceptInvitationForEmail(AcceptInvitationRequest) returns (User);
   rpc AdminApproveApp(AppApprovalMutationRequest) returns (MutationResponse);
+  rpc AdminCancelAppRequest(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminUninstallApps(AdminUninstallAppsRequest) returns (MutationResponse);
   rpc AdminRestrictApp(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminListApps(AppApprovalsRequest) returns (AppApprovalPage);

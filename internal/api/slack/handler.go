@@ -3,6 +3,7 @@ package slack
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -26,7 +27,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -184,6 +184,11 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
 	mux.HandleFunc("POST /api/admin.apps.uninstall", h.adminAppsUninstall)
+	mux.HandleFunc("POST /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
+	mux.HandleFunc("GET /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
+	mux.HandleFunc("POST /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
+	mux.HandleFunc("GET /api/admin.functions.list", h.adminFunctionsList)
+	mux.HandleFunc("POST /api/admin.functions.list", h.adminFunctionsList)
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
@@ -196,6 +201,70 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("POST /api/apps.icon.set", h.appsIconSet)
+	mux.HandleFunc("GET /api/apps.auth.external.get", h.appsAuthExternalGet)
+	mux.HandleFunc("POST /api/apps.auth.external.get", h.appsAuthExternalGet)
+	mux.HandleFunc("POST /api/apps.auth.external.delete", h.appsAuthExternalDelete)
+	mux.HandleFunc("POST /api/apps.user.connection.update", h.appsUserConnectionUpdate)
+	mux.HandleFunc("GET /api/assistant.search.info", h.assistantSearchInfo)
+	mux.HandleFunc("POST /api/assistant.search.info", h.assistantSearchInfo)
+	mux.HandleFunc("GET /api/assistant.search.context", h.assistantSearchContext)
+	mux.HandleFunc("POST /api/assistant.search.context", h.assistantSearchContext)
+	mux.HandleFunc("GET /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
+	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
+	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.updateItem", h.adminAuditAnomalyAllowUpdateItem)
+	mux.HandleFunc("GET /api/team.billing.info", h.teamBillingInfo)
+	mux.HandleFunc("POST /api/team.billing.info", h.teamBillingInfo)
+	mux.HandleFunc("POST /api/admin.users.unsupportedVersions.export", h.adminUsersUnsupportedVersionsExport)
+	mux.HandleFunc("POST /api/functions.workflows.steps.responses.export", h.functionsWorkflowsStepsResponsesExport)
+	mux.HandleFunc("GET /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
+	mux.HandleFunc("POST /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
+	mux.HandleFunc("GET /api/admin.analytics.messages.activity", h.adminAnalyticsMessagesActivity)
+	mux.HandleFunc("POST /api/admin.analytics.messages.activity", h.adminAnalyticsMessagesActivity)
+	mux.HandleFunc("GET /api/admin.analytics.messages.metadata", h.adminAnalyticsMessagesMetadata)
+	mux.HandleFunc("POST /api/admin.analytics.messages.metadata", h.adminAnalyticsMessagesMetadata)
+	mux.HandleFunc("GET /api/apps.activities.list", h.appsActivitiesList)
+	mux.HandleFunc("POST /api/apps.activities.list", h.appsActivitiesList)
+	mux.HandleFunc("GET /api/admin.apps.activities.list", h.adminAppsActivitiesList)
+	mux.HandleFunc("POST /api/admin.apps.activities.list", h.adminAppsActivitiesList)
+	mux.HandleFunc("GET /api/admin.conversations.lookup", h.adminConversationsLookup)
+	mux.HandleFunc("POST /api/admin.conversations.lookup", h.adminConversationsLookup)
+	mux.HandleFunc("POST /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
+	mux.HandleFunc("POST /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
+	mux.HandleFunc("POST /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
+	mux.HandleFunc("POST /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
+	mux.HandleFunc("POST /api/admin.conversations.createForObjects", h.adminConversationsCreateForObjects)
+	mux.HandleFunc("GET /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
+	mux.HandleFunc("POST /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
+	mux.HandleFunc("POST /api/admin.apps.config.set", h.adminAppsConfigSet)
+	mux.HandleFunc("POST /api/admin.apps.clearResolution", h.adminAppsClearResolution)
+	mux.HandleFunc("GET /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
+	mux.HandleFunc("POST /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
+	mux.HandleFunc("POST /api/admin.functions.permissions.set", h.adminFunctionsPermissionsSet)
+	mux.HandleFunc("GET /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
+	mux.HandleFunc("POST /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
+	mux.HandleFunc("GET /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
+	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
+	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.set", h.adminWorkflowsTriggerTypePermissionsSet)
+	mux.HandleFunc("POST /api/admin.barriers.create", h.adminBarriersCreate)
+	mux.HandleFunc("POST /api/admin.barriers.update", h.adminBarriersUpdate)
+	mux.HandleFunc("POST /api/admin.barriers.delete", h.adminBarriersDelete)
+	mux.HandleFunc("GET /api/admin.barriers.list", h.adminBarriersList)
+	mux.HandleFunc("POST /api/admin.barriers.list", h.adminBarriersList)
+	mux.HandleFunc("POST /api/admin.users.session.setSettings", h.adminUsersSessionSetSettings)
+	mux.HandleFunc("POST /api/admin.users.session.clearSettings", h.adminUsersSessionClearSettings)
+	mux.HandleFunc("GET /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
+	mux.HandleFunc("POST /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
+	mux.HandleFunc("POST /api/admin.auth.policy.assignEntities", h.adminAuthPolicyAssignEntities)
+	mux.HandleFunc("POST /api/admin.auth.policy.removeEntities", h.adminAuthPolicyRemoveEntities)
+	mux.HandleFunc("GET /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
+	mux.HandleFunc("POST /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
+	mux.HandleFunc("POST /api/admin.roles.addAssignments", h.adminRolesAddAssignments)
+	mux.HandleFunc("POST /api/admin.roles.removeAssignments", h.adminRolesRemoveAssignments)
+	mux.HandleFunc("GET /api/admin.roles.listAssignments", h.adminRolesListAssignments)
+	mux.HandleFunc("POST /api/admin.roles.listAssignments", h.adminRolesListAssignments)
+	mux.HandleFunc("GET /api/admin.users.getExpiration", h.adminUsersGetExpiration)
+	mux.HandleFunc("POST /api/admin.users.getExpiration", h.adminUsersGetExpiration)
 	mux.HandleFunc("POST /api/admin.users.invite", h.adminUsersInvite)
 	mux.HandleFunc("POST /api/admin.users.assign", h.adminUsersAssign)
 	mux.HandleFunc("POST /api/admin.inviteRequests.approve", h.adminInviteRequestApprove)
@@ -226,6 +295,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.invite", h.adminConversationInvite)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPublic", h.adminConversationConvertToPublic)
+	mux.HandleFunc("POST /api/admin.conversations.bulkArchive", h.adminConversationBulkArchive)
+	mux.HandleFunc("POST /api/admin.conversations.bulkDelete", h.adminConversationBulkDelete)
 	mux.HandleFunc("GET /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
@@ -1027,7 +1098,7 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 		teamName = string(workspace.ID)
 	}
 	response := map[string]any{"ok": true, "url": "http://localhost/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID}
-	if principal.TokenType == "bot" {
+	if principal.TokenType.IsBot() {
 		response["bot_id"] = principal.BotID
 		response["is_enterprise_install"] = false
 	}
@@ -1633,12 +1704,12 @@ func (h Handler) functionsDistributionsPermissionsSet(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	permissionType := strings.TrimSpace(fields["permission_type"])
+	permissionType := domain.PermissionType(strings.TrimSpace(fields["permission_type"]))
 	if permissionType == "" {
 		writeError(w, "permission_type_required")
 		return
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities", "system"}, permissionType) {
+	if !permissionType.Valid() {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -1812,8 +1883,8 @@ func (h Handler) workflowsTriggersPermissionsSet(w http.ResponseWriter, r *http.
 	if !requireTriggerApp(w, principal) {
 		return
 	}
-	permissionType := strings.TrimSpace(fields["permission_type"])
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, permissionType) {
+	permissionType := domain.PermissionType(strings.TrimSpace(fields["permission_type"]))
+	if !permissionType.SettableBy() || permissionType == domain.PermissionNoOne {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -2081,7 +2152,7 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if principal.TokenType == "bot" {
+	if principal.TokenType.IsBot() {
 		writeError(w, "no_permission")
 		return
 	}
@@ -2512,7 +2583,7 @@ func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any
 		response["authed_user"] = authedUser
 		return response
 	}
-	if token.TokenType == "bot" {
+	if token.TokenType.IsBot() {
 		response["bot_user_id"] = token.UserID
 		authedUser := map[string]any{"id": token.InstallerID}
 		if token.AuthedUserAccessToken != "" {
@@ -2991,6 +3062,88 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// users.discoverableContacts.lookup reports which addresses belong to a member
+// this workspace lets others find. A workspace that hides itself answers none.
+func (h Handler) usersDiscoverableContacts(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersReadEmail)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	emails := parseIDList[string](fields["emails"])
+	if len(emails) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	users, err := h.Messages.DiscoverableContacts(r.Context(), principal.WorkspaceID, principal.UserID, emails)
+	if err != nil {
+		writeError(w, mapServiceError(err, "invalid_arg_name"))
+		return
+	}
+	contacts := make([]map[string]any, 0, len(users))
+	for _, user := range users {
+		contacts = append(contacts, map[string]any{"email": user.Email, "user_id": string(user.ID), "team_id": string(user.WorkspaceID)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "contacts": contacts})
+}
+
+// admin.functions.list reports the functions the installed apps declare. A
+// function lives in a manifest, so the read parses the manifests.
+func (h Handler) adminFunctionsList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	functions, err := h.Messages.AdminFunctions(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "not_an_admin"))
+		return
+	}
+	payload := make([]map[string]any, 0, len(functions))
+	for _, function := range functions {
+		payload = append(payload, map[string]any{
+			"app_id": string(function.AppID), "app_name": function.AppName,
+			"callback_id": function.CallbackID, "title": function.Title,
+			"description": function.Description, "type": "app",
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "functions": payload,
+		"response_metadata": map[string]any{"next_cursor": ""},
+	})
+}
+
+// admin.apps.requests.cancel withdraws a request nobody has decided.
+func (h Handler) adminAppRequestCancel(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	requestID := domain.AppRequestID(strings.TrimSpace(fields["request_id"]))
+	if appID == "" && requestID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if err := h.Messages.AdminCancelAppRequest(r.Context(), principal.WorkspaceID, principal.UserID, appID, requestID); err != nil {
+		writeError(w, mapServiceError(err, "app_request_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // admin.apps.uninstall removes apps from the workspace. apps.uninstall is the
 // app's own, proven by its client credentials; an administrator holds no app's
 // secret, so without this a workspace could approve an app and never take it
@@ -3132,6 +3285,1483 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apps.icon.set records what a client draws beside an app's messages.
+func (h Handler) appsIconSet(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	iconURL := strings.TrimSpace(fields["image_url"])
+	if appID == "" || iconURL == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.SetAppIcon(r.Context(), principal.WorkspaceID, principal.UserID, appID, iconURL); err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apps.auth.external.get and delete govern an app's credentials with services
+// outside this deployment. The secret never leaves the store: a caller needs to
+// know the credential exists and when it lapses, not what it is.
+func (h Handler) appsAuthExternalGet(w http.ResponseWriter, r *http.Request) {
+	principal, appID, fields, ok := h.appCredentialRequest(w, r)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(fields["external_token_id"])
+	if id == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value, err := h.Messages.ExternalAuthToken(r.Context(), principal.WorkspaceID, appID, id)
+	if err != nil {
+		writeError(w, mapServiceError(err, "token_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "external_token": map[string]any{
+		"external_token_id": value.ID,
+		"app_id":            string(value.AppID),
+		"provider_name":     value.Provider,
+		"date_updated":      value.CreatedAt.UTC().Unix(),
+		"expires_at":        value.ExpiresAt.UTC().Unix(),
+	}})
+}
+
+func (h Handler) appsAuthExternalDelete(w http.ResponseWriter, r *http.Request) {
+	principal, appID, fields, ok := h.appCredentialRequest(w, r)
+	if !ok {
+		return
+	}
+	// Slack takes either one credential or the whole app's set, so an absent
+	// identifier revokes every credential rather than none.
+	if err := h.Messages.DeleteExternalAuthToken(r.Context(), principal.WorkspaceID, principal.UserID, appID, fields["external_token_id"]); err != nil {
+		writeError(w, mapServiceError(err, "token_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// appCredentialRequest resolves which app the caller speaks for. A credential
+// that carries an app speaks for that app and no other, so an app_id argument
+// cannot widen it: an app that could name another app could read its secrets.
+func (h Handler) appCredentialRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, domain.AppID, map[string]string, bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return auth.Principal{}, "", nil, false
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return auth.Principal{}, "", nil, false
+	}
+	appID := principal.AppID
+	if appID == "" {
+		appID = domain.AppID(strings.TrimSpace(fields["app_id"]))
+	}
+	if appID == "" {
+		writeError(w, "invalid_arguments")
+		return auth.Principal{}, "", nil, false
+	}
+	return principal, appID, fields, true
+}
+
+// apps.user.connection.update refreshes a member's connection to an app.
+func (h Handler) appsUserConnectionUpdate(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuthorizationsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := principal.AppID
+	if appID == "" {
+		appID = domain.AppID(strings.TrimSpace(fields["app_id"]))
+	}
+	if appID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.UpdateUserAppConnection(r.Context(), principal.WorkspaceID, principal.UserID, appID); err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// assistant.search.info reports what an assistant may search here, and
+// assistant.search.context answers the messages it may quote. The context is
+// the member's own search, so an assistant answering on somebody's behalf sees
+// what they see and no more.
+func (h Handler) assistantSearchInfo(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if _, err := decodeFields(w, r); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	availability, err := h.Messages.AssistantSearchAvailability(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "enabled": availability.Enabled, "searchable_sources": availability.SearchableSources,
+	})
+}
+
+func (h Handler) assistantSearchContext(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	query := strings.TrimSpace(fields["query"])
+	if query == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AssistantSearchContext(r.Context(), principal.WorkspaceID, principal.UserID, query, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	results := make([]map[string]any, 0, len(page.Messages))
+	for _, message := range page.Messages {
+		results = append(results, map[string]any{
+			"author_user_id": string(message.AuthorID),
+			"channel_id":     string(message.Conversation),
+			"content":        message.Text,
+			"message_ts":     slackTimestamp(message.CreatedAt),
+			"is_author_bot":  message.AppID != "",
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": map[string]any{"messages": results},
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// admin.audit.anomaly.allow.getItem and updateItem govern what audit does not
+// flag. A workspace that has set nothing answers an empty list rather than a
+// not-found: an empty allow list is the state a workspace starts in.
+func (h Handler) adminAuditAnomalyAllowGetItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuditLogsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if _, err := decodeFields(w, r); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	value, err := h.Messages.AdminAnomalyAllowList(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "anomaly_allow_updated_item": anomalyAllowListResponse(value)})
+}
+
+func (h Handler) adminAuditAnomalyAllowUpdateItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuditLogsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	addresses := parseIDList[string](fields["ip_addresses"])
+	reasons := parseIDList[string](fields["reasons"])
+	value, err := h.Messages.AdminSetAnomalyAllowList(r.Context(), principal.WorkspaceID, principal.UserID, addresses, reasons)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "anomaly_allow_updated_item": anomalyAllowListResponse(value)})
+}
+
+func anomalyAllowListResponse(value domain.AnomalyAllowList) map[string]any {
+	return map[string]any{"ips": value.IPAddresses, "reasons": value.Reasons}
+}
+
+// team.billing.info reports which plan the workspace is on. A workspace on the
+// free plan reports an empty plan, which is what Slack reports for one.
+func (h Handler) teamBillingInfo(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeTeamRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if _, err := decodeFields(w, r); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	plan, err := h.Messages.TeamBillingInfo(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "plan": string(plan)})
+}
+
+// admin.users.unsupportedVersions.export and
+// functions.workflows.steps.responses.export ask for a report to be built and
+// sent. Slack acknowledges the request rather than answering the report, so
+// both answer ok once the request is recorded in the workspace journal - which
+// is what makes the request auditable rather than merely accepted.
+func (h Handler) adminUsersUnsupportedVersionsExport(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	endOfSupport, endErr := optionalEpochSeconds(fields["date_end_of_support"])
+	sessionsStarted, startErr := optionalEpochSeconds(fields["date_sessions_started"])
+	if endErr != nil || startErr != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminRequestExport(r.Context(), principal.WorkspaceID, principal.UserID, "unsupported_versions", map[string]int64{
+		"date_end_of_support": endOfSupport, "date_sessions_started": sessionsStarted,
+	}); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) functionsWorkflowsStepsResponsesExport(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeWorkflowStepsExecute)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	workflowID := strings.TrimSpace(fields["workflow_id"])
+	stepID := strings.TrimSpace(fields["step_id"])
+	if workflowID == "" || stepID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.RequestWorkflowStepResponsesExport(r.Context(), principal.WorkspaceID, principal.UserID,
+		domain.WorkflowID(workflowID), stepID); err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// optionalEpochSeconds reads an absent argument as no bound rather than as the
+// beginning of 1970.
+func optionalEpochSeconds(value string) (int64, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	seconds, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || seconds < 0 {
+		return 0, errors.New("invalid_arguments")
+	}
+	return seconds, nil
+}
+
+// admin.analytics.getFile answers a gzipped stream of JSON lines, which is what
+// Slack answers: the file is meant to be piped to a store, not parsed out of a
+// JSON envelope. admin.analytics.messages.activity and .metadata answer the
+// same rows as JSON, for a caller reading a day rather than archiving it.
+func (h Handler) adminAnalyticsGetFile(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.analyticsRequest(w, r)
+	if !ok {
+		return
+	}
+	kind := domain.AnalyticsKind(strings.TrimSpace(fields["type"]))
+	day, dayErr := analyticsDay(fields["date"])
+	if !kind.Valid() || dayErr != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	// metadata_only describes the fields without reading anybody's day, so it
+	// answers JSON rather than a stream that would hold one line of schema.
+	if metadataOnly, err := parseBoolField(fields["metadata_only"]); err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	} else if metadataOnly {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "fields": analyticsFieldDescriptions(kind)})
+		return
+	}
+	rows, err := h.Messages.AdminAnalytics(r.Context(), principal.WorkspaceID, principal.UserID, kind, day)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", string(kind)+"-"+domain.AnalyticsDate(day)+".json.gz"))
+	w.WriteHeader(http.StatusOK)
+	compressor := gzip.NewWriter(w)
+	encoder := json.NewEncoder(compressor)
+	for _, row := range rows {
+		if err := encoder.Encode(analyticsRowResponse(row)); err != nil {
+			// The status line is already out, so the only honest signal left is
+			// to stop writing: a truncated gzip stream fails the reader's
+			// checksum rather than passing off a short day as a whole one.
+			return
+		}
+	}
+	compressor.Close()
+}
+
+func (h Handler) adminAnalyticsMessagesActivity(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.analyticsRequest(w, r)
+	if !ok {
+		return
+	}
+	day, err := analyticsDay(fields["date"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	rows, err := h.Messages.AdminAnalytics(r.Context(), principal.WorkspaceID, principal.UserID, domain.AnalyticsConversations, day)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	values := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, analyticsRowResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "activity": values})
+}
+
+func (h Handler) adminAnalyticsMessagesMetadata(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.analyticsRequest(w, r); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "fields": analyticsFieldDescriptions(domain.AnalyticsConversations)})
+}
+
+func (h Handler) analyticsRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, map[string]string, bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAnalyticsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	return principal, fields, true
+}
+
+// analyticsDay reads Slack's YYYY-MM-DD argument. An absent date means
+// yesterday, which is the most recent whole day there is.
+func analyticsDay(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Now().UTC().AddDate(0, 0, -1).Truncate(24 * time.Hour), nil
+	}
+	day, err := domain.ParseAnalyticsDate(trimmed)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return day.UTC(), nil
+}
+
+func analyticsRowResponse(row domain.AnalyticsRow) map[string]any {
+	value := map[string]any{
+		"date":            row.Date,
+		"messages_posted": row.MessagesPosted,
+	}
+	if row.Kind == domain.AnalyticsMember {
+		value["user_id"] = row.EntityID
+		value["user_name"] = row.Name
+		value["reactions_added"] = row.ReactionsAdded
+		value["is_active"] = row.IsActive
+		return value
+	}
+	value["channel_id"] = row.EntityID
+	value["channel_name"] = row.Name
+	value["member_count"] = row.MemberCount
+	return value
+}
+
+// analyticsFieldDescriptions names what each column of a file holds. Slack
+// answers this so a reader can build a table before it downloads a day.
+func analyticsFieldDescriptions(kind domain.AnalyticsKind) []map[string]any {
+	shared := []map[string]any{
+		{"name": "date", "type": "string", "description": "The day these counts cover, as YYYY-MM-DD."},
+		{"name": "messages_posted", "type": "integer", "description": "Messages posted on that day."},
+	}
+	if kind == domain.AnalyticsMember {
+		return append(shared,
+			map[string]any{"name": "user_id", "type": "string", "description": "The member these counts describe."},
+			map[string]any{"name": "user_name", "type": "string", "description": "That member's name."},
+			map[string]any{"name": "reactions_added", "type": "integer", "description": "Reactions the member added on that day."},
+			map[string]any{"name": "is_active", "type": "boolean", "description": "Whether the membership was active."},
+		)
+	}
+	return append(shared,
+		map[string]any{"name": "channel_id", "type": "string", "description": "The channel these counts describe."},
+		map[string]any{"name": "channel_name", "type": "string", "description": "That channel's name."},
+		map[string]any{"name": "member_count", "type": "integer", "description": "Members the channel held when the file was built."},
+	)
+}
+
+// apps.activities.list reports one app's own activity log, and
+// admin.apps.activities.list reports any app's to an administrator. The app's
+// own read takes the app from the credential rather than an argument: an app
+// that could name another app's identifier could read its log.
+func (h Handler) appsActivitiesList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuthorizationsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if principal.AppID == "" {
+		writeError(w, "not_allowed_token_type")
+		return
+	}
+	filter, request, ok := appActivityArguments(w, r)
+	if !ok {
+		return
+	}
+	page, err := h.Messages.AppActivities(r.Context(), principal.WorkspaceID, principal.AppID, filter, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeActivityPage(w, page)
+}
+
+func (h Handler) adminAppsActivitiesList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	filter, request, ok := appActivityArguments(w, r)
+	if !ok {
+		return
+	}
+	page, err := h.Messages.AdminAppActivities(r.Context(), principal.WorkspaceID, principal.UserID, filter, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeActivityPage(w, page)
+}
+
+// appActivityArguments reads the filter both activity reads accept. A level the
+// platform does not emit is refused rather than ignored: ignoring it would
+// answer every entry to a caller that asked for a narrow set.
+func appActivityArguments(w http.ResponseWriter, r *http.Request) (domain.AppActivityFilter, domain.PageRequest, bool) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return domain.AppActivityFilter{}, domain.PageRequest{}, false
+	}
+	filter := domain.AppActivityFilter{
+		AppID:         domain.AppID(strings.TrimSpace(fields["app_id"])),
+		ComponentType: strings.TrimSpace(fields["component_type"]),
+		ComponentID:   strings.TrimSpace(fields["component_id"]),
+		Source:        strings.TrimSpace(fields["source"]),
+		TraceID:       strings.TrimSpace(fields["trace_id"]),
+	}
+	if level := strings.TrimSpace(fields["min_log_level"]); level != "" {
+		filter.MinLevel = domain.ActivityLevel(level)
+		if !filter.MinLevel.Valid() {
+			writeError(w, "invalid_arguments")
+			return domain.AppActivityFilter{}, domain.PageRequest{}, false
+		}
+	}
+	for _, bound := range []struct {
+		name  string
+		apply func(time.Time)
+	}{
+		{"min_date_created", func(value time.Time) { filter.MinCreatedAt = value }},
+		{"max_date_created", func(value time.Time) { filter.MaxCreatedAt = value }},
+	} {
+		raw := strings.TrimSpace(fields[bound.name])
+		if raw == "" {
+			continue
+		}
+		seconds, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || seconds < 0 {
+			writeError(w, "invalid_arguments")
+			return domain.AppActivityFilter{}, domain.PageRequest{}, false
+		}
+		bound.apply(time.Unix(seconds, 0).UTC())
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return domain.AppActivityFilter{}, domain.PageRequest{}, false
+	}
+	return filter, request, true
+}
+
+func writeActivityPage(w http.ResponseWriter, page domain.AppActivityPage) {
+	activities := make([]map[string]any, 0, len(page.Activities))
+	for _, activity := range page.Activities {
+		activities = append(activities, map[string]any{
+			"app_id":         string(activity.AppID),
+			"component_type": activity.ComponentType,
+			"component_id":   activity.ComponentID,
+			"level":          string(activity.Level),
+			"event_type":     activity.EventType,
+			"source":         activity.Source,
+			"message":        activity.Message,
+			"trace_id":       activity.TraceID,
+			"created":        activity.CreatedAt.UTC().UnixMilli(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "activities": activities,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// admin.conversations.lookup finds channels that have gone quiet or stayed
+// small. A filter the caller leaves out is not applied, so a lookup naming
+// nothing answers every channel rather than none.
+func (h Handler) adminConversationsLookup(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	lookup := domain.ConversationLookup{TeamIDs: parseIDList[domain.WorkspaceID](fields["team_ids"])}
+	if before := strings.TrimSpace(fields["last_message_activity_before"]); before != "" {
+		seconds, parseErr := strconv.ParseInt(before, 10, 64)
+		if parseErr != nil || seconds < 0 {
+			writeError(w, "invalid_arguments")
+			return
+		}
+		lookup.LastMessageActivityBefore = time.Unix(seconds, 0).UTC()
+	}
+	if maximum := strings.TrimSpace(fields["max_member_count"]); maximum != "" {
+		count, parseErr := strconv.Atoi(maximum)
+		if parseErr != nil || count < 0 {
+			writeError(w, "invalid_arguments")
+			return
+		}
+		lookup.MaxMemberCount = count
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminLookupConversations(r.Context(), principal.WorkspaceID, principal.UserID, lookup, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	ids := make([]string, 0, len(page.Conversations))
+	for _, conversation := range page.Conversations {
+		ids = append(ids, string(conversation.ID))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channels": ids,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// admin.conversations.bulkMove reassigns channels to another workspace. Every
+// channel is checked before one moves, so a request naming a channel that is
+// not here moves nothing.
+func (h Handler) adminConversationsBulkMove(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channel_ids"])
+	target := domain.WorkspaceID(strings.TrimSpace(fields["target_team_id"]))
+	if len(ids) == 0 || target == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminBulkMoveConversations(r.Context(), principal.WorkspaceID, principal.UserID, ids, target); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.conversations.bulkSetExcludeFromSlackAi keeps channels in or out of the
+// workspace's generative features.
+func (h Handler) adminConversationsBulkSetExcludeFromAI(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channel_ids"])
+	excluded, err := parseBoolField(fields["exclude_from_slack_ai_value"])
+	if len(ids) == 0 || err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminSetConversationsExcludedFromAI(r.Context(), principal.WorkspaceID, principal.UserID, ids, excluded); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.conversations.linkObjects and unlinkObjects tie a channel to external
+// records and cut every tie again.
+func (h Handler) adminConversationsLinkObjects(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	id := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	orgID := strings.TrimSpace(fields["salesforce_org_id"])
+	records := parseIDList[string](fields["record_id"])
+	if id == "" || orgID == "" || len(records) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminLinkConversationObjects(r.Context(), principal.WorkspaceID, principal.UserID, id, orgID, records); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) adminConversationsUnlinkObjects(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channels"])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminUnlinkConversationObjects(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.conversations.createForObjects creates a channel already linked to an
+// external record. A link that cannot be stored leaves no channel behind: a
+// half-made channel is worse than none, because nobody would know it is not
+// linked.
+func (h Handler) adminConversationsCreateForObjects(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	name := strings.TrimSpace(fields["channel_name"])
+	orgID := strings.TrimSpace(fields["salesforce_org_id"])
+	recordID := strings.TrimSpace(fields["object_id"])
+	private, err := parseBoolField(fields["is_private"])
+	if name == "" || orgID == "" || recordID == "" || err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	conversation, err := h.Messages.AdminCreateConversationForObjects(r.Context(), principal.WorkspaceID, principal.UserID, name, orgID, recordID, private)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": string(conversation.ID)})
+}
+
+// admin.apps.config.lookup and set decide what an installed app may reach and
+// whose credentials its steps run under. An app nobody has configured answers
+// the defaults rather than being left out of the reply.
+func (h Handler) adminAppsConfigLookup(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appIDs := parseIDList[domain.AppID](fields["app_ids"])
+	if len(appIDs) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	configs, err := h.Messages.AdminAppConfigs(r.Context(), principal.WorkspaceID, principal.UserID, appIDs)
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	values := make([]map[string]any, 0, len(configs))
+	for _, config := range configs {
+		values = append(values, appConfigResponse(config))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "configs": values})
+}
+
+func (h Handler) adminAppsConfigSet(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	// Slack leaves the strategy out to mean "keep the default", so an absent
+	// argument is the default rather than a refusal.
+	strategy := domain.WorkflowAuthStrategy(strings.TrimSpace(fields["workflow_auth_strategy"]))
+	if strategy == "" {
+		strategy = domain.WorkflowAuthBuilderChoice
+	}
+	if appID == "" || !strategy.Valid() {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	urls, emails, err := domainRestrictions(fields["domain_restrictions"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	config, err := h.Messages.AdminSetAppConfig(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppConfig{
+		AppID: appID, DomainURLs: urls, DomainEmails: emails, WorkflowAuthStrategy: strategy,
+	})
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config": appConfigResponse(config)})
+}
+
+// admin.apps.clearResolution undoes an approval decision. The app becomes
+// undecided again, which is not the same as restricted: an undecided app is one
+// an administrator has yet to judge.
+func (h Handler) adminAppsClearResolution(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if appID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminClearAppResolution(r.Context(), principal.WorkspaceID, principal.UserID, appID); err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// domainRestrictions reads Slack's nested JSON argument. An absent argument
+// restricts nothing, which is not the same as restricting to an empty list.
+func domainRestrictions(value string) ([]string, []string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return []string{}, []string{}, nil
+	}
+	var decoded struct {
+		URLs   []string `json:"urls"`
+		Emails []string `json:"emails"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return nil, nil, err
+	}
+	if decoded.URLs == nil {
+		decoded.URLs = []string{}
+	}
+	if decoded.Emails == nil {
+		decoded.Emails = []string{}
+	}
+	return decoded.URLs, decoded.Emails, nil
+}
+
+func appConfigResponse(config domain.AppConfig) map[string]any {
+	return map[string]any{
+		"app_id": string(config.AppID),
+		"domain_restrictions": map[string]any{
+			"urls":   config.DomainURLs,
+			"emails": config.DomainEmails,
+		},
+		"workflow_auth_strategy": string(config.WorkflowAuthStrategy),
+	}
+}
+
+// admin.functions.permissions.lookup, admin.workflows.permissions.lookup and
+// admin.workflows.triggers.types.permissions.lookup report who may run an
+// automation. A resource with no stored permission answers the default rather
+// than being left out, so the caller learns the effective answer for every
+// identifier it named instead of having to infer it from an absence.
+func (h Handler) adminFunctionsPermissionsLookup(w http.ResponseWriter, r *http.Request) {
+	h.lookupAutomationPermissions(w, r, "function_ids", func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, ids []string) ([]domain.AutomationPermission, error) {
+		return h.Messages.AdminFunctionPermissions(ctx, workspace, actor, ids)
+	})
+}
+
+func (h Handler) adminWorkflowsPermissionsLookup(w http.ResponseWriter, r *http.Request) {
+	h.lookupAutomationPermissions(w, r, "workflow_ids", func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, ids []string) ([]domain.AutomationPermission, error) {
+		workflows := make([]domain.WorkflowID, 0, len(ids))
+		for _, id := range ids {
+			workflows = append(workflows, domain.WorkflowID(id))
+		}
+		return h.Messages.AdminWorkflowPermissions(ctx, workspace, actor, workflows)
+	})
+}
+
+func (h Handler) lookupAutomationPermissions(w http.ResponseWriter, r *http.Request, field string, read func(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.AutomationPermission, error)) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[string](fields[field])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	values, err := read(r.Context(), principal.WorkspaceID, principal.UserID, ids)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	permissions := make(map[string]any, len(values))
+	for _, value := range values {
+		permissions[value.ResourceID] = automationPermissionResponse(value)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "permissions": permissions})
+}
+
+func (h Handler) adminWorkflowsTriggerTypePermissionsLookup(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	kind := domain.WorkflowTriggerType(strings.TrimSpace(fields["trigger_type_id"]))
+	if !kind.Valid() {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value, err := h.Messages.AdminTriggerTypePermission(r.Context(), principal.WorkspaceID, principal.UserID, kind)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	response := automationPermissionResponse(value)
+	response["ok"] = true
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h Handler) adminFunctionsPermissionsSet(w http.ResponseWriter, r *http.Request) {
+	h.setAutomationPermission(w, r, "function_id",
+		func(fields map[string]string) bool { return strings.TrimSpace(fields["function_id"]) != "" },
+		func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, fields map[string]string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+			return h.Messages.AdminSetFunctionPermission(ctx, workspace, actor, strings.TrimSpace(fields["function_id"]), value)
+		})
+}
+
+func (h Handler) adminWorkflowsTriggerTypePermissionsSet(w http.ResponseWriter, r *http.Request) {
+	h.setAutomationPermission(w, r, "trigger_type_id",
+		func(fields map[string]string) bool {
+			return domain.WorkflowTriggerType(strings.TrimSpace(fields["trigger_type_id"])).Valid()
+		},
+		func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, fields map[string]string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+			return h.Messages.AdminSetTriggerTypePermission(ctx, workspace, actor, domain.WorkflowTriggerType(strings.TrimSpace(fields["trigger_type_id"])), value)
+		})
+}
+
+// setAutomationPermission checks the resource identifier before it reaches the
+// service, so a request naming no resource answers invalid_arguments rather
+// than the service's own name for a malformed automation.
+func (h Handler) setAutomationPermission(w http.ResponseWriter, r *http.Request, _ string, valid func(map[string]string) bool, write func(context.Context, domain.WorkspaceID, domain.UserID, map[string]string, domain.AutomationPermission) (domain.AutomationPermission, error)) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// Slack names this argument visibility on the set methods and reports it as
+	// permission_type on the lookups. Accepting both spellings here keeps a
+	// caller from having to know which surface it is on.
+	visibility := domain.PermissionType(strings.TrimSpace(fields["visibility"]))
+	if visibility == "" {
+		visibility = domain.PermissionType(strings.TrimSpace(fields["permission_type"]))
+	}
+	if !visibility.SettableBy() || !valid(fields) {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value := domain.AutomationPermission{
+		PermissionType: visibility,
+		UserIDs:        parseIDList[domain.UserID](fields["user_ids"]),
+		ChannelIDs:     parseIDList[domain.ConversationID](fields["channel_ids"]),
+		TeamIDs:        parseIDList[domain.WorkspaceID](fields["team_ids"]),
+		OrgIDs:         parseIDList[string](fields["org_ids"]),
+	}
+	// named_entities that names nobody would open the resource to nobody while
+	// reading as a narrowing, so Slack refuses it and so does this.
+	if visibility == domain.PermissionNamedEntities && len(value.UserIDs)+len(value.ChannelIDs)+len(value.TeamIDs)+len(value.OrgIDs) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	stored, err := write(r.Context(), principal.WorkspaceID, principal.UserID, fields, value)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	response := automationPermissionResponse(stored)
+	response["ok"] = true
+	writeJSON(w, http.StatusOK, response)
+}
+
+func automationPermissionResponse(value domain.AutomationPermission) map[string]any {
+	userIDs := make([]string, 0, len(value.UserIDs))
+	for _, id := range value.UserIDs {
+		userIDs = append(userIDs, string(id))
+	}
+	return map[string]any{"permission_type": string(value.PermissionType), "user_ids": userIDs}
+}
+
+// admin.barriers.create, update, delete and list govern who may reach whom.
+// Slack requires a barrier to restrict every subject it declares - direct
+// messages, group direct messages and calls - so a request naming a subset is
+// refused rather than stored as a barrier that stops only some of them.
+func (h Handler) adminBarriersCreate(w http.ResponseWriter, r *http.Request) {
+	h.writeBarrier(w, r, true)
+}
+
+func (h Handler) adminBarriersUpdate(w http.ResponseWriter, r *http.Request) {
+	h.writeBarrier(w, r, false)
+}
+
+func (h Handler) writeBarrier(w http.ResponseWriter, r *http.Request, creating bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminBarriersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	primary := domain.UserGroupID(strings.TrimSpace(fields["primary_usergroup_id"]))
+	barrieredFrom := parseIDList[domain.UserGroupID](fields["barriered_from_usergroup_ids"])
+	subjects := parseIDList[domain.BarrierSubject](fields["restricted_subjects"])
+	id := domain.BarrierID(strings.TrimSpace(fields["barrier_id"]))
+	if primary == "" || len(barrieredFrom) == 0 || !domain.ValidBarrierSubjects(subjects) || (!creating && id == "") {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	change := h.Messages.AdminUpdateBarrier
+	if creating {
+		change = func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, _ domain.BarrierID, primary domain.UserGroupID, from []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+			return h.Messages.AdminCreateBarrier(ctx, workspace, actor, primary, from, subjects)
+		}
+	}
+	barrier, err := change(r.Context(), principal.WorkspaceID, principal.UserID, id, primary, barrieredFrom, subjects)
+	if err != nil {
+		writeError(w, mapServiceError(err, "barrier_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "barrier": barrierResponse(barrier)})
+}
+
+func (h Handler) adminBarriersDelete(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminBarriersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	id := domain.BarrierID(strings.TrimSpace(fields["barrier_id"]))
+	if id == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminDeleteBarrier(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
+		writeError(w, mapServiceError(err, "barrier_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) adminBarriersList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminBarriersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminBarriers(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "barrier_not_found"))
+		return
+	}
+	barriers := make([]map[string]any, 0, len(page.Barriers))
+	for _, barrier := range page.Barriers {
+		barriers = append(barriers, barrierResponse(barrier))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "barriers": barriers,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+func barrierResponse(barrier domain.InformationBarrier) map[string]any {
+	barrieredFrom := make([]string, 0, len(barrier.BarrieredFromIDs))
+	for _, group := range barrier.BarrieredFromIDs {
+		barrieredFrom = append(barrieredFrom, string(group))
+	}
+	subjects := make([]string, 0, len(barrier.Subjects))
+	for _, subject := range barrier.Subjects {
+		subjects = append(subjects, string(subject))
+	}
+	return map[string]any{
+		"id":                        string(barrier.ID),
+		"primary_usergroup":         string(barrier.PrimaryGroupID),
+		"barriered_from_usergroups": barrieredFrom,
+		"restricted_subjects":       subjects,
+		"date_update":               barrier.UpdatedAt.UTC().Unix(),
+	}
+}
+
+// admin.users.session.setSettings, getSettings and clearSettings govern how
+// long the named members stay signed in. Slack refuses a duration under eight
+// hours, and so does this: a duration that silently became the floor would tell
+// the administrator something untrue.
+func (h Handler) adminUsersSessionSetSettings(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	targets := parseIDList[domain.UserID](fields["user_ids"])
+	if len(targets) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	duration, err := sessionSettingsDuration(fields["duration"])
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	flags, err := parseBoolFields(fields, "desktop_app_browser_quit", "mobile_device_check")
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	settings := domain.SessionSettings{Duration: duration, DesktopAppBrowserQuit: flags[0], MobileDeviceCheck: flags[1]}
+	if err := h.Messages.AdminSetSessionSettings(r.Context(), principal.WorkspaceID, principal.UserID, targets, settings); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) adminUsersSessionClearSettings(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	targets := parseIDList[domain.UserID](fields["user_ids"])
+	if len(targets) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminClearSessionSettings(r.Context(), principal.WorkspaceID, principal.UserID, targets); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// adminUsersSessionGetSettings answers the members who carry settings and,
+// separately, the ones who carry none. A member on the workspace default is not
+// a member with zeroed settings, and reporting them as one would read as an
+// eight-second session rather than as no override.
+func (h Handler) adminUsersSessionGetSettings(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	targets := parseIDList[domain.UserID](fields["user_ids"])
+	if len(targets) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	settings, err := h.Messages.AdminSessionSettings(r.Context(), principal.WorkspaceID, principal.UserID, targets)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	applied := make(map[domain.UserID]struct{}, len(settings))
+	values := make([]map[string]any, 0, len(settings))
+	for _, value := range settings {
+		applied[value.UserID] = struct{}{}
+		values = append(values, map[string]any{
+			"user_id":                  string(value.UserID),
+			"duration":                 int64(value.Duration),
+			"desktop_app_browser_quit": value.DesktopAppBrowserQuit,
+			"mobile_device_check":      value.MobileDeviceCheck,
+		})
+	}
+	none := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if _, ok := applied[target]; !ok {
+			none = append(none, string(target))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session_settings": values, "no_settings_applied": none})
+}
+
+// sessionSettingsDuration reads Slack's duration in seconds. An absent duration
+// means the workspace default; anything above zero and under eight hours is
+// refused rather than rounded up.
+func sessionSettingsDuration(value string) (domain.SessionDuration, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	seconds, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || seconds < 0 {
+		return 0, errors.New("invalid_arguments")
+	}
+	duration := domain.SessionDuration(seconds)
+	if !duration.Valid() {
+		return 0, errors.New("invalid_arguments")
+	}
+	return duration, nil
+}
+
+// admin.auth.policy.assignEntities and admin.auth.policy.removeEntities put
+// members under an authentication policy and take them back out. Slack names
+// one policy and one entity type, and this deployment refuses any other, so a
+// caller learns at once rather than storing a policy nothing enforces.
+func (h Handler) adminAuthPolicyAssignEntities(w http.ResponseWriter, r *http.Request) {
+	h.changeAuthPolicyEntities(w, r, true)
+}
+
+func (h Handler) adminAuthPolicyRemoveEntities(w http.ResponseWriter, r *http.Request) {
+	h.changeAuthPolicyEntities(w, r, false)
+}
+
+func (h Handler) changeAuthPolicyEntities(w http.ResponseWriter, r *http.Request, adding bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	policy, kind, entityIDs, ok := authPolicyArguments(fields)
+	if !ok {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	change := h.Messages.AdminRemoveAuthPolicyEntities
+	if adding {
+		change = h.Messages.AdminAssignAuthPolicy
+	}
+	if err := change(r.Context(), principal.WorkspaceID, principal.UserID, policy, kind, entityIDs); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.auth.policy.getEntities reports who one policy applies to. Slack
+// answers the running total alongside the page, so a caller reading the first
+// page learns how many there are without walking every one of them.
+func (h Handler) adminAuthPolicyGetEntities(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	policy := domain.AuthPolicyName(strings.TrimSpace(fields["policy_name"]))
+	kind := authPolicyEntityType(fields["entity_type"])
+	if !policy.Valid() || !kind.Valid() {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminAuthPolicyEntities(r.Context(), principal.WorkspaceID, principal.UserID, policy, kind, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	entities := make([]map[string]any, 0, len(page.Entities))
+	for _, entity := range page.Entities {
+		entities = append(entities, map[string]any{
+			"entity_id":   entity.EntityID,
+			"entity_type": string(entity.EntityType),
+			"date_add":    entity.CreatedAt.UTC().Unix(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "entities": entities,
+		"entity_total_count": page.TotalCount,
+		"response_metadata":  map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+func authPolicyArguments(fields map[string]string) (domain.AuthPolicyName, domain.PolicyEntityType, []string, bool) {
+	policy := domain.AuthPolicyName(strings.TrimSpace(fields["policy_name"]))
+	kind := authPolicyEntityType(fields["entity_type"])
+	entityIDs := parseIDList[string](fields["entity_ids"])
+	return policy, kind, entityIDs, policy.Valid() && kind.Valid() && len(entityIDs) > 0
+}
+
+// authPolicyEntityType folds the case Slack documents in upper case, because a
+// caller sending "user" means the member and nothing else.
+func authPolicyEntityType(value string) domain.PolicyEntityType {
+	return domain.PolicyEntityType(strings.ToUpper(strings.TrimSpace(value)))
+}
+
+// admin.roles.addAssignments and admin.roles.removeAssignments give and take a
+// system role. Slack scopes a role to one entity, so the caller names both the
+// entities and the members, and the server writes the cross product.
+func (h Handler) adminRolesAddAssignments(w http.ResponseWriter, r *http.Request) {
+	h.changeRoleAssignments(w, r, true)
+}
+
+func (h Handler) adminRolesRemoveAssignments(w http.ResponseWriter, r *http.Request) {
+	h.changeRoleAssignments(w, r, false)
+}
+
+func (h Handler) changeRoleAssignments(w http.ResponseWriter, r *http.Request, adding bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminRolesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	roleID := strings.TrimSpace(fields["role_id"])
+	entityIDs := parseIDList[string](fields["entity_ids"])
+	userIDs := parseIDList[domain.UserID](fields["user_ids"])
+	if roleID == "" || len(entityIDs) == 0 || len(userIDs) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	change := h.Messages.AdminRemoveRoleAssignments
+	if adding {
+		change = h.Messages.AdminAddRoleAssignments
+	}
+	if err := change(r.Context(), principal.WorkspaceID, principal.UserID, roleID, entityIDs, userIDs); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.roles.listAssignments reports who holds one role.
+func (h Handler) adminRolesListAssignments(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminRolesRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	roleID := strings.TrimSpace(fields["role_id"])
+	if roleID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminListRoleAssignments(r.Context(), principal.WorkspaceID, principal.UserID, roleID, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	assignments := make([]map[string]any, 0, len(page.Assignments))
+	for _, assignment := range page.Assignments {
+		assignments = append(assignments, map[string]any{
+			"role_id":     assignment.RoleID,
+			"entity_id":   assignment.EntityID,
+			"user_id":     string(assignment.UserID),
+			"date_create": assignment.CreatedAt.UTC().Unix(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role_assignments": assignments,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// admin.users.getExpiration reports when a guest account lapses. An account
+// that does not lapse reports 0, which is what Slack reports for one.
+func (h Handler) adminUsersGetExpiration(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	teamID, targetID := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"]))
+	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	expiration, err := h.Messages.UserExpiration(r.Context(), principal.WorkspaceID, principal.UserID, targetID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	timestamp := int64(0)
+	if !expiration.IsZero() {
+		timestamp = expiration.UTC().Unix()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "expiration_ts": timestamp})
 }
 
 // admin.users.session.list reports one member's live sessions. Each session is
@@ -3750,6 +5380,43 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+}
+
+// admin.conversations.bulkArchive and .bulkDelete act on several channels. The
+// service checks every channel before it changes one.
+func (h Handler) adminConversationBulkArchive(w http.ResponseWriter, r *http.Request) {
+	h.adminConversationBulk(w, r, true)
+}
+
+func (h Handler) adminConversationBulkDelete(w http.ResponseWriter, r *http.Request) {
+	h.adminConversationBulk(w, r, false)
+}
+
+func (h Handler) adminConversationBulk(w http.ResponseWriter, r *http.Request, archive bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[domain.ConversationID](fields["channel_ids"])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	act := h.Messages.AdminBulkDeleteConversations
+	if archive {
+		act = h.Messages.AdminBulkArchiveConversations
+	}
+	if err := act(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // admin.conversations.convertToPublic is the reverse of convertToPrivate, and
@@ -4945,7 +6612,7 @@ func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userSco
 	// other conversation mutators and requiring channels:manage made an
 	// official bot installation unable to join any public channel.
 	needed := userScope
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		needed = botScope
 	}
 	if !principal.HasScope(needed) {
@@ -4989,9 +6656,9 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		required = []auth.Scope{auth.ScopeIMWrite}
 	case conversation.Kind == domain.ConversationTypeMPIM:
 		required = []auth.Scope{auth.ScopeMPIMWrite}
-	case conversation.PrivateFlag():
+	case conversation.Kind == domain.ConversationTypePrivate:
 		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
-	case principal.TokenType == "bot" || principal.BotID != "":
+	case principal.TokenType.IsBot() || principal.BotID != "":
 		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}
 	default:
 		required = []auth.Scope{auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites}
@@ -6084,7 +7751,7 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 	// current page separately notes a bot-token exception, so preserve that
 	// explicit token distinction instead of accepting the obsolete path for
 	// every credential.
-	if targetID != "" && targetID != principal.UserID && principal.TokenType != "bot" {
+	if targetID != "" && targetID != principal.UserID && !principal.TokenType.IsBot() {
 		writeError(w, "cannot_add_others")
 		return
 	}
@@ -6197,7 +7864,7 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		writeError(w, "not_allowed_token_type")
 		return
 	}
@@ -6233,7 +7900,7 @@ func (h Handler) searchFiles(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		writeError(w, "not_allowed_token_type")
 		return
 	}
@@ -6264,7 +7931,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		writeError(w, "not_allowed_token_type")
 		return
 	}
@@ -7994,7 +9661,7 @@ func (h Handler) messageStreamRequest(w http.ResponseWriter, r *http.Request) (a
 		writeAuthError(w, err)
 		return auth.Principal{}, nil, false
 	}
-	if principal.TokenType != "bot" || principal.AppID == "" {
+	if !principal.TokenType.IsBot() || principal.AppID == "" {
 		writeError(w, "not_allowed_token_type")
 		return auth.Principal{}, nil, false
 	}

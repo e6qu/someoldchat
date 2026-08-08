@@ -19,21 +19,21 @@ import (
 )
 
 type workflowFunctionDefinition struct {
-	ID           string                 `json:"id,omitempty"`
-	Type         string                 `json:"type,omitempty"`
-	FunctionID   string                 `json:"function_id"`
-	AppID        domain.AppID           `json:"app_id,omitempty"`
-	Title        string                 `json:"title,omitempty"`
-	Inputs       any                    `json:"inputs,omitempty"`
-	InputMapping map[string]string      `json:"input_mapping,omitempty"`
-	Condition    *workflowStepCondition `json:"condition,omitempty"`
-	Form         *workflowFormStep      `json:"form,omitempty"`
-	Button       *workflowButtonStep    `json:"button,omitempty"`
-	Message      *workflowMessageStep   `json:"message,omitempty"`
-	AddPeople    *workflowAddPeopleStep `json:"add_people,omitempty"`
-	Canvas       *workflowCanvasStep    `json:"create_canvas,omitempty"`
-	Delay        *workflowDelayStep     `json:"delay,omitempty"`
-	WaitUntil    *workflowWaitUntilStep `json:"wait_until,omitempty"`
+	ID           string                  `json:"id,omitempty"`
+	Type         domain.WorkflowStepType `json:"type,omitempty"`
+	FunctionID   string                  `json:"function_id"`
+	AppID        domain.AppID            `json:"app_id,omitempty"`
+	Title        string                  `json:"title,omitempty"`
+	Inputs       any                     `json:"inputs,omitempty"`
+	InputMapping map[string]string       `json:"input_mapping,omitempty"`
+	Condition    *workflowStepCondition  `json:"condition,omitempty"`
+	Form         *workflowFormStep       `json:"form,omitempty"`
+	Button       *workflowButtonStep     `json:"button,omitempty"`
+	Message      *workflowMessageStep    `json:"message,omitempty"`
+	AddPeople    *workflowAddPeopleStep  `json:"add_people,omitempty"`
+	Canvas       *workflowCanvasStep     `json:"create_canvas,omitempty"`
+	Delay        *workflowDelayStep      `json:"delay,omitempty"`
+	WaitUntil    *workflowWaitUntilStep  `json:"wait_until,omitempty"`
 }
 
 // workflowDelayStep is Slack's "wait for a set time" step. It is the first step
@@ -109,18 +109,17 @@ type workflowStepCondition struct {
 	Value    string `json:"value"`
 }
 
-// workflowStepTypeFunction is the default step kind: an app function callback.
-// Form and button steps are additional kinds with their own execution model.
-const workflowStepTypeFunction = "function"
-
+// The step kinds live in the domain, so the builder and the run engine cannot
+// spell them differently.
 const (
-	workflowStepTypeForm      = "form"
-	workflowStepTypeButton    = "button"
-	workflowStepTypeMessage   = "message"
-	workflowStepTypeAddPeople = "add_people"
-	workflowStepTypeCanvas    = "create_canvas"
-	workflowStepTypeDelay     = "delay"
-	workflowStepTypeWaitUntil = "wait_until"
+	workflowStepTypeFunction  = domain.WorkflowStepFunction
+	workflowStepTypeForm      = domain.WorkflowStepForm
+	workflowStepTypeButton    = domain.WorkflowStepButton
+	workflowStepTypeMessage   = domain.WorkflowStepMessage
+	workflowStepTypeAddPeople = domain.WorkflowStepAddPeople
+	workflowStepTypeCanvas    = domain.WorkflowStepCanvas
+	workflowStepTypeDelay     = domain.WorkflowStepDelay
+	workflowStepTypeWaitUntil = domain.WorkflowStepWaitUntil
 )
 
 // workflowDelayMaximum bounds how long a run may be suspended. Slack's builder
@@ -132,13 +131,7 @@ const workflowDelayMaximum = 30 * 24 * time.Hour
 // itself. Every other kind ends when something external arrives — a function
 // completion, a form submission, a click — and a built-in one finishes inside
 // the call that starts it, so the run must carry itself past it.
-func builtInWorkflowStep(stepType string) bool {
-	switch stepType {
-	case workflowStepTypeMessage, workflowStepTypeAddPeople, workflowStepTypeCanvas:
-		return true
-	}
-	return false
-}
+func builtInWorkflowStep(stepType domain.WorkflowStepType) bool { return stepType.BuiltIn() }
 
 // workflowConditionOperators are the comparisons a step condition supports,
 // matching the operators Slack's conditional branch editor offers.
@@ -159,7 +152,7 @@ type slackFunctionSnapshot struct {
 	CallbackID       string                          `json:"callback_id"`
 	Title            string                          `json:"title"`
 	Description      string                          `json:"description,omitempty"`
-	Type             string                          `json:"type"`
+	Type             domain.WorkflowStepType         `json:"type"`
 	InputParameters  []appmanifest.FunctionParameter `json:"input_parameters"`
 	OutputParameters []appmanifest.FunctionParameter `json:"output_parameters"`
 	AppID            domain.AppID                    `json:"app_id"`
@@ -197,12 +190,10 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 	seen := make(map[string]int, len(values))
 	for index := range values {
 		values[index].ID = strings.TrimSpace(values[index].ID)
-		values[index].Type = strings.TrimSpace(values[index].Type)
+		values[index].Type = domain.WorkflowStepType(strings.TrimSpace(string(values[index].Type)))
 		values[index].FunctionID = strings.TrimSpace(values[index].FunctionID)
 		values[index].Title = strings.TrimSpace(values[index].Title)
-		if values[index].Type == "" {
-			values[index].Type = workflowStepTypeFunction
-		}
+		values[index].Type = values[index].Type.OrFunction()
 		switch values[index].Type {
 		case workflowStepTypeFunction:
 			if values[index].FunctionID == "" {
@@ -703,7 +694,7 @@ func (m Messages) SetWorkflowPermission(ctx context.Context, workspaceID domain.
 	if err := m.requireWorkflowManager(ctx, workflow, actor); err != nil {
 		return domain.AutomationPermission{}, err
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, value.PermissionType) {
+	if !slices.Contains([]domain.PermissionType{domain.PermissionEveryone, domain.PermissionAppCollaborators, domain.PermissionNamedEntities}, value.PermissionType) {
 		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
 	}
 	value.ResourceType = "workflow_" + scope
@@ -717,7 +708,7 @@ func (m Messages) SetWorkflowPermission(ctx context.Context, workspaceID domain.
 	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.permission_set",
 		events.String("workflow_id", string(workflowID)),
 		events.String("scope", scope),
-		events.String("permission_type", value.PermissionType),
+		events.String("permission_type", string(value.PermissionType)),
 	), value.UpdatedAt)
 	if err != nil {
 		return domain.AutomationPermission{}, err
@@ -758,9 +749,9 @@ func (m Messages) GetWorkflowPermission(ctx context.Context, workspaceID domain.
 	}
 	value, err := m.Store.GetAutomationPermission(ctx, workspaceID, "workflow_"+scope, string(workflowID))
 	if errors.Is(err, store.ErrNotFound) {
-		permissionType := "everyone"
+		permissionType := domain.PermissionEveryone
 		if scope == "copy" {
-			permissionType = "app_collaborators"
+			permissionType = domain.PermissionAppCollaborators
 		}
 		return domain.AutomationPermission{
 			ResourceType: "workflow_" + scope, ResourceID: string(workflowID), WorkspaceID: workspaceID,
@@ -1495,12 +1486,8 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 		return domain.WorkflowTrigger{}, err
 	}
 	value.Title = strings.TrimSpace(value.Title)
-	value.Type = strings.TrimSpace(value.Type)
-	switch domain.WorkflowTriggerType(value.Type) {
-	case domain.WorkflowTriggerLink, domain.WorkflowTriggerShortcut, domain.WorkflowTriggerScheduled,
-		domain.WorkflowTriggerWebhook, domain.WorkflowTriggerMessage, domain.WorkflowTriggerReaction,
-		domain.WorkflowTriggerJoin, domain.WorkflowTriggerList:
-	default:
+	value.Type = domain.WorkflowTriggerType(strings.TrimSpace(string(value.Type)))
+	if !value.Type.Valid() {
 		return domain.WorkflowTrigger{}, ErrInvalidTriggerConfig
 	}
 	if value.ID == "" {
@@ -1730,7 +1717,7 @@ func (m Messages) newWorkflowDelayExecution(run domain.WorkflowRun, step workflo
 	event, err := newEvent(run.WorkspaceID, actor, events.NewPayload("workflow.step_waiting",
 		events.String("workflow_run_id", string(run.ID)),
 		events.String("step_id", step.ID),
-		events.String("step_type", step.Type),
+		events.String("step_type", string(step.Type)),
 		events.String("function_execution_id", string(execution.ID)),
 	), now)
 	if err != nil {
@@ -1828,7 +1815,7 @@ func (m Messages) newBuiltInStepExecution(ctx context.Context, run domain.Workfl
 	event, err := newEvent(run.WorkspaceID, actor, events.NewPayload("workflow.step_configured",
 		events.String("workflow_run_id", string(run.ID)),
 		events.String("step_id", step.ID),
-		events.String("step_type", step.Type),
+		events.String("step_type", string(step.Type)),
 		events.String("function_execution_id", string(execution.ID)),
 	), now)
 	if err != nil {
@@ -1843,12 +1830,12 @@ func (m Messages) newBuiltInStepExecution(ctx context.Context, run domain.Workfl
 // one.
 func (m Messages) performBuiltInStep(ctx context.Context, run domain.WorkflowRun, execution domain.WorkflowStep) error {
 	var inputs struct {
-		Builtin      string   `json:"builtin"`
-		Conversation string   `json:"conversation"`
-		Text         string   `json:"text"`
-		Title        string   `json:"title"`
-		Content      string   `json:"content"`
-		Users        []string `json:"users"`
+		Builtin      domain.WorkflowStepType `json:"builtin"`
+		Conversation string                  `json:"conversation"`
+		Text         string                  `json:"text"`
+		Title        string                  `json:"title"`
+		Content      string                  `json:"content"`
+		Users        []string                `json:"users"`
 	}
 	if err := json.Unmarshal([]byte(execution.Inputs), &inputs); err != nil {
 		return m.advanceStep(ctx, run.WorkspaceID, run.ActorID, execution, "{}", "the step inputs could not be read")
@@ -1874,7 +1861,7 @@ type builtInStepInputs struct {
 // one would attribute a real change to nobody. It also means each action is
 // authorized against a real person, so a workflow can do nothing its owner
 // could not.
-func (m Messages) builtInStepResult(ctx context.Context, run domain.WorkflowRun, execution domain.WorkflowStep, kind string, inputs builtInStepInputs) (string, string) {
+func (m Messages) builtInStepResult(ctx context.Context, run domain.WorkflowRun, execution domain.WorkflowStep, kind domain.WorkflowStepType, inputs builtInStepInputs) (string, string) {
 	switch kind {
 	case workflowStepTypeMessage:
 		posted, err := m.Post(ctx, run.WorkspaceID, run.ActorID, domain.ConversationID(inputs.Conversation), inputs.Text, "", string(execution.ID))
@@ -2008,7 +1995,7 @@ func (m Messages) newWorkflowStepExecution(ctx context.Context, run domain.Workf
 		event, err := newEvent(run.WorkspaceID, actor, events.NewPayload(topic,
 			events.String("workflow_run_id", string(run.ID)),
 			events.String("step_id", step.ID),
-			events.String("step_type", step.Type),
+			events.String("step_type", string(step.Type)),
 			events.String("function_execution_id", string(execution.ID)),
 		), now)
 		if err != nil {
@@ -2262,7 +2249,30 @@ func (m Messages) CompleteFunction(ctx context.Context, workspaceID domain.Works
 	if execution.Status != domain.WorkflowStepExecuting {
 		return ErrFunctionNotRunning
 	}
+	// The entry is recorded before the step advances, so a recording that
+	// cannot be written leaves the step running and the app free to retry.
+	// Recording after the advance would make the retry answer not_running and
+	// lose the entry for good.
+	if err := m.recordFunctionActivity(ctx, workspaceID, execution, failure); err != nil {
+		return err
+	}
 	return m.advanceStep(ctx, workspaceID, actor, execution, outputs, failure)
+}
+
+// recordFunctionActivity writes what the app answered to its activity log. A
+// function that reported a failure is an error entry; one that completed is an
+// info entry, which is what Slack's own activity log shows.
+func (m Messages) recordFunctionActivity(ctx context.Context, workspaceID domain.WorkspaceID, execution domain.WorkflowStep, failure string) error {
+	level, message := domain.ActivityInfo, "function completed"
+	if strings.TrimSpace(failure) != "" {
+		level, message = domain.ActivityError, failure
+	}
+	return m.Store.RecordAppActivity(ctx, domain.AppActivity{
+		AppID: execution.AppID, WorkspaceID: workspaceID,
+		ComponentType: "function", ComponentID: execution.EditID,
+		Level: level, EventType: "function_execution", Source: "slack",
+		Message: message, TraceID: string(execution.ID), CreatedAt: time.Now().UTC(),
+	})
 }
 
 // SubmitWorkflowForm completes a waiting form step with the submitted inputs.
@@ -2553,7 +2563,7 @@ func (m Messages) SetFunctionPermission(ctx context.Context, workspaceID domain.
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.AutomationPermission{}, err
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities", "system"}, value.PermissionType) {
+	if !slices.Contains([]domain.PermissionType{domain.PermissionEveryone, domain.PermissionAppCollaborators, domain.PermissionNamedEntities, domain.PermissionSystem}, value.PermissionType) {
 		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
 	}
 	value.ResourceType = "function"
@@ -2567,7 +2577,7 @@ func (m Messages) SetFunctionPermission(ctx context.Context, workspaceID domain.
 	event, err := newEvent(workspaceID, actor, events.NewPayload("function.permission_set",
 		events.String("target_app_id", string(appID)),
 		events.String("function_id", function.ID),
-		events.String("permission_type", value.PermissionType),
+		events.String("permission_type", string(value.PermissionType)),
 	), value.UpdatedAt)
 	if err != nil {
 		return domain.AutomationPermission{}, err
@@ -2614,7 +2624,7 @@ func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.W
 	if trigger.AppID != appID {
 		return domain.AutomationPermission{}, ErrFunctionAccessDenied
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, value.PermissionType) {
+	if !slices.Contains([]domain.PermissionType{domain.PermissionEveryone, domain.PermissionAppCollaborators, domain.PermissionNamedEntities}, value.PermissionType) {
 		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
@@ -2631,7 +2641,7 @@ func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.W
 	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.trigger_permission_set",
 		events.String("target_app_id", string(appID)),
 		events.String("trigger_id", string(triggerID)),
-		events.String("permission_type", value.PermissionType),
+		events.String("permission_type", string(value.PermissionType)),
 	), value.UpdatedAt)
 	if err != nil {
 		return domain.AutomationPermission{}, err

@@ -129,6 +129,7 @@ func runQualification(t *testing.T, open opener) {
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},
 		{"external connections are derived and end everywhere", externalConnectionsAreDerivedAndEndEverywhere},
 		{"sessions are listed without their tokens", sessionsAreListedWithoutTheirTokens},
+		{"a guest expiration reads back or stays zero", aGuestExpirationReadsBackOrStaysZero},
 		{"stopping a workflow is not an edit", stoppingAWorkflowIsNotAnEdit},
 		{"a channel converts both ways and says which kind it is not", aChannelConvertsBothWaysAndSaysWhichKindItIsNot},
 		{"search modifiers mean the same on every profile", searchModifiersMeanTheSame},
@@ -138,6 +139,16 @@ func runQualification(t *testing.T, open opener) {
 		{"canvas grants are listed in one stable order", canvasGrantsAreListedInOneStableOrder},
 		{"list grants are listed in one stable order", listGrantsAreListedInOneStableOrder},
 		{"a Slack Connect decision reaches its requester", connectDecisionReachesItsRequester},
+		{"role assignments agree on every profile", roleAssignmentsAgreeOnEveryProfile},
+		{"authentication policy entities agree on every profile", authPolicyEntitiesAgreeOnEveryProfile},
+		{"session settings are absent rather than zero", sessionSettingsAreAbsentRatherThanZero},
+		{"information barriers keep their groups and subjects", informationBarriersKeepTheirGroupsAndSubjects},
+		{"app configuration and resolution survive on every profile", appConfigurationAndResolutionSurvive},
+		{"administrative channel batches are all or nothing", administrativeChannelBatchesAreAllOrNothing},
+		{"app activity filters by rank on every profile", appActivityFiltersByRank},
+		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
+		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
+		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -1854,5 +1865,758 @@ func durableEventDeliveryRepositoryContract(t *testing.T, open opener) {
 	}
 	if err := repository.AckEvents(ctx, "blob-worker", []uint64{blobs[0].Sequence}); !errors.Is(err, store.ErrLeaseConflict) {
 		t.Fatalf("repeated acknowledgement error=%v, want ErrLeaseConflict", err)
+	}
+}
+
+// roleAssignmentsAgreeOnEveryProfile holds the storage contract for
+// admin.roles.*. A role assignment is a triple, so writing the same triple
+// twice must not create a second row, paging must order by member and then by
+// entity, and removing one entity must leave the others in place.
+func roleAssignmentsAgreeOnEveryProfile(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-roles-" + suffix)
+	first := domain.UserID("U-roles-a-" + suffix)
+	second := domain.UserID("U-roles-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Roles"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.UserID{first, second} {
+		if err := repository.SeedUser(ctx, domain.User{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assignments := []domain.RoleAssignment{
+		{RoleID: "Rl0A", EntityID: "C1", UserID: second, WorkspaceID: workspaceID, CreatedAt: now},
+		{RoleID: "Rl0A", EntityID: "C2", UserID: first, WorkspaceID: workspaceID, CreatedAt: now},
+		{RoleID: "Rl0A", EntityID: "C1", UserID: first, WorkspaceID: workspaceID, CreatedAt: now},
+	}
+	if err := repository.SetRoleAssignments(ctx, assignments, event("roles-add", "role.assignments_added")); err != nil {
+		t.Fatal(err)
+	}
+	// The same triple again must not double the rows.
+	if err := repository.SetRoleAssignments(ctx, assignments, event("roles-again", "role.assignments_added")); err != nil {
+		t.Fatal(err)
+	}
+	page, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Assignments) != 3 || page.HasMore {
+		t.Fatalf("assignments=%+v err=%v", page, err)
+	}
+	ordered := make([]string, 0, len(page.Assignments))
+	for _, assignment := range page.Assignments {
+		ordered = append(ordered, string(assignment.UserID)+"/"+assignment.EntityID)
+	}
+	want := []string{string(first) + "/C1", string(first) + "/C2", string(second) + "/C1"}
+	if strings.Join(ordered, ",") != strings.Join(want, ",") {
+		t.Fatalf("order=%v want=%v", ordered, want)
+	}
+	// A page boundary must resume without repeating or dropping a row.
+	head, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2})
+	if err != nil || len(head.Assignments) != 2 || !head.HasMore || head.NextCursor == "" {
+		t.Fatalf("head=%+v err=%v", head, err)
+	}
+	tail, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
+	if err != nil || len(tail.Assignments) != 1 || tail.Assignments[0].UserID != second {
+		t.Fatalf("tail=%+v err=%v", tail, err)
+	}
+	// Another role is a different set entirely.
+	if other, otherErr := repository.ListRoleAssignments(ctx, workspaceID, "Rl0B", domain.PageRequest{Limit: 10}); otherErr != nil || len(other.Assignments) != 0 {
+		t.Fatalf("other role=%+v err=%v", other, otherErr)
+	}
+	if err := repository.DeleteRoleAssignments(ctx, assignments[:1], event("roles-remove", "role.assignments_removed")); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	if err != nil || len(remaining.Assignments) != 2 {
+		t.Fatalf("remaining=%+v err=%v", remaining, err)
+	}
+	for _, assignment := range remaining.Assignments {
+		if assignment.UserID == second {
+			t.Fatalf("removed assignment survived: %+v", assignment)
+		}
+	}
+	// Removing a triple that is not there is not an error.
+	if err := repository.DeleteRoleAssignments(ctx, assignments[:1], event("roles-remove-again", "role.assignments_removed")); err != nil {
+		t.Fatal(err)
+	}
+	// A member the workspace does not hold cannot hold a role: user_id carries
+	// a foreign key to users, so the write is refused on every profile.
+	absent := []domain.RoleAssignment{{RoleID: "Rl0A", EntityID: "C1", UserID: domain.UserID("U-absent-" + suffix), WorkspaceID: workspaceID, CreatedAt: now}}
+	if err := repository.SetRoleAssignments(ctx, absent, event("roles-absent", "role.assignments_added")); err == nil {
+		t.Fatal("a role assignment for a member outside the workspace was stored")
+	}
+}
+
+// authPolicyEntitiesAgreeOnEveryProfile holds the storage contract for
+// admin.auth.policy.*. The total count reports every entity under the policy
+// and not merely the page, so a caller reading one page still learns the size.
+func authPolicyEntitiesAgreeOnEveryProfile(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-policy-" + suffix)
+	first := domain.UserID("U-policy-a-" + suffix)
+	second := domain.UserID("U-policy-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Policy"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.UserID{first, second} {
+		if err := repository.SeedUser(ctx, domain.User{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entities := []domain.AuthPolicyEntity{
+		{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: string(second), WorkspaceID: workspaceID, CreatedAt: now},
+		{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: string(first), WorkspaceID: workspaceID, CreatedAt: now},
+	}
+	if err := repository.SetAuthPolicyEntities(ctx, entities, event("policy-add", "auth.policy_entities_assigned")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetAuthPolicyEntities(ctx, entities, event("policy-again", "auth.policy_entities_assigned")); err != nil {
+		t.Fatal(err)
+	}
+	page, err := repository.ListAuthPolicyEntities(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 1})
+	if err != nil || len(page.Entities) != 1 || page.Entities[0].EntityID != string(first) || !page.HasMore || page.TotalCount != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	tail, err := repository.ListAuthPolicyEntities(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+	if err != nil || len(tail.Entities) != 1 || tail.Entities[0].EntityID != string(second) || tail.HasMore || tail.TotalCount != 2 {
+		t.Fatalf("tail=%+v err=%v", tail, err)
+	}
+	if err := repository.DeleteAuthPolicyEntities(ctx, entities[:1], event("policy-remove", "auth.policy_entities_removed")); err != nil {
+		t.Fatal(err)
+	}
+	left, err := repository.ListAuthPolicyEntities(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10})
+	if err != nil || len(left.Entities) != 1 || left.Entities[0].EntityID != string(first) || left.TotalCount != 1 {
+		t.Fatalf("left=%+v err=%v", left, err)
+	}
+	// An entity the workspace does not hold cannot be stored: the column
+	// carries a foreign key to users, so the write is refused rather than
+	// leaving a policy that names nobody.
+	unknown := []domain.AuthPolicyEntity{{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: "U-absent-" + suffix, WorkspaceID: workspaceID, CreatedAt: now}}
+	if err := repository.SetAuthPolicyEntities(ctx, unknown, event("policy-unknown", "auth.policy_entities_assigned")); err == nil {
+		t.Fatal("an entity outside the workspace was stored")
+	}
+}
+
+// sessionSettingsAreAbsentRatherThanZero holds the storage contract for
+// admin.users.session.*Settings. A member on the workspace default carries no
+// row, and a read must leave that member out rather than answer zeros, because
+// zeros read as a session that ends at once.
+func sessionSettingsAreAbsentRatherThanZero(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-session-" + suffix)
+	first := domain.UserID("U-session-a-" + suffix)
+	second := domain.UserID("U-session-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Sessions"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.UserID{first, second} {
+		if err := repository.SeedUser(ctx, domain.User{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings := domain.SessionSettings{UserID: first, WorkspaceID: workspaceID, Duration: 12 * 60 * 60, MobileDeviceCheck: true, UpdatedAt: now}
+	if err := repository.SetSessionSettings(ctx, []domain.SessionSettings{settings}, event("session-set", "user.session_settings_set")); err != nil {
+		t.Fatal(err)
+	}
+	read, err := repository.ListSessionSettings(ctx, workspaceID, []domain.UserID{first, second})
+	if err != nil || len(read) != 1 || read[0].UserID != first || read[0].Duration != 12*60*60 || !read[0].MobileDeviceCheck || read[0].DesktopAppBrowserQuit {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	// Writing again replaces rather than adds, and every flag is replaced.
+	settings.Duration, settings.MobileDeviceCheck, settings.DesktopAppBrowserQuit = 24*60*60, false, true
+	if err := repository.SetSessionSettings(ctx, []domain.SessionSettings{settings}, event("session-again", "user.session_settings_set")); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := repository.ListSessionSettings(ctx, workspaceID, []domain.UserID{first})
+	if err != nil || len(replaced) != 1 || replaced[0].Duration != 24*60*60 || replaced[0].MobileDeviceCheck || !replaced[0].DesktopAppBrowserQuit {
+		t.Fatalf("replaced=%+v err=%v", replaced, err)
+	}
+	if err := repository.ClearSessionSettings(ctx, workspaceID, []domain.UserID{first}, event("session-clear", "user.session_settings_cleared")); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repository.ListSessionSettings(ctx, workspaceID, []domain.UserID{first, second})
+	if err != nil || len(cleared) != 0 {
+		t.Fatalf("cleared=%+v err=%v", cleared, err)
+	}
+	// Clearing a member who carries nothing is not an error.
+	if err := repository.ClearSessionSettings(ctx, workspaceID, []domain.UserID{second}, event("session-clear-again", "user.session_settings_cleared")); err != nil {
+		t.Fatal(err)
+	}
+	absent := []domain.SessionSettings{{UserID: domain.UserID("U-absent-" + suffix), WorkspaceID: workspaceID, Duration: 12 * 60 * 60, UpdatedAt: now}}
+	if err := repository.SetSessionSettings(ctx, absent, event("session-absent", "user.session_settings_set")); err == nil {
+		t.Fatal("settings for a member outside the workspace were stored")
+	}
+}
+
+// informationBarriersKeepTheirGroupsAndSubjects holds the storage contract for
+// admin.barriers.*. The group list and the subject list are stored whole, so a
+// barrier that comes back with fewer groups than it went in with stops fewer
+// people than the administrator asked it to.
+func informationBarriersKeepTheirGroupsAndSubjects(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-barrier-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Barriers"}); err != nil {
+		t.Fatal(err)
+	}
+	creatorID := domain.UserID("U-barrier-" + suffix)
+	if err := repository.SeedUser(ctx, domain.User{ID: creatorID, WorkspaceID: workspaceID, Name: string(creatorID)}); err != nil {
+		t.Fatal(err)
+	}
+	groups := []domain.UserGroupID{domain.UserGroupID("S1-" + suffix), domain.UserGroupID("S2-" + suffix), domain.UserGroupID("S3-" + suffix)}
+	for index, group := range groups {
+		value := domain.UserGroup{ID: group, WorkspaceID: workspaceID, Name: string(group), Handle: fmt.Sprintf("group-%d-%s", index, suffix), Creator: creatorID, UpdatedBy: creatorID, CreatedAt: now, UpdatedAt: now}
+		if err := repository.CreateUserGroup(ctx, value, event("group-"+string(group), "subteam.created")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	barrier := domain.InformationBarrier{
+		ID: domain.BarrierID("B1-" + suffix), WorkspaceID: workspaceID, PrimaryGroupID: groups[0],
+		BarrieredFromIDs: []domain.UserGroupID{groups[1], groups[2]}, Subjects: domain.BarrierSubjects(), UpdatedAt: now,
+	}
+	if err := repository.CreateBarrier(ctx, barrier, event("barrier-create", "barrier.created")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateBarrier(ctx, barrier, event("barrier-again", "barrier.created")); err == nil {
+		t.Fatal("a repeated barrier identifier was accepted")
+	}
+	page, err := repository.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Barriers) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	stored := page.Barriers[0]
+	if stored.PrimaryGroupID != groups[0] || len(stored.BarrieredFromIDs) != 2 ||
+		stored.BarrieredFromIDs[0] != groups[1] || stored.BarrieredFromIDs[1] != groups[2] ||
+		len(stored.Subjects) != 3 || !domain.ValidBarrierSubjects(stored.Subjects) {
+		t.Fatalf("stored=%+v", stored)
+	}
+	barrier.PrimaryGroupID, barrier.BarrieredFromIDs = groups[1], []domain.UserGroupID{groups[0]}
+	if err := repository.UpdateBarrier(ctx, barrier, event("barrier-update", "barrier.updated")); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repository.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: 10})
+	if err != nil || len(updated.Barriers) != 1 || updated.Barriers[0].PrimaryGroupID != groups[1] || len(updated.Barriers[0].BarrieredFromIDs) != 1 {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	absent := barrier
+	absent.ID = domain.BarrierID("B-absent-" + suffix)
+	if err := repository.UpdateBarrier(ctx, absent, event("barrier-absent", "barrier.updated")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("update of a missing barrier error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.DeleteBarrier(ctx, workspaceID, barrier.ID, event("barrier-delete", "barrier.deleted")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteBarrier(ctx, workspaceID, barrier.ID, event("barrier-delete-again", "barrier.deleted")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("delete of a missing barrier error=%v, want %v", err, store.ErrNotFound)
+	}
+	left, err := repository.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: 10})
+	if err != nil || len(left.Barriers) != 0 {
+		t.Fatalf("left=%+v err=%v", left, err)
+	}
+}
+
+// appConfigurationAndResolutionSurvive holds the storage contract for
+// admin.apps.config.* and admin.apps.clearResolution. An app with no stored
+// configuration is absent rather than present with empty lists, because absence
+// is what lets the service answer the default instead of an emptiness the
+// administrator never asked for.
+func appConfigurationAndResolutionSurvive(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-appconfig-" + suffix)
+	userID := domain.UserID("U-appconfig-" + suffix)
+	appID := domain.AppID("A-appconfig-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "App config"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	app := domain.App{
+		ID: appID, DevelopmentWorkspaceID: workspaceID, OwnerID: userID, Name: "Config app",
+		ClientID: "client-" + suffix, SigningSecretHash: "hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}
+	revision := domain.AppManifestRevision{AppID: appID, Version: 1, Manifest: `{"display_information":{"name":"Config app"}}`, CreatedBy: userID, CreatedAt: now}
+	if err := repository.CreateApp(ctx, app, revision, domain.OAuthClient{ID: app.ClientID, SecretHash: "secret", AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	if configs, err := repository.ListAppConfigs(ctx, workspaceID, []domain.AppID{appID}); err != nil || len(configs) != 0 {
+		t.Fatalf("unconfigured app configs=%+v err=%v", configs, err)
+	}
+	config := domain.AppConfig{
+		AppID: appID, WorkspaceID: workspaceID,
+		DomainURLs: []string{"https://example.invalid"}, DomainEmails: []string{"ops@example.invalid"},
+		WorkflowAuthStrategy: domain.WorkflowAuthEndUserOnly, UpdatedAt: now,
+	}
+	if err := repository.SetAppConfig(ctx, config, event("config-set", "app.config_set")); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.ListAppConfigs(ctx, workspaceID, []domain.AppID{appID})
+	if err != nil || len(stored) != 1 || len(stored[0].DomainURLs) != 1 || stored[0].DomainURLs[0] != "https://example.invalid" ||
+		len(stored[0].DomainEmails) != 1 || stored[0].WorkflowAuthStrategy != domain.WorkflowAuthEndUserOnly {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	// Writing again replaces the lists rather than appending to them.
+	config.DomainURLs, config.DomainEmails = []string{}, []string{}
+	config.WorkflowAuthStrategy = domain.WorkflowAuthBuilderChoice
+	if err := repository.SetAppConfig(ctx, config, event("config-again", "app.config_set")); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := repository.ListAppConfigs(ctx, workspaceID, []domain.AppID{appID})
+	if err != nil || len(replaced) != 1 || len(replaced[0].DomainURLs) != 0 || replaced[0].WorkflowAuthStrategy != domain.WorkflowAuthBuilderChoice {
+		t.Fatalf("replaced=%+v err=%v", replaced, err)
+	}
+	// Clearing a resolution that was never made is not found, and clearing one
+	// that was made leaves the app undecided.
+	if err := repository.ClearAppApproval(ctx, workspaceID, appID, event("clear-absent", "app.resolution_cleared")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("clear of an undecided app error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.SetAppApproval(ctx, workspaceID, appID, "", domain.AppApprovalApproved, now, event("approve", "app.approved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ClearAppApproval(ctx, workspaceID, appID, event("clear", "app.resolution_cleared")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ClearAppApproval(ctx, workspaceID, appID, event("clear-twice", "app.resolution_cleared")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second clear error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// administrativeChannelBatchesAreAllOrNothing holds the storage contract for
+// admin.conversations.bulkMove, bulkSetExcludeFromSlackAi, linkObjects and
+// unlinkObjects. A batch that names a channel the workspace does not hold
+// changes nothing at all: a partly applied batch is worse than a refused one,
+// because the administrator would not know which half landed.
+func administrativeChannelBatchesAreAllOrNothing(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-chanadmin-" + suffix)
+	otherID := domain.WorkspaceID("T-chanadmin-other-" + suffix)
+	userID := domain.UserID("U-chanadmin-" + suffix)
+	first := domain.ConversationID("C-chanadmin-a-" + suffix)
+	second := domain.ConversationID("C-chanadmin-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	for _, workspace := range []domain.WorkspaceID{workspaceID, otherID} {
+		if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspace, Name: string(workspace)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.ConversationID{first, second} {
+		if err := repository.SeedConversation(ctx, domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	absent := domain.ConversationID("C-absent-" + suffix)
+	// A batch naming a channel that is not here leaves the others untouched.
+	if err := repository.SetConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first, absent}, true, event("exclude-bad", "channel.ai_exclusion_set")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("exclusion naming a missing channel error=%v, want %v", err, store.ErrNotFound)
+	}
+	if excluded, err := repository.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first, second}); err != nil || len(excluded) != 0 {
+		t.Fatalf("a refused batch left rows behind: %+v err=%v", excluded, err)
+	}
+	if err := repository.SetConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first}, true, event("exclude", "channel.ai_exclusion_set")); err != nil {
+		t.Fatal(err)
+	}
+	excluded, err := repository.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first, second})
+	if err != nil || len(excluded) != 1 || excluded[0] != first {
+		t.Fatalf("excluded=%+v err=%v", excluded, err)
+	}
+	if err := repository.SetConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first}, false, event("include", "channel.ai_exclusion_set")); err != nil {
+		t.Fatal(err)
+	}
+	if back, err := repository.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{first}); err != nil || len(back) != 0 {
+		t.Fatalf("back=%+v err=%v", back, err)
+	}
+	// Links are keyed by the triple, so the same record twice adds no row.
+	objects := []domain.LinkedObject{
+		{ConversationID: first, WorkspaceID: workspaceID, OrgID: "00D000", RecordID: "a02", CreatedAt: now},
+		{ConversationID: first, WorkspaceID: workspaceID, OrgID: "00D000", RecordID: "a01", CreatedAt: now},
+	}
+	if err := repository.LinkConversationObjects(ctx, objects, event("link", "channel.objects_linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.LinkConversationObjects(ctx, objects, event("link-again", "channel.objects_linked")); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := repository.ListConversationObjects(ctx, workspaceID, first)
+	if err != nil || len(linked) != 2 || linked[0].RecordID != "a01" || linked[1].RecordID != "a02" {
+		t.Fatalf("linked=%+v err=%v", linked, err)
+	}
+	if err := repository.UnlinkConversationObjects(ctx, workspaceID, []domain.ConversationID{first}, event("unlink", "channel.objects_unlinked")); err != nil {
+		t.Fatal(err)
+	}
+	if left, err := repository.ListConversationObjects(ctx, workspaceID, first); err != nil || len(left) != 0 {
+		t.Fatalf("left=%+v err=%v", left, err)
+	}
+	// A move to a workspace that does not exist moves nothing.
+	if err := repository.MoveConversations(ctx, workspaceID, []domain.ConversationID{first}, domain.WorkspaceID("T-nobody-"+suffix), event("move-bad", "channel.bulk_moved")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("move to a missing workspace error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.MoveConversations(ctx, workspaceID, []domain.ConversationID{first}, otherID, event("move", "channel.bulk_moved")); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := repository.GetConversation(ctx, first)
+	if err != nil || moved.WorkspaceID != otherID {
+		t.Fatalf("moved=%+v err=%v", moved, err)
+	}
+	// The lookup answers the channels the workspace still holds.
+	page, err := repository.LookupConversations(ctx, workspaceID, domain.ConversationLookup{}, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].ID != second {
+		t.Fatalf("lookup=%+v err=%v", page, err)
+	}
+}
+
+// appActivityFiltersByRank holds the storage contract for apps.activities.list.
+// The level filter is a rank comparison and the storage keeps the name, so a
+// profile that compared names would answer a different set. The filter also has
+// to run before the page limit: filtering the rows the limit already chose
+// returns short pages and reports has_more against an unrelated count.
+func appActivityFiltersByRank(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-activity-" + suffix)
+	userID := domain.UserID("U-activity-" + suffix)
+	appID := domain.AppID("A-activity-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Activity"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	app := domain.App{
+		ID: appID, DevelopmentWorkspaceID: workspaceID, OwnerID: userID, Name: "Activity app",
+		ClientID: "activity-" + suffix, SigningSecretHash: "hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}
+	revision := domain.AppManifestRevision{AppID: appID, Version: 1, Manifest: `{"display_information":{"name":"Activity app"}}`, CreatedBy: userID, CreatedAt: now}
+	if err := repository.CreateApp(ctx, app, revision, domain.OAuthClient{ID: app.ClientID, SecretHash: "secret", AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	levels := []domain.ActivityLevel{domain.ActivityTrace, domain.ActivityInfo, domain.ActivityWarn, domain.ActivityError, domain.ActivityFatal}
+	for index, level := range levels {
+		if err := repository.RecordAppActivity(ctx, domain.AppActivity{
+			AppID: appID, WorkspaceID: workspaceID, ComponentType: "function", ComponentID: "triage",
+			Level: level, EventType: "function_execution", Source: "slack",
+			Message: string(level), TraceID: fmt.Sprintf("trace-%d", index),
+			CreatedAt: now.Add(time.Duration(index) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A level the platform does not emit cannot be recorded.
+	if err := repository.RecordAppActivity(ctx, domain.AppActivity{AppID: appID, WorkspaceID: workspaceID, Level: "shouted", CreatedAt: now}); err == nil {
+		t.Fatal("an unrecognised level was recorded")
+	}
+	all, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID}, domain.PageRequest{Limit: 10})
+	if err != nil || len(all.Activities) != len(levels) {
+		t.Fatalf("all=%+v err=%v", all, err)
+	}
+	// warn and above is three of the five, whatever order the names sort in.
+	warned, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 10})
+	if err != nil || len(warned.Activities) != 3 {
+		t.Fatalf("warned=%+v err=%v", warned, err)
+	}
+	for _, activity := range warned.Activities {
+		if activity.Level.Rank() < domain.ActivityWarn.Rank() {
+			t.Fatalf("a level below warn survived the filter: %+v", activity)
+		}
+	}
+	// The filter runs before the limit, so a page of two is two warnings.
+	head, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 2})
+	if err != nil || len(head.Activities) != 2 || !head.HasMore {
+		t.Fatalf("head=%+v err=%v", head, err)
+	}
+	tail, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
+	if err != nil || len(tail.Activities) != 1 || tail.HasMore {
+		t.Fatalf("tail=%+v err=%v", tail, err)
+	}
+	traced, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, TraceID: "trace-0"}, domain.PageRequest{Limit: 10})
+	if err != nil || len(traced.Activities) != 1 || traced.Activities[0].Level != domain.ActivityTrace {
+		t.Fatalf("traced=%+v err=%v", traced, err)
+	}
+	windowed, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{
+		AppID: appID, MinCreatedAt: now.Add(time.Minute), MaxCreatedAt: now.Add(2 * time.Minute),
+	}, domain.PageRequest{Limit: 10})
+	if err != nil || len(windowed.Activities) != 2 {
+		t.Fatalf("windowed=%+v err=%v", windowed, err)
+	}
+}
+
+// analyticsCountOneDayAndNotAnother holds the storage contract for
+// admin.analytics.*. The rows cover exactly one day, so a message posted a
+// minute after midnight belongs to the next day's file and not to this one.
+func analyticsCountOneDayAndNotAnother(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-analytics-" + suffix)
+	userID := domain.UserID("U-analytics-" + suffix)
+	publicID := domain.ConversationID("C-analytics-public-" + suffix)
+	privateID := domain.ConversationID("C-analytics-private-" + suffix)
+	day := time.Date(2023, 11, 14, 0, 0, 0, 0, time.UTC)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Analytics"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: "analyst"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, conversation := range []domain.Conversation{
+		{ID: publicID, WorkspaceID: workspaceID, Name: "public-" + suffix},
+		{ID: privateID, WorkspaceID: workspaceID, Name: "private-" + suffix, Kind: domain.ConversationTypePrivate},
+	} {
+		if err := repository.SeedConversation(ctx, conversation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, instant := range []time.Time{day.Add(time.Hour), day.Add(2 * time.Hour), day.Add(25 * time.Hour)} {
+		message := domain.Message{
+			ID:          domain.MessageID(fmt.Sprintf("M-analytics-%d-%s", index, suffix)),
+			WorkspaceID: workspaceID, Conversation: publicID, AuthorID: userID,
+			Text: "counted", CreatedAt: instant,
+		}
+		if err := repository.CreateMessage(ctx, message, events.Event{
+			ID: domain.EventID(fmt.Sprintf("evt-analytics-%d-%s", index, suffix)), WorkspaceID: workspaceID,
+			Topic: "message", Payload: string(message.ID), CreatedAt: instant,
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A deleted message is not activity: analytics are computed from what the
+	// day still holds, so deleting a message lowers the count on both profiles.
+	deleted := domain.MessageID(fmt.Sprintf("M-analytics-deleted-%s", suffix))
+	deletedAt := day.Add(3 * time.Hour)
+	if err := repository.CreateMessage(ctx, domain.Message{
+		ID: deleted, WorkspaceID: workspaceID, Conversation: publicID, AuthorID: userID,
+		Text: "retracted", CreatedAt: deletedAt,
+	}, events.Event{
+		ID: domain.EventID("evt-analytics-deleted-" + suffix), WorkspaceID: workspaceID,
+		Topic: "message", Payload: string(deleted), CreatedAt: deletedAt,
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteMessage(ctx, domain.Message{
+		ID: deleted, WorkspaceID: workspaceID, Conversation: publicID, AuthorID: userID, CreatedAt: deletedAt, Deleted: true,
+	}, events.Event{
+		ID: domain.EventID("evt-analytics-undeleted-" + suffix), WorkspaceID: workspaceID,
+		Topic: "message_deleted", Payload: string(deleted), CreatedAt: deletedAt,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	members, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsMember, day)
+	if err != nil || len(members) != 1 {
+		t.Fatalf("members=%+v err=%v", members, err)
+	}
+	// Two of the three messages fall inside the day; the third is the next day.
+	if members[0].EntityID != string(userID) || members[0].MessagesPosted != 2 || members[0].Date != "2023-11-14" {
+		t.Fatalf("member row=%+v", members[0])
+	}
+	next, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsMember, day.AddDate(0, 0, 1))
+	if err != nil || len(next) != 1 || next[0].MessagesPosted != 1 {
+		t.Fatalf("next day=%+v err=%v", next, err)
+	}
+	// public_channel is what its name says; conversations covers both.
+	publicRows, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsPublicChannel, day)
+	if err != nil || len(publicRows) != 1 || publicRows[0].EntityID != string(publicID) || publicRows[0].MessagesPosted != 2 {
+		t.Fatalf("public=%+v err=%v", publicRows, err)
+	}
+	everything, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsConversations, day)
+	if err != nil || len(everything) != 2 {
+		t.Fatalf("conversations=%+v err=%v", everything, err)
+	}
+	if _, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsKind("hourly"), day); err == nil {
+		t.Fatal("an unknown analytics kind was accepted")
+	}
+}
+
+// anomalyAllowListIsEmptyNotMissing holds the storage contract for
+// admin.audit.anomaly.allow.*. A workspace that has set nothing answers an
+// empty list, because an empty allow list is the state a workspace starts in
+// and a not-found would read as a workspace that does not exist. The workspace
+// plan round-trips in the same contract: it is a new column, and a column that
+// does not survive a read is a setting that silently reverts.
+func anomalyAllowListIsEmptyNotMissing(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-anomaly-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Anomaly", Plan: domain.PlanPlus}); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := repository.GetWorkspace(ctx, workspaceID)
+	if err != nil || workspace.Plan != domain.PlanPlus {
+		t.Fatalf("workspace=%+v err=%v", workspace, err)
+	}
+	unset, err := repository.GetAnomalyAllowList(ctx, workspaceID)
+	if err != nil || unset.IPAddresses == nil || len(unset.IPAddresses) != 0 || unset.Reasons == nil || len(unset.Reasons) != 0 {
+		t.Fatalf("unset=%+v err=%v", unset, err)
+	}
+	value := domain.AnomalyAllowList{
+		WorkspaceID: workspaceID, IPAddresses: []string{"198.51.100.7"}, Reasons: []string{"office"}, UpdatedAt: now,
+	}
+	event := events.Event{ID: domain.EventID("evt-anomaly-" + suffix), WorkspaceID: workspaceID, Topic: "audit.anomaly_allow_list_set", Payload: "{}", CreatedAt: now}
+	if err := repository.SetAnomalyAllowList(ctx, value, event); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetAnomalyAllowList(ctx, workspaceID)
+	if err != nil || len(stored.IPAddresses) != 1 || stored.IPAddresses[0] != "198.51.100.7" || len(stored.Reasons) != 1 {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	// Writing again replaces the lists rather than adding to them.
+	value.IPAddresses, value.Reasons = []string{}, []string{}
+	replaced := events.Event{ID: domain.EventID("evt-anomaly-again-" + suffix), WorkspaceID: workspaceID, Topic: "audit.anomaly_allow_list_set", Payload: "{}", CreatedAt: now}
+	if err := repository.SetAnomalyAllowList(ctx, value, replaced); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repository.GetAnomalyAllowList(ctx, workspaceID)
+	if err != nil || len(cleared.IPAddresses) != 0 {
+		t.Fatalf("cleared=%+v err=%v", cleared, err)
+	}
+	// A workspace that does not exist cannot hold an allow list.
+	absent := value
+	absent.WorkspaceID = domain.WorkspaceID("T-absent-" + suffix)
+	missing := events.Event{ID: domain.EventID("evt-anomaly-absent-" + suffix), WorkspaceID: absent.WorkspaceID, Topic: "audit.anomaly_allow_list_set", Payload: "{}", CreatedAt: now}
+	if err := repository.SetAnomalyAllowList(ctx, absent, missing); err == nil {
+		t.Fatal("an allow list was stored for a workspace that does not exist")
+	}
+}
+
+// externalCredentialKeepsItsSecret holds the storage contract for
+// apps.auth.external.* and apps.icon.set. Revoking with no identifier revokes
+// every credential the app holds, which is what disconnecting an app means;
+// revoking one leaves the others.
+func externalCredentialKeepsItsSecret(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-external-" + suffix)
+	userID := domain.UserID("U-external-" + suffix)
+	appID := domain.AppID("A-external-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "External"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	app := domain.App{
+		ID: appID, DevelopmentWorkspaceID: workspaceID, OwnerID: userID, Name: "External app",
+		ClientID: "external-" + suffix, SigningSecretHash: "hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}
+	revision := domain.AppManifestRevision{AppID: appID, Version: 1, Manifest: `{"display_information":{"name":"External app"}}`, CreatedBy: userID, CreatedAt: now}
+	if err := repository.CreateApp(ctx, app, revision, domain.OAuthClient{ID: app.ClientID, SecretHash: "secret", AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetAppIcon(ctx, workspaceID, appID, "https://example.invalid/icon.png", event("icon", "app.icon_set")); err != nil {
+		t.Fatal(err)
+	}
+	stored, _, err := repository.GetApp(ctx, appID)
+	if err != nil || stored.IconURL != "https://example.invalid/icon.png" {
+		t.Fatalf("icon=%+v err=%v", stored, err)
+	}
+	if err := repository.SetAppIcon(ctx, workspaceID, domain.AppID("A-absent-"+suffix), "https://example.invalid/icon.png", event("icon-absent", "app.icon_set")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("icon on a missing app error=%v, want %v", err, store.ErrNotFound)
+	}
+	first := domain.ExternalAuthToken{
+		ID: "Et1-" + suffix, AppID: appID, WorkspaceID: workspaceID, UserID: userID,
+		Provider: "example", Ciphertext: "sealed-1", ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}
+	second := first
+	second.ID, second.Ciphertext = "Et2-"+suffix, "sealed-2"
+	for _, value := range []domain.ExternalAuthToken{first, second} {
+		if err := repository.SetExternalAuthToken(ctx, value, event("token-"+value.ID, "app.external_token_set")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, first.ID)
+	if err != nil || read.Ciphertext != "sealed-1" || read.Provider != "example" {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	// Another app cannot read this app's credential.
+	if _, err := repository.GetExternalAuthToken(ctx, workspaceID, domain.AppID("A-other-"+suffix), first.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-app read error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.DeleteExternalAuthToken(ctx, workspaceID, appID, first.ID, event("revoke-one", "app.external_token_deleted")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, first.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revoked credential error=%v, want %v", err, store.ErrNotFound)
+	}
+	if survivor, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, second.ID); err != nil || survivor.Ciphertext != "sealed-2" {
+		t.Fatalf("revoking one took the other: %+v err=%v", survivor, err)
+	}
+	// No identifier revokes every credential the app holds.
+	if err := repository.DeleteExternalAuthToken(ctx, workspaceID, appID, "", event("revoke-all", "app.external_token_deleted")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetExternalAuthToken(ctx, workspaceID, appID, second.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after revoking every credential error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.DeleteExternalAuthToken(ctx, workspaceID, appID, "", event("revoke-again", "app.external_token_deleted")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revoking nothing error=%v, want %v", err, store.ErrNotFound)
 	}
 }

@@ -807,7 +807,7 @@ func (r Remote) ListAppAuthorizations(ctx context.Context, appID domain.AppID, w
 		values = append(values, domain.AppAuthorization{
 			AppID: domain.AppID(item.GetAppId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()),
 			UserID: domain.UserID(item.GetUserId()), BotID: domain.BotID(item.GetBotId()),
-			TokenType: item.GetTokenType(), Scopes: domain.NormalizeScopes(item.GetScopes()),
+			TokenType: domain.TokenType(item.GetTokenType()), Scopes: domain.NormalizeScopes(item.GetScopes()),
 		})
 	}
 	return values, nil
@@ -1521,7 +1521,7 @@ func (r Remote) LookupCanvasSections(ctx context.Context, workspaceID domain.Wor
 	}
 	result := make([]domain.CanvasSection, 0, len(out.GetSections()))
 	for _, section := range out.GetSections() {
-		result = append(result, domain.CanvasSection{ID: section.GetId(), Type: section.GetType(), Text: section.GetText()})
+		result = append(result, domain.CanvasSection{ID: section.GetId(), Type: domain.CanvasSectionType(section.GetType()), Text: section.GetText()})
 	}
 	return result, nil
 }
@@ -1615,6 +1615,426 @@ func (r Remote) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceID,
 	return nil
 }
 
+func (r Remote) DiscoverableContacts(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, emails []string) ([]domain.User, error) {
+	out, err := r.directory.DiscoverableContacts(ctx, &chatv1.DiscoverableContactsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Emails: emails})
+	if err != nil {
+		return nil, err
+	}
+	users := make([]domain.User, 0, len(out.GetUsers()))
+	for _, encoded := range out.GetUsers() {
+		user, decodeErr := decodeProtoUser(encoded)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		users = append(users, user)
+	}
+	return users, nil
+}
+
+func (r Remote) AdminCreateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	out, err := r.directory.AdminCreateBarrier(ctx, barrierMutation(workspaceID, userID, "", primary, barrieredFrom, subjects))
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return decodeProtoBarrier(out), nil
+}
+
+func (r Remote) AdminUpdateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	out, err := r.directory.AdminUpdateBarrier(ctx, barrierMutation(workspaceID, userID, id, primary, barrieredFrom, subjects))
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return decodeProtoBarrier(out), nil
+}
+
+func (r Remote) AdminDeleteBarrier(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.BarrierID) error {
+	out, err := r.directory.AdminDeleteBarrier(ctx, barrierMutation(workspaceID, userID, id, "", nil, nil))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed barrier deletion was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminBarriers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.InformationBarrierPage, error) {
+	out, err := r.directory.AdminBarriers(ctx, &chatv1.BarriersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	barriers := make([]domain.InformationBarrier, 0, len(out.GetBarriers()))
+	for _, encoded := range out.GetBarriers() {
+		barriers = append(barriers, decodeProtoBarrier(encoded))
+	}
+	return domain.InformationBarrierPage{Barriers: barriers, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func barrierMutation(workspaceID domain.WorkspaceID, userID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) *chatv1.BarrierMutationRequest {
+	return &chatv1.BarrierMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), BarrierId: string(id),
+		PrimaryUsergroupId: string(primary), BarrieredFromIds: encodeUserGroupIDs(barrieredFrom),
+		Subjects: encodeBarrierSubjects(subjects),
+	}
+}
+
+func encodeUserGroupIDs(values []domain.UserGroupID) []string {
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, string(value))
+	}
+	return ids
+}
+
+func decodeUserGroupIDs(values []string) []domain.UserGroupID {
+	ids := make([]domain.UserGroupID, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, domain.UserGroupID(value))
+	}
+	return ids
+}
+
+func encodeBarrierSubjects(values []domain.BarrierSubject) []string {
+	subjects := make([]string, 0, len(values))
+	for _, value := range values {
+		subjects = append(subjects, string(value))
+	}
+	return subjects
+}
+
+func decodeBarrierSubjects(values []string) []domain.BarrierSubject {
+	subjects := make([]domain.BarrierSubject, 0, len(values))
+	for _, value := range values {
+		subjects = append(subjects, domain.BarrierSubject(value))
+	}
+	return subjects
+}
+
+func encodeProtoBarrier(value domain.InformationBarrier) *chatv1.InformationBarrier {
+	return &chatv1.InformationBarrier{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID),
+		PrimaryUsergroupId: string(value.PrimaryGroupID),
+		BarrieredFromIds:   encodeUserGroupIDs(value.BarrieredFromIDs),
+		Subjects:           encodeBarrierSubjects(value.Subjects),
+		UpdatedAt:          optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoBarrier(value *chatv1.InformationBarrier) domain.InformationBarrier {
+	return domain.InformationBarrier{
+		ID: domain.BarrierID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		PrimaryGroupID:   domain.UserGroupID(value.GetPrimaryUsergroupId()),
+		BarrieredFromIDs: decodeUserGroupIDs(value.GetBarrieredFromIds()),
+		Subjects:         decodeBarrierSubjects(value.GetSubjects()),
+		UpdatedAt:        optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
+func (r Remote) AdminSetSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID, settings domain.SessionSettings) error {
+	request := sessionSettingsMutation(workspaceID, userID, targets)
+	request.Settings = encodeProtoSessionSettings(settings)
+	out, err := r.directory.AdminSetSessionSettings(ctx, request)
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed session settings write was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminClearSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) error {
+	out, err := r.directory.AdminClearSessionSettings(ctx, sessionSettingsMutation(workspaceID, userID, targets))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed session settings clearance was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) ([]domain.SessionSettings, error) {
+	out, err := r.directory.AdminSessionSettings(ctx, sessionSettingsMutation(workspaceID, userID, targets))
+	if err != nil {
+		return nil, err
+	}
+	settings := make([]domain.SessionSettings, 0, len(out.GetSettings()))
+	for _, encoded := range out.GetSettings() {
+		settings = append(settings, decodeProtoSessionSettings(encoded))
+	}
+	return settings, nil
+}
+
+func sessionSettingsMutation(workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) *chatv1.SessionSettingsMutationRequest {
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, string(target))
+	}
+	return &chatv1.SessionSettingsMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserIds: ids}
+}
+
+func encodeProtoSessionSettings(value domain.SessionSettings) *chatv1.SessionSettings {
+	return &chatv1.SessionSettings{
+		UserId:                string(value.UserID),
+		WorkspaceId:           string(value.WorkspaceID),
+		DurationSeconds:       int64(value.Duration),
+		DesktopAppBrowserQuit: value.DesktopAppBrowserQuit,
+		MobileDeviceCheck:     value.MobileDeviceCheck,
+		UpdatedAt:             optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoSessionSettings(value *chatv1.SessionSettings) domain.SessionSettings {
+	return domain.SessionSettings{
+		UserID:                domain.UserID(value.GetUserId()),
+		WorkspaceID:           domain.WorkspaceID(value.GetWorkspaceId()),
+		Duration:              domain.SessionDuration(value.GetDurationSeconds()),
+		DesktopAppBrowserQuit: value.GetDesktopAppBrowserQuit(),
+		MobileDeviceCheck:     value.GetMobileDeviceCheck(),
+		UpdatedAt:             optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
+func (r Remote) AdminAssignAuthPolicy(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	out, err := r.directory.AdminAssignAuthPolicy(ctx, authPolicyMutation(workspaceID, userID, policy, kind, entityIDs))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed authentication policy assignment was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminRemoveAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	out, err := r.directory.AdminRemoveAuthPolicyEntities(ctx, authPolicyMutation(workspaceID, userID, policy, kind, entityIDs))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed authentication policy removal was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, request domain.PageRequest) (domain.AuthPolicyEntityPage, error) {
+	out, err := r.directory.AdminAuthPolicyEntities(ctx, &chatv1.AuthPolicyEntitiesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), PolicyName: string(policy),
+		EntityType: string(kind), Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	entities := make([]domain.AuthPolicyEntity, 0, len(out.GetEntities()))
+	for _, encoded := range out.GetEntities() {
+		entities = append(entities, decodeProtoAuthPolicyEntity(encoded))
+	}
+	return domain.AuthPolicyEntityPage{Entities: entities, TotalCount: int(out.GetTotalCount()),
+		NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func authPolicyMutation(workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) *chatv1.AuthPolicyMutationRequest {
+	entities := make([]string, 0, len(entityIDs))
+	entities = append(entities, entityIDs...)
+	return &chatv1.AuthPolicyMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID),
+		PolicyName: string(policy), EntityType: string(kind), EntityIds: entities}
+}
+
+func encodeProtoAuthPolicyEntity(value domain.AuthPolicyEntity) *chatv1.AuthPolicyEntity {
+	return &chatv1.AuthPolicyEntity{
+		PolicyName:  string(value.Policy),
+		EntityType:  string(value.EntityType),
+		EntityId:    value.EntityID,
+		WorkspaceId: string(value.WorkspaceID),
+		CreatedAt:   optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoAuthPolicyEntity(value *chatv1.AuthPolicyEntity) domain.AuthPolicyEntity {
+	return domain.AuthPolicyEntity{
+		Policy:      domain.AuthPolicyName(value.GetPolicyName()),
+		EntityType:  domain.PolicyEntityType(value.GetEntityType()),
+		EntityID:    value.GetEntityId(),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		CreatedAt:   optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
+func (r Remote) AdminRequestExport(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind string, bounds map[string]int64) error {
+	out, err := r.directory.AdminRequestExport(ctx, &chatv1.ExportRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Kind: kind, Bounds: bounds,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed export request was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) RequestWorkflowStepResponsesExport(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, stepID string) error {
+	out, err := r.directory.RequestWorkflowStepResponsesExport(ctx, &chatv1.ExportRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID), StepId: stepID,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed step response export was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.AnomalyAllowList, error) {
+	out, err := r.directory.AdminAnomalyAllowList(ctx, &chatv1.AnomalyAllowListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return decodeProtoAnomalyAllowList(out), nil
+}
+
+func (r Remote) AdminSetAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, addresses, reasons []string) (domain.AnomalyAllowList, error) {
+	out, err := r.directory.AdminSetAnomalyAllowList(ctx, &chatv1.AnomalyAllowListRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+		IpAddresses: append([]string{}, addresses...), Reasons: append([]string{}, reasons...),
+	})
+	if err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return decodeProtoAnomalyAllowList(out), nil
+}
+
+func (r Remote) TeamBillingInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspacePlan, error) {
+	out, err := r.directory.TeamBillingInfo(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return "", err
+	}
+	return domain.WorkspacePlan(out.GetPlan()), nil
+}
+
+func encodeProtoAnomalyAllowList(value domain.AnomalyAllowList) *chatv1.AnomalyAllowList {
+	return &chatv1.AnomalyAllowList{
+		WorkspaceId: string(value.WorkspaceID),
+		IpAddresses: append([]string{}, value.IPAddresses...),
+		Reasons:     append([]string{}, value.Reasons...),
+		UpdatedAt:   optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoAnomalyAllowList(value *chatv1.AnomalyAllowList) domain.AnomalyAllowList {
+	return domain.AnomalyAllowList{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		IPAddresses: append([]string{}, value.GetIpAddresses()...),
+		Reasons:     append([]string{}, value.GetReasons()...),
+		UpdatedAt:   optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
+func (r Remote) AdminAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
+	out, err := r.directory.AdminAnalytics(ctx, &chatv1.AnalyticsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Kind: string(kind), Day: optionalUnixNano(day),
+	})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.AnalyticsRow, 0, len(out.GetRows()))
+	for _, encoded := range out.GetRows() {
+		rows = append(rows, decodeProtoAnalyticsRow(encoded))
+	}
+	return rows, nil
+}
+
+func encodeProtoAnalyticsRow(value domain.AnalyticsRow) *chatv1.AnalyticsRow {
+	return &chatv1.AnalyticsRow{
+		Kind: string(value.Kind), Date: value.Date, EntityId: value.EntityID, Name: value.Name,
+		MessagesPosted: int32(value.MessagesPosted), ReactionsAdded: int32(value.ReactionsAdded),
+		MemberCount: int32(value.MemberCount), IsActive: value.IsActive,
+	}
+}
+
+func decodeProtoAnalyticsRow(value *chatv1.AnalyticsRow) domain.AnalyticsRow {
+	return domain.AnalyticsRow{
+		Kind: domain.AnalyticsKind(value.GetKind()), Date: value.GetDate(), EntityID: value.GetEntityId(),
+		Name: value.GetName(), MessagesPosted: int(value.GetMessagesPosted()),
+		ReactionsAdded: int(value.GetReactionsAdded()), MemberCount: int(value.GetMemberCount()),
+		IsActive: value.GetIsActive(),
+	}
+}
+
+func (r Remote) AdminAddRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) error {
+	out, err := r.directory.AdminAddRoleAssignments(ctx, roleAssignmentMutation(workspaceID, userID, roleID, entityIDs, targets))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed role assignment was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminRemoveRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) error {
+	out, err := r.directory.AdminRemoveRoleAssignments(ctx, roleAssignmentMutation(workspaceID, userID, roleID, entityIDs, targets))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed role removal was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	out, err := r.directory.AdminListRoleAssignments(ctx, &chatv1.RoleAssignmentsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), RoleId: roleID, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	assignments := make([]domain.RoleAssignment, 0, len(out.GetAssignments()))
+	for _, encoded := range out.GetAssignments() {
+		assignments = append(assignments, decodeProtoRoleAssignment(encoded))
+	}
+	return domain.RoleAssignmentPage{Assignments: assignments, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func roleAssignmentMutation(workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) *chatv1.RoleAssignmentMutationRequest {
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, string(target))
+	}
+	entities := make([]string, 0, len(entityIDs))
+	entities = append(entities, entityIDs...)
+	return &chatv1.RoleAssignmentMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), RoleId: roleID, EntityIds: entities, TargetUserIds: ids}
+}
+
+func encodeProtoRoleAssignment(value domain.RoleAssignment) *chatv1.RoleAssignment {
+	return &chatv1.RoleAssignment{
+		RoleId:      value.RoleID,
+		EntityId:    value.EntityID,
+		UserId:      string(value.UserID),
+		WorkspaceId: string(value.WorkspaceID),
+		CreatedAt:   optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoRoleAssignment(value *chatv1.RoleAssignment) domain.RoleAssignment {
+	return domain.RoleAssignment{
+		RoleID:      value.GetRoleId(),
+		EntityID:    value.GetEntityId(),
+		UserID:      domain.UserID(value.GetUserId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		CreatedAt:   optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
+func (r Remote) UserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) (time.Time, error) {
+	out, err := r.directory.UserExpiration(ctx, &chatv1.SetUserExpirationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return optionalTimeFromUnixNano(out.GetExpirationUnixNano()), nil
+}
+
 func (r Remote) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, expiration time.Time) error {
 	seconds := int64(0)
 	if !expiration.IsZero() {
@@ -1678,6 +2098,29 @@ func (r Remote) AdminSetConversationArchived(ctx context.Context, workspaceID do
 		return domain.Conversation{}, err
 	}
 	return decodeProtoConversation(out)
+}
+
+func (r Remote) AdminBulkArchiveConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) error {
+	return r.bulkConversations(ctx, r.mutations.AdminBulkArchiveConversations, workspaceID, userID, ids, "archive")
+}
+
+func (r Remote) AdminBulkDeleteConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) error {
+	return r.bulkConversations(ctx, r.mutations.AdminBulkDeleteConversations, workspaceID, userID, ids, "deletion")
+}
+
+func (r Remote) bulkConversations(ctx context.Context, call func(context.Context, *chatv1.BulkConversationsRequest, ...grpc.CallOption) (*chatv1.MutationResponse, error), workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID, what string) error {
+	values := make([]string, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, string(id))
+	}
+	out, err := call(ctx, &chatv1.BulkConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: values})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed bulk conversation " + what + " was not acknowledged")
+	}
+	return nil
 }
 
 func (r Remote) AdminDeleteConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
@@ -2301,6 +2744,17 @@ func (r Remote) AdminUninstallApps(ctx context.Context, workspaceID domain.Works
 	return nil
 }
 
+func (r Remote) AdminCancelAppRequest(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
+	out, err := r.directory.AdminCancelAppRequest(ctx, &chatv1.AppApprovalMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), RequestId: string(requestID)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app request cancellation was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) AdminApproveApp(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
 	out, err := r.directory.AdminApproveApp(ctx, &chatv1.AppApprovalMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), RequestId: string(requestID)})
 	if err != nil {
@@ -2762,19 +3216,18 @@ func decodeWorkflowDefinition(value *chatv1.WorkflowDefinition) domain.WorkflowD
 		ID: domain.WorkflowID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		AppID: domain.AppID(value.GetAppId()), OwnerID: domain.UserID(value.GetOwnerId()),
 		CallbackID: value.GetCallbackId(), Title: value.GetTitle(), Description: value.GetDescription(),
-		Icon: value.GetIcon(), ManagerIDs: decodeWorkflowUserIDs(value.GetManagerIds()), InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
+		Icon: value.GetIcon(), ManagerIDs: decodeUserIDs(value.GetManagerIds()), InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
 		Version: value.GetVersion(), PublishedVersion: value.GetPublishedVersion(),
 		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
 	}
 }
 
-// decodeWorkflowUserIDs answers with an empty list rather than nil when there
-// are none. It used to answer nil, which is the same thing to most Go code and
-// a different answer at the seam: the local composition returns the empty list
-// the store holds, so the remote one returning nil made the two compositions
-// disagree about a workflow nobody manages. The parity gate caught it.
-func decodeWorkflowUserIDs(ids []string) []domain.UserID {
+// decodeUserIDs answers with an empty list rather than nil when there are
+// none. Nil and the empty list are the same thing to most Go code and a
+// different answer at the seam: the local composition returns the empty list
+// the store holds, so a nil here makes the two compositions disagree.
+func decodeUserIDs(ids []string) []domain.UserID {
 	values := make([]domain.UserID, 0, len(ids))
 	for _, id := range ids {
 		values = append(values, domain.UserID(id))
@@ -2809,7 +3262,7 @@ func decodeWorkflowStepChanges(changes []*chatv1.WorkflowStepChange) []domain.Wo
 func encodeWorkflowTrigger(value domain.WorkflowTrigger) *chatv1.WorkflowTrigger {
 	return &chatv1.WorkflowTrigger{
 		Id: string(value.ID), WorkflowId: string(value.WorkflowID), WorkspaceId: string(value.WorkspaceID),
-		AppId: string(value.AppID), Title: value.Title, Type: value.Type, Config: value.Config,
+		AppId: string(value.AppID), Title: value.Title, Type: string(value.Type), Config: value.Config,
 		Enabled: value.Enabled, Version: value.Version,
 		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
 		NextRunAtUnixNano: optionalUnixNano(value.NextRunAt),
@@ -2823,7 +3276,7 @@ func decodeWorkflowTrigger(value *chatv1.WorkflowTrigger) domain.WorkflowTrigger
 	return domain.WorkflowTrigger{
 		ID: domain.WorkflowTriggerID(value.GetId()), WorkflowID: domain.WorkflowID(value.GetWorkflowId()),
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
-		Title: value.GetTitle(), Type: value.GetType(), Config: value.GetConfig(),
+		Title: value.GetTitle(), Type: domain.WorkflowTriggerType(value.GetType()), Config: value.GetConfig(),
 		Enabled: value.GetEnabled(), Version: value.GetVersion(),
 		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
@@ -2948,7 +3401,7 @@ func decodeWorkflowInteraction(value *chatv1.WorkflowInteraction) domain.Workflo
 		return domain.WorkflowInteraction{}
 	}
 	interaction := domain.WorkflowInteraction{
-		StepID: domain.WorkflowStepID(value.GetStepId()), Kind: value.GetKind(),
+		StepID: domain.WorkflowStepID(value.GetStepId()), Kind: domain.WorkflowStepType(value.GetKind()),
 		Title: value.GetTitle(), Label: value.GetLabel(),
 	}
 	for _, field := range value.GetFields() {
@@ -3199,7 +3652,7 @@ func (r Remote) CompleteFunction(ctx context.Context, workspaceID domain.Workspa
 func encodeAutomationPermission(value domain.AutomationPermission) *chatv1.AutomationPermission {
 	return &chatv1.AutomationPermission{
 		ResourceType: value.ResourceType, ResourceId: value.ResourceID, WorkspaceId: string(value.WorkspaceID),
-		AppId: string(value.AppID), PermissionType: value.PermissionType,
+		AppId: string(value.AppID), PermissionType: string(value.PermissionType),
 		UserIds: userStrings(value.UserIDs), ChannelIds: conversationStrings(value.ChannelIDs),
 		TeamIds: workspaceStrings(value.TeamIDs), OrgIds: append([]string(nil), value.OrgIDs...),
 		UpdatedAtUnixNano: value.UpdatedAt.UnixNano(),
@@ -3221,7 +3674,7 @@ func decodeAutomationPermission(value *chatv1.AutomationPermission) domain.Autom
 	result := domain.AutomationPermission{
 		ResourceType: value.GetResourceType(), ResourceID: value.GetResourceId(),
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
-		PermissionType: value.GetPermissionType(), OrgIDs: append([]string(nil), value.GetOrgIds()...),
+		PermissionType: domain.PermissionType(value.GetPermissionType()), OrgIDs: append([]string(nil), value.GetOrgIds()...),
 	}
 	for _, id := range value.GetUserIds() {
 		result.UserIDs = append(result.UserIDs, domain.UserID(id))
@@ -3243,6 +3696,71 @@ func functionPermissionRequest(workspaceID domain.WorkspaceID, userID domain.Use
 		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
 		FunctionId: functionID, FunctionCallbackId: callbackID, Permission: encodeAutomationPermission(permission),
 	}
+}
+
+func (r Remote) AdminFunctionPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, functionIDs []string) ([]domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminFunctionPermissions(ctx, adminPermissionsRequest(workspaceID, userID, functionIDs))
+	if err != nil {
+		return nil, err
+	}
+	return decodeAutomationPermissions(out.GetPermissions()), nil
+}
+
+func (r Remote) AdminWorkflowPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowIDs []domain.WorkflowID) ([]domain.AutomationPermission, error) {
+	ids := make([]string, 0, len(workflowIDs))
+	for _, id := range workflowIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.workflows.AdminWorkflowPermissions(ctx, adminPermissionsRequest(workspaceID, userID, ids))
+	if err != nil {
+		return nil, err
+	}
+	return decodeAutomationPermissions(out.GetPermissions()), nil
+}
+
+func (r Remote) AdminTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind domain.WorkflowTriggerType) (domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminTriggerTypePermission(ctx, adminPermissionsRequest(workspaceID, userID, []string{string(kind)}))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) AdminSetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, functionID string, permission domain.AutomationPermission) (domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminSetFunctionPermission(ctx, adminPermissionMutation(workspaceID, userID, functionID, permission))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) AdminSetTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind domain.WorkflowTriggerType, permission domain.AutomationPermission) (domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminSetTriggerTypePermission(ctx, adminPermissionMutation(workspaceID, userID, string(kind), permission))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func adminPermissionsRequest(workspaceID domain.WorkspaceID, userID domain.UserID, ids []string) *chatv1.AdminPermissionsRequest {
+	values := make([]string, 0, len(ids))
+	values = append(values, ids...)
+	return &chatv1.AdminPermissionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ResourceIds: values}
+}
+
+func adminPermissionMutation(workspaceID domain.WorkspaceID, userID domain.UserID, id string, permission domain.AutomationPermission) *chatv1.AdminPermissionMutationRequest {
+	return &chatv1.AdminPermissionMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ResourceId: id,
+		Permission: encodeAutomationPermission(permission),
+	}
+}
+
+func decodeAutomationPermissions(values []*chatv1.AutomationPermission) []domain.AutomationPermission {
+	permissions := make([]domain.AutomationPermission, 0, len(values))
+	for _, value := range values {
+		permissions = append(permissions, decodeAutomationPermission(value))
+	}
+	return permissions
 }
 
 func (r Remote) GetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, functionID, callbackID string) (domain.AutomationPermission, error) {
@@ -3479,7 +3997,7 @@ func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
 		InstallerID:            domain.UserID(value.GetInstallerId()),
 		BotID:                  domain.BotID(value.GetBotId()),
 		Scopes:                 append([]string(nil), value.GetScopes()...),
-		TokenType:              value.GetTokenType(),
+		TokenType:              domain.TokenType(value.GetTokenType()),
 		AuthedUserAccessToken:  value.GetAuthedUserAccessToken(),
 		AuthedUserScopes:       append([]string(nil), value.GetAuthedUserScopes()...),
 		RefreshToken:           value.GetRefreshToken(),
@@ -5002,7 +5520,7 @@ func (s *Server) lookupCanvasSectionsProto(ctx context.Context, input *chatv1.Ca
 	}
 	result := make([]*chatv1.CanvasSection, 0, len(sections))
 	for _, section := range sections {
-		result = append(result, &chatv1.CanvasSection{Id: section.ID, Type: section.Type, Text: section.Text})
+		result = append(result, &chatv1.CanvasSection{Id: section.ID, Type: string(section.Type), Text: section.Text})
 	}
 	return &chatv1.CanvasSectionsResponse{Sections: result}, nil
 }
@@ -5250,6 +5768,203 @@ func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleReque
 	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
+func (s *Server) AdminCreateBarrier(ctx context.Context, input *chatv1.BarrierMutationRequest) (*chatv1.InformationBarrier, error) {
+	barrier, err := s.implementation.AdminCreateBarrier(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.UserGroupID(input.GetPrimaryUsergroupId()), decodeUserGroupIDs(input.GetBarrieredFromIds()), decodeBarrierSubjects(input.GetSubjects()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoBarrier(barrier), nil
+}
+
+func (s *Server) AdminUpdateBarrier(ctx context.Context, input *chatv1.BarrierMutationRequest) (*chatv1.InformationBarrier, error) {
+	barrier, err := s.implementation.AdminUpdateBarrier(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.BarrierID(input.GetBarrierId()), domain.UserGroupID(input.GetPrimaryUsergroupId()),
+		decodeUserGroupIDs(input.GetBarrieredFromIds()), decodeBarrierSubjects(input.GetSubjects()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoBarrier(barrier), nil
+}
+
+func (s *Server) AdminDeleteBarrier(ctx context.Context, input *chatv1.BarrierMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminDeleteBarrier(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.BarrierID(input.GetBarrierId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminBarriers(ctx context.Context, input *chatv1.BarriersRequest) (*chatv1.InformationBarrierPage, error) {
+	page, err := s.implementation.AdminBarriers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	barriers := make([]*chatv1.InformationBarrier, 0, len(page.Barriers))
+	for _, value := range page.Barriers {
+		barriers = append(barriers, encodeProtoBarrier(value))
+	}
+	return &chatv1.InformationBarrierPage{Barriers: barriers, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) AdminSetSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminSetSessionSettings(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeUserIDs(input.GetTargetUserIds()), decodeProtoSessionSettings(input.GetSettings())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminClearSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminClearSessionSettings(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeUserIDs(input.GetTargetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.SessionSettingsResponse, error) {
+	settings, err := s.implementation.AdminSessionSettings(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeUserIDs(input.GetTargetUserIds()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.SessionSettings, 0, len(settings))
+	for _, value := range settings {
+		encoded = append(encoded, encodeProtoSessionSettings(value))
+	}
+	return &chatv1.SessionSettingsResponse{Settings: encoded}, nil
+}
+
+func (s *Server) AdminAssignAuthPolicy(ctx context.Context, input *chatv1.AuthPolicyMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminAssignAuthPolicy(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AuthPolicyName(input.GetPolicyName()), domain.PolicyEntityType(input.GetEntityType()), input.GetEntityIds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminRemoveAuthPolicyEntities(ctx context.Context, input *chatv1.AuthPolicyMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminRemoveAuthPolicyEntities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AuthPolicyName(input.GetPolicyName()), domain.PolicyEntityType(input.GetEntityType()), input.GetEntityIds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminAuthPolicyEntities(ctx context.Context, input *chatv1.AuthPolicyEntitiesRequest) (*chatv1.AuthPolicyEntityPage, error) {
+	page, err := s.implementation.AdminAuthPolicyEntities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AuthPolicyName(input.GetPolicyName()), domain.PolicyEntityType(input.GetEntityType()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	entities := make([]*chatv1.AuthPolicyEntity, 0, len(page.Entities))
+	for _, value := range page.Entities {
+		entities = append(entities, encodeProtoAuthPolicyEntity(value))
+	}
+	return &chatv1.AuthPolicyEntityPage{Entities: entities, NextCursor: string(page.NextCursor),
+		HasMore: page.HasMore, TotalCount: int32(page.TotalCount)}, nil
+}
+
+func (s *Server) AdminRequestExport(ctx context.Context, input *chatv1.ExportRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminRequestExport(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetKind(), input.GetBounds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) RequestWorkflowStepResponsesExport(ctx context.Context, input *chatv1.ExportRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.RequestWorkflowStepResponsesExport(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetStepId()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminAnomalyAllowList(ctx context.Context, input *chatv1.AnomalyAllowListRequest) (*chatv1.AnomalyAllowList, error) {
+	value, err := s.implementation.AdminAnomalyAllowList(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAnomalyAllowList(value), nil
+}
+
+func (s *Server) AdminSetAnomalyAllowList(ctx context.Context, input *chatv1.AnomalyAllowListRequest) (*chatv1.AnomalyAllowList, error) {
+	value, err := s.implementation.AdminSetAnomalyAllowList(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetIpAddresses(), input.GetReasons())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAnomalyAllowList(value), nil
+}
+
+func (s *Server) TeamBillingInfo(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.BillingInfoResponse, error) {
+	plan, err := s.implementation.TeamBillingInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.BillingInfoResponse{Plan: string(plan)}, nil
+}
+
+func (s *Server) AdminAnalytics(ctx context.Context, input *chatv1.AnalyticsRequest) (*chatv1.AnalyticsResponse, error) {
+	rows, err := s.implementation.AdminAnalytics(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AnalyticsKind(input.GetKind()), optionalTimeFromUnixNano(input.GetDay()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.AnalyticsRow, 0, len(rows))
+	for _, row := range rows {
+		encoded = append(encoded, encodeProtoAnalyticsRow(row))
+	}
+	return &chatv1.AnalyticsResponse{Rows: encoded}, nil
+}
+
+func (s *Server) AdminAddRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminAddRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetRoleId(), input.GetEntityIds(), decodeUserIDs(input.GetTargetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminRemoveRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminRemoveRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetRoleId(), input.GetEntityIds(), decodeUserIDs(input.GetTargetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminListRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentsRequest) (*chatv1.RoleAssignmentPage, error) {
+	page, err := s.implementation.AdminListRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetRoleId(), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	assignments := make([]*chatv1.RoleAssignment, 0, len(page.Assignments))
+	for _, value := range page.Assignments {
+		assignments = append(assignments, encodeProtoRoleAssignment(value))
+	}
+	return &chatv1.RoleAssignmentPage{Assignments: assignments, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) DiscoverableContacts(ctx context.Context, input *chatv1.DiscoverableContactsRequest) (*chatv1.DiscoverableContactsResponse, error) {
+	users, err := s.implementation.DiscoverableContacts(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetEmails())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.User, 0, len(users))
+	for _, user := range users {
+		encoded = append(encoded, encodeProtoUser(user))
+	}
+	return &chatv1.DiscoverableContactsResponse{Users: encoded}, nil
+}
+
+func (s *Server) UserExpiration(ctx context.Context, input *chatv1.SetUserExpirationRequest) (*chatv1.UserExpirationResponse, error) {
+	expiration, err := s.implementation.UserExpiration(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.UserExpirationResponse{ExpirationUnixNano: optionalUnixNano(expiration)}, nil
+}
+
 func (s *Server) SetUserExpiration(ctx context.Context, input *chatv1.SetUserExpirationRequest) (*chatv1.MutationResponse, error) {
 	expiration := time.Time{}
 	if input.GetExpirationTs() != 0 {
@@ -5379,6 +6094,28 @@ func (s *Server) AdminInviteConversationMembers(ctx context.Context, input *chat
 		return nil, mapError(err)
 	}
 	return encodeProtoConversation(result), nil
+}
+
+func (s *Server) AdminBulkArchiveConversations(ctx context.Context, input *chatv1.BulkConversationsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminBulkArchiveConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), bulkConversationIDs(input)); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminBulkDeleteConversations(ctx context.Context, input *chatv1.BulkConversationsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminBulkDeleteConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), bulkConversationIDs(input)); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func bulkConversationIDs(input *chatv1.BulkConversationsRequest) []domain.ConversationID {
+	ids := make([]domain.ConversationID, 0, len(input.GetConversationIds()))
+	for _, id := range input.GetConversationIds() {
+		ids = append(ids, domain.ConversationID(id))
+	}
+	return ids
 }
 
 func (s *Server) AdminConvertConversationToPublic(ctx context.Context, input *chatv1.ConvertConversationToPrivateRequest) (*chatv1.Conversation, error) {
@@ -5856,6 +6593,13 @@ func (s *Server) AdminUninstallApps(ctx context.Context, input *chatv1.AdminUnin
 	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
+func (s *Server) AdminCancelAppRequest(ctx context.Context, input *chatv1.AppApprovalMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminCancelAppRequest(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.AppRequestID(input.GetRequestId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) AdminApproveApp(ctx context.Context, input *chatv1.AppApprovalMutationRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.AdminApproveApp(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.AppRequestID(input.GetRequestId())); err != nil {
 		return nil, mapError(err)
@@ -5929,7 +6673,7 @@ func (s *Server) ListAppAuthorizations(ctx context.Context, input *chatv1.AppAut
 		result.Authorizations = append(result.Authorizations, &chatv1.AppAuthorization{
 			AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
 			UserId: string(value.UserID), BotId: string(value.BotID),
-			TokenType: value.TokenType, Scopes: domain.NormalizeScopes(value.Scopes),
+			TokenType: string(value.TokenType), Scopes: domain.NormalizeScopes(value.Scopes),
 		})
 	}
 	return result, nil
@@ -6342,7 +7086,7 @@ func (s *Server) WorkflowRunInteraction(ctx context.Context, input *chatv1.Workf
 		fields = append(fields, &chatv1.WorkflowInteractionField{Name: field.Name, Label: field.Label})
 	}
 	return &chatv1.WorkflowInteraction{
-		StepId: string(interaction.StepID), Kind: interaction.Kind, Title: interaction.Title,
+		StepId: string(interaction.StepID), Kind: string(interaction.Kind), Title: interaction.Title,
 		Label: interaction.Label, Fields: fields,
 	}, nil
 }
@@ -6384,7 +7128,7 @@ func (s *Server) WorkflowFormResponseExport(ctx context.Context, input *chatv1.W
 func (s *Server) SetWorkflowManagers(ctx context.Context, input *chatv1.WorkflowManagersRequest) (*chatv1.WorkflowDefinition, error) {
 	value, err := s.implementation.SetWorkflowManagers(ctx,
 		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		domain.WorkflowID(input.GetWorkflowId()), decodeWorkflowUserIDs(input.GetManagerIds()),
+		domain.WorkflowID(input.GetWorkflowId()), decodeUserIDs(input.GetManagerIds()),
 	)
 	if err != nil {
 		return nil, mapError(err)
@@ -6572,6 +7316,64 @@ func (s *Server) CompleteFunction(ctx context.Context, input *chatv1.FunctionCom
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminFunctionPermissions(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AdminPermissionsResponse, error) {
+	values, err := s.implementation.AdminFunctionPermissions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetResourceIds())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AdminPermissionsResponse{Permissions: encodeAutomationPermissions(values)}, nil
+}
+
+func (s *Server) AdminWorkflowPermissions(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AdminPermissionsResponse, error) {
+	ids := make([]domain.WorkflowID, 0, len(input.GetResourceIds()))
+	for _, id := range input.GetResourceIds() {
+		ids = append(ids, domain.WorkflowID(id))
+	}
+	values, err := s.implementation.AdminWorkflowPermissions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AdminPermissionsResponse{Permissions: encodeAutomationPermissions(values)}, nil
+}
+
+func (s *Server) AdminTriggerTypePermission(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AutomationPermission, error) {
+	kind := domain.WorkflowTriggerType("")
+	if ids := input.GetResourceIds(); len(ids) > 0 {
+		kind = domain.WorkflowTriggerType(ids[0])
+	}
+	value, err := s.implementation.AdminTriggerTypePermission(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), kind)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) AdminSetFunctionPermission(ctx context.Context, input *chatv1.AdminPermissionMutationRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.AdminSetFunctionPermission(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetResourceId(), decodeAutomationPermission(input.GetPermission()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) AdminSetTriggerTypePermission(ctx context.Context, input *chatv1.AdminPermissionMutationRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.AdminSetTriggerTypePermission(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowTriggerType(input.GetResourceId()), decodeAutomationPermission(input.GetPermission()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func encodeAutomationPermissions(values []domain.AutomationPermission) []*chatv1.AutomationPermission {
+	encoded := make([]*chatv1.AutomationPermission, 0, len(values))
+	for _, value := range values {
+		encoded = append(encoded, encodeAutomationPermission(value))
+	}
+	return encoded
 }
 
 func (s *Server) GetFunctionPermission(ctx context.Context, input *chatv1.FunctionPermissionRequest) (*chatv1.AutomationPermission, error) {
@@ -6818,7 +7620,7 @@ func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
 		InstallerId:            string(value.InstallerID),
 		BotId:                  string(value.BotID),
 		Scopes:                 value.Scopes,
-		TokenType:              value.TokenType,
+		TokenType:              string(value.TokenType),
 		AuthedUserAccessToken:  value.AuthedUserAccessToken,
 		AuthedUserScopes:       value.AuthedUserScopes,
 		RefreshToken:           value.RefreshToken,
@@ -9435,7 +10237,7 @@ func encodeProtoWorkspace(value domain.Workspace) *chatv1.Workspace {
 	for _, channel := range value.DefaultChannelIDs {
 		channels = append(channels, string(channel))
 	}
-	return &chatv1.Workspace{Id: string(value.ID), Domain: value.Domain, Name: value.Name, Description: value.Description, Discoverability: string(value.Discoverability), IconUrl: value.IconURL, DefaultChannelIds: channels}
+	return &chatv1.Workspace{Id: string(value.ID), Domain: value.Domain, Name: value.Name, Description: value.Description, Discoverability: string(value.Discoverability), IconUrl: value.IconURL, DefaultChannelIds: channels, Plan: string(value.Plan)}
 }
 
 func decodeProtoWorkspace(value *chatv1.Workspace) (domain.Workspace, error) {
@@ -9446,7 +10248,7 @@ func decodeProtoWorkspace(value *chatv1.Workspace) (domain.Workspace, error) {
 	for _, channel := range value.GetDefaultChannelIds() {
 		channels = append(channels, domain.ConversationID(channel))
 	}
-	return domain.Workspace{ID: domain.WorkspaceID(value.GetId()), Domain: value.GetDomain(), Name: value.GetName(), Description: value.GetDescription(), Discoverability: domain.WorkspaceDiscoverability(value.GetDiscoverability()), IconURL: value.GetIconUrl(), DefaultChannelIDs: channels}, nil
+	return domain.Workspace{ID: domain.WorkspaceID(value.GetId()), Domain: value.GetDomain(), Name: value.GetName(), Description: value.GetDescription(), Discoverability: domain.WorkspaceDiscoverability(value.GetDiscoverability()), IconURL: value.GetIconUrl(), DefaultChannelIDs: channels, Plan: domain.WorkspacePlan(value.GetPlan())}, nil
 }
 
 func encodeProtoWorkspacePage(value domain.WorkspacePage) *chatv1.WorkspacePage {
@@ -9646,6 +10448,216 @@ func decodeProtoListDownload(value *chatv1.ListDownload) (domain.ListDownload, e
 		return domain.ListDownload{}, err
 	}
 	return domain.ListDownload{ID: domain.ListDownloadID(value.GetId()), ListID: domain.ListID(value.GetListId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Status: value.GetStatus(), URL: value.GetUrl(), IncludeArchived: value.GetIncludeArchived(), CreatedAt: createdAt}, nil
+}
+
+func (r Remote) AdminLookupConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, lookup domain.ConversationLookup, request domain.PageRequest) (domain.ConversationPage, error) {
+	teams := make([]string, 0, len(lookup.TeamIDs))
+	for _, id := range lookup.TeamIDs {
+		teams = append(teams, string(id))
+	}
+	out, err := r.mutations.AdminLookupConversations(ctx, &chatv1.ConversationLookupRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), TeamIds: teams,
+		LastMessageActivityBefore: optionalUnixNano(lookup.LastMessageActivityBefore),
+		MaxMemberCount:            int32(lookup.MaxMemberCount),
+		Limit:                     int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.ConversationPage{}, err
+	}
+	return decodeProtoConversationPage(out)
+}
+
+func (r Remote) AdminBulkMoveConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID, target domain.WorkspaceID) error {
+	out, err := r.mutations.AdminBulkMoveConversations(ctx, &chatv1.BulkMoveConversationsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+		ConversationIds: conversationStrings(ids), TargetTeamId: string(target),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed bulk channel move was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminSetConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID, excluded bool) error {
+	out, err := r.mutations.AdminSetConversationsExcludedFromAI(ctx, &chatv1.ConversationAIExclusionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(ids), Excluded: excluded,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed channel exclusion was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) ([]domain.ConversationID, error) {
+	out, err := r.mutations.AdminConversationsExcludedFromAI(ctx, &chatv1.ConversationAIExclusionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(ids),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return decodeConversationIDs(out.GetConversationIds()), nil
+}
+
+func (r Remote) AdminLinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ConversationID, orgID string, recordIDs []string) error {
+	out, err := r.mutations.AdminLinkConversationObjects(ctx, &chatv1.LinkConversationObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(id),
+		OrgId: orgID, RecordIds: append([]string{}, recordIDs...),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed channel object link was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) error {
+	out, err := r.mutations.AdminUnlinkConversationObjects(ctx, &chatv1.UnlinkConversationObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(ids),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed channel object unlink was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ConversationID) ([]domain.LinkedObject, error) {
+	out, err := r.mutations.AdminConversationObjects(ctx, &chatv1.ConversationObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(id),
+	})
+	if err != nil {
+		return nil, err
+	}
+	objects := make([]domain.LinkedObject, 0, len(out.GetObjects()))
+	for _, encoded := range out.GetObjects() {
+		objects = append(objects, decodeProtoLinkedObject(encoded))
+	}
+	return objects, nil
+}
+
+func (r Remote) AdminCreateConversationForObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, orgID, recordID string, private bool) (domain.Conversation, error) {
+	out, err := r.mutations.AdminCreateConversationForObjects(ctx, &chatv1.CreateConversationForObjectsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Name: name,
+		OrgId: orgID, RecordId: recordID, IsPrivate: private,
+	})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
+func (s *Server) AdminLookupConversations(ctx context.Context, input *chatv1.ConversationLookupRequest) (*chatv1.ConversationPage, error) {
+	teams := make([]domain.WorkspaceID, 0, len(input.GetTeamIds()))
+	for _, id := range input.GetTeamIds() {
+		teams = append(teams, domain.WorkspaceID(id))
+	}
+	page, err := s.implementation.AdminLookupConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationLookup{
+			TeamIDs:                   teams,
+			LastMessageActivityBefore: optionalTimeFromUnixNano(input.GetLastMessageActivityBefore()),
+			MaxMemberCount:            int(input.GetMaxMemberCount()),
+		}, protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversationPage(page), nil
+}
+
+func (s *Server) AdminBulkMoveConversations(ctx context.Context, input *chatv1.BulkMoveConversationsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminBulkMoveConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds()), domain.WorkspaceID(input.GetTargetTeamId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminSetConversationsExcludedFromAI(ctx context.Context, input *chatv1.ConversationAIExclusionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminSetConversationsExcludedFromAI(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds()), input.GetExcluded()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminConversationsExcludedFromAI(ctx context.Context, input *chatv1.ConversationAIExclusionRequest) (*chatv1.ConversationAIExclusionResponse, error) {
+	ids, err := s.implementation.AdminConversationsExcludedFromAI(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ConversationAIExclusionResponse{ConversationIds: conversationStrings(ids)}, nil
+}
+
+func (s *Server) AdminLinkConversationObjects(ctx context.Context, input *chatv1.LinkConversationObjectsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminLinkConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), input.GetOrgId(), input.GetRecordIds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminUnlinkConversationObjects(ctx context.Context, input *chatv1.UnlinkConversationObjectsRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminUnlinkConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		decodeConversationIDs(input.GetConversationIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminConversationObjects(ctx context.Context, input *chatv1.ConversationObjectsRequest) (*chatv1.ConversationObjectsResponse, error) {
+	objects, err := s.implementation.AdminConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.LinkedObject, 0, len(objects))
+	for _, object := range objects {
+		encoded = append(encoded, encodeProtoLinkedObject(object))
+	}
+	return &chatv1.ConversationObjectsResponse{Objects: encoded}, nil
+}
+
+func (s *Server) AdminCreateConversationForObjects(ctx context.Context, input *chatv1.CreateConversationForObjectsRequest) (*chatv1.Conversation, error) {
+	conversation, err := s.implementation.AdminCreateConversationForObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetName(), input.GetOrgId(), input.GetRecordId(), input.GetIsPrivate())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(conversation), nil
+}
+
+func decodeConversationIDs(values []string) []domain.ConversationID {
+	ids := make([]domain.ConversationID, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, domain.ConversationID(value))
+	}
+	return ids
+}
+
+func encodeProtoLinkedObject(value domain.LinkedObject) *chatv1.LinkedObject {
+	return &chatv1.LinkedObject{
+		ConversationId: string(value.ConversationID), WorkspaceId: string(value.WorkspaceID),
+		OrgId: value.OrgID, RecordId: value.RecordID, CreatedAt: optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoLinkedObject(value *chatv1.LinkedObject) domain.LinkedObject {
+	return domain.LinkedObject{
+		ConversationID: domain.ConversationID(value.GetConversationId()),
+		WorkspaceID:    domain.WorkspaceID(value.GetWorkspaceId()),
+		OrgID:          value.GetOrgId(), RecordID: value.GetRecordId(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
 }
 
 func encodeProtoConversation(value domain.Conversation) *chatv1.Conversation {
@@ -9981,7 +10993,7 @@ func encodeProtoToken(value domain.TokenRecord) *chatv1.TokenRecord {
 	if !value.ExpiresAt.IsZero() {
 		expiresAt = value.ExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID), BotId: string(value.BotID), Scopes: domain.NormalizeScopes(value.Scopes), TokenType: value.TokenType, ExpiresAt: expiresAt, Revoked: value.Revoked}
+	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID), BotId: string(value.BotID), Scopes: domain.NormalizeScopes(value.Scopes), TokenType: string(value.TokenType), ExpiresAt: expiresAt, Revoked: value.Revoked}
 }
 
 func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
@@ -9992,7 +11004,7 @@ func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
 	if err != nil {
 		return domain.TokenRecord{}, err
 	}
-	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), Scopes: domain.NormalizeScopes(value.GetScopes()), TokenType: value.GetTokenType(), ExpiresAt: expiresAt, Revoked: value.GetRevoked()}, nil
+	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), Scopes: domain.NormalizeScopes(value.GetScopes()), TokenType: domain.TokenType(value.GetTokenType()), ExpiresAt: expiresAt, Revoked: value.GetRevoked()}, nil
 }
 
 func encodeProtoSession(value domain.SessionRecord) *chatv1.SessionRecord {
@@ -11475,6 +12487,274 @@ func (r Remote) ListDeveloperApps(ctx context.Context, workspaceID domain.Worksp
 	return result, nil
 }
 
+func (r Remote) AdminFunctions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.AppFunction, error) {
+	out, err := r.apps.AdminFunctions(ctx, &chatv1.AppListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoAppFunctions(out.GetFunctions()), nil
+}
+
+func encodeProtoAppFunction(value domain.AppFunction) *chatv1.AppFunction {
+	return &chatv1.AppFunction{
+		AppId: string(value.AppID), AppName: value.AppName, CallbackId: value.CallbackID,
+		Title: value.Title, Description: value.Description,
+	}
+}
+
+func decodeProtoAppFunction(value *chatv1.AppFunction) domain.AppFunction {
+	if value == nil {
+		return domain.AppFunction{}
+	}
+	return domain.AppFunction{
+		AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), CallbackID: value.GetCallbackId(),
+		Title: value.GetTitle(), Description: value.GetDescription(),
+	}
+}
+
+func encodeProtoAppFunctions(values []domain.AppFunction) []*chatv1.AppFunction {
+	functions := make([]*chatv1.AppFunction, 0, len(values))
+	for _, value := range values {
+		functions = append(functions, encodeProtoAppFunction(value))
+	}
+	return functions
+}
+
+func decodeProtoAppFunctions(values []*chatv1.AppFunction) []domain.AppFunction {
+	functions := make([]domain.AppFunction, 0, len(values))
+	for _, value := range values {
+		functions = append(functions, decodeProtoAppFunction(value))
+	}
+	return functions
+}
+
+func (r Remote) SetAppIcon(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, iconURL string) error {
+	out, err := r.apps.SetAppIcon(ctx, &chatv1.AppIconRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), IconUrl: iconURL,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app icon change was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) ExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, id string) (domain.ExternalAuthToken, error) {
+	out, err := r.apps.ExternalAuthToken(ctx, &chatv1.ExternalAuthTokenRequest{
+		WorkspaceId: string(workspaceID), AppId: string(appID), ExternalTokenId: id,
+	})
+	if err != nil {
+		return domain.ExternalAuthToken{}, err
+	}
+	return decodeProtoExternalAuthToken(out), nil
+}
+
+func (r Remote) DeleteExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, id string) error {
+	out, err := r.apps.DeleteExternalAuthToken(ctx, &chatv1.ExternalAuthTokenRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), ExternalTokenId: id,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed external credential revocation was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) UpdateUserAppConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) error {
+	out, err := r.apps.UpdateUserAppConnection(ctx, &chatv1.UserConnectionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app connection refresh was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AssistantSearchAvailability(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.AssistantSearchAvailability, error) {
+	out, err := r.apps.AssistantSearchAvailability(ctx, &chatv1.UserConnectionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+	})
+	if err != nil {
+		return domain.AssistantSearchAvailability{}, err
+	}
+	return decodeProtoAssistantSearchAvailability(out), nil
+}
+
+func (r Remote) AssistantSearchContext(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
+	out, err := r.apps.AssistantSearchContext(ctx, &chatv1.AssistantSearchRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Query: query,
+		Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.MessagePage{}, err
+	}
+	return decodeProtoMessagePage(out)
+}
+
+func encodeProtoExternalAuthToken(value domain.ExternalAuthToken) *chatv1.ExternalAuthTokenValue {
+	// The ciphertext is deliberately absent: an external credential's secret
+	// belongs to the store, in the same way an app's signing secret does.
+	return &chatv1.ExternalAuthTokenValue{
+		Id: value.ID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
+		UserId: string(value.UserID), Provider: value.Provider,
+		ExpiresAt: optionalUnixNano(value.ExpiresAt), CreatedAt: optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoExternalAuthToken(value *chatv1.ExternalAuthTokenValue) domain.ExternalAuthToken {
+	return domain.ExternalAuthToken{
+		ID: value.GetId(), AppID: domain.AppID(value.GetAppId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
+		Provider:  value.GetProvider(),
+		ExpiresAt: optionalTimeFromUnixNano(value.GetExpiresAt()),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
+func encodeProtoAssistantSearchAvailability(value domain.AssistantSearchAvailability) *chatv1.AssistantSearchAvailabilityValue {
+	return &chatv1.AssistantSearchAvailabilityValue{
+		Enabled: value.Enabled, SearchableSources: append([]string{}, value.SearchableSources...),
+	}
+}
+
+func decodeProtoAssistantSearchAvailability(value *chatv1.AssistantSearchAvailabilityValue) domain.AssistantSearchAvailability {
+	return domain.AssistantSearchAvailability{
+		Enabled: value.GetEnabled(), SearchableSources: append([]string{}, value.GetSearchableSources()...),
+	}
+}
+
+func (r Remote) AppActivities(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	out, err := r.apps.AppActivities(ctx, appActivitiesRequest(workspaceID, "", appID, filter, request))
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	return decodeProtoAppActivityPage(out), nil
+}
+
+func (r Remote) AdminAppActivities(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	out, err := r.apps.AdminAppActivities(ctx, appActivitiesRequest(workspaceID, userID, filter.AppID, filter, request))
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	return decodeProtoAppActivityPage(out), nil
+}
+
+func appActivitiesRequest(workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, filter domain.AppActivityFilter, request domain.PageRequest) *chatv1.AppActivitiesRequest {
+	return &chatv1.AppActivitiesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		MinLevel: string(filter.MinLevel), MinCreatedAt: optionalUnixNano(filter.MinCreatedAt),
+		MaxCreatedAt: optionalUnixNano(filter.MaxCreatedAt), ComponentType: filter.ComponentType,
+		ComponentId: filter.ComponentID, Source: filter.Source, TraceId: filter.TraceID,
+		Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	}
+}
+
+func appActivityFilter(input *chatv1.AppActivitiesRequest) domain.AppActivityFilter {
+	return domain.AppActivityFilter{
+		AppID: domain.AppID(input.GetAppId()), MinLevel: domain.ActivityLevel(input.GetMinLevel()),
+		MinCreatedAt:  optionalTimeFromUnixNano(input.GetMinCreatedAt()),
+		MaxCreatedAt:  optionalTimeFromUnixNano(input.GetMaxCreatedAt()),
+		ComponentType: input.GetComponentType(), ComponentID: input.GetComponentId(),
+		Source: input.GetSource(), TraceID: input.GetTraceId(),
+	}
+}
+
+func encodeProtoAppActivity(value domain.AppActivity) *chatv1.AppActivity {
+	return &chatv1.AppActivity{
+		Id: value.ID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
+		ComponentType: value.ComponentType, ComponentId: value.ComponentID, Level: string(value.Level),
+		EventType: value.EventType, Source: value.Source, Message: value.Message,
+		TraceId: value.TraceID, CreatedAt: optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoAppActivity(value *chatv1.AppActivity) domain.AppActivity {
+	return domain.AppActivity{
+		ID: value.GetId(), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		ComponentType: value.GetComponentType(), ComponentID: value.GetComponentId(),
+		Level: domain.ActivityLevel(value.GetLevel()), EventType: value.GetEventType(),
+		Source: value.GetSource(), Message: value.GetMessage(), TraceID: value.GetTraceId(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
+func decodeProtoAppActivityPage(value *chatv1.AppActivityPage) domain.AppActivityPage {
+	activities := make([]domain.AppActivity, 0, len(value.GetActivities()))
+	for _, encoded := range value.GetActivities() {
+		activities = append(activities, decodeProtoAppActivity(encoded))
+	}
+	return domain.AppActivityPage{Activities: activities, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}
+}
+
+func encodeProtoAppActivityPage(page domain.AppActivityPage) *chatv1.AppActivityPage {
+	activities := make([]*chatv1.AppActivity, 0, len(page.Activities))
+	for _, value := range page.Activities {
+		activities = append(activities, encodeProtoAppActivity(value))
+	}
+	return &chatv1.AppActivityPage{Activities: activities, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+}
+
+func (r Remote) AdminAppConfigs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appIDs []domain.AppID) ([]domain.AppConfig, error) {
+	ids := make([]string, 0, len(appIDs))
+	for _, id := range appIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.apps.AdminAppConfigs(ctx, &chatv1.AppConfigsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	configs := make([]domain.AppConfig, 0, len(out.GetConfigs()))
+	for _, encoded := range out.GetConfigs() {
+		configs = append(configs, decodeProtoAppConfig(encoded))
+	}
+	return configs, nil
+}
+
+func (r Remote) AdminSetAppConfig(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, config domain.AppConfig) (domain.AppConfig, error) {
+	out, err := r.apps.AdminSetAppConfig(ctx, &chatv1.AppConfigMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Config: encodeProtoAppConfig(config),
+	})
+	if err != nil {
+		return domain.AppConfig{}, err
+	}
+	return decodeProtoAppConfig(out), nil
+}
+
+func (r Remote) AdminClearAppResolution(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) error {
+	out, err := r.apps.AdminClearAppResolution(ctx, &chatv1.AppResolutionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app resolution clearance was not acknowledged")
+	}
+	return nil
+}
+
+func encodeProtoAppConfig(value domain.AppConfig) *chatv1.AppConfig {
+	return &chatv1.AppConfig{
+		AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
+		DomainUrls: append([]string{}, value.DomainURLs...), DomainEmails: append([]string{}, value.DomainEmails...),
+		WorkflowAuthStrategy: string(value.WorkflowAuthStrategy), UpdatedAt: optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoAppConfig(value *chatv1.AppConfig) domain.AppConfig {
+	return domain.AppConfig{
+		AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		DomainURLs: append([]string{}, value.GetDomainUrls()...), DomainEmails: append([]string{}, value.GetDomainEmails()...),
+		WorkflowAuthStrategy: domain.WorkflowAuthStrategy(value.GetWorkflowAuthStrategy()),
+		UpdatedAt:            optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
 func (r Remote) ListWorkspaceApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.InstalledApp, error) {
 	out, err := r.apps.ListWorkspaceApps(ctx, &chatv1.AppListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -11667,6 +12947,113 @@ func (s *Server) ListDeveloperApps(ctx context.Context, input *chatv1.AppListReq
 	return result, nil
 }
 
+func (s *Server) AdminFunctions(ctx context.Context, input *chatv1.AppListRequest) (*chatv1.AppFunctionListResponse, error) {
+	functions, err := s.implementation.AdminFunctions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppFunctionListResponse{Functions: encodeProtoAppFunctions(functions)}, nil
+}
+
+func (s *Server) SetAppIcon(ctx context.Context, input *chatv1.AppIconRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.SetAppIcon(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetIconUrl()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ExternalAuthToken(ctx context.Context, input *chatv1.ExternalAuthTokenRequest) (*chatv1.ExternalAuthTokenValue, error) {
+	value, err := s.implementation.ExternalAuthToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()),
+		domain.AppID(input.GetAppId()), input.GetExternalTokenId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoExternalAuthToken(value), nil
+}
+
+func (s *Server) DeleteExternalAuthToken(ctx context.Context, input *chatv1.ExternalAuthTokenRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.DeleteExternalAuthToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetExternalTokenId()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) UpdateUserAppConnection(ctx context.Context, input *chatv1.UserConnectionRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.UpdateUserAppConnection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AssistantSearchAvailability(ctx context.Context, input *chatv1.UserConnectionRequest) (*chatv1.AssistantSearchAvailabilityValue, error) {
+	value, err := s.implementation.AssistantSearchAvailability(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAssistantSearchAvailability(value), nil
+}
+
+func (s *Server) AssistantSearchContext(ctx context.Context, input *chatv1.AssistantSearchRequest) (*chatv1.MessagePage, error) {
+	page, err := s.implementation.AssistantSearchContext(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetQuery(), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessagePage(page), nil
+}
+
+func (s *Server) AppActivities(ctx context.Context, input *chatv1.AppActivitiesRequest) (*chatv1.AppActivityPage, error) {
+	page, err := s.implementation.AppActivities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()),
+		appActivityFilter(input), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppActivityPage(page), nil
+}
+
+func (s *Server) AdminAppActivities(ctx context.Context, input *chatv1.AppActivitiesRequest) (*chatv1.AppActivityPage, error) {
+	page, err := s.implementation.AdminAppActivities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		appActivityFilter(input), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppActivityPage(page), nil
+}
+
+func (s *Server) AdminAppConfigs(ctx context.Context, input *chatv1.AppConfigsRequest) (*chatv1.AppConfigsResponse, error) {
+	ids := make([]domain.AppID, 0, len(input.GetAppIds()))
+	for _, id := range input.GetAppIds() {
+		ids = append(ids, domain.AppID(id))
+	}
+	configs, err := s.implementation.AdminAppConfigs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.AppConfig, 0, len(configs))
+	for _, config := range configs {
+		encoded = append(encoded, encodeProtoAppConfig(config))
+	}
+	return &chatv1.AppConfigsResponse{Configs: encoded}, nil
+}
+
+func (s *Server) AdminSetAppConfig(ctx context.Context, input *chatv1.AppConfigMutationRequest) (*chatv1.AppConfig, error) {
+	config, err := s.implementation.AdminSetAppConfig(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), decodeProtoAppConfig(input.GetConfig()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppConfig(config), nil
+}
+
+func (s *Server) AdminClearAppResolution(ctx context.Context, input *chatv1.AppResolutionRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.AdminClearAppResolution(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
 func (s *Server) ListWorkspaceApps(ctx context.Context, input *chatv1.AppListRequest) (*chatv1.InstalledAppListResponse, error) {
 	apps, err := s.implementation.ListWorkspaceApps(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
 	if err != nil {
@@ -11806,7 +13193,7 @@ func decodeProtoAppConfigurationCredentials(value *chatv1.AppConfigurationCreden
 }
 
 func encodeProtoDeveloperApp(value domain.App) *chatv1.DeveloperApp {
-	return &chatv1.DeveloperApp{Id: string(value.ID), DevelopmentWorkspaceId: string(value.DevelopmentWorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, Description: value.Description, ClientId: value.ClientID, ManifestVersion: value.ManifestVersion, Distribution: value.Distribution, SocketModeEnabled: value.SocketModeEnabled, TokenRotationEnabled: value.TokenRotationEnabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted}
+	return &chatv1.DeveloperApp{Id: string(value.ID), DevelopmentWorkspaceId: string(value.DevelopmentWorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, Description: value.Description, ClientId: value.ClientID, ManifestVersion: value.ManifestVersion, Distribution: value.Distribution, SocketModeEnabled: value.SocketModeEnabled, TokenRotationEnabled: value.TokenRotationEnabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, IconUrl: value.IconURL}
 }
 
 func decodeProtoDeveloperApp(value *chatv1.DeveloperApp) (domain.App, error) {
@@ -11821,7 +13208,7 @@ func decodeProtoDeveloperApp(value *chatv1.DeveloperApp) (domain.App, error) {
 	if err != nil {
 		return domain.App{}, err
 	}
-	return domain.App{ID: domain.AppID(value.GetId()), DevelopmentWorkspaceID: domain.WorkspaceID(value.GetDevelopmentWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), Description: value.GetDescription(), ClientID: value.GetClientId(), ManifestVersion: value.GetManifestVersion(), Distribution: value.GetDistribution(), SocketModeEnabled: value.GetSocketModeEnabled(), TokenRotationEnabled: value.GetTokenRotationEnabled(), Deleted: value.GetDeleted(), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}, nil
+	return domain.App{ID: domain.AppID(value.GetId()), DevelopmentWorkspaceID: domain.WorkspaceID(value.GetDevelopmentWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), Description: value.GetDescription(), ClientID: value.GetClientId(), ManifestVersion: value.GetManifestVersion(), Distribution: value.GetDistribution(), SocketModeEnabled: value.GetSocketModeEnabled(), TokenRotationEnabled: value.GetTokenRotationEnabled(), Deleted: value.GetDeleted(), IconURL: value.GetIconUrl(), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}, nil
 }
 
 func encodeProtoAppDeliveryHealth(value domain.AppDeliveryHealth) *chatv1.AppDeliveryHealth {

@@ -5,6 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -75,7 +78,7 @@ func TestStoredAuthenticatorUsesPersistedScopes(t *testing.T) {
 	if !principal.HasScope(ScopeChannelsHistory) || principal.HasScope(ScopeChatWrite) {
 		t.Fatalf("principal = %+v", principal)
 	}
-	if principal.AppID != "A1" || principal.BotID != "B1" || principal.TokenType != "bot" {
+	if principal.AppID != "A1" || principal.BotID != "B1" || !principal.TokenType.IsBot() {
 		t.Fatalf("principal lost app/bot identity: %+v", principal)
 	}
 	if principal.CredentialHash != domain.HashToken("token") || strings.Contains(principal.CredentialHash, "token") {
@@ -670,4 +673,45 @@ type unboundAppTokens struct{}
 
 func (unboundAppTokens) LookupAppToken(context.Context, string) (domain.AppTokenRecord, error) {
 	return domain.AppTokenRecord{}, nil
+}
+
+// TestAllScopesHoldsEveryDeclaredScope reads the Scope constants this package
+// declares and requires each one to be in allScopes. A scope constant that
+// allScopes omits compiles, enforces on a route, and can never be granted, so
+// the operation behind it is unreachable for every caller. admin.roles:read and
+// admin.roles:write reached the SDK qualification that way.
+func TestAllScopesHoldsEveryDeclaredScope(t *testing.T) {
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "auth.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := map[Scope]struct{}{}
+	for _, scope := range allScopes {
+		granted[scope] = struct{}{}
+	}
+	declared := 0
+	ast.Inspect(file, func(node ast.Node) bool {
+		spec, ok := node.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || len(spec.Values) != 1 {
+			return true
+		}
+		typeName, ok := spec.Type.(*ast.Ident)
+		if !ok || typeName.Name != "Scope" {
+			return true
+		}
+		literal, ok := spec.Values[0].(*ast.BasicLit)
+		if !ok {
+			return true
+		}
+		declared++
+		value := Scope(strings.Trim(literal.Value, `"`))
+		if _, ok := granted[value]; !ok {
+			t.Errorf("%s (%q) is declared but not in allScopes, so no token can carry it; add it or delete the constant", spec.Names[0].Name, value)
+		}
+		return true
+	})
+	if declared < len(allScopes) {
+		t.Fatalf("read %d Scope constants but allScopes holds %d; the reader missed some", declared, len(allScopes))
+	}
 }

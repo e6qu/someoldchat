@@ -4,6 +4,8 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/messages.proto";
+
 message AppConfigurationTokenRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -52,6 +54,7 @@ message DeveloperApp {
   string created_at = 11;
   string updated_at = 12;
   bool deleted = 13;
+  string icon_url = 14;
 }
 
 message AppCredentials {
@@ -127,6 +130,18 @@ message InstalledApp {
   string bot_user_id = 8;
 }
 
+message AppFunction {
+  string app_id = 1;
+  string app_name = 2;
+  string callback_id = 3;
+  string title = 4;
+  string description = 5;
+}
+
+message AppFunctionListResponse {
+  repeated AppFunction functions = 1;
+}
+
 message InstalledAppListResponse {
   repeated InstalledApp apps = 1;
 }
@@ -187,7 +202,127 @@ message OAuthAuthorization {
   string code_challenge_method = 14;
 }
 
+message ExternalAuthTokenValue {
+  string id = 1;
+  string app_id = 2;
+  string workspace_id = 3;
+  string user_id = 4;
+  string provider = 5;
+  int64 expires_at = 6;
+  int64 created_at = 7;
+}
+
+message AppIconRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string icon_url = 4;
+}
+
+message ExternalAuthTokenRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string external_token_id = 4;
+}
+
+message UserConnectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
+message AssistantSearchAvailabilityValue {
+  bool enabled = 1;
+  repeated string searchable_sources = 2;
+}
+
+message AssistantSearchRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message AppActivity {
+  int64 id = 1;
+  string app_id = 2;
+  string workspace_id = 3;
+  string component_type = 4;
+  string component_id = 5;
+  string level = 6;
+  string event_type = 7;
+  string source = 8;
+  string message = 9;
+  string trace_id = 10;
+  int64 created_at = 11;
+}
+
+message AppActivitiesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string min_level = 4;
+  int64 min_created_at = 5;
+  int64 max_created_at = 6;
+  string component_type = 7;
+  string component_id = 8;
+  string source = 9;
+  string trace_id = 10;
+  int32 limit = 11;
+  string cursor = 12;
+}
+
+message AppActivityPage {
+  repeated AppActivity activities = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message AppConfig {
+  string app_id = 1;
+  string workspace_id = 2;
+  repeated string domain_urls = 3;
+  repeated string domain_emails = 4;
+  string workflow_auth_strategy = 5;
+  int64 updated_at = 6;
+}
+
+message AppConfigsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string app_ids = 3;
+}
+
+message AppConfigsResponse {
+  repeated AppConfig configs = 1;
+}
+
+message AppConfigMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  AppConfig config = 3;
+}
+
+message AppResolutionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
 service AppsService {
+  rpc SetAppIcon(AppIconRequest) returns (AppMutationResponse);
+  rpc ExternalAuthToken(ExternalAuthTokenRequest) returns (ExternalAuthTokenValue);
+  rpc DeleteExternalAuthToken(ExternalAuthTokenRequest) returns (AppMutationResponse);
+  rpc UpdateUserAppConnection(UserConnectionRequest) returns (AppMutationResponse);
+  rpc AssistantSearchAvailability(UserConnectionRequest) returns (AssistantSearchAvailabilityValue);
+  rpc AssistantSearchContext(AssistantSearchRequest) returns (MessagePage);
+  rpc AppActivities(AppActivitiesRequest) returns (AppActivityPage);
+  rpc AdminAppActivities(AppActivitiesRequest) returns (AppActivityPage);
+  rpc AdminAppConfigs(AppConfigsRequest) returns (AppConfigsResponse);
+  rpc AdminSetAppConfig(AppConfigMutationRequest) returns (AppConfig);
+  rpc AdminClearAppResolution(AppResolutionRequest) returns (AppMutationResponse);
   rpc IssueAppConfigurationToken(AppConfigurationTokenRequest) returns (AppConfigurationCredentials);
   rpc RotateAppConfigurationToken(AppConfigurationTokenRotateRequest) returns (AppConfigurationCredentials);
   rpc ValidateAppManifest(AppManifestRequest) returns (AppManifestValidation);
@@ -197,6 +332,7 @@ service AppsService {
   rpc DeleteDeveloperApp(AppManifestRequest) returns (AppMutationResponse);
   rpc ListDeveloperApps(AppListRequest) returns (AppListResponse);
   rpc ListWorkspaceApps(AppListRequest) returns (InstalledAppListResponse);
+  rpc AdminFunctions(AppListRequest) returns (AppFunctionListResponse);
   rpc PutAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc GetAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc QueryAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);

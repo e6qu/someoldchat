@@ -91,7 +91,7 @@ type WorkflowActivity struct {
 // on, if any. Kind is empty when the run is not waiting on a form or button.
 type WorkflowInteraction struct {
 	StepID WorkflowStepID
-	Kind   string
+	Kind   WorkflowStepType
 	Title  string
 	Label  string
 	Fields []WorkflowInteractionField
@@ -114,6 +114,54 @@ type WorkflowFormResponse struct {
 	SubmittedAt     time.Time
 }
 
+// WorkflowStepType is what one workflow step does. The service held these as
+// untyped constants while the web builder spelt the same eight values as string
+// literals in its own switch, so a typo on either side fell through to the
+// default and the step silently did nothing. One type, named once.
+type WorkflowStepType string
+
+const (
+	WorkflowStepFunction  WorkflowStepType = "function"
+	WorkflowStepForm      WorkflowStepType = "form"
+	WorkflowStepButton    WorkflowStepType = "button"
+	WorkflowStepMessage   WorkflowStepType = "message"
+	WorkflowStepAddPeople WorkflowStepType = "add_people"
+	WorkflowStepCanvas    WorkflowStepType = "create_canvas"
+	WorkflowStepDelay     WorkflowStepType = "delay"
+	WorkflowStepWaitUntil WorkflowStepType = "wait_until"
+)
+
+// Valid accepts the eight kinds. The empty value is not one of them: a step
+// with no kind is read as a function step by the decoder, and OrFunction says
+// so where that is meant rather than leaving it implicit.
+func (kind WorkflowStepType) Valid() bool {
+	switch kind {
+	case WorkflowStepFunction, WorkflowStepForm, WorkflowStepButton, WorkflowStepMessage,
+		WorkflowStepAddPeople, WorkflowStepCanvas, WorkflowStepDelay, WorkflowStepWaitUntil:
+		return true
+	}
+	return false
+}
+
+// OrFunction reads an unset kind as the function step, which is the default a
+// step with no type has always had.
+func (kind WorkflowStepType) OrFunction() WorkflowStepType {
+	if kind == "" {
+		return WorkflowStepFunction
+	}
+	return kind
+}
+
+// BuiltIn reports whether the run performs this step itself. Every other kind
+// ends when something external arrives.
+func (kind WorkflowStepType) BuiltIn() bool {
+	switch kind {
+	case WorkflowStepMessage, WorkflowStepAddPeople, WorkflowStepCanvas:
+		return true
+	}
+	return false
+}
+
 type WorkflowTriggerType string
 
 const (
@@ -127,6 +175,26 @@ const (
 	WorkflowTriggerList      WorkflowTriggerType = "list"
 )
 
+// Valid reports whether this is a trigger type the platform runs. The field on
+// WorkflowTrigger used to be a bare string, so a misspelt type stored cleanly
+// and then matched no dispatcher: the trigger existed and never fired.
+func (kind WorkflowTriggerType) Valid() bool {
+	switch kind {
+	case WorkflowTriggerLink, WorkflowTriggerShortcut, WorkflowTriggerScheduled, WorkflowTriggerWebhook,
+		WorkflowTriggerMessage, WorkflowTriggerReaction, WorkflowTriggerJoin, WorkflowTriggerList:
+		return true
+	}
+	return false
+}
+
+// WorkflowTriggerTypes is every trigger type, in a stable order.
+func WorkflowTriggerTypes() []WorkflowTriggerType {
+	return []WorkflowTriggerType{
+		WorkflowTriggerLink, WorkflowTriggerShortcut, WorkflowTriggerScheduled, WorkflowTriggerWebhook,
+		WorkflowTriggerMessage, WorkflowTriggerReaction, WorkflowTriggerJoin, WorkflowTriggerList,
+	}
+}
+
 // EventWorkflowTriggerTypes are the trigger types a workspace event dispatcher
 // fires. Scheduled and webhook triggers have their own execution paths.
 var EventWorkflowTriggerTypes = []WorkflowTriggerType{
@@ -139,7 +207,7 @@ type WorkflowTrigger struct {
 	WorkspaceID WorkspaceID
 	AppID       AppID
 	Title       string
-	Type        string
+	Type        WorkflowTriggerType
 	Config      string
 	Enabled     bool
 	// NextRunAt is the next scheduled fire time for a scheduled trigger. It is
@@ -182,12 +250,41 @@ type WorkflowRun struct {
 	CompletedAt     time.Time
 }
 
+// PermissionType is who may exercise one automation. Slack names four values
+// and this used to be an untyped string in the domain, the store, the seam and
+// the handler, so a misspelling read as "nobody but the collaborators" - the
+// safest-looking answer and the wrong one.
+type PermissionType string
+
+const (
+	PermissionEveryone         PermissionType = "everyone"
+	PermissionAppCollaborators PermissionType = "app_collaborators"
+	PermissionNamedEntities    PermissionType = "named_entities"
+	PermissionNoOne            PermissionType = "no_one"
+	// Slack sets a trigger's permission to system when the platform owns it.
+	PermissionSystem PermissionType = "system"
+)
+
+func (permission PermissionType) Valid() bool {
+	switch permission {
+	case PermissionEveryone, PermissionAppCollaborators, PermissionNamedEntities, PermissionNoOne, PermissionSystem:
+		return true
+	}
+	return false
+}
+
+// SettableBy reports whether an administrator may set this value on a resource.
+// system is the platform's own answer and never an administrator's.
+func (permission PermissionType) SettableBy() bool {
+	return permission.Valid() && permission != PermissionSystem
+}
+
 type AutomationPermission struct {
 	ResourceType   string
 	ResourceID     string
 	WorkspaceID    WorkspaceID
 	AppID          AppID
-	PermissionType string
+	PermissionType PermissionType
 	UserIDs        []UserID
 	ChannelIDs     []ConversationID
 	TeamIDs        []WorkspaceID

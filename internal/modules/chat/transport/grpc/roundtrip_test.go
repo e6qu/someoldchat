@@ -377,8 +377,17 @@ func conversionCases() map[string]conversionCase {
 		},
 		"ExternalTeam":     {sample: &domain.ExternalTeam{}, through: throughInfallible(encodeProtoExternalTeam, decodeProtoExternalTeam)},
 		"ExternalTeamPage": {sample: &domain.ExternalTeamPage{Teams: []domain.ExternalTeam{{}}}, through: throughInfallible(encodeProtoExternalTeamPage, decodeProtoExternalTeamPage)},
-		"CanvasGrant":      {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
-		"ListGrant":        {sample: &domain.ListAccess{}, through: throughInfallible(encodeProtoListGrant, decodeProtoListGrant)},
+		"AppFunction":      {sample: &domain.AppFunction{}, through: throughInfallible(encodeProtoAppFunction, decodeProtoAppFunction)},
+		"AppFunctions": {
+			sample: &appFunctionsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				value := filled.(*appFunctionsRoundTrip)
+				wire := &chatv1.AppFunctionListResponse{Functions: encodeProtoAppFunctions(value.Functions)}
+				return &appFunctionsRoundTrip{Functions: decodeProtoAppFunctions(wire.GetFunctions())}, wire, nil
+			},
+		},
+		"CanvasGrant": {sample: &domain.CanvasAccess{}, through: throughInfallible(encodeProtoCanvasGrant, decodeProtoCanvasGrant)},
+		"ListGrant":   {sample: &domain.ListAccess{}, through: throughInfallible(encodeProtoListGrant, decodeProtoListGrant)},
 		"ListGrants": {
 			sample: &listGrantsRoundTrip{},
 			through: func(t *testing.T, filled any) (any, proto.Message, error) {
@@ -568,10 +577,26 @@ func conversionCases() map[string]conversionCase {
 		"SocketModeInteraction": {sample: &domain.SocketModeInteraction{}, through: through(func(value domain.SocketModeInteraction) *chatv1.SocketModeInteraction {
 			return encodeProtoSocketModeInteraction(value, true)
 		}, decodeProtoSocketModeInteraction)},
-		"Bot":           {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
-		"InviteRequest": {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
-		"AppApproval":   {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
-		"RTMConnection": {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
+		"Bot":                {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
+		"InviteRequest":      {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
+		"RoleAssignment":     {sample: &domain.RoleAssignment{}, through: throughInfallible(encodeProtoRoleAssignment, decodeProtoRoleAssignment)},
+		"AuthPolicyEntity":   {sample: &domain.AuthPolicyEntity{}, through: throughInfallible(encodeProtoAuthPolicyEntity, decodeProtoAuthPolicyEntity)},
+		"SessionSettings":    {sample: &domain.SessionSettings{}, through: throughInfallible(encodeProtoSessionSettings, decodeProtoSessionSettings)},
+		"InformationBarrier": {sample: &domain.InformationBarrier{}, through: throughInfallible(encodeProtoBarrier, decodeProtoBarrier)},
+		"AppConfig":          {sample: &domain.AppConfig{}, through: throughInfallible(encodeProtoAppConfig, decodeProtoAppConfig)},
+		"LinkedObject":       {sample: &domain.LinkedObject{}, through: throughInfallible(encodeProtoLinkedObject, decodeProtoLinkedObject)},
+		"AppActivity":        {sample: &domain.AppActivity{}, through: throughInfallible(encodeProtoAppActivity, decodeProtoAppActivity)},
+		"AppActivityPage":    {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
+		"AnalyticsRow":       {sample: &domain.AnalyticsRow{}, through: throughInfallible(encodeProtoAnalyticsRow, decodeProtoAnalyticsRow)},
+		"AnomalyAllowList":   {sample: &domain.AnomalyAllowList{}, through: throughInfallible(encodeProtoAnomalyAllowList, decodeProtoAnomalyAllowList)},
+		"ExternalAuthToken": {
+			sample:  &domain.ExternalAuthToken{},
+			through: throughInfallible(encodeProtoExternalAuthToken, decodeProtoExternalAuthToken),
+			omitted: map[string]string{"Ciphertext": "an external credential's secret belongs to the store, in the same way an app's signing secret does"},
+		},
+		"AssistantSearchAvailability": {sample: &domain.AssistantSearchAvailability{}, through: throughInfallible(encodeProtoAssistantSearchAvailability, decodeProtoAssistantSearchAvailability)},
+		"AppApproval":                 {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
+		"RTMConnection":               {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
 		"IncomingWebhook": {
 			sample: &domain.IncomingWebhook{},
 			omitted: map[string]string{
@@ -691,6 +716,10 @@ type typingSignalsRoundTrip struct {
 // would read as a session opened before the workspace existed.
 type workspaceSessionsRoundTrip struct {
 	Sessions []domain.WorkspaceSession
+}
+
+type appFunctionsRoundTrip struct {
+	Functions []domain.AppFunction
 }
 
 type canvasGrantsRoundTrip struct {

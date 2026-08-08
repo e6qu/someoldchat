@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -1648,6 +1650,15 @@ func (m Messages) setWorkspaceRole(ctx context.Context, workspaceID domain.Works
 	return m.Store.SetWorkspaceRole(ctx, workspaceID, targetID, role, event)
 }
 
+// UserExpiration reports when a guest account lapses. A zero time means the
+// account does not lapse.
+func (m Messages) UserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) (time.Time, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return time.Time{}, err
+	}
+	return m.Store.GetUserExpiration(ctx, workspaceID, targetID)
+}
+
 func (m Messages) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, expiration time.Time) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
@@ -1679,6 +1690,64 @@ func (m Messages) AdminRenameConversation(ctx context.Context, workspaceID domai
 		return domain.Conversation{}, err
 	}
 	return m.Store.RenameConversation(ctx, conversationID, name, event)
+}
+
+// AdminBulkArchiveConversations archives several channels. The service checks
+// every channel before it archives one, so an administrator who names a channel
+// that is not here learns it before the request changes anything. A channel that
+// is already archived is the state the request asked for.
+func (m Messages) AdminBulkArchiveConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	pending := make([]domain.Conversation, 0, len(ids))
+	for _, id := range ids {
+		conversation, err := m.Store.GetConversation(ctx, id)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return store.ErrNotFound
+		}
+		if conversation.IsDirectOrGroup() {
+			return ErrInvalidConversation
+		}
+		pending = append(pending, conversation)
+	}
+	for _, conversation := range pending {
+		if conversation.Archived {
+			continue
+		}
+		if _, err := m.AdminSetConversationArchived(ctx, workspaceID, actorID, conversation.ID, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AdminBulkDeleteConversations deletes several channels under the same rule.
+func (m Messages) AdminBulkDeleteConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	for _, id := range ids {
+		conversation, err := m.Store.GetConversation(ctx, id)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return store.ErrNotFound
+		}
+		if conversation.IsDirectOrGroup() {
+			return ErrInvalidConversation
+		}
+	}
+	for _, id := range ids {
+		if err := m.AdminDeleteConversation(ctx, workspaceID, actorID, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m Messages) AdminSetConversationArchived(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, archived bool) (domain.Conversation, error) {
@@ -1748,7 +1817,7 @@ func (m Messages) changeConversationAccessGroup(ctx context.Context, workspaceID
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() || groupID == "" {
+	if conversation.Kind != domain.ConversationTypePrivate || groupID == "" {
 		return ErrInvalidConversation
 	}
 	if _, err := m.Store.GetUserGroup(ctx, workspaceID, groupID); err != nil {
@@ -1797,7 +1866,7 @@ func (m Messages) AdminListConversationAccessGroups(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return nil, store.ErrNotFound
 	}
-	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind != domain.ConversationTypePrivate {
 		return nil, ErrInvalidConversation
 	}
 	return m.Store.ListConversationAccessGroups(ctx, workspaceID, conversationID)
@@ -2137,6 +2206,12 @@ func (m Messages) AdminRestrictApp(ctx context.Context, workspaceID domain.Works
 	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalRestricted)
 }
 
+// AdminCancelAppRequest withdraws an app request. The member who asked or an
+// administrator may cancel it, and cancelling records that nobody decided it.
+func (m Messages) AdminCancelAppRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
+	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalCancelled)
+}
+
 func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID, status domain.AppApprovalStatus) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
@@ -2161,7 +2236,7 @@ func (m Messages) AdminListApps(ctx context.Context, workspaceID domain.Workspac
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.AppApprovalPage{}, err
 	}
-	if status != domain.AppApprovalRequested && status != domain.AppApprovalApproved && status != domain.AppApprovalRestricted {
+	if status != domain.AppApprovalRequested && status != domain.AppApprovalApproved && status != domain.AppApprovalRestricted && status != domain.AppApprovalCancelled {
 		return domain.AppApprovalPage{}, ErrInvalidAppApproval
 	}
 	return m.Store.ListAppApprovals(ctx, workspaceID, status, request)
@@ -2679,16 +2754,16 @@ func (m Messages) OAuthExchange(ctx context.Context, clientID, clientSecret, cod
 }
 
 func (m Messages) OAuthV2Exchange(ctx context.Context, clientID, clientSecret, code, redirectURI string, userOnly bool) (domain.OAuthToken, error) {
-	tokenType := "bot"
+	tokenType := domain.TokenBot
 	if userOnly {
-		tokenType = "user"
+		tokenType = domain.TokenUser
 	}
 	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", tokenType, true)
 }
 
 const oauthRotatingTokenLifetime = 12 * time.Hour
 
-func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier, tokenType string, rotationAllowed bool) (domain.OAuthToken, error) {
+func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier string, tokenType domain.TokenType, rotationAllowed bool) (domain.OAuthToken, error) {
 	clientID = strings.TrimSpace(clientID)
 	clientSecret = strings.TrimSpace(clientSecret)
 	code = strings.TrimSpace(code)
@@ -2717,7 +2792,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	var accessToken string
 	if tokenType == "bot" && rotating {
 		accessToken, err = domain.NewRotatingBotToken()
-	} else if tokenType == "bot" {
+	} else if tokenType == domain.TokenBot {
 		accessToken, err = domain.NewBotToken()
 	} else if rotating {
 		accessToken, err = domain.NewRotatingUserToken()
@@ -2728,7 +2803,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		return domain.OAuthToken{}, err
 	}
 	exchange := domain.OAuthToken{TokenType: tokenType, CodeVerifier: codeVerifier}
-	if tokenType == "bot" {
+	if tokenType == domain.TokenBot {
 		if rotating {
 			exchange.AuthedUserAccessToken, err = domain.NewRotatingUserToken()
 		} else {
@@ -2744,7 +2819,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 			return domain.OAuthToken{}, err
 		}
 		exchange.ExpiresAt = time.Now().UTC().Add(oauthRotatingTokenLifetime)
-		if tokenType == "bot" {
+		if tokenType == domain.TokenBot {
 			exchange.AuthedUserRefreshToken, err = domain.NewRefreshToken()
 			if err != nil {
 				return domain.OAuthToken{}, err
@@ -2761,7 +2836,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	}
 	token.AppID = client.AppID
 	token.TokenType = tokenType
-	if tokenType == "bot" {
+	if tokenType == domain.TokenBot {
 		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, accessToken, token.InstallerID); err != nil {
 			return domain.OAuthToken{}, err
 		}
@@ -2840,7 +2915,7 @@ func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, re
 		return domain.OAuthToken{}, err
 	}
 	var nextAccessToken string
-	if grant.TokenType == "bot" {
+	if grant.TokenType.IsBot() {
 		nextAccessToken, err = domain.NewRotatingBotToken()
 	} else {
 		nextAccessToken, err = domain.NewRotatingUserToken()
@@ -2888,7 +2963,7 @@ func (m Messages) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecr
 		return domain.OAuthToken{}, err
 	}
 	record, err := m.Store.LookupToken(ctx, accessToken)
-	if err != nil || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || record.TokenType != "bot" && record.TokenType != "user" {
+	if err != nil || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || !record.TokenType.Valid() {
 		if errors.Is(err, store.ErrNotFound) || err == nil {
 			return domain.OAuthToken{}, ErrInvalidOAuth
 		}
@@ -3541,6 +3616,871 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// SetAppIcon records what a client draws beside an app's messages. The owner
+// sets it, because the icon is part of how the app presents itself.
+func (m Messages) SetAppIcon(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, iconURL string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	app, _, err := m.Store.GetApp(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if app.OwnerID != actorID {
+		if adminErr := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); adminErr != nil {
+			return adminErr
+		}
+	}
+	iconURL = strings.TrimSpace(iconURL)
+	if _, err := url.ParseRequestURI(iconURL); err != nil {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.icon_set",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetAppIcon(ctx, workspaceID, appID, iconURL, event)
+}
+
+// ExternalAuthToken reports one of an app's external credentials without its
+// secret. The ciphertext never leaves the store, in the same way an app's
+// signing secret does not: a caller needs to know the credential exists and
+// when it lapses, not what it is.
+func (m Messages) ExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, id string) (domain.ExternalAuthToken, error) {
+	if appID == "" || strings.TrimSpace(id) == "" {
+		return domain.ExternalAuthToken{}, ErrInvalidWorkspace
+	}
+	value, err := m.Store.GetExternalAuthToken(ctx, workspaceID, appID, strings.TrimSpace(id))
+	if err != nil {
+		return domain.ExternalAuthToken{}, err
+	}
+	value.Ciphertext = ""
+	return value, nil
+}
+
+// DeleteExternalAuthToken revokes one external credential, or every one the app
+// holds when no identifier is named.
+func (m Messages) DeleteExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, id string) error {
+	if appID == "" {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.external_token_deleted",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteExternalAuthToken(ctx, workspaceID, appID, strings.TrimSpace(id), event)
+}
+
+// UpdateUserAppConnection records that a member has re-authorised an app. Slack
+// answers ok and refreshes the connection rather than reporting one, so the
+// membership check is the whole contract: a member who is not here cannot hold
+// a connection to anything.
+func (m Messages) UpdateUserAppConnection(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if appID == "" {
+		return ErrInvalidWorkspace
+	}
+	installations, err := m.Store.ListAppInstallations(ctx, appID)
+	if err != nil {
+		return err
+	}
+	installed := false
+	for _, installation := range installations {
+		if installation.WorkspaceID == workspaceID && installation.Enabled {
+			installed = true
+			break
+		}
+	}
+	if !installed {
+		return store.ErrNotFound
+	}
+	event, eventErr := newEvent(workspaceID, actorID, events.NewPayload("app.user_connection_updated",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if eventErr != nil {
+		return eventErr
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// AssistantSearchAvailability reports what an assistant may search here.
+func (m Messages) AssistantSearchAvailability(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.AssistantSearchAvailability, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return domain.AssistantSearchAvailability{}, err
+	}
+	// Messages are the one source this deployment indexes. Naming a source it
+	// cannot search would promise a result it can never return.
+	return domain.AssistantSearchAvailability{Enabled: true, SearchableSources: []string{"messages"}}, nil
+}
+
+// AssistantSearchContext answers the messages an assistant may quote. It is the
+// member's own search, so it can never reach a conversation the member cannot
+// read: an assistant answering on somebody's behalf must see what they see and
+// no more.
+func (m Messages) AssistantSearchContext(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
+	if strings.TrimSpace(query) == "" {
+		return domain.MessagePage{}, ErrInvalidWorkspace
+	}
+	return m.SearchMessages(ctx, workspaceID, actorID, domain.MessageSearchRequest{Query: query, Page: request})
+}
+
+// AdminRequestExport records a request for a report the workspace will build
+// and send. Slack acknowledges the request rather than answering the report, so
+// the acknowledgement has to leave a trace: an export nobody can find later is
+// the same as one that never ran.
+func (m Messages) AdminRequestExport(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind string, bounds map[string]int64) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	fields := []events.Field{events.String("export", kind)}
+	for _, name := range slices.Sorted(maps.Keys(bounds)) {
+		fields = append(fields, events.Int(name, bounds[name]))
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("export.requested", fields...), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// RequestWorkflowStepResponsesExport records a request for one step's collected
+// responses. Only somebody who may manage the workflow may ask, because the
+// responses are what its members submitted.
+func (m Messages) RequestWorkflowStepResponsesExport(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowID domain.WorkflowID, stepID string) error {
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return err
+	}
+	if err := m.requireWorkflowManager(ctx, workflow, actorID); err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("export.requested",
+		events.String("export", "workflow_step_responses"),
+		events.String("workflow_id", string(workflowID)),
+		events.String("step_id", stepID)), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// AdminAnomalyAllowList reports what audit is told not to flag.
+func (m Messages) AdminAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.AnomalyAllowList, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return m.Store.GetAnomalyAllowList(ctx, workspaceID)
+}
+
+// AdminSetAnomalyAllowList replaces the allow list. An address without a reason
+// is refused: an exclusion nobody explained is one nobody can review later.
+func (m Messages) AdminSetAnomalyAllowList(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, addresses, reasons []string) (domain.AnomalyAllowList, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	if len(addresses) > 0 && len(reasons) == 0 {
+		return domain.AnomalyAllowList{}, ErrInvalidWorkspace
+	}
+	for _, address := range addresses {
+		if net.ParseIP(strings.TrimSpace(address)) == nil {
+			if _, _, err := net.ParseCIDR(strings.TrimSpace(address)); err != nil {
+				return domain.AnomalyAllowList{}, ErrInvalidWorkspace
+			}
+		}
+	}
+	value := domain.AnomalyAllowList{
+		WorkspaceID: workspaceID, IPAddresses: append([]string{}, addresses...),
+		Reasons: append([]string{}, reasons...), UpdatedAt: time.Now().UTC(),
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("audit.anomaly_allow_list_set",
+		events.Int("addresses", int64(len(value.IPAddresses)))), value.UpdatedAt)
+	if err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	if err := m.Store.SetAnomalyAllowList(ctx, value, event); err != nil {
+		return domain.AnomalyAllowList{}, err
+	}
+	return value, nil
+}
+
+// TeamBillingInfo reports which plan the workspace is on.
+func (m Messages) TeamBillingInfo(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.WorkspacePlan, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return "", err
+	}
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return workspace.Plan, nil
+}
+
+// AdminAnalytics reports one day of analytics. The rows are computed from the
+// messages and reactions the day holds rather than read from a nightly
+// aggregate: a stored aggregate is a second copy of the truth, and the two
+// disagree the first time a message is deleted.
+func (m Messages) AdminAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if !kind.Valid() || day.IsZero() {
+		return nil, ErrInvalidWorkspace
+	}
+	return m.Store.AnalyticsRows(ctx, workspaceID, kind, day)
+}
+
+// AppActivities reports one app's activity log to that app. An app reads only
+// its own entries, so the caller's identity decides the filter rather than an
+// argument it could set to somebody else's.
+func (m Messages) AppActivities(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	if appID == "" {
+		return domain.AppActivityPage{}, ErrInvalidWorkspace
+	}
+	filter.AppID = appID
+	return m.Store.ListAppActivities(ctx, workspaceID, filter, request)
+}
+
+// AdminAppActivities reports any app's activity log to an administrator.
+func (m Messages) AdminAppActivities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	return m.Store.ListAppActivities(ctx, workspaceID, filter, request)
+}
+
+// AdminLookupConversations finds channels an administrator is looking for. A
+// filter left at its zero value is not applied, so a lookup that names nothing
+// answers every channel rather than none.
+func (m Messages) AdminLookupConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, lookup domain.ConversationLookup, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.ConversationPage{}, err
+	}
+	return m.Store.LookupConversations(ctx, workspaceID, lookup, request)
+}
+
+// AdminBulkMoveConversations reassigns channels to another workspace. Every
+// channel is checked before one moves, so a request naming a channel that is
+// not here moves nothing.
+func (m Messages) AdminBulkMoveConversations(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID, target domain.WorkspaceID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 || target == "" {
+		return ErrInvalidConversation
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.bulk_moved",
+		events.String("target_team_id", string(target)), events.Int("channels", int64(len(ids)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.MoveConversations(ctx, workspaceID, ids, target, event)
+}
+
+// AdminSetConversationsExcludedFromAI keeps channels in or out of the
+// workspace's generative features.
+func (m Messages) AdminSetConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID, excluded bool) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.ai_exclusion_set",
+		events.Int("channels", int64(len(ids)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetConversationsExcludedFromAI(ctx, workspaceID, ids, excluded, event)
+}
+
+// AdminConversationsExcludedFromAI reports which of the named channels are out.
+func (m Messages) AdminConversationsExcludedFromAI(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) ([]domain.ConversationID, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, ErrInvalidConversation
+	}
+	return m.Store.ConversationsExcludedFromAI(ctx, workspaceID, ids)
+}
+
+// AdminLinkConversationObjects links one channel to external records.
+func (m Messages) AdminLinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.ConversationID, orgID string, recordIDs []string) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	orgID = strings.TrimSpace(orgID)
+	if id == "" || orgID == "" || len(recordIDs) == 0 {
+		return ErrInvalidConversation
+	}
+	now := time.Now().UTC()
+	objects := make([]domain.LinkedObject, 0, len(recordIDs))
+	for _, recordID := range recordIDs {
+		recordID = strings.TrimSpace(recordID)
+		if recordID == "" {
+			return ErrInvalidConversation
+		}
+		objects = append(objects, domain.LinkedObject{
+			ConversationID: id, WorkspaceID: workspaceID, OrgID: orgID, RecordID: recordID, CreatedAt: now,
+		})
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.objects_linked",
+		events.String("channel", string(id)), events.Int("records", int64(len(objects)))), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.LinkConversationObjects(ctx, objects, event)
+}
+
+// AdminUnlinkConversationObjects removes every link the named channels hold.
+func (m Messages) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return ErrInvalidConversation
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.objects_unlinked",
+		events.Int("channels", int64(len(ids)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.UnlinkConversationObjects(ctx, workspaceID, ids, event)
+}
+
+// AdminConversationObjects reports the records one channel is linked to.
+func (m Messages) AdminConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.ConversationID) ([]domain.LinkedObject, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, ErrInvalidConversation
+	}
+	return m.Store.ListConversationObjects(ctx, workspaceID, id)
+}
+
+// AdminCreateConversationForObjects creates a channel and links it to an
+// external record in one step. The link is written after the channel exists, so
+// a link that cannot be stored leaves no channel behind either.
+func (m Messages) AdminCreateConversationForObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, name, orgID, recordID string, private bool) (domain.Conversation, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.Conversation{}, err
+	}
+	orgID, recordID = strings.TrimSpace(orgID), strings.TrimSpace(recordID)
+	if orgID == "" || recordID == "" {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	conversation, err := m.CreateConversation(ctx, workspaceID, actorID, name, private)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := m.AdminLinkConversationObjects(ctx, workspaceID, actorID, conversation.ID, orgID, []string{recordID}); err != nil {
+		if deleteErr := m.Store.DeleteConversation(ctx, workspaceID, conversation.ID, events.Event{
+			ID: domain.EventID("evt_unlinked_" + string(conversation.ID)), WorkspaceID: workspaceID, ActorID: actorID,
+			Topic: "channel.deleted", Payload: string(conversation.ID), CreatedAt: time.Now().UTC(),
+		}); deleteErr != nil {
+			return domain.Conversation{}, deleteErr
+		}
+		return domain.Conversation{}, err
+	}
+	return conversation, nil
+}
+
+// AdminAppConfigs reports the administrative configuration of the named apps.
+// An app nobody has configured answers Slack's defaults rather than being left
+// out, so the caller learns the effective answer for every app it named.
+func (m Messages) AdminAppConfigs(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appIDs []domain.AppID) ([]domain.AppConfig, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(appIDs) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	stored, err := m.Store.ListAppConfigs(ctx, workspaceID, appIDs)
+	if err != nil {
+		return nil, err
+	}
+	held := make(map[domain.AppID]domain.AppConfig, len(stored))
+	for _, config := range stored {
+		held[config.AppID] = config
+	}
+	configs := make([]domain.AppConfig, 0, len(appIDs))
+	for _, appID := range appIDs {
+		if config, exists := held[appID]; exists {
+			configs = append(configs, config)
+			continue
+		}
+		configs = append(configs, domain.AppConfig{
+			AppID: appID, WorkspaceID: workspaceID,
+			DomainURLs: []string{}, DomainEmails: []string{},
+			WorkflowAuthStrategy: domain.WorkflowAuthBuilderChoice,
+		})
+	}
+	return configs, nil
+}
+
+// AdminSetAppConfig writes one app's administrative configuration.
+func (m Messages) AdminSetAppConfig(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, config domain.AppConfig) (domain.AppConfig, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AppConfig{}, err
+	}
+	if config.AppID == "" || !config.WorkflowAuthStrategy.Valid() {
+		return domain.AppConfig{}, ErrInvalidWorkspace
+	}
+	if config.DomainURLs == nil {
+		config.DomainURLs = []string{}
+	}
+	if config.DomainEmails == nil {
+		config.DomainEmails = []string{}
+	}
+	config.WorkspaceID, config.UpdatedAt = workspaceID, time.Now().UTC()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.config_set",
+		events.String("app_id", string(config.AppID)),
+		events.String("workflow_auth_strategy", string(config.WorkflowAuthStrategy))), config.UpdatedAt)
+	if err != nil {
+		return domain.AppConfig{}, err
+	}
+	if err := m.Store.SetAppConfig(ctx, config, event); err != nil {
+		return domain.AppConfig{}, err
+	}
+	return config, nil
+}
+
+// AdminClearAppResolution undoes an approval decision, so the app is undecided
+// again rather than approved or restricted.
+func (m Messages) AdminClearAppResolution(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if appID == "" {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.resolution_cleared",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.ClearAppApproval(ctx, workspaceID, appID, event)
+}
+
+// AdminFunctionPermissions reports who may run each named function. A function
+// with no stored permission answers Slack's default rather than being left out,
+// so the caller learns the effective answer for every identifier it named.
+func (m Messages) AdminFunctionPermissions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, functionIDs []string) ([]domain.AutomationPermission, error) {
+	return m.adminAutomationPermissions(ctx, workspaceID, actorID, "function", functionIDs, domain.PermissionEveryone)
+}
+
+// AdminWorkflowPermissions reports who may run each named workflow.
+func (m Messages) AdminWorkflowPermissions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowIDs []domain.WorkflowID) ([]domain.AutomationPermission, error) {
+	ids := make([]string, 0, len(workflowIDs))
+	for _, id := range workflowIDs {
+		ids = append(ids, string(id))
+	}
+	return m.adminAutomationPermissions(ctx, workspaceID, actorID, "workflow_use", ids, domain.PermissionEveryone)
+}
+
+// AdminTriggerTypePermission reports who may build triggers of one type.
+func (m Messages) AdminTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind domain.WorkflowTriggerType) (domain.AutomationPermission, error) {
+	if !kind.Valid() {
+		return domain.AutomationPermission{}, ErrInvalidTriggerConfig
+	}
+	values, err := m.adminAutomationPermissions(ctx, workspaceID, actorID, "trigger_type", []string{string(kind)}, domain.PermissionEveryone)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return values[0], nil
+}
+
+// AdminSetFunctionPermission decides who may run one function.
+func (m Messages) AdminSetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, functionID string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	return m.adminSetAutomationPermission(ctx, workspaceID, actorID, "function", strings.TrimSpace(functionID), value)
+}
+
+// AdminSetTriggerTypePermission decides who may build triggers of one type.
+func (m Messages) AdminSetTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind domain.WorkflowTriggerType, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	if !kind.Valid() {
+		return domain.AutomationPermission{}, ErrInvalidTriggerConfig
+	}
+	return m.adminSetAutomationPermission(ctx, workspaceID, actorID, "trigger_type", string(kind), value)
+}
+
+func (m Messages) adminAutomationPermissions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, resourceType string, ids []string, fallback domain.PermissionType) ([]domain.AutomationPermission, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, ErrInvalidWorkflowStep
+	}
+	values := make([]domain.AutomationPermission, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, ErrInvalidWorkflowStep
+		}
+		value, err := m.Store.GetAutomationPermission(ctx, workspaceID, resourceType, id)
+		if errors.Is(err, store.ErrNotFound) {
+			value = domain.AutomationPermission{
+				ResourceType: resourceType, ResourceID: id, WorkspaceID: workspaceID, PermissionType: fallback,
+			}
+		} else if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
+func (m Messages) adminSetAutomationPermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, resourceType, resourceID string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if resourceID == "" || !value.PermissionType.SettableBy() {
+		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
+	}
+	value.ResourceType, value.ResourceID, value.WorkspaceID = resourceType, resourceID, workspaceID
+	value.UpdatedAt = time.Now().UTC()
+	if err := m.validateAutomationEntities(ctx, &value); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("automation.permission_set",
+		events.String("resource_type", resourceType), events.String("resource_id", resourceID),
+		events.String("permission_type", string(value.PermissionType))), value.UpdatedAt)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := m.Store.SetAutomationPermission(ctx, value, event); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return value, nil
+}
+
+// AdminCreateBarrier builds an information barrier. Every named group is
+// checked before the barrier is stored, so a barrier never names a group that
+// does not exist and therefore stops nothing.
+func (m Messages) AdminCreateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	barrier, err := m.barrierValue(ctx, workspaceID, actorID, "", primary, barrieredFrom, subjects)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	id, err := domain.NewBarrierID()
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	barrier.ID = id
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("barrier.created", events.String("barrier_id", string(id))), barrier.UpdatedAt)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if err := m.Store.CreateBarrier(ctx, barrier, event); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return barrier, nil
+}
+
+// AdminUpdateBarrier replaces the groups and subjects one barrier holds.
+func (m Messages) AdminUpdateBarrier(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	barrier, err := m.barrierValue(ctx, workspaceID, actorID, id, primary, barrieredFrom, subjects)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("barrier.updated", events.String("barrier_id", string(id))), barrier.UpdatedAt)
+	if err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if err := m.Store.UpdateBarrier(ctx, barrier, event); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	return barrier, nil
+}
+
+// AdminDeleteBarrier removes one barrier.
+func (m Messages) AdminDeleteBarrier(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.BarrierID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(id)) == "" {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("barrier.deleted", events.String("barrier_id", string(id))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteBarrier(ctx, workspaceID, id, event)
+}
+
+// AdminBarriers reports the workspace's barriers.
+func (m Messages) AdminBarriers(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, request domain.PageRequest) (domain.InformationBarrierPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.InformationBarrierPage{}, err
+	}
+	return m.Store.ListBarriers(ctx, workspaceID, request)
+}
+
+func (m Messages) barrierValue(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.BarrierID, primary domain.UserGroupID, barrieredFrom []domain.UserGroupID, subjects []domain.BarrierSubject) (domain.InformationBarrier, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	if primary == "" || len(barrieredFrom) == 0 || !domain.ValidBarrierSubjects(subjects) {
+		return domain.InformationBarrier{}, ErrInvalidUserGroup
+	}
+	if _, err := m.Store.GetUserGroup(ctx, workspaceID, primary); err != nil {
+		return domain.InformationBarrier{}, err
+	}
+	seen := make(map[domain.UserGroupID]struct{}, len(barrieredFrom))
+	groups := make([]domain.UserGroupID, 0, len(barrieredFrom))
+	for _, group := range barrieredFrom {
+		// A group barriered from itself would stop the group reaching itself,
+		// which is not a barrier and which no administrator means.
+		if group == primary {
+			return domain.InformationBarrier{}, ErrInvalidUserGroup
+		}
+		if _, repeated := seen[group]; repeated {
+			continue
+		}
+		if _, err := m.Store.GetUserGroup(ctx, workspaceID, group); err != nil {
+			return domain.InformationBarrier{}, err
+		}
+		seen[group] = struct{}{}
+		groups = append(groups, group)
+	}
+	if len(groups) == 0 {
+		return domain.InformationBarrier{}, ErrInvalidUserGroup
+	}
+	return domain.InformationBarrier{
+		ID: id, WorkspaceID: workspaceID, PrimaryGroupID: primary,
+		BarrieredFromIDs: groups, Subjects: domain.BarrierSubjects(), UpdatedAt: time.Now().UTC(),
+	}, nil
+}
+
+// AdminSetSessionSettings writes session settings for the named members. A
+// duration Slack refuses is refused here, so a caller never stores a setting
+// that silently becomes something else.
+func (m Messages) AdminSetSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID, settings domain.SessionSettings) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(targets) == 0 || !settings.Duration.Valid() {
+		return ErrInvalidWorkspace
+	}
+	now := time.Now().UTC()
+	values := make([]domain.SessionSettings, 0, len(targets))
+	for _, target := range targets {
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, target); err != nil {
+			return store.ErrNotFound
+		}
+		value := settings
+		value.UserID, value.WorkspaceID, value.UpdatedAt = target, workspaceID, now
+		values = append(values, value)
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.session_settings_set",
+		events.Int("members", int64(len(values)))), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.SetSessionSettings(ctx, values, event)
+}
+
+// AdminClearSessionSettings puts the named members back on the workspace
+// default.
+func (m Messages) AdminClearSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.session_settings_cleared",
+		events.Int("members", int64(len(targets)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.ClearSessionSettings(ctx, workspaceID, targets, event)
+}
+
+// AdminSessionSettings reports the settings the named members hold.
+func (m Messages) AdminSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID) ([]domain.SessionSettings, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	return m.Store.ListSessionSettings(ctx, workspaceID, targets)
+}
+
+// AdminAssignAuthPolicy puts members under an authentication policy. Every
+// named member is checked before one row is written, so a request that names
+// somebody outside the workspace leaves nothing behind.
+func (m Messages) AdminAssignAuthPolicy(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	entities, err := m.authPolicyEntities(ctx, workspaceID, actorID, policy, kind, entityIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("auth.policy_entities_assigned",
+		events.String("policy_name", string(policy)), events.Int("entities", int64(len(entities)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetAuthPolicyEntities(ctx, entities, event)
+}
+
+// AdminRemoveAuthPolicyEntities takes members back out of the policy.
+func (m Messages) AdminRemoveAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	entities, err := m.authPolicyEntities(ctx, workspaceID, actorID, policy, kind, entityIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("auth.policy_entities_removed",
+		events.String("policy_name", string(policy)), events.Int("entities", int64(len(entities)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteAuthPolicyEntities(ctx, entities, event)
+}
+
+// AdminAuthPolicyEntities reports who is under one policy.
+func (m Messages) AdminAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, request domain.PageRequest) (domain.AuthPolicyEntityPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	if !policy.Valid() || !kind.Valid() {
+		return domain.AuthPolicyEntityPage{}, ErrInvalidWorkspace
+	}
+	return m.Store.ListAuthPolicyEntities(ctx, workspaceID, policy, kind, request)
+}
+
+func (m Messages) authPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) ([]domain.AuthPolicyEntity, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if !policy.Valid() || !kind.Valid() || len(entityIDs) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	now := time.Now().UTC()
+	entities := make([]domain.AuthPolicyEntity, 0, len(entityIDs))
+	for _, entityID := range entityIDs {
+		entityID = strings.TrimSpace(entityID)
+		if entityID == "" {
+			return nil, ErrInvalidWorkspace
+		}
+		// The only entity type Slack defines is the member, and the storage
+		// carries a foreign key to users, so an unknown identifier is refused
+		// here rather than becoming a constraint violation at commit.
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, domain.UserID(entityID)); err != nil {
+			return nil, store.ErrNotFound
+		}
+		entities = append(entities, domain.AuthPolicyEntity{
+			Policy: policy, EntityType: kind, EntityID: entityID, WorkspaceID: workspaceID, CreatedAt: now,
+		})
+	}
+	return entities, nil
+}
+
+// AdminAddRoleAssignments gives members a system role over entities. The
+// service checks every member before it writes one row, so an administrator who
+// names somebody outside the workspace learns it before the request lands.
+func (m Messages) AdminAddRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, entityIDs []string, userIDs []domain.UserID) error {
+	assignments, err := m.roleAssignments(ctx, workspaceID, actorID, roleID, entityIDs, userIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("role.assignments_added",
+		events.String("role_id", roleID), events.Int("assignments", int64(len(assignments)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetRoleAssignments(ctx, assignments, event)
+}
+
+// AdminRemoveRoleAssignments takes the role away again.
+func (m Messages) AdminRemoveRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, entityIDs []string, userIDs []domain.UserID) error {
+	assignments, err := m.roleAssignments(ctx, workspaceID, actorID, roleID, entityIDs, userIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("role.assignments_removed",
+		events.String("role_id", roleID), events.Int("assignments", int64(len(assignments)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteRoleAssignments(ctx, assignments, event)
+}
+
+// AdminListRoleAssignments reports who holds one role.
+func (m Messages) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	return m.Store.ListRoleAssignments(ctx, workspaceID, strings.TrimSpace(roleID), request)
+}
+
+func (m Messages) roleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, entityIDs []string, userIDs []domain.UserID) ([]domain.RoleAssignment, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" || len(entityIDs) == 0 || len(userIDs) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	for _, userID := range userIDs {
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, userID); err != nil {
+			return nil, store.ErrNotFound
+		}
+	}
+	now := time.Now().UTC()
+	assignments := make([]domain.RoleAssignment, 0, len(entityIDs)*len(userIDs))
+	for _, entityID := range entityIDs {
+		entityID = strings.TrimSpace(entityID)
+		if entityID == "" {
+			return nil, ErrInvalidWorkspace
+		}
+		for _, userID := range userIDs {
+			assignments = append(assignments, domain.RoleAssignment{
+				RoleID: roleID, EntityID: entityID, UserID: userID, WorkspaceID: workspaceID, CreatedAt: now,
+			})
+		}
+	}
+	return assignments, nil
+}
+
+// DiscoverableContacts reports which of the named email addresses belong to a
+// member this workspace lets others find. A workspace that is not discoverable
+// answers no contacts, whatever the addresses match.
+func (m Messages) DiscoverableContacts(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, emails []string) ([]domain.User, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(emails) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if workspace.Discoverability != domain.WorkspaceDiscoverabilityOpen {
+		return []domain.User{}, nil
+	}
+	found := make([]domain.User, 0, len(emails))
+	for _, email := range emails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" {
+			continue
+		}
+		user, err := m.Store.FindUserByEmail(ctx, workspaceID, email)
+		if err != nil {
+			continue
+		}
+		if user.Deleted {
+			continue
+		}
+		found = append(found, user)
+	}
+	return found, nil
+}
+
 func (m Messages) AdminCreateWorkspace(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, domainName, name, description string, discoverability domain.WorkspaceDiscoverability) (domain.Workspace, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err
@@ -4012,7 +4952,7 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	// refuses this too, inside the write transaction, which is where the race-free
 	// enforcement belongs — but every neighbouring method states its own
 	// precondition, and this one silently depended on a backend detail.
-	if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 		return domain.Conversation{}, store.ErrNotFound
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload(
@@ -4127,7 +5067,7 @@ func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	event, err := newEvent(workspaceID, userID, conversationPayload("conversation.converted_to_private", conversationID), time.Now().UTC())
@@ -4157,7 +5097,7 @@ func (m Messages) AdminConvertConversationToPublic(ctx context.Context, workspac
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
+	if conversation.Kind != domain.ConversationTypePrivate {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	teams, _, err := m.Store.ListConversationTeams(ctx, workspaceID, conversationID)

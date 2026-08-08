@@ -51,6 +51,11 @@ const (
 	WorkflowsService_GetWorkflowRun_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflowRun"
 	WorkflowsService_CompleteFunction_FullMethodName              = "/sameoldchat.chat.v1.WorkflowsService/CompleteFunction"
 	WorkflowsService_GetFunctionPermission_FullMethodName         = "/sameoldchat.chat.v1.WorkflowsService/GetFunctionPermission"
+	WorkflowsService_AdminFunctionPermissions_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/AdminFunctionPermissions"
+	WorkflowsService_AdminWorkflowPermissions_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/AdminWorkflowPermissions"
+	WorkflowsService_AdminTriggerTypePermission_FullMethodName    = "/sameoldchat.chat.v1.WorkflowsService/AdminTriggerTypePermission"
+	WorkflowsService_AdminSetFunctionPermission_FullMethodName    = "/sameoldchat.chat.v1.WorkflowsService/AdminSetFunctionPermission"
+	WorkflowsService_AdminSetTriggerTypePermission_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/AdminSetTriggerTypePermission"
 	WorkflowsService_SetFunctionPermission_FullMethodName         = "/sameoldchat.chat.v1.WorkflowsService/SetFunctionPermission"
 	WorkflowsService_GetTriggerPermission_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/GetTriggerPermission"
 	WorkflowsService_SetTriggerPermission_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/SetTriggerPermission"
@@ -97,6 +102,11 @@ type WorkflowsServiceClient interface {
 	GetWorkflowRun(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
 	CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	GetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
+	AdminFunctionPermissions(ctx context.Context, in *AdminPermissionsRequest, opts ...grpc.CallOption) (*AdminPermissionsResponse, error)
+	AdminWorkflowPermissions(ctx context.Context, in *AdminPermissionsRequest, opts ...grpc.CallOption) (*AdminPermissionsResponse, error)
+	AdminTriggerTypePermission(ctx context.Context, in *AdminPermissionsRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
+	AdminSetFunctionPermission(ctx context.Context, in *AdminPermissionMutationRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
+	AdminSetTriggerTypePermission(ctx context.Context, in *AdminPermissionMutationRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
 	SetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
 	GetTriggerPermission(ctx context.Context, in *TriggerPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
 	SetTriggerPermission(ctx context.Context, in *TriggerPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
@@ -435,6 +445,56 @@ func (c *workflowsServiceClient) GetFunctionPermission(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *workflowsServiceClient) AdminFunctionPermissions(ctx context.Context, in *AdminPermissionsRequest, opts ...grpc.CallOption) (*AdminPermissionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminPermissionsResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_AdminFunctionPermissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) AdminWorkflowPermissions(ctx context.Context, in *AdminPermissionsRequest, opts ...grpc.CallOption) (*AdminPermissionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminPermissionsResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_AdminWorkflowPermissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) AdminTriggerTypePermission(ctx context.Context, in *AdminPermissionsRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationPermission)
+	err := c.cc.Invoke(ctx, WorkflowsService_AdminTriggerTypePermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) AdminSetFunctionPermission(ctx context.Context, in *AdminPermissionMutationRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationPermission)
+	err := c.cc.Invoke(ctx, WorkflowsService_AdminSetFunctionPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) AdminSetTriggerTypePermission(ctx context.Context, in *AdminPermissionMutationRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationPermission)
+	err := c.cc.Invoke(ctx, WorkflowsService_AdminSetTriggerTypePermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *workflowsServiceClient) SetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AutomationPermission)
@@ -551,6 +611,11 @@ type WorkflowsServiceServer interface {
 	GetWorkflowRun(context.Context, *WorkflowRunGetRequest) (*WorkflowRun, error)
 	CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error)
 	GetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error)
+	AdminFunctionPermissions(context.Context, *AdminPermissionsRequest) (*AdminPermissionsResponse, error)
+	AdminWorkflowPermissions(context.Context, *AdminPermissionsRequest) (*AdminPermissionsResponse, error)
+	AdminTriggerTypePermission(context.Context, *AdminPermissionsRequest) (*AutomationPermission, error)
+	AdminSetFunctionPermission(context.Context, *AdminPermissionMutationRequest) (*AutomationPermission, error)
+	AdminSetTriggerTypePermission(context.Context, *AdminPermissionMutationRequest) (*AutomationPermission, error)
 	SetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error)
 	GetTriggerPermission(context.Context, *TriggerPermissionRequest) (*AutomationPermission, error)
 	SetTriggerPermission(context.Context, *TriggerPermissionRequest) (*AutomationPermission, error)
@@ -663,6 +728,21 @@ func (UnimplementedWorkflowsServiceServer) CompleteFunction(context.Context, *Fu
 }
 func (UnimplementedWorkflowsServiceServer) GetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetFunctionPermission not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) AdminFunctionPermissions(context.Context, *AdminPermissionsRequest) (*AdminPermissionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminFunctionPermissions not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) AdminWorkflowPermissions(context.Context, *AdminPermissionsRequest) (*AdminPermissionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminWorkflowPermissions not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) AdminTriggerTypePermission(context.Context, *AdminPermissionsRequest) (*AutomationPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminTriggerTypePermission not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) AdminSetFunctionPermission(context.Context, *AdminPermissionMutationRequest) (*AutomationPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetFunctionPermission not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) AdminSetTriggerTypePermission(context.Context, *AdminPermissionMutationRequest) (*AutomationPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetTriggerTypePermission not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) SetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetFunctionPermission not implemented")
@@ -1284,6 +1364,96 @@ func _WorkflowsService_GetFunctionPermission_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkflowsService_AdminFunctionPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminPermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).AdminFunctionPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_AdminFunctionPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).AdminFunctionPermissions(ctx, req.(*AdminPermissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_AdminWorkflowPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminPermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).AdminWorkflowPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_AdminWorkflowPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).AdminWorkflowPermissions(ctx, req.(*AdminPermissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_AdminTriggerTypePermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminPermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).AdminTriggerTypePermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_AdminTriggerTypePermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).AdminTriggerTypePermission(ctx, req.(*AdminPermissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_AdminSetFunctionPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminPermissionMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).AdminSetFunctionPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_AdminSetFunctionPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).AdminSetFunctionPermission(ctx, req.(*AdminPermissionMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_AdminSetTriggerTypePermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminPermissionMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).AdminSetTriggerTypePermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_AdminSetTriggerTypePermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).AdminSetTriggerTypePermission(ctx, req.(*AdminPermissionMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorkflowsService_SetFunctionPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FunctionPermissionRequest)
 	if err := dec(in); err != nil {
@@ -1562,6 +1732,26 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetFunctionPermission",
 			Handler:    _WorkflowsService_GetFunctionPermission_Handler,
+		},
+		{
+			MethodName: "AdminFunctionPermissions",
+			Handler:    _WorkflowsService_AdminFunctionPermissions_Handler,
+		},
+		{
+			MethodName: "AdminWorkflowPermissions",
+			Handler:    _WorkflowsService_AdminWorkflowPermissions_Handler,
+		},
+		{
+			MethodName: "AdminTriggerTypePermission",
+			Handler:    _WorkflowsService_AdminTriggerTypePermission_Handler,
+		},
+		{
+			MethodName: "AdminSetFunctionPermission",
+			Handler:    _WorkflowsService_AdminSetFunctionPermission_Handler,
+		},
+		{
+			MethodName: "AdminSetTriggerTypePermission",
+			Handler:    _WorkflowsService_AdminSetTriggerTypePermission_Handler,
 		},
 		{
 			MethodName: "SetFunctionPermission",

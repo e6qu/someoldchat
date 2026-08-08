@@ -2239,7 +2239,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil {
 		t.Fatal(err)
 	}
-	if converted.ID != expanded.ID || !converted.PrivateFlag() || converted.IsDirectOrGroup() || converted.Name != "project-room" {
+	if converted.ID != expanded.ID || converted.Kind != domain.ConversationTypePrivate || converted.Name != "project-room" {
 		t.Fatalf("converted conversation = %+v", converted)
 	}
 	convertedHistory, err := messages.History(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})

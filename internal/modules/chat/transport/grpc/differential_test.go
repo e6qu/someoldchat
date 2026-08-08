@@ -227,6 +227,22 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}}))
 }
 
+// seedUserGroupParity gives the fixture two user groups, so a barrier has
+// something real to name on both compositions.
+func seedUserGroupParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_300, 0).UTC()
+	for _, group := range []domain.UserGroup{
+		{ID: "S1", WorkspaceID: "T1", Name: "Traders", Handle: "traders", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+		{ID: "S2", WorkspaceID: "T1", Name: "Analysts", Handle: "analysts", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
+	} {
+		requireSeed(t, target.CreateUserGroup(context.Background(), group, events.Event{
+			ID: domain.EventID("evt_group_" + string(group.ID)), WorkspaceID: "T1", Topic: "subteam.created", CreatedAt: now,
+		}))
+	}
+}
+
 func seedFormParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedWorkflowParity(t, target)
@@ -771,6 +787,525 @@ func parityCases() []parityCase {
 					badPage != nil, badRequests != nil, badStatus != nil,
 					memberInvites != nil, memberRequests != nil, memberLogs != nil,
 				}, nil
+			},
+		},
+		{
+			// An external credential's secret belongs to the store, so neither
+			// composition may hand it back, and an assistant's context is the
+			// member's own search rather than a wider one.
+			name: "app icons, external credentials, and assistant search agree",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.SetAppIcon(ctx, "T1", "U1", "A1", "https://example.invalid/icon.png"); err != nil {
+					return nil, err
+				}
+				notAURL := chat.SetAppIcon(ctx, "T1", "U1", "A1", "an icon")
+				unknownApp := chat.SetAppIcon(ctx, "T1", "U1", "A-nobody", "https://example.invalid/icon.png")
+				_, missingToken := chat.ExternalAuthToken(ctx, "T1", "A1", "Et-nobody")
+				_, unnamedToken := chat.ExternalAuthToken(ctx, "T1", "A1", "")
+				missingRevocation := chat.DeleteExternalAuthToken(ctx, "T1", "U1", "A1", "Et-nobody")
+				connection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A1")
+				unknownConnection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A-nobody")
+				availability, err := chat.AssistantSearchAvailability(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				found, err := chat.AssistantSearchContext(ctx, "T1", "U1", "hello", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				_, emptyQuery := chat.AssistantSearchContext(ctx, "T1", "U1", "  ", domain.PageRequest{Limit: 10})
+				return []any{
+					availability.Enabled, availability.SearchableSources, len(found.Messages),
+					notAURL != nil, unknownApp != nil, missingToken != nil, unnamedToken != nil,
+					missingRevocation != nil, connection != nil, unknownConnection != nil, emptyQuery != nil,
+				}, nil
+			},
+		},
+		{
+			// An empty allow list is the state a workspace starts in, not a
+			// missing one, and an address without a reason is refused. Both
+			// compositions must answer the same on each.
+			name: "audit allow list, billing plan, and export requests agree",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				empty, err := chat.AdminAnomalyAllowList(ctx, "T1", "UA")
+				if err != nil {
+					return nil, err
+				}
+				written, err := chat.AdminSetAnomalyAllowList(ctx, "T1", "UA", []string{"198.51.100.7", "203.0.113.0/24"}, []string{"office"})
+				if err != nil {
+					return nil, err
+				}
+				_, unexplained := chat.AdminSetAnomalyAllowList(ctx, "T1", "UA", []string{"198.51.100.7"}, nil)
+				_, notAnAddress := chat.AdminSetAnomalyAllowList(ctx, "T1", "UA", []string{"the office"}, []string{"office"})
+				read, err := chat.AdminAnomalyAllowList(ctx, "T1", "UA")
+				if err != nil {
+					return nil, err
+				}
+				plan, err := chat.TeamBillingInfo(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				exported := chat.AdminRequestExport(ctx, "T1", "UA", "unsupported_versions", map[string]int64{"date_end_of_support": 1700000000})
+				strangerExport := chat.AdminRequestExport(ctx, "T1", "U-nobody", "unsupported_versions", nil)
+				stepExport := chat.RequestWorkflowStepResponsesExport(ctx, "T1", "U1", "Wf1", "intake")
+				missingWorkflow := chat.RequestWorkflowStepResponsesExport(ctx, "T1", "U1", "Wf-nobody", "intake")
+				return []any{
+					empty.IPAddresses, empty.Reasons, written.IPAddresses, written.Reasons,
+					read.IPAddresses, read.Reasons, plan,
+					unexplained != nil, notAnAddress != nil, exported != nil, strangerExport != nil,
+					stepExport != nil, missingWorkflow != nil,
+				}, nil
+			},
+		},
+		{
+			// Analytics are computed from the day's own messages, so both
+			// compositions must count the same rows for the same day and refuse
+			// the same kinds.
+			name: "analytics count the same rows on both compositions",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				day := time.Unix(1_700_000_000, 0).UTC().Truncate(24 * time.Hour)
+				members, err := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsMember, day)
+				if err != nil {
+					return nil, err
+				}
+				channels, err := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsPublicChannel, day)
+				if err != nil {
+					return nil, err
+				}
+				everything, err := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsConversations, day)
+				if err != nil {
+					return nil, err
+				}
+				_, badKind := chat.AdminAnalytics(ctx, "T1", "UA", "hourly", day)
+				_, noDay := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsMember, time.Time{})
+				described := func(rows []domain.AnalyticsRow) []string {
+					out := make([]string, 0, len(rows))
+					for _, row := range rows {
+						out = append(out, fmt.Sprintf("%s/%s/%s/%d/%d/%d", row.Kind, row.Date, row.EntityID, row.MessagesPosted, row.ReactionsAdded, row.MemberCount))
+					}
+					return out
+				}
+				return []any{described(members), described(channels), len(everything) >= len(channels), badKind != nil, noDay != nil}, nil
+			},
+		},
+		{
+			// An app's activity log is written when the app answers a function,
+			// and a level filter is a rank comparison rather than a name match.
+			// Both compositions must order and filter identically.
+			name: "app activity is recorded and filtered by rank identically",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				empty, err := chat.AppActivities(ctx, "T1", "A1", domain.AppActivityFilter{}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				_, badLevel := chat.AdminAppActivities(ctx, "T1", "U-nobody", domain.AppActivityFilter{}, domain.PageRequest{Limit: 10})
+				admin, err := chat.AdminAppActivities(ctx, "T1", "UA", domain.AppActivityFilter{MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				unnamedApp, unnamedErr := chat.AppActivities(ctx, "T1", "", domain.AppActivityFilter{}, domain.PageRequest{Limit: 10})
+				return []any{len(empty.Activities), empty.HasMore, len(admin.Activities), len(unnamedApp.Activities), badLevel != nil, unnamedErr != nil}, nil
+			},
+		},
+		{
+			// A lookup that names no filter answers every channel, and a batch
+			// that names a channel the workspace does not hold changes nothing.
+			// Both compositions must agree on each.
+			name: "administrative channel lookup, move, exclusion, and linking agree",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				everything, err := chat.AdminLookupConversations(ctx, "T1", "UA", domain.ConversationLookup{}, domain.PageRequest{Limit: 50})
+				if err != nil {
+					return nil, err
+				}
+				quiet, err := chat.AdminLookupConversations(ctx, "T1", "UA", domain.ConversationLookup{MaxMemberCount: 1}, domain.PageRequest{Limit: 50})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminSetConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1"}, true); err != nil {
+					return nil, err
+				}
+				excluded, err := chat.AdminConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1", "C2"})
+				if err != nil {
+					return nil, err
+				}
+				missingChannel := chat.AdminSetConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1", "C-nobody"}, true)
+				stillExcluded, err := chat.AdminConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1"})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminLinkConversationObjects(ctx, "T1", "UA", "C1", "00D000", []string{"a02", "a01"}); err != nil {
+					return nil, err
+				}
+				linked, err := chat.AdminConversationObjects(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				records := make([]string, 0, len(linked))
+				for _, object := range linked {
+					records = append(records, object.OrgID+"/"+object.RecordID)
+				}
+				if err := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+					return nil, err
+				}
+				after, err := chat.AdminConversationObjects(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				missingTarget := chat.AdminBulkMoveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}, "T-nobody")
+				// A channel made for a record carries the link from the start.
+				made, err := chat.AdminCreateConversationForObjects(ctx, "T1", "UA", "record-channel", "00D000", "a03", false)
+				if err != nil {
+					return nil, err
+				}
+				madeObjects, err := chat.AdminConversationObjects(ctx, "T1", "UA", made.ID)
+				if err != nil {
+					return nil, err
+				}
+				madeRecords := make([]string, 0, len(madeObjects))
+				for _, object := range madeObjects {
+					madeRecords = append(madeRecords, object.OrgID+"/"+object.RecordID)
+				}
+				_, unnamedRecord := chat.AdminCreateConversationForObjects(ctx, "T1", "UA", "no-record-channel", "00D000", "", false)
+				return []any{
+					made.Name, madeRecords, unnamedRecord != nil,
+					len(everything.Conversations) > 0, len(quiet.Conversations) <= len(everything.Conversations),
+					excluded, len(stillExcluded), records, len(after),
+					missingChannel != nil, missingTarget != nil,
+				}, nil
+			},
+		},
+		{
+			// An app nobody has configured answers the defaults, so both
+			// compositions must report the same effective configuration.
+			name: "app configuration defaults and resolution clearance agree",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				defaults, err := chat.AdminAppConfigs(ctx, "T1", "UA", []domain.AppID{"A1"})
+				if err != nil {
+					return nil, err
+				}
+				written, err := chat.AdminSetAppConfig(ctx, "T1", "UA", domain.AppConfig{
+					AppID: "A1", DomainURLs: []string{"https://example.invalid"},
+					WorkflowAuthStrategy: domain.WorkflowAuthEndUserOnly,
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, badStrategy := chat.AdminSetAppConfig(ctx, "T1", "UA", domain.AppConfig{AppID: "A1", WorkflowAuthStrategy: "whoever"})
+				_, unknownApp := chat.AdminSetAppConfig(ctx, "T1", "UA", domain.AppConfig{AppID: "A-nobody", WorkflowAuthStrategy: domain.WorkflowAuthBuilderChoice})
+				after, err := chat.AdminAppConfigs(ctx, "T1", "UA", []domain.AppID{"A1"})
+				if err != nil {
+					return nil, err
+				}
+				undecided := chat.AdminClearAppResolution(ctx, "T1", "UA", "A1")
+				return []any{
+					defaults[0].WorkflowAuthStrategy, defaults[0].DomainURLs, defaults[0].DomainEmails,
+					written.WorkflowAuthStrategy, after[0].DomainURLs, after[0].WorkflowAuthStrategy,
+					badStrategy != nil, unknownApp != nil, undecided != nil,
+				}, nil
+			},
+		},
+		{
+			// A resource nobody has set a permission on answers the default, so
+			// both compositions must report the same effective answer rather
+			// than one answering nothing.
+			name: "administrative automation permissions default and page identically",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				functions, err := chat.AdminFunctionPermissions(ctx, "T1", "UA", []string{"Fn1", "Fn2"})
+				if err != nil {
+					return nil, err
+				}
+				set, err := chat.AdminSetFunctionPermission(ctx, "T1", "UA", "Fn1", domain.AutomationPermission{
+					PermissionType: domain.PermissionNamedEntities, UserIDs: []domain.UserID{"U1"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, system := chat.AdminSetFunctionPermission(ctx, "T1", "UA", "Fn1", domain.AutomationPermission{PermissionType: domain.PermissionSystem})
+				_, unnamed := chat.AdminSetFunctionPermission(ctx, "T1", "UA", "", domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+				after, err := chat.AdminFunctionPermissions(ctx, "T1", "UA", []string{"Fn1", "Fn2"})
+				if err != nil {
+					return nil, err
+				}
+				trigger, err := chat.AdminSetTriggerTypePermission(ctx, "T1", "UA", domain.WorkflowTriggerScheduled, domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+				if err != nil {
+					return nil, err
+				}
+				_, badType := chat.AdminSetTriggerTypePermission(ctx, "T1", "UA", "sundial", domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+				readTrigger, err := chat.AdminTriggerTypePermission(ctx, "T1", "UA", domain.WorkflowTriggerScheduled)
+				if err != nil {
+					return nil, err
+				}
+				workflows, err := chat.AdminWorkflowPermissions(ctx, "T1", "UA", []domain.WorkflowID{"Wf1"})
+				if err != nil {
+					return nil, err
+				}
+				described := func(values []domain.AutomationPermission) []string {
+					out := make([]string, 0, len(values))
+					for _, value := range values {
+						out = append(out, value.ResourceID+"/"+string(value.PermissionType))
+					}
+					return out
+				}
+				return []any{
+					described(functions), described(after), described(workflows),
+					set.PermissionType, set.UserIDs, trigger.ResourceID, readTrigger.PermissionType,
+					system != nil, unnamed != nil, badType != nil,
+				}, nil
+			},
+		},
+		{
+			// A barrier that restricts a subset of the subjects is not a
+			// barrier, so both compositions must refuse one the same way.
+			name: "information barriers are built, listed, and refused identically",
+			seed: seedUserGroupParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				every := domain.BarrierSubjects()
+				created, err := chat.AdminCreateBarrier(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S2"}, every)
+				if err != nil {
+					return nil, err
+				}
+				partial := chat.AdminCreateBarrier
+				_, someSubjects := partial(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S2"}, []domain.BarrierSubject{domain.BarrierSubjectDirect})
+				_, itself := partial(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S1"}, every)
+				_, unknownGroup := partial(ctx, "T1", "UA", "S1", []domain.UserGroupID{"S-nobody"}, every)
+				updated, err := chat.AdminUpdateBarrier(ctx, "T1", "UA", created.ID, "S2", []domain.UserGroupID{"S1"}, every)
+				if err != nil {
+					return nil, err
+				}
+				_, unknownBarrier := chat.AdminUpdateBarrier(ctx, "T1", "UA", "B-nobody", "S1", []domain.UserGroupID{"S2"}, every)
+				page, err := chat.AdminBarriers(ctx, "T1", "UA", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminDeleteBarrier(ctx, "T1", "UA", created.ID); err != nil {
+					return nil, err
+				}
+				missing := chat.AdminDeleteBarrier(ctx, "T1", "UA", created.ID)
+				left, err := chat.AdminBarriers(ctx, "T1", "UA", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					created.PrimaryGroupID, created.BarrieredFromIDs, created.Subjects,
+					updated.PrimaryGroupID, updated.BarrieredFromIDs, len(page.Barriers), len(left.Barriers),
+					someSubjects != nil, itself != nil, unknownGroup != nil, unknownBarrier != nil, missing != nil,
+				}, nil
+			},
+		},
+		{
+			// A member on the workspace default carries no settings row, so
+			// both compositions must leave that member out of the answer rather
+			// than reporting zeros.
+			name: "session settings are written, read back, and cleared identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				settings := domain.SessionSettings{Duration: 12 * 60 * 60, DesktopAppBrowserQuit: true}
+				if err := chat.AdminSetSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"}, settings); err != nil {
+					return nil, err
+				}
+				tooShort := chat.AdminSetSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"}, domain.SessionSettings{Duration: 60 * 60})
+				stranger := chat.AdminSetSessionSettings(ctx, "T1", "UA", []domain.UserID{"U-nobody"}, settings)
+				read, err := chat.AdminSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1", "U2"})
+				if err != nil {
+					return nil, err
+				}
+				described := make([]string, 0, len(read))
+				for _, value := range read {
+					described = append(described, fmt.Sprintf("%s/%d/%t/%t", value.UserID, value.Duration, value.DesktopAppBrowserQuit, value.MobileDeviceCheck))
+				}
+				if err := chat.AdminClearSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				cleared, err := chat.AdminSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"})
+				if err != nil {
+					return nil, err
+				}
+				return []any{described, len(cleared), tooShort != nil, stranger != nil}, nil
+			},
+		},
+		{
+			// An authentication policy this deployment does not hold cannot be
+			// assigned, and both compositions must refuse the same names.
+			name: "authentication policy entities are assigned, paged, and refused identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, []string{"U2", "U1"}); err != nil {
+					return nil, err
+				}
+				unknownPolicy := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", "sso_only", domain.PolicyEntityUser, []string{"U1"})
+				unknownKind := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, "CHANNEL", []string{"U1"})
+				stranger := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, []string{"U-nobody"})
+				page, err := chat.AdminAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				first := make([]string, 0, len(page.Entities))
+				for _, entity := range page.Entities {
+					first = append(first, entity.EntityID)
+				}
+				rest, err := chat.AdminAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+				if err != nil {
+					return nil, err
+				}
+				second := make([]string, 0, len(rest.Entities))
+				for _, entity := range rest.Entities {
+					second = append(second, entity.EntityID)
+				}
+				if err := chat.AdminRemoveAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, []string{"U1"}); err != nil {
+					return nil, err
+				}
+				left, err := chat.AdminAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{first, page.TotalCount, page.HasMore, second, len(left.Entities), left.TotalCount,
+					unknownPolicy != nil, unknownKind != nil, stranger != nil}, nil
+			},
+		},
+		{
+			// A role assignment is a triple, so the two compositions must agree
+			// on the order it pages in and on what a repeat write does.
+			name: "role assignments are written, paged, and removed identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C2", "C1"}, []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				repeat := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"})
+				stranger := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U-nobody"})
+				page, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				first := make([]string, 0, len(page.Assignments))
+				for _, assignment := range page.Assignments {
+					first = append(first, string(assignment.UserID)+"/"+assignment.EntityID)
+				}
+				rest, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+				if err != nil {
+					return nil, err
+				}
+				second := make([]string, 0, len(rest.Assignments))
+				for _, assignment := range rest.Assignments {
+					second = append(second, string(assignment.UserID)+"/"+assignment.EntityID)
+				}
+				if err := chat.AdminRemoveRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				left, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{first, page.HasMore, second, rest.HasMore, len(left.Assignments), repeat != nil, stranger != nil}, nil
+			},
+		},
+		{
+			// A workspace that hides itself answers no contacts, whatever the
+			// addresses match. Both compositions must agree on that, because
+			// the answer tells the caller who works here.
+			name: "discoverable contacts follow the workspace setting",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				open, err := chat.DiscoverableContacts(ctx, "T1", "U1", []string{"u1@example.com", "nobody@example.com"})
+				if err != nil {
+					return nil, err
+				}
+				found := make([]string, 0, len(open))
+				for _, user := range open {
+					found = append(found, string(user.ID))
+				}
+				_, empty := chat.DiscoverableContacts(ctx, "T1", "U1", nil)
+				return []any{found, empty != nil}, nil
+			},
+		},
+		{
+			// admin.functions.list reads the manifests of the installed apps,
+			// because a function exists in a manifest and nowhere else.
+			name: "an administrator lists the functions the installed apps declare",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				functions, err := chat.AdminFunctions(ctx, "T1", "UA")
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(functions))
+				for _, function := range functions {
+					listed = append(listed, string(function.AppID)+":"+function.CallbackID+":"+function.Title)
+				}
+				_, memberErr := chat.AdminFunctions(ctx, "T1", "U1")
+				return []any{listed, memberErr != nil}, nil
+			},
+		},
+		{
+			// A member withdraws an app request. Cancelling records that nobody
+			// decided it, which is a third state beside approved and
+			// restricted.
+			name: "an app request can be cancelled and lists under its own status",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminCancelAppRequest(ctx, "T1", "UA", "A-cancel", "R-cancel"); err != nil {
+					return nil, err
+				}
+				cancelled, err := chat.AdminListApps(ctx, "T1", "UA", domain.AppApprovalCancelled, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(cancelled.Apps))
+				for _, approval := range cancelled.Apps {
+					listed = append(listed, string(approval.ID)+":"+string(approval.Status))
+				}
+				member := chat.AdminCancelAppRequest(ctx, "T1", "U1", "A-cancel", "R-cancel") != nil
+				empty := chat.AdminCancelAppRequest(ctx, "T1", "UA", "", "") != nil
+				return []any{listed, member, empty}, nil
+			},
+		},
+		{
+			// A guest account lapses at a stored instant. A member who never
+			// received one reads the zero time, which must not decode as an
+			// instant in 1754.
+			name: "an administrator reads when a guest account lapses",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				none, err := chat.UserExpiration(ctx, "T1", "UA", "U1")
+				if err != nil {
+					return nil, err
+				}
+				lapses := time.Unix(1_900_000_000, 0).UTC()
+				if err := chat.SetUserExpiration(ctx, "T1", "UA", "U1", lapses); err != nil {
+					return nil, err
+				}
+				stored, err := chat.UserExpiration(ctx, "T1", "UA", "U1")
+				if err != nil {
+					return nil, err
+				}
+				_, memberErr := chat.UserExpiration(ctx, "T1", "U1", "U1")
+				_, missing := chat.UserExpiration(ctx, "T1", "UA", "U-not-here")
+				return []any{none.IsZero(), stored.Equal(lapses), memberErr != nil, missing != nil}, nil
+			},
+		},
+		{
+			// An administrator archives or deletes several channels in one
+			// request. The service checks every channel first, so a name that
+			// is not here stops the request before it changes anything.
+			name: "an administrator archives and deletes channels in bulk",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				member := chat.AdminBulkArchiveConversations(ctx, "T1", "U1", []domain.ConversationID{"C1"}) != nil
+				empty := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", nil) != nil
+				absent := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1", "C-not-here"}) != nil
+				if err := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+					return nil, err
+				}
+				archived, err := chat.ConversationInfo(ctx, "T1", "UA", "C1")
+				if err != nil {
+					return nil, err
+				}
+				// A channel that is already archived is the state the request
+				// asked for.
+				again := chat.AdminBulkArchiveConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}) == nil
+				if err := chat.AdminBulkDeleteConversations(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+					return nil, err
+				}
+				_, missing := chat.ConversationInfo(ctx, "T1", "UA", "C1")
+				return []any{member, empty, absent, archived.Archived, again, missing != nil}, nil
 			},
 		},
 		{
@@ -3523,7 +4058,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 174
+const parityGapCeiling = 171
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -3563,7 +4098,6 @@ var parityGaps = map[string]struct{}{
 	"AdminDisconnectSharedConversation":  {},
 	"AdminInviteConversationMembers":     {},
 	"AdminInviteUser":                    {},
-	"AdminListApps":                      {},
 	"AdminListConversationAccessGroups":  {},
 	"AcceptInvitationForEmail":           {},
 	"ApproveSharedInvite":                {},
@@ -3591,7 +4125,6 @@ var parityGaps = map[string]struct{}{
 	"CompleteExternalUploads":            {},
 	"CompleteReminder":                   {},
 	"ConsumeRTMConnection":               {},
-	"ConversationInfo":                   {},
 	"CountSocketModeConnections":         {},
 	"CreateAppInstallation":              {},
 	"CreateExternalIdentity":             {},
@@ -3690,7 +4223,6 @@ var parityGaps = map[string]struct{}{
 	"SetConversationTopic":                    {},
 	"SetExternalInvitePermissions":            {},
 	"SetSocketModeCursor":                     {},
-	"SetUserExpiration":                       {},
 	"SetUserGroupEnabled":                     {},
 	"SetWorkspaceRetention":                   {},
 	"ShareFilePublic":                         {},

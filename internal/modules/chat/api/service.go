@@ -27,6 +27,7 @@ type Service interface {
 	DeleteDeveloperApp(context.Context, string, domain.AppID) error
 	ListDeveloperApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.App, error)
 	ListWorkspaceApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.InstalledApp, error)
+	AdminFunctions(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.AppFunction, error)
 	PutAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string, bool) ([]string, error)
 	GetAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) ([]string, error)
 	QueryAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.AppDatastoreQuery) (domain.AppDatastoreQueryPage, error)
@@ -139,9 +140,12 @@ type Service interface {
 	ProvisionExternalUser(context.Context, domain.WorkspaceID, string, string, domain.WorkspaceRole) (domain.User, error)
 	SynchronizeExternalUserRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole) error
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, time.Time) error
+	UserExpiration(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (time.Time, error)
 	AdminRenameConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)
 	AdminSetConversationArchived(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool) (domain.Conversation, error)
 	AdminDeleteConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
+	AdminBulkArchiveConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error
+	AdminBulkDeleteConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error
 	AdminAddConversationAccessGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserGroupID) error
 	AdminRemoveConversationAccessGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserGroupID) error
 	AdminListConversationAccessGroups(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.UserGroupID, error)
@@ -158,6 +162,7 @@ type Service interface {
 	AdminListUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.AdminUserPage, error)
 	AdminAssignUser(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, []domain.ConversationID) error
 	AdminApproveApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.AppRequestID) error
+	AdminCancelAppRequest(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.AppRequestID) error
 	AdminUninstallApps(context.Context, domain.WorkspaceID, domain.UserID, []domain.AppID) error
 	AdminRestrictApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.AppRequestID) error
 	AdminListApps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
@@ -276,6 +281,50 @@ type Service interface {
 	WorkspaceInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.Workspace, error)
 	AuthorizedAppWorkspaces(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.PageRequest) (domain.WorkspacePage, error)
 	AdminCreateWorkspace(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, domain.WorkspaceDiscoverability) (domain.Workspace, error)
+	DiscoverableContacts(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.User, error)
+	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
+	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
+	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	SetAppIcon(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string) error
+	ExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.ExternalAuthToken, error)
+	DeleteExternalAuthToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string) error
+	UpdateUserAppConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
+	AssistantSearchAvailability(context.Context, domain.WorkspaceID, domain.UserID) (domain.AssistantSearchAvailability, error)
+	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
+	AdminRequestExport(context.Context, domain.WorkspaceID, domain.UserID, string, map[string]int64) error
+	RequestWorkflowStepResponsesExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) error
+	AdminAnomalyAllowList(context.Context, domain.WorkspaceID, domain.UserID) (domain.AnomalyAllowList, error)
+	AdminSetAnomalyAllowList(context.Context, domain.WorkspaceID, domain.UserID, []string, []string) (domain.AnomalyAllowList, error)
+	TeamBillingInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspacePlan, error)
+	AdminAnalytics(context.Context, domain.WorkspaceID, domain.UserID, domain.AnalyticsKind, time.Time) ([]domain.AnalyticsRow, error)
+	AppActivities(context.Context, domain.WorkspaceID, domain.AppID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)
+	AdminAppActivities(context.Context, domain.WorkspaceID, domain.UserID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)
+	AdminLookupConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationLookup, domain.PageRequest) (domain.ConversationPage, error)
+	AdminBulkMoveConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, domain.WorkspaceID) error
+	AdminSetConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, bool) error
+	AdminConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.ConversationID, error)
+	AdminLinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, []string) error
+	AdminUnlinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error
+	AdminConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.LinkedObject, error)
+	AdminCreateConversationForObjects(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool) (domain.Conversation, error)
+	AdminAppConfigs(context.Context, domain.WorkspaceID, domain.UserID, []domain.AppID) ([]domain.AppConfig, error)
+	AdminSetAppConfig(context.Context, domain.WorkspaceID, domain.UserID, domain.AppConfig) (domain.AppConfig, error)
+	AdminClearAppResolution(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
+	AdminFunctionPermissions(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.AutomationPermission, error)
+	AdminWorkflowPermissions(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID) ([]domain.AutomationPermission, error)
+	AdminTriggerTypePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerType) (domain.AutomationPermission, error)
+	AdminSetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, string, domain.AutomationPermission) (domain.AutomationPermission, error)
+	AdminSetTriggerTypePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerType, domain.AutomationPermission) (domain.AutomationPermission, error)
+	AdminCreateBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserGroupID, []domain.BarrierSubject) (domain.InformationBarrier, error)
+	AdminUpdateBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.BarrierID, domain.UserGroupID, []domain.UserGroupID, []domain.BarrierSubject) (domain.InformationBarrier, error)
+	AdminDeleteBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.BarrierID) error
+	AdminBarriers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.InformationBarrierPage, error)
+	AdminSetSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, domain.SessionSettings) error
+	AdminClearSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) error
+	AdminSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) ([]domain.SessionSettings, error)
+	AdminAssignAuthPolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
+	AdminRemoveAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
+	AdminAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)
 	Conversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	OpenConversation(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) (domain.Conversation, error)

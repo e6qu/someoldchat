@@ -106,6 +106,20 @@ const (
 	// workflow without being trusted to install or remove the app that owns it.
 	ScopeAdminWorkflowsRead  Scope = "admin.workflows:read"
 	ScopeAdminWorkflowsWrite Scope = "admin.workflows:write"
+	// System roles carry their own scopes. Holding a role over a channel is not
+	// workspace membership, so admin.users does not cover it.
+	ScopeAdminRolesRead  Scope = "admin.roles:read"
+	ScopeAdminRolesWrite Scope = "admin.roles:write"
+	// An information barrier decides who may reach whom, which is a different
+	// authority from managing the groups it names.
+	ScopeAdminBarriersRead  Scope = "admin.barriers:read"
+	ScopeAdminBarriersWrite Scope = "admin.barriers:write"
+	// Analytics covers every member and channel at once, which is a wider read
+	// than any single administrative surface.
+	ScopeAdminAnalyticsRead Scope = "admin.analytics:read"
+	// The audit log records what everybody did, so reading it is its own
+	// authority and not part of managing members.
+	ScopeAuditLogsRead Scope = "auditlogs:read"
 )
 
 type Principal struct {
@@ -117,7 +131,7 @@ type Principal struct {
 	// its secret. Slack scopes scheduled-message listing and deletion to the
 	// token that created the message, not merely to the token's user.
 	CredentialHash string
-	TokenType      string
+	TokenType      domain.TokenType
 	Scopes         map[Scope]struct{}
 }
 
@@ -562,6 +576,12 @@ var allScopes = []Scope{
 	ScopeAdminAppsWrite,
 	ScopeAdminWorkflowsRead,
 	ScopeAdminWorkflowsWrite,
+	ScopeAdminRolesRead,
+	ScopeAdminRolesWrite,
+	ScopeAdminBarriersRead,
+	ScopeAdminBarriersWrite,
+	ScopeAdminAnalyticsRead,
+	ScopeAuditLogsRead,
 }
 
 // AllScopes returns a fresh copy on every call, so a caller that appends to or

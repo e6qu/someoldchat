@@ -1016,35 +1016,71 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/openid.connect.userInfo/
   - method: admin.analytics.getFile
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.analytics.getFile/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAnalytics
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:analyticsCountOneDayAndNotAnother
+    deviations:
+      - Rows carry the counts this deployment records - messages, reactions, membership - and not Slack's full enterprise column set.
   - method: admin.analytics.messages.activity
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.analytics.messages.activity/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAnalytics
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:analyticsCountOneDayAndNotAnother
+    deviations:
+      - Rows carry the counts this deployment records - messages, reactions, membership - and not Slack's full enterprise column set.
   - method: admin.analytics.messages.metadata
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.analytics.messages.metadata/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAnalytics
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:analyticsCountOneDayAndNotAnother
+    deviations:
+      - Rows carry the counts this deployment records - messages, reactions, membership - and not Slack's full enterprise column set.
   - method: admin.apps.activities.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.activities.list/
+    evidence:
+      - go-test:internal/api/slack:TestAppActivityLog
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appActivityFiltersByRank
+    deviations:
+      - Entries come from function executions the platform runs; an app cannot write its own log entry, and Slack declares no method for one either.
   - method: admin.apps.clearResolution
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.clearResolution/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppConfigAndResolution
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appConfigurationAndResolutionSurvive
   - method: admin.apps.config.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.config.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppConfigAndResolution
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appConfigurationAndResolutionSurvive
   - method: admin.apps.config.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.config.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppConfigAndResolution
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appConfigurationAndResolutionSurvive
   - method: admin.apps.requests.cancel
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.requests.cancel/
   - method: admin.apps.uninstall
@@ -1052,65 +1088,126 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.uninstall/
   - method: admin.audit.anomaly.allow.getItem
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.audit.anomaly.allow.getItem/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:anomalyAllowListIsEmptyNotMissing
   - method: admin.audit.anomaly.allow.updateItem
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.audit.anomaly.allow.updateItem/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.auth.policy.assignEntities
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.auth.policy.assignEntities/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuthPolicyEntities
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:authPolicyEntitiesAgreeOnEveryProfile
+    deviations:
+      - email_password is the only policy and USER the only entity type, which is every value Slack's reference declares.
   - method: admin.auth.policy.getEntities
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.auth.policy.getEntities/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuthPolicyEntities
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:authPolicyEntitiesAgreeOnEveryProfile
+    deviations:
+      - email_password is the only policy and USER the only entity type, which is every value Slack's reference declares.
   - method: admin.auth.policy.removeEntities
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.auth.policy.removeEntities/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuthPolicyEntities
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:authPolicyEntitiesAgreeOnEveryProfile
+    deviations:
+      - email_password is the only policy and USER the only entity type, which is every value Slack's reference declares.
   - method: admin.barriers.create
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.create/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.barriers.delete
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.delete/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.barriers.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.barriers.update
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.barriers.update/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBarriers
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
+    deviations:
+      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
   - method: admin.conversations.bulkArchive
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkArchive/
   - method: admin.conversations.bulkDelete
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkDelete/
   - method: admin.conversations.bulkMove
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkMove/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.bulkSetExcludeFromSlackAi
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetExcludeFromSlackAi/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.convertToPublic
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.convertToPublic/
   - method: admin.conversations.createForObjects
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.createForObjects/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.getCustomRetention
     status: behavior-compatible
     provenance: slack-reference
@@ -1125,13 +1222,21 @@ operations:
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.linkObjects
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.linkObjects/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.conversations.removeCustomRetention
     status: behavior-compatible
     provenance: slack-reference
@@ -1159,45 +1264,75 @@ operations:
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.unlinkObjects
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.unlinkObjects/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationAdministration
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
   - method: admin.functions.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.list/
   - method: admin.functions.permissions.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.permissions.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.functions.permissions.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.roles.addAssignments
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.roles.addAssignments/
+    evidence:
+      - go-test:internal/api/slack:TestAdminRoleAssignments
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
   - method: admin.roles.listAssignments
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.roles.listAssignments/
+    evidence:
+      - go-test:internal/api/slack:TestAdminRoleAssignments
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
   - method: admin.roles.removeAssignments
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.roles.removeAssignments/
+    evidence:
+      - go-test:internal/api/slack:TestAdminRoleAssignments
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
   - method: admin.users.getExpiration
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.getExpiration/
   - method: admin.users.session.clearSettings
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.clearSettings/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionSettings
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
   - method: admin.users.session.getSettings
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.getSettings/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionSettings
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
   - method: admin.users.session.list
     status: behavior-compatible
     provenance: slack-reference
@@ -1207,13 +1342,22 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.resetBulk/
   - method: admin.users.session.setSettings
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.session.setSettings/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersSessionSettings
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
   - method: admin.users.unsupportedVersions.export
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.unsupportedVersions.export/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - The request is acknowledged and recorded in the workspace journal; the report itself is not built or delivered.
   - method: admin.workflows.collaborators.add
     status: behavior-compatible
     provenance: slack-reference
@@ -1223,37 +1367,60 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.remove/
   - method: admin.workflows.permissions.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.permissions.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.workflows.search
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.search/
   - method: admin.workflows.triggers.types.permissions.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.triggers.types.permissions.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.workflows.triggers.types.permissions.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.triggers.types.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.workflows.unpublish
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.unpublish/
   - method: apps.activities.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.activities.list/
+    evidence:
+      - go-test:internal/api/slack:TestAppActivityLog
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appActivityFiltersByRank
+    deviations:
+      - Entries come from function executions the platform runs; an app cannot write its own log entry, and Slack declares no method for one either.
   - method: apps.auth.external.delete
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.auth.external.delete/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: apps.auth.external.get
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.auth.external.get/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: apps.datastore.bulkDelete
     status: behavior-compatible
     provenance: slack-reference
@@ -1305,21 +1472,39 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.datastore.update/
   - method: apps.icon.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.icon.set/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: apps.user.connection.update
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.user.connection.update/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
   - method: assistant.search.context
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.search.context/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Messages are the only source this deployment indexes, so the assistant searches messages and nothing else.
   - method: assistant.search.info
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.search.info/
+    evidence:
+      - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - Messages are the only source this deployment indexes, so the assistant searches messages and nothing else.
   - method: assistant.threads.setStatus
     status: sdk-compatible
     evidence:
@@ -1536,9 +1721,14 @@ operations:
       - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
   - method: functions.workflows.steps.responses.export
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.responses.export/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - The request is acknowledged and recorded in the workspace journal; the report itself is not built or delivered.
   - method: rtm.start
     status: sdk-compatible
     provenance: slack-reference
@@ -1570,9 +1760,12 @@ operations:
       - Remote files and Slack's private relevance ranking are not yet represented.
       - Highlight-marker behavior has not been differentially qualified.
   - method: team.billing.info
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/team.billing.info/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAuditBillingAndExports
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: team.externalTeams.disconnect
     status: behavior-compatible
     provenance: slack-reference
@@ -1594,7 +1787,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/tooling.tokens.rotate/
   - method: users.discoverableContacts.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/users.discoverableContacts.lookup/
   - method: workflows.featured.add

@@ -293,7 +293,7 @@ type workflowData struct {
 type workflowPermissionView struct {
 	Scope          string
 	Title          string
-	PermissionType string
+	PermissionType domain.PermissionType
 	UserIDs        string
 }
 
@@ -824,7 +824,7 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 			canRun = workflowPermissionAllows(permission, principal, value.OwnerID) && (canManage || canUse)
 		}
 		view := workflowTriggerView{
-			ID: string(trigger.ID), Title: trigger.Title, Type: trigger.Type, Enabled: trigger.Enabled,
+			ID: string(trigger.ID), Title: trigger.Title, Type: string(trigger.Type), Enabled: trigger.Enabled,
 			Version: trigger.Version, Config: trigger.Config, IdempotencyKey: key, CanRun: canRun,
 			CanManage: canManage, WorkflowVersion: value.PublishedVersion,
 		}
@@ -961,39 +961,42 @@ func encodeWorkflowSteps(fields map[string]string, options []workflowFunctionOpt
 	}
 	steps := make([]map[string]any, 0, count)
 	for index := 1; index <= count; index++ {
-		stepType := strings.TrimSpace(fields[fmt.Sprintf("step_type_%d", index)])
-		if stepType == "" {
-			stepType = "function"
+		// The builder used to spell these eight kinds as literals here while the
+		// run engine held its own copy, so a typo on either side fell through
+		// to the function branch and the step silently did something else.
+		stepType := domain.WorkflowStepType(strings.TrimSpace(fields[fmt.Sprintf("step_type_%d", index)])).OrFunction()
+		if !stepType.Valid() {
+			return "", fmt.Errorf("step %d names a kind this workflow builder does not run", index)
 		}
 		var step map[string]any
 		switch stepType {
-		case "form":
+		case domain.WorkflowStepForm:
 			form, err := decodeWorkflowFormDefinition(strings.TrimSpace(fields[fmt.Sprintf("form_%d", index)]))
 			if err != nil {
 				return "", fmt.Errorf("step %d form definition is invalid: %s", index, err.Error())
 			}
-			step = map[string]any{"type": "form", "form": form}
-		case "button":
+			step = map[string]any{"type": string(domain.WorkflowStepForm), "form": form}
+		case domain.WorkflowStepButton:
 			label := strings.TrimSpace(fields[fmt.Sprintf("button_label_%d", index)])
 			if label == "" {
 				return "", fmt.Errorf("step %d button needs a label", index)
 			}
-			step = map[string]any{"type": "button", "button": map[string]string{"label": label}}
-		case "message":
+			step = map[string]any{"type": string(domain.WorkflowStepButton), "button": map[string]string{"label": label}}
+		case domain.WorkflowStepMessage:
 			conversation := strings.TrimSpace(fields[fmt.Sprintf("message_conversation_%d", index)])
 			text := strings.TrimSpace(fields[fmt.Sprintf("message_text_%d", index)])
 			if conversation == "" || text == "" {
 				return "", fmt.Errorf("step %d sends a message and needs both a conversation and text", index)
 			}
-			step = map[string]any{"type": "message", "message": map[string]string{"conversation": conversation, "text": text}}
-		case "add_people":
+			step = map[string]any{"type": string(domain.WorkflowStepMessage), "message": map[string]string{"conversation": conversation, "text": text}}
+		case domain.WorkflowStepAddPeople:
 			conversation := strings.TrimSpace(fields[fmt.Sprintf("message_conversation_%d", index)])
 			people := workflowStepUserList(fields[fmt.Sprintf("step_people_%d", index)])
 			if conversation == "" || len(people) == 0 {
 				return "", fmt.Errorf("step %d adds people and needs both a channel and at least one member", index)
 			}
-			step = map[string]any{"type": "add_people", "add_people": map[string]any{"conversation": conversation, "users": people}}
-		case "create_canvas":
+			step = map[string]any{"type": string(domain.WorkflowStepAddPeople), "add_people": map[string]any{"conversation": conversation, "users": people}}
+		case domain.WorkflowStepCanvas:
 			title := strings.TrimSpace(fields[fmt.Sprintf("message_text_%d", index)])
 			if title == "" {
 				return "", fmt.Errorf("step %d creates a canvas and needs a title", index)
@@ -1002,14 +1005,14 @@ func encodeWorkflowSteps(fields map[string]string, options []workflowFunctionOpt
 			if conversation := strings.TrimSpace(fields[fmt.Sprintf("message_conversation_%d", index)]); conversation != "" {
 				canvas["conversation"] = conversation
 			}
-			step = map[string]any{"type": "create_canvas", "create_canvas": canvas}
-		case "delay":
+			step = map[string]any{"type": string(domain.WorkflowStepCanvas), "create_canvas": canvas}
+		case domain.WorkflowStepDelay:
 			seconds, err := strconv.Atoi(strings.TrimSpace(fields[fmt.Sprintf("step_delay_%d", index)]))
 			if err != nil || seconds <= 0 {
 				return "", fmt.Errorf("step %d waits for a time and needs a positive number of minutes", index)
 			}
-			step = map[string]any{"type": "delay", "delay": map[string]int{"seconds": seconds * 60}}
-		case "wait_until":
+			step = map[string]any{"type": string(domain.WorkflowStepDelay), "delay": map[string]int{"seconds": seconds * 60}}
+		case domain.WorkflowStepWaitUntil:
 			// Resolved to an instant here, once, rather than carried as wall
 			// clock and resolved per run: a zone whose offset changes between
 			// writing the step and running it would otherwise move the moment
@@ -1026,7 +1029,7 @@ func encodeWorkflowSteps(fields map[string]string, options []workflowFunctionOpt
 			if err != nil {
 				return "", fmt.Errorf("step %d waits until a date and needs one", index)
 			}
-			step = map[string]any{"type": "wait_until", "wait_until": map[string]int64{"unix_seconds": at.Unix()}}
+			step = map[string]any{"type": string(domain.WorkflowStepWaitUntil), "wait_until": map[string]int64{"unix_seconds": at.Unix()}}
 		default:
 			callback := strings.TrimSpace(fields[fmt.Sprintf("step_%d", index)])
 			if callback == "" {
@@ -1255,8 +1258,8 @@ func (h Handler) setWorkflowPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
-	permission := domain.AutomationPermission{PermissionType: strings.TrimSpace(fields["permission_type"])}
-	if permission.PermissionType == "named_entities" {
+	permission := domain.AutomationPermission{PermissionType: domain.PermissionType(strings.TrimSpace(fields["permission_type"]))}
+	if permission.PermissionType == domain.PermissionNamedEntities {
 		permission.UserIDs = splitUserIDs(fields["user_ids"])
 	}
 	if _, err := h.Messages.SetWorkflowPermission(r.Context(), principal.WorkspaceID, principal.UserID, id, strings.TrimSpace(fields["scope"]), permission); err != nil {
@@ -1381,7 +1384,7 @@ func (h Handler) createWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
-		WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]), Type: triggerType, Config: config, Enabled: true,
+		WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]), Type: domain.WorkflowTriggerType(triggerType), Config: config, Enabled: true,
 	}, 0)
 	if err != nil {
 		h.writeWorkflowMutationError(w, r, "The trigger was not created", err)
@@ -1408,7 +1411,7 @@ func (h Handler) updateWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
 		ID: triggerID, WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]),
-		Type: strings.TrimSpace(fields["type"]), Config: strings.TrimSpace(fields["config"]), Enabled: fields["enabled"] == "true",
+		Type: domain.WorkflowTriggerType(strings.TrimSpace(fields["type"])), Config: strings.TrimSpace(fields["config"]), Enabled: fields["enabled"] == "true",
 	}, version)
 	if err != nil {
 		h.writeWorkflowMutationError(w, r, "The trigger was not updated", err)
@@ -1475,7 +1478,7 @@ func (h Handler) workflowRun(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "That workflow run is not available.")
 		return
 	}
-	view := workflowInteractionView{StepID: string(interaction.StepID), Kind: interaction.Kind, Title: interaction.Title, Label: interaction.Label}
+	view := workflowInteractionView{StepID: string(interaction.StepID), Kind: string(interaction.Kind), Title: interaction.Title, Label: interaction.Label}
 	for _, field := range interaction.Fields {
 		view.Fields = append(view.Fields, workflowInteractionField{Name: field.Name, Label: field.Label})
 	}

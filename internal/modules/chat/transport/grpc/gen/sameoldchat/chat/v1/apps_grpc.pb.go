@@ -19,6 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AppsService_SetAppIcon_FullMethodName                    = "/sameoldchat.chat.v1.AppsService/SetAppIcon"
+	AppsService_ExternalAuthToken_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ExternalAuthToken"
+	AppsService_DeleteExternalAuthToken_FullMethodName       = "/sameoldchat.chat.v1.AppsService/DeleteExternalAuthToken"
+	AppsService_UpdateUserAppConnection_FullMethodName       = "/sameoldchat.chat.v1.AppsService/UpdateUserAppConnection"
+	AppsService_AssistantSearchAvailability_FullMethodName   = "/sameoldchat.chat.v1.AppsService/AssistantSearchAvailability"
+	AppsService_AssistantSearchContext_FullMethodName        = "/sameoldchat.chat.v1.AppsService/AssistantSearchContext"
+	AppsService_AppActivities_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AppActivities"
+	AppsService_AdminAppActivities_FullMethodName            = "/sameoldchat.chat.v1.AppsService/AdminAppActivities"
+	AppsService_AdminAppConfigs_FullMethodName               = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
+	AppsService_AdminSetAppConfig_FullMethodName             = "/sameoldchat.chat.v1.AppsService/AdminSetAppConfig"
+	AppsService_AdminClearAppResolution_FullMethodName       = "/sameoldchat.chat.v1.AppsService/AdminClearAppResolution"
 	AppsService_IssueAppConfigurationToken_FullMethodName    = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
 	AppsService_RotateAppConfigurationToken_FullMethodName   = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
 	AppsService_ValidateAppManifest_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
@@ -28,6 +39,7 @@ const (
 	AppsService_DeleteDeveloperApp_FullMethodName            = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
 	AppsService_ListDeveloperApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
 	AppsService_ListWorkspaceApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
+	AppsService_AdminFunctions_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AdminFunctions"
 	AppsService_PutAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
 	AppsService_GetAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
 	AppsService_QueryAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
@@ -44,6 +56,17 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AppsServiceClient interface {
+	SetAppIcon(ctx context.Context, in *AppIconRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	ExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*ExternalAuthTokenValue, error)
+	DeleteExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	UpdateUserAppConnection(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	AssistantSearchAvailability(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AssistantSearchAvailabilityValue, error)
+	AssistantSearchContext(ctx context.Context, in *AssistantSearchRequest, opts ...grpc.CallOption) (*MessagePage, error)
+	AppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error)
+	AdminAppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error)
+	AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error)
+	AdminSetAppConfig(ctx context.Context, in *AppConfigMutationRequest, opts ...grpc.CallOption) (*AppConfig, error)
+	AdminClearAppResolution(ctx context.Context, in *AppResolutionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	IssueAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRotateRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error)
 	ValidateAppManifest(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppManifestValidation, error)
@@ -53,6 +76,7 @@ type AppsServiceClient interface {
 	DeleteDeveloperApp(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	ListDeveloperApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*AppListResponse, error)
 	ListWorkspaceApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*InstalledAppListResponse, error)
+	AdminFunctions(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*AppFunctionListResponse, error)
 	PutAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	QueryAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
@@ -71,6 +95,116 @@ type appsServiceClient struct {
 
 func NewAppsServiceClient(cc grpc.ClientConnInterface) AppsServiceClient {
 	return &appsServiceClient{cc}
+}
+
+func (c *appsServiceClient) SetAppIcon(ctx context.Context, in *AppIconRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_SetAppIcon_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) ExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*ExternalAuthTokenValue, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExternalAuthTokenValue)
+	err := c.cc.Invoke(ctx, AppsService_ExternalAuthToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) DeleteExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_DeleteExternalAuthToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) UpdateUserAppConnection(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_UpdateUserAppConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AssistantSearchAvailability(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AssistantSearchAvailabilityValue, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AssistantSearchAvailabilityValue)
+	err := c.cc.Invoke(ctx, AppsService_AssistantSearchAvailability_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AssistantSearchContext(ctx context.Context, in *AssistantSearchRequest, opts ...grpc.CallOption) (*MessagePage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MessagePage)
+	err := c.cc.Invoke(ctx, AppsService_AssistantSearchContext_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppActivityPage)
+	err := c.cc.Invoke(ctx, AppsService_AppActivities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminAppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppActivityPage)
+	err := c.cc.Invoke(ctx, AppsService_AdminAppActivities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppConfigsResponse)
+	err := c.cc.Invoke(ctx, AppsService_AdminAppConfigs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminSetAppConfig(ctx context.Context, in *AppConfigMutationRequest, opts ...grpc.CallOption) (*AppConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppConfig)
+	err := c.cc.Invoke(ctx, AppsService_AdminSetAppConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminClearAppResolution(ctx context.Context, in *AppResolutionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_AdminClearAppResolution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *appsServiceClient) IssueAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error) {
@@ -157,6 +291,16 @@ func (c *appsServiceClient) ListWorkspaceApps(ctx context.Context, in *AppListRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InstalledAppListResponse)
 	err := c.cc.Invoke(ctx, AppsService_ListWorkspaceApps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminFunctions(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*AppFunctionListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppFunctionListResponse)
+	err := c.cc.Invoke(ctx, AppsService_AdminFunctions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -267,6 +411,17 @@ func (c *appsServiceClient) AuthorizeOAuth(ctx context.Context, in *OAuthAuthori
 // All implementations should embed UnimplementedAppsServiceServer
 // for forward compatibility.
 type AppsServiceServer interface {
+	SetAppIcon(context.Context, *AppIconRequest) (*AppMutationResponse, error)
+	ExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*ExternalAuthTokenValue, error)
+	DeleteExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*AppMutationResponse, error)
+	UpdateUserAppConnection(context.Context, *UserConnectionRequest) (*AppMutationResponse, error)
+	AssistantSearchAvailability(context.Context, *UserConnectionRequest) (*AssistantSearchAvailabilityValue, error)
+	AssistantSearchContext(context.Context, *AssistantSearchRequest) (*MessagePage, error)
+	AppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error)
+	AdminAppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error)
+	AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error)
+	AdminSetAppConfig(context.Context, *AppConfigMutationRequest) (*AppConfig, error)
+	AdminClearAppResolution(context.Context, *AppResolutionRequest) (*AppMutationResponse, error)
 	IssueAppConfigurationToken(context.Context, *AppConfigurationTokenRequest) (*AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(context.Context, *AppConfigurationTokenRotateRequest) (*AppConfigurationCredentials, error)
 	ValidateAppManifest(context.Context, *AppManifestRequest) (*AppManifestValidation, error)
@@ -276,6 +431,7 @@ type AppsServiceServer interface {
 	DeleteDeveloperApp(context.Context, *AppManifestRequest) (*AppMutationResponse, error)
 	ListDeveloperApps(context.Context, *AppListRequest) (*AppListResponse, error)
 	ListWorkspaceApps(context.Context, *AppListRequest) (*InstalledAppListResponse, error)
+	AdminFunctions(context.Context, *AppListRequest) (*AppFunctionListResponse, error)
 	PutAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	QueryAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
@@ -295,6 +451,39 @@ type AppsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAppsServiceServer struct{}
 
+func (UnimplementedAppsServiceServer) SetAppIcon(context.Context, *AppIconRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetAppIcon not implemented")
+}
+func (UnimplementedAppsServiceServer) ExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*ExternalAuthTokenValue, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExternalAuthToken not implemented")
+}
+func (UnimplementedAppsServiceServer) DeleteExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteExternalAuthToken not implemented")
+}
+func (UnimplementedAppsServiceServer) UpdateUserAppConnection(context.Context, *UserConnectionRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateUserAppConnection not implemented")
+}
+func (UnimplementedAppsServiceServer) AssistantSearchAvailability(context.Context, *UserConnectionRequest) (*AssistantSearchAvailabilityValue, error) {
+	return nil, status.Error(codes.Unimplemented, "method AssistantSearchAvailability not implemented")
+}
+func (UnimplementedAppsServiceServer) AssistantSearchContext(context.Context, *AssistantSearchRequest) (*MessagePage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AssistantSearchContext not implemented")
+}
+func (UnimplementedAppsServiceServer) AppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AppActivities not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminAppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAppActivities not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAppConfigs not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminSetAppConfig(context.Context, *AppConfigMutationRequest) (*AppConfig, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetAppConfig not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminClearAppResolution(context.Context, *AppResolutionRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminClearAppResolution not implemented")
+}
 func (UnimplementedAppsServiceServer) IssueAppConfigurationToken(context.Context, *AppConfigurationTokenRequest) (*AppConfigurationCredentials, error) {
 	return nil, status.Error(codes.Unimplemented, "method IssueAppConfigurationToken not implemented")
 }
@@ -321,6 +510,9 @@ func (UnimplementedAppsServiceServer) ListDeveloperApps(context.Context, *AppLis
 }
 func (UnimplementedAppsServiceServer) ListWorkspaceApps(context.Context, *AppListRequest) (*InstalledAppListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListWorkspaceApps not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminFunctions(context.Context, *AppListRequest) (*AppFunctionListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminFunctions not implemented")
 }
 func (UnimplementedAppsServiceServer) PutAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PutAppDatastoreItems not implemented")
@@ -370,6 +562,204 @@ func RegisterAppsServiceServer(s grpc.ServiceRegistrar, srv AppsServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AppsService_ServiceDesc, srv)
+}
+
+func _AppsService_SetAppIcon_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppIconRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).SetAppIcon(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_SetAppIcon_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).SetAppIcon(ctx, req.(*AppIconRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_ExternalAuthToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExternalAuthTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).ExternalAuthToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_ExternalAuthToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).ExternalAuthToken(ctx, req.(*ExternalAuthTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_DeleteExternalAuthToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExternalAuthTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).DeleteExternalAuthToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_DeleteExternalAuthToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).DeleteExternalAuthToken(ctx, req.(*ExternalAuthTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_UpdateUserAppConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).UpdateUserAppConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_UpdateUserAppConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).UpdateUserAppConnection(ctx, req.(*UserConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AssistantSearchAvailability_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AssistantSearchAvailability(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AssistantSearchAvailability_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AssistantSearchAvailability(ctx, req.(*UserConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AssistantSearchContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssistantSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AssistantSearchContext(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AssistantSearchContext_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AssistantSearchContext(ctx, req.(*AssistantSearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AppActivities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppActivitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AppActivities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AppActivities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AppActivities(ctx, req.(*AppActivitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminAppActivities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppActivitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminAppActivities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminAppActivities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminAppActivities(ctx, req.(*AppActivitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminAppConfigs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppConfigsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminAppConfigs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminAppConfigs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminAppConfigs(ctx, req.(*AppConfigsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminSetAppConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppConfigMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminSetAppConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminSetAppConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminSetAppConfig(ctx, req.(*AppConfigMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminClearAppResolution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppResolutionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminClearAppResolution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminClearAppResolution_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminClearAppResolution(ctx, req.(*AppResolutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AppsService_IssueAppConfigurationToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -530,6 +920,24 @@ func _AppsService_ListWorkspaceApps_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AppsServiceServer).ListWorkspaceApps(ctx, req.(*AppListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminFunctions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminFunctions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminFunctions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminFunctions(ctx, req.(*AppListRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -722,6 +1130,50 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*AppsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "SetAppIcon",
+			Handler:    _AppsService_SetAppIcon_Handler,
+		},
+		{
+			MethodName: "ExternalAuthToken",
+			Handler:    _AppsService_ExternalAuthToken_Handler,
+		},
+		{
+			MethodName: "DeleteExternalAuthToken",
+			Handler:    _AppsService_DeleteExternalAuthToken_Handler,
+		},
+		{
+			MethodName: "UpdateUserAppConnection",
+			Handler:    _AppsService_UpdateUserAppConnection_Handler,
+		},
+		{
+			MethodName: "AssistantSearchAvailability",
+			Handler:    _AppsService_AssistantSearchAvailability_Handler,
+		},
+		{
+			MethodName: "AssistantSearchContext",
+			Handler:    _AppsService_AssistantSearchContext_Handler,
+		},
+		{
+			MethodName: "AppActivities",
+			Handler:    _AppsService_AppActivities_Handler,
+		},
+		{
+			MethodName: "AdminAppActivities",
+			Handler:    _AppsService_AdminAppActivities_Handler,
+		},
+		{
+			MethodName: "AdminAppConfigs",
+			Handler:    _AppsService_AdminAppConfigs_Handler,
+		},
+		{
+			MethodName: "AdminSetAppConfig",
+			Handler:    _AppsService_AdminSetAppConfig_Handler,
+		},
+		{
+			MethodName: "AdminClearAppResolution",
+			Handler:    _AppsService_AdminClearAppResolution_Handler,
+		},
+		{
 			MethodName: "IssueAppConfigurationToken",
 			Handler:    _AppsService_IssueAppConfigurationToken_Handler,
 		},
@@ -756,6 +1208,10 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorkspaceApps",
 			Handler:    _AppsService_ListWorkspaceApps_Handler,
+		},
+		{
+			MethodName: "AdminFunctions",
+			Handler:    _AppsService_AdminFunctions_Handler,
 		},
 		{
 			MethodName: "PutAppDatastoreItems",

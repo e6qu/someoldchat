@@ -181,6 +181,14 @@ func main() {
 	if err := store.CreateAppConfigurationToken(context.Background(), "xoxe.xoxp-qualification", "xoxe-qualification", domain.AppConfigurationToken{WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().UTC().Add(12 * time.Hour)}); err != nil {
 		panic(err)
 	}
+	// An external credential for the walk to read and revoke. The ciphertext is
+	// here so the walk can prove the secret does not come back out.
+	if err := store.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
+		ID: "Et-qualification", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
+		Ciphertext: "sealed-qualification", ExpiresAt: now.Add(12 * time.Hour), CreatedAt: now,
+	}, events.Event{ID: "evt-external-qualification", WorkspaceID: "T1", Topic: "app.external_token_set", Payload: "Et-qualification", CreatedAt: now}); err != nil {
+		panic(err)
+	}
 	for _, candidate := range []struct {
 		suffix string
 		appID  domain.AppID

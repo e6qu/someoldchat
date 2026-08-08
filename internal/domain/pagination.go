@@ -193,6 +193,43 @@ func DecodeListCursor(cursor Cursor) (string, error) {
 	return value.ID, nil
 }
 
+// PairCursor carries a keyset position that two columns make up. Joining the
+// two parts into one string needs a separator that neither part contains, and
+// no separator survives a SQL string literal on every profile: SQLite reads
+// '\x00' as four ordinary characters and PostgreSQL rejects a NUL byte inside
+// text. The two parts therefore travel apart, and the query compares the two
+// columns as a tuple.
+type PairCursor struct {
+	First  string
+	Second string
+}
+
+func NewPairCursor(first, second string) (Cursor, error) {
+	if first == "" || second == "" || !utf8.ValidString(first) || !utf8.ValidString(second) {
+		return "", ErrInvalidCursor
+	}
+	body, err := json.Marshal(PairCursor{First: first, Second: second})
+	if err != nil {
+		return "", err
+	}
+	return Cursor(base64.RawURLEncoding.EncodeToString(body)), nil
+}
+
+func DecodePairCursor(cursor Cursor) (PairCursor, error) {
+	if cursor == "" {
+		return PairCursor{}, nil
+	}
+	body, err := base64.RawURLEncoding.DecodeString(string(cursor))
+	if err != nil {
+		return PairCursor{}, ErrInvalidCursor
+	}
+	var value PairCursor
+	if err := json.Unmarshal(body, &value); err != nil || value.First == "" || value.Second == "" {
+		return PairCursor{}, ErrInvalidCursor
+	}
+	return value, nil
+}
+
 // NewMessageCursor refuses a message without a creation instant. Decoding
 // rejects a zero CreatedAt, so minting one produced a cursor that always failed
 // on the next page request: pagination dead-ended with InvalidArgument instead of

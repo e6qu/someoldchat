@@ -19,52 +19,74 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DirectoryService_Users_FullMethodName                       = "/sameoldchat.chat.v1.DirectoryService/Users"
-	DirectoryService_ConversationMembers_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/ConversationMembers"
-	DirectoryService_WorkspaceInfo_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/WorkspaceInfo"
-	DirectoryService_AuthorizedAppWorkspaces_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AuthorizedAppWorkspaces"
-	DirectoryService_TeamBillableInfo_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/TeamBillableInfo"
-	DirectoryService_RemoveUser_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/RemoveUser"
-	DirectoryService_SetUserRole_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
-	DirectoryService_SetUserExpiration_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
-	DirectoryService_ResetUserSessions_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
-	DirectoryService_UserSessions_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
-	DirectoryService_ResetUserSessionsBulk_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
-	DirectoryService_Emojis_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/Emojis"
-	DirectoryService_AddEmoji_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AddEmoji"
-	DirectoryService_AddEmojiAlias_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AddEmojiAlias"
-	DirectoryService_RemoveEmoji_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/RemoveEmoji"
-	DirectoryService_RenameEmoji_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/RenameEmoji"
-	DirectoryService_SearchConversations_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/SearchConversations"
-	DirectoryService_SearchPeople_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/SearchPeople"
-	DirectoryService_SearchChannels_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/SearchChannels"
-	DirectoryService_SetWorkspaceName_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceName"
-	DirectoryService_AdminCreateWorkspace_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/AdminCreateWorkspace"
-	DirectoryService_RequestAppPermissions_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/RequestAppPermissions"
-	DirectoryService_SetWorkspaceDescription_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDescription"
-	DirectoryService_SetWorkspaceDiscoverability_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDiscoverability"
-	DirectoryService_SetWorkspaceIcon_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceIcon"
-	DirectoryService_SetWorkspaceDefaultChannels_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDefaultChannels"
-	DirectoryService_GetConversationPrefs_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/GetConversationPrefs"
-	DirectoryService_SetConversationPrefs_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetConversationPrefs"
-	DirectoryService_AdminTeamUsers_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminTeamUsers"
-	DirectoryService_AdminInviteUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminInviteUser"
-	DirectoryService_AdminCreateUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminCreateUser"
-	DirectoryService_AdminListUsers_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminListUsers"
-	DirectoryService_AdminAssignUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminAssignUser"
-	DirectoryService_AdminApproveInviteRequest_FullMethodName   = "/sameoldchat.chat.v1.DirectoryService/AdminApproveInviteRequest"
-	DirectoryService_AdminDenyInviteRequest_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminDenyInviteRequest"
-	DirectoryService_AdminListInviteRequests_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AdminListInviteRequests"
-	DirectoryService_UserWorkspaces_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/UserWorkspaces"
-	DirectoryService_InvitationPreview_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/InvitationPreview"
-	DirectoryService_AcceptInvitationForEmail_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AcceptInvitationForEmail"
-	DirectoryService_AdminApproveApp_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminApproveApp"
-	DirectoryService_AdminUninstallApps_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminUninstallApps"
-	DirectoryService_AdminRestrictApp_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminRestrictApp"
-	DirectoryService_AdminListApps_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminListApps"
-	DirectoryService_GetWorkspaceMembership_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/GetWorkspaceMembership"
-	DirectoryService_ProvisionExternalUser_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ProvisionExternalUser"
-	DirectoryService_SynchronizeExternalUserRole_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/SynchronizeExternalUserRole"
+	DirectoryService_Users_FullMethodName                              = "/sameoldchat.chat.v1.DirectoryService/Users"
+	DirectoryService_ConversationMembers_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/ConversationMembers"
+	DirectoryService_WorkspaceInfo_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/WorkspaceInfo"
+	DirectoryService_AuthorizedAppWorkspaces_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AuthorizedAppWorkspaces"
+	DirectoryService_TeamBillableInfo_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/TeamBillableInfo"
+	DirectoryService_RemoveUser_FullMethodName                         = "/sameoldchat.chat.v1.DirectoryService/RemoveUser"
+	DirectoryService_SetUserRole_FullMethodName                        = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
+	DirectoryService_SetUserExpiration_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
+	DirectoryService_UserExpiration_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/UserExpiration"
+	DirectoryService_DiscoverableContacts_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/DiscoverableContacts"
+	DirectoryService_AdminAnalytics_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/AdminAnalytics"
+	DirectoryService_AdminRequestExport_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/AdminRequestExport"
+	DirectoryService_RequestWorkflowStepResponsesExport_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/RequestWorkflowStepResponsesExport"
+	DirectoryService_AdminAnomalyAllowList_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminAnomalyAllowList"
+	DirectoryService_AdminSetAnomalyAllowList_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/AdminSetAnomalyAllowList"
+	DirectoryService_TeamBillingInfo_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/TeamBillingInfo"
+	DirectoryService_AdminAddRoleAssignments_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminAddRoleAssignments"
+	DirectoryService_AdminRemoveRoleAssignments_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveRoleAssignments"
+	DirectoryService_AdminListRoleAssignments_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/AdminListRoleAssignments"
+	DirectoryService_AdminCreateBarrier_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/AdminCreateBarrier"
+	DirectoryService_AdminUpdateBarrier_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/AdminUpdateBarrier"
+	DirectoryService_AdminDeleteBarrier_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/AdminDeleteBarrier"
+	DirectoryService_AdminBarriers_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/AdminBarriers"
+	DirectoryService_AdminSetSessionSettings_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminSetSessionSettings"
+	DirectoryService_AdminClearSessionSettings_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminClearSessionSettings"
+	DirectoryService_AdminSessionSettings_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminSessionSettings"
+	DirectoryService_AdminAssignAuthPolicy_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminAssignAuthPolicy"
+	DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveAuthPolicyEntities"
+	DirectoryService_AdminAuthPolicyEntities_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminAuthPolicyEntities"
+	DirectoryService_ResetUserSessions_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
+	DirectoryService_UserSessions_FullMethodName                       = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
+	DirectoryService_ResetUserSessionsBulk_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
+	DirectoryService_Emojis_FullMethodName                             = "/sameoldchat.chat.v1.DirectoryService/Emojis"
+	DirectoryService_AddEmoji_FullMethodName                           = "/sameoldchat.chat.v1.DirectoryService/AddEmoji"
+	DirectoryService_AddEmojiAlias_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/AddEmojiAlias"
+	DirectoryService_RemoveEmoji_FullMethodName                        = "/sameoldchat.chat.v1.DirectoryService/RemoveEmoji"
+	DirectoryService_RenameEmoji_FullMethodName                        = "/sameoldchat.chat.v1.DirectoryService/RenameEmoji"
+	DirectoryService_SearchConversations_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/SearchConversations"
+	DirectoryService_SearchPeople_FullMethodName                       = "/sameoldchat.chat.v1.DirectoryService/SearchPeople"
+	DirectoryService_SearchChannels_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/SearchChannels"
+	DirectoryService_SetWorkspaceName_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceName"
+	DirectoryService_AdminCreateWorkspace_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminCreateWorkspace"
+	DirectoryService_RequestAppPermissions_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/RequestAppPermissions"
+	DirectoryService_SetWorkspaceDescription_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDescription"
+	DirectoryService_SetWorkspaceDiscoverability_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDiscoverability"
+	DirectoryService_SetWorkspaceIcon_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceIcon"
+	DirectoryService_SetWorkspaceDefaultChannels_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDefaultChannels"
+	DirectoryService_GetConversationPrefs_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/GetConversationPrefs"
+	DirectoryService_SetConversationPrefs_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/SetConversationPrefs"
+	DirectoryService_AdminTeamUsers_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/AdminTeamUsers"
+	DirectoryService_AdminInviteUser_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AdminInviteUser"
+	DirectoryService_AdminCreateUser_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AdminCreateUser"
+	DirectoryService_AdminListUsers_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/AdminListUsers"
+	DirectoryService_AdminAssignUser_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AdminAssignUser"
+	DirectoryService_AdminApproveInviteRequest_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminApproveInviteRequest"
+	DirectoryService_AdminDenyInviteRequest_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminDenyInviteRequest"
+	DirectoryService_AdminListInviteRequests_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminListInviteRequests"
+	DirectoryService_UserWorkspaces_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/UserWorkspaces"
+	DirectoryService_InvitationPreview_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/InvitationPreview"
+	DirectoryService_AcceptInvitationForEmail_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/AcceptInvitationForEmail"
+	DirectoryService_AdminApproveApp_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AdminApproveApp"
+	DirectoryService_AdminCancelAppRequest_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminCancelAppRequest"
+	DirectoryService_AdminUninstallApps_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/AdminUninstallApps"
+	DirectoryService_AdminRestrictApp_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/AdminRestrictApp"
+	DirectoryService_AdminListApps_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/AdminListApps"
+	DirectoryService_GetWorkspaceMembership_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/GetWorkspaceMembership"
+	DirectoryService_ProvisionExternalUser_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/ProvisionExternalUser"
+	DirectoryService_SynchronizeExternalUserRole_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SynchronizeExternalUserRole"
 )
 
 // DirectoryServiceClient is the client API for DirectoryService service.
@@ -79,6 +101,27 @@ type DirectoryServiceClient interface {
 	RemoveUser(ctx context.Context, in *RemoveUserRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserRole(ctx context.Context, in *SetUserRoleRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	UserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*UserExpirationResponse, error)
+	DiscoverableContacts(ctx context.Context, in *DiscoverableContactsRequest, opts ...grpc.CallOption) (*DiscoverableContactsResponse, error)
+	AdminAnalytics(ctx context.Context, in *AnalyticsRequest, opts ...grpc.CallOption) (*AnalyticsResponse, error)
+	AdminRequestExport(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	RequestWorkflowStepResponsesExport(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminAnomalyAllowList(ctx context.Context, in *AnomalyAllowListRequest, opts ...grpc.CallOption) (*AnomalyAllowList, error)
+	AdminSetAnomalyAllowList(ctx context.Context, in *AnomalyAllowListRequest, opts ...grpc.CallOption) (*AnomalyAllowList, error)
+	TeamBillingInfo(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*BillingInfoResponse, error)
+	AdminAddRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminRemoveRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminListRoleAssignments(ctx context.Context, in *RoleAssignmentsRequest, opts ...grpc.CallOption) (*RoleAssignmentPage, error)
+	AdminCreateBarrier(ctx context.Context, in *BarrierMutationRequest, opts ...grpc.CallOption) (*InformationBarrier, error)
+	AdminUpdateBarrier(ctx context.Context, in *BarrierMutationRequest, opts ...grpc.CallOption) (*InformationBarrier, error)
+	AdminDeleteBarrier(ctx context.Context, in *BarrierMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminBarriers(ctx context.Context, in *BarriersRequest, opts ...grpc.CallOption) (*InformationBarrierPage, error)
+	AdminSetSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminClearSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*SessionSettingsResponse, error)
+	AdminAssignAuthPolicy(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminRemoveAuthPolicyEntities(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminAuthPolicyEntities(ctx context.Context, in *AuthPolicyEntitiesRequest, opts ...grpc.CallOption) (*AuthPolicyEntityPage, error)
 	ResetUserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -111,6 +154,7 @@ type DirectoryServiceClient interface {
 	InvitationPreview(ctx context.Context, in *InvitationPreviewRequest, opts ...grpc.CallOption) (*InviteRequest, error)
 	AcceptInvitationForEmail(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*User, error)
 	AdminApproveApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminCancelAppRequest(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminUninstallApps(ctx context.Context, in *AdminUninstallAppsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRestrictApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListApps(ctx context.Context, in *AppApprovalsRequest, opts ...grpc.CallOption) (*AppApprovalPage, error)
@@ -201,6 +245,216 @@ func (c *directoryServiceClient) SetUserExpiration(ctx context.Context, in *SetU
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
 	err := c.cc.Invoke(ctx, DirectoryService_SetUserExpiration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) UserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*UserExpirationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserExpirationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_UserExpiration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) DiscoverableContacts(ctx context.Context, in *DiscoverableContactsRequest, opts ...grpc.CallOption) (*DiscoverableContactsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DiscoverableContactsResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_DiscoverableContacts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAnalytics(ctx context.Context, in *AnalyticsRequest, opts ...grpc.CallOption) (*AnalyticsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnalyticsResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAnalytics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminRequestExport(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminRequestExport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) RequestWorkflowStepResponsesExport(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_RequestWorkflowStepResponsesExport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAnomalyAllowList(ctx context.Context, in *AnomalyAllowListRequest, opts ...grpc.CallOption) (*AnomalyAllowList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnomalyAllowList)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAnomalyAllowList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminSetAnomalyAllowList(ctx context.Context, in *AnomalyAllowListRequest, opts ...grpc.CallOption) (*AnomalyAllowList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnomalyAllowList)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminSetAnomalyAllowList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) TeamBillingInfo(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*BillingInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BillingInfoResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_TeamBillingInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAddRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAddRoleAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminRemoveRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminRemoveRoleAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminListRoleAssignments(ctx context.Context, in *RoleAssignmentsRequest, opts ...grpc.CallOption) (*RoleAssignmentPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RoleAssignmentPage)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminListRoleAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminCreateBarrier(ctx context.Context, in *BarrierMutationRequest, opts ...grpc.CallOption) (*InformationBarrier, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InformationBarrier)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminCreateBarrier_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminUpdateBarrier(ctx context.Context, in *BarrierMutationRequest, opts ...grpc.CallOption) (*InformationBarrier, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InformationBarrier)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminUpdateBarrier_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminDeleteBarrier(ctx context.Context, in *BarrierMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminDeleteBarrier_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminBarriers(ctx context.Context, in *BarriersRequest, opts ...grpc.CallOption) (*InformationBarrierPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InformationBarrierPage)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminBarriers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminSetSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminSetSessionSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminClearSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminClearSessionSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*SessionSettingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionSettingsResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminSessionSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAssignAuthPolicy(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAssignAuthPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminRemoveAuthPolicyEntities(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAuthPolicyEntities(ctx context.Context, in *AuthPolicyEntitiesRequest, opts ...grpc.CallOption) (*AuthPolicyEntityPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthPolicyEntityPage)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAuthPolicyEntities_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -527,6 +781,16 @@ func (c *directoryServiceClient) AdminApproveApp(ctx context.Context, in *AppApp
 	return out, nil
 }
 
+func (c *directoryServiceClient) AdminCancelAppRequest(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminCancelAppRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *directoryServiceClient) AdminUninstallApps(ctx context.Context, in *AdminUninstallAppsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -599,6 +863,27 @@ type DirectoryServiceServer interface {
 	RemoveUser(context.Context, *RemoveUserRequest) (*MutationResponse, error)
 	SetUserRole(context.Context, *SetUserRoleRequest) (*MutationResponse, error)
 	SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error)
+	UserExpiration(context.Context, *SetUserExpirationRequest) (*UserExpirationResponse, error)
+	DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error)
+	AdminAnalytics(context.Context, *AnalyticsRequest) (*AnalyticsResponse, error)
+	AdminRequestExport(context.Context, *ExportRequest) (*MutationResponse, error)
+	RequestWorkflowStepResponsesExport(context.Context, *ExportRequest) (*MutationResponse, error)
+	AdminAnomalyAllowList(context.Context, *AnomalyAllowListRequest) (*AnomalyAllowList, error)
+	AdminSetAnomalyAllowList(context.Context, *AnomalyAllowListRequest) (*AnomalyAllowList, error)
+	TeamBillingInfo(context.Context, *WorkspaceRequest) (*BillingInfoResponse, error)
+	AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
+	AdminRemoveRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
+	AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error)
+	AdminCreateBarrier(context.Context, *BarrierMutationRequest) (*InformationBarrier, error)
+	AdminUpdateBarrier(context.Context, *BarrierMutationRequest) (*InformationBarrier, error)
+	AdminDeleteBarrier(context.Context, *BarrierMutationRequest) (*MutationResponse, error)
+	AdminBarriers(context.Context, *BarriersRequest) (*InformationBarrierPage, error)
+	AdminSetSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error)
+	AdminClearSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error)
+	AdminSessionSettings(context.Context, *SessionSettingsMutationRequest) (*SessionSettingsResponse, error)
+	AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
+	AdminRemoveAuthPolicyEntities(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
+	AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error)
 	ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error)
 	UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error)
@@ -631,6 +916,7 @@ type DirectoryServiceServer interface {
 	InvitationPreview(context.Context, *InvitationPreviewRequest) (*InviteRequest, error)
 	AcceptInvitationForEmail(context.Context, *AcceptInvitationRequest) (*User, error)
 	AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
+	AdminCancelAppRequest(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminUninstallApps(context.Context, *AdminUninstallAppsRequest) (*MutationResponse, error)
 	AdminRestrictApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminListApps(context.Context, *AppApprovalsRequest) (*AppApprovalPage, error)
@@ -669,6 +955,69 @@ func (UnimplementedDirectoryServiceServer) SetUserRole(context.Context, *SetUser
 }
 func (UnimplementedDirectoryServiceServer) SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetUserExpiration not implemented")
+}
+func (UnimplementedDirectoryServiceServer) UserExpiration(context.Context, *SetUserExpirationRequest) (*UserExpirationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UserExpiration not implemented")
+}
+func (UnimplementedDirectoryServiceServer) DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DiscoverableContacts not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAnalytics(context.Context, *AnalyticsRequest) (*AnalyticsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAnalytics not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminRequestExport(context.Context, *ExportRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRequestExport not implemented")
+}
+func (UnimplementedDirectoryServiceServer) RequestWorkflowStepResponsesExport(context.Context, *ExportRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestWorkflowStepResponsesExport not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAnomalyAllowList(context.Context, *AnomalyAllowListRequest) (*AnomalyAllowList, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAnomalyAllowList not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminSetAnomalyAllowList(context.Context, *AnomalyAllowListRequest) (*AnomalyAllowList, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetAnomalyAllowList not implemented")
+}
+func (UnimplementedDirectoryServiceServer) TeamBillingInfo(context.Context, *WorkspaceRequest) (*BillingInfoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TeamBillingInfo not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAddRoleAssignments not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminRemoveRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRemoveRoleAssignments not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminListRoleAssignments not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminCreateBarrier(context.Context, *BarrierMutationRequest) (*InformationBarrier, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminCreateBarrier not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminUpdateBarrier(context.Context, *BarrierMutationRequest) (*InformationBarrier, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminUpdateBarrier not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminDeleteBarrier(context.Context, *BarrierMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminDeleteBarrier not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminBarriers(context.Context, *BarriersRequest) (*InformationBarrierPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminBarriers not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminSetSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetSessionSettings not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminClearSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminClearSessionSettings not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminSessionSettings(context.Context, *SessionSettingsMutationRequest) (*SessionSettingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSessionSettings not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAssignAuthPolicy not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminRemoveAuthPolicyEntities(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRemoveAuthPolicyEntities not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAuthPolicyEntities not implemented")
 }
 func (UnimplementedDirectoryServiceServer) ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetUserSessions not implemented")
@@ -765,6 +1114,9 @@ func (UnimplementedDirectoryServiceServer) AcceptInvitationForEmail(context.Cont
 }
 func (UnimplementedDirectoryServiceServer) AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminApproveApp not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminCancelAppRequest(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminCancelAppRequest not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminUninstallApps(context.Context, *AdminUninstallAppsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminUninstallApps not implemented")
@@ -944,6 +1296,384 @@ func _DirectoryService_SetUserExpiration_Handler(srv interface{}, ctx context.Co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).SetUserExpiration(ctx, req.(*SetUserExpirationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_UserExpiration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetUserExpirationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).UserExpiration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_UserExpiration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).UserExpiration(ctx, req.(*SetUserExpirationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_DiscoverableContacts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DiscoverableContactsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).DiscoverableContacts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_DiscoverableContacts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).DiscoverableContacts(ctx, req.(*DiscoverableContactsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAnalytics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnalyticsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAnalytics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAnalytics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAnalytics(ctx, req.(*AnalyticsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminRequestExport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminRequestExport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminRequestExport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminRequestExport(ctx, req.(*ExportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_RequestWorkflowStepResponsesExport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).RequestWorkflowStepResponsesExport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_RequestWorkflowStepResponsesExport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).RequestWorkflowStepResponsesExport(ctx, req.(*ExportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAnomalyAllowList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnomalyAllowListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAnomalyAllowList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAnomalyAllowList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAnomalyAllowList(ctx, req.(*AnomalyAllowListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminSetAnomalyAllowList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnomalyAllowListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminSetAnomalyAllowList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminSetAnomalyAllowList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminSetAnomalyAllowList(ctx, req.(*AnomalyAllowListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_TeamBillingInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).TeamBillingInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_TeamBillingInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).TeamBillingInfo(ctx, req.(*WorkspaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAddRoleAssignments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoleAssignmentMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAddRoleAssignments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAddRoleAssignments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAddRoleAssignments(ctx, req.(*RoleAssignmentMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminRemoveRoleAssignments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoleAssignmentMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminRemoveRoleAssignments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminRemoveRoleAssignments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminRemoveRoleAssignments(ctx, req.(*RoleAssignmentMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminListRoleAssignments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoleAssignmentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminListRoleAssignments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminListRoleAssignments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminListRoleAssignments(ctx, req.(*RoleAssignmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminCreateBarrier_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BarrierMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminCreateBarrier(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminCreateBarrier_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminCreateBarrier(ctx, req.(*BarrierMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminUpdateBarrier_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BarrierMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminUpdateBarrier(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminUpdateBarrier_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminUpdateBarrier(ctx, req.(*BarrierMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminDeleteBarrier_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BarrierMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminDeleteBarrier(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminDeleteBarrier_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminDeleteBarrier(ctx, req.(*BarrierMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminBarriers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BarriersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminBarriers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminBarriers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminBarriers(ctx, req.(*BarriersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminSetSessionSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionSettingsMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminSetSessionSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminSetSessionSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminSetSessionSettings(ctx, req.(*SessionSettingsMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminClearSessionSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionSettingsMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminClearSessionSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminClearSessionSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminClearSessionSettings(ctx, req.(*SessionSettingsMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminSessionSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionSettingsMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminSessionSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminSessionSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminSessionSettings(ctx, req.(*SessionSettingsMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAssignAuthPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthPolicyMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAssignAuthPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAssignAuthPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAssignAuthPolicy(ctx, req.(*AuthPolicyMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminRemoveAuthPolicyEntities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthPolicyMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminRemoveAuthPolicyEntities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminRemoveAuthPolicyEntities(ctx, req.(*AuthPolicyMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAuthPolicyEntities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthPolicyEntitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAuthPolicyEntities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAuthPolicyEntities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAuthPolicyEntities(ctx, req.(*AuthPolicyEntitiesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1524,6 +2254,24 @@ func _DirectoryService_AdminApproveApp_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DirectoryService_AdminCancelAppRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppApprovalMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminCancelAppRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminCancelAppRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminCancelAppRequest(ctx, req.(*AppApprovalMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DirectoryService_AdminUninstallApps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminUninstallAppsRequest)
 	if err := dec(in); err != nil {
@@ -1672,6 +2420,90 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DirectoryService_SetUserExpiration_Handler,
 		},
 		{
+			MethodName: "UserExpiration",
+			Handler:    _DirectoryService_UserExpiration_Handler,
+		},
+		{
+			MethodName: "DiscoverableContacts",
+			Handler:    _DirectoryService_DiscoverableContacts_Handler,
+		},
+		{
+			MethodName: "AdminAnalytics",
+			Handler:    _DirectoryService_AdminAnalytics_Handler,
+		},
+		{
+			MethodName: "AdminRequestExport",
+			Handler:    _DirectoryService_AdminRequestExport_Handler,
+		},
+		{
+			MethodName: "RequestWorkflowStepResponsesExport",
+			Handler:    _DirectoryService_RequestWorkflowStepResponsesExport_Handler,
+		},
+		{
+			MethodName: "AdminAnomalyAllowList",
+			Handler:    _DirectoryService_AdminAnomalyAllowList_Handler,
+		},
+		{
+			MethodName: "AdminSetAnomalyAllowList",
+			Handler:    _DirectoryService_AdminSetAnomalyAllowList_Handler,
+		},
+		{
+			MethodName: "TeamBillingInfo",
+			Handler:    _DirectoryService_TeamBillingInfo_Handler,
+		},
+		{
+			MethodName: "AdminAddRoleAssignments",
+			Handler:    _DirectoryService_AdminAddRoleAssignments_Handler,
+		},
+		{
+			MethodName: "AdminRemoveRoleAssignments",
+			Handler:    _DirectoryService_AdminRemoveRoleAssignments_Handler,
+		},
+		{
+			MethodName: "AdminListRoleAssignments",
+			Handler:    _DirectoryService_AdminListRoleAssignments_Handler,
+		},
+		{
+			MethodName: "AdminCreateBarrier",
+			Handler:    _DirectoryService_AdminCreateBarrier_Handler,
+		},
+		{
+			MethodName: "AdminUpdateBarrier",
+			Handler:    _DirectoryService_AdminUpdateBarrier_Handler,
+		},
+		{
+			MethodName: "AdminDeleteBarrier",
+			Handler:    _DirectoryService_AdminDeleteBarrier_Handler,
+		},
+		{
+			MethodName: "AdminBarriers",
+			Handler:    _DirectoryService_AdminBarriers_Handler,
+		},
+		{
+			MethodName: "AdminSetSessionSettings",
+			Handler:    _DirectoryService_AdminSetSessionSettings_Handler,
+		},
+		{
+			MethodName: "AdminClearSessionSettings",
+			Handler:    _DirectoryService_AdminClearSessionSettings_Handler,
+		},
+		{
+			MethodName: "AdminSessionSettings",
+			Handler:    _DirectoryService_AdminSessionSettings_Handler,
+		},
+		{
+			MethodName: "AdminAssignAuthPolicy",
+			Handler:    _DirectoryService_AdminAssignAuthPolicy_Handler,
+		},
+		{
+			MethodName: "AdminRemoveAuthPolicyEntities",
+			Handler:    _DirectoryService_AdminRemoveAuthPolicyEntities_Handler,
+		},
+		{
+			MethodName: "AdminAuthPolicyEntities",
+			Handler:    _DirectoryService_AdminAuthPolicyEntities_Handler,
+		},
+		{
 			MethodName: "ResetUserSessions",
 			Handler:    _DirectoryService_ResetUserSessions_Handler,
 		},
@@ -1798,6 +2630,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminApproveApp",
 			Handler:    _DirectoryService_AdminApproveApp_Handler,
+		},
+		{
+			MethodName: "AdminCancelAppRequest",
+			Handler:    _DirectoryService_AdminCancelAppRequest_Handler,
 		},
 		{
 			MethodName: "AdminUninstallApps",

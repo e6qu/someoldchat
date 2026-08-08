@@ -1159,7 +1159,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	}
 	defer s.Close()
 	converted, err = s.GetConversation(ctx, "D2")
-	if err != nil || converted.Name != "project-room-2" || !converted.PrivateFlag() || converted.IsDirectOrGroup() {
+	if err != nil || converted.Name != "project-room-2" || converted.Kind != domain.ConversationTypePrivate {
 		t.Fatalf("reopened conversion=%+v err=%v", converted, err)
 	}
 	history, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})

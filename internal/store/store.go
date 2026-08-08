@@ -330,6 +330,91 @@ type Store interface {
 	// state, not something a consumer needs delivered.
 	TouchUserActivity(context.Context, domain.WorkspaceID, domain.UserID, time.Time) error
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
+	// SetRoleAssignments gives members a system role over entities. The store
+	// writes one row for each member and entity pair.
+	SetRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
+	// DeleteRoleAssignments removes those rows.
+	DeleteRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
+	// ListRoleAssignments reports the members who hold one role, in a stable
+	// order so two reads agree.
+	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	// SetAuthPolicyEntities puts entities under one authentication policy. The
+	// same entity twice adds no row.
+	// SetAppIcon records what a client draws beside an app's messages.
+	SetAppIcon(context.Context, domain.WorkspaceID, domain.AppID, string, events.Event) error
+	// GetExternalAuthToken reads one of an app's external credentials.
+	GetExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.ExternalAuthToken, error)
+	// SetExternalAuthToken stores one.
+	SetExternalAuthToken(context.Context, domain.ExternalAuthToken, events.Event) error
+	// DeleteExternalAuthToken removes one, or every one the app holds when the
+	// identifier is empty.
+	DeleteExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string, events.Event) error
+	// GetAnomalyAllowList reports what audit is told not to flag. A workspace
+	// that has set nothing answers an empty list rather than not found: an
+	// empty allow list is the state a workspace starts in.
+	GetAnomalyAllowList(context.Context, domain.WorkspaceID) (domain.AnomalyAllowList, error)
+	// SetAnomalyAllowList replaces it.
+	SetAnomalyAllowList(context.Context, domain.AnomalyAllowList, events.Event) error
+	// AnalyticsRows reports one day of analytics, in entity-identifier order.
+	AnalyticsRows(context.Context, domain.WorkspaceID, domain.AnalyticsKind, time.Time) ([]domain.AnalyticsRow, error)
+	// RecordAppActivity appends one entry to an app's activity log.
+	RecordAppActivity(context.Context, domain.AppActivity) error
+	// ListAppActivities reports the entries that match a filter, newest last.
+	ListAppActivities(context.Context, domain.WorkspaceID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)
+	// SetConversationsExcludedFromAI marks channels in or out of the
+	// workspace's generative features. Exclusion is its own row rather than a
+	// column on conversations: every conversation read names its columns
+	// explicitly in about twenty places, and a fact only the administrative
+	// surface reads does not belong in all of them.
+	SetConversationsExcludedFromAI(context.Context, domain.WorkspaceID, []domain.ConversationID, bool, events.Event) error
+	// ConversationsExcludedFromAI reports which of the named channels are out.
+	ConversationsExcludedFromAI(context.Context, domain.WorkspaceID, []domain.ConversationID) ([]domain.ConversationID, error)
+	// MoveConversations reassigns channels to another workspace.
+	MoveConversations(context.Context, domain.WorkspaceID, []domain.ConversationID, domain.WorkspaceID, events.Event) error
+	// LookupConversations reports the channels that match an administrative
+	// search, in identifier order.
+	LookupConversations(context.Context, domain.WorkspaceID, domain.ConversationLookup, domain.PageRequest) (domain.ConversationPage, error)
+	// LinkConversationObjects links channels to external records.
+	LinkConversationObjects(context.Context, []domain.LinkedObject, events.Event) error
+	// UnlinkConversationObjects removes every link the named channels hold.
+	UnlinkConversationObjects(context.Context, domain.WorkspaceID, []domain.ConversationID, events.Event) error
+	// ListConversationObjects reports the records one channel is linked to.
+	ListConversationObjects(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.LinkedObject, error)
+	// SetAppConfig writes one app's administrative configuration, replacing
+	// what was there.
+	SetAppConfig(context.Context, domain.AppConfig, events.Event) error
+	// ListAppConfigs reports the configuration of the named apps. An app with
+	// none is absent rather than present with empty lists.
+	ListAppConfigs(context.Context, domain.WorkspaceID, []domain.AppID) ([]domain.AppConfig, error)
+	// ClearAppApproval removes an app's approval decision, so the app is
+	// undecided again rather than approved or restricted.
+	ClearAppApproval(context.Context, domain.WorkspaceID, domain.AppID, events.Event) error
+	// CreateBarrier stores a new information barrier.
+	CreateBarrier(context.Context, domain.InformationBarrier, events.Event) error
+	// UpdateBarrier replaces the groups and subjects one barrier holds.
+	UpdateBarrier(context.Context, domain.InformationBarrier, events.Event) error
+	// DeleteBarrier removes one barrier.
+	DeleteBarrier(context.Context, domain.WorkspaceID, domain.BarrierID, events.Event) error
+	// ListBarriers reports the workspace's barriers, newest identifier last.
+	ListBarriers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.InformationBarrierPage, error)
+	// SetSessionSettings writes one member's session settings, replacing what
+	// was there. A zero value clears them back to the workspace default.
+	SetSessionSettings(context.Context, []domain.SessionSettings, events.Event) error
+	// ClearSessionSettings drops the rows, so the members fall back to the
+	// workspace default.
+	ClearSessionSettings(context.Context, domain.WorkspaceID, []domain.UserID, events.Event) error
+	// ListSessionSettings reports the settings the named members hold. A member
+	// with none is absent from the result rather than present with zeros.
+	ListSessionSettings(context.Context, domain.WorkspaceID, []domain.UserID) ([]domain.SessionSettings, error)
+	SetAuthPolicyEntities(context.Context, []domain.AuthPolicyEntity, events.Event) error
+	// DeleteAuthPolicyEntities takes them back out.
+	DeleteAuthPolicyEntities(context.Context, []domain.AuthPolicyEntity, events.Event) error
+	// ListAuthPolicyEntities reports the entities one policy holds, in a stable
+	// order, and how many there are in total.
+	ListAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)
+	// GetUserExpiration reports when a guest account lapses. A zero time means
+	// the account does not lapse.
+	GetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
 	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
 	SetWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error

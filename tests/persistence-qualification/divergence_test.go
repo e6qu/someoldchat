@@ -3141,6 +3141,39 @@ func stoppingAWorkflowIsNotAnEdit(t *testing.T, open opener) {
 	}
 }
 
+// aGuestExpirationReadsBackOrStaysZero pins the read behind
+// admin.users.getExpiration. A member who never received one reads the zero
+// time, which must not decode as an instant in 1754.
+func aGuestExpirationReadsBackOrStaysZero(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	none, err := f.repository.GetUserExpiration(ctx, f.workspaceID, f.userID)
+	if err != nil || !none.IsZero() {
+		t.Fatalf("expiration = %s err = %v, want the zero time", none, err)
+	}
+	lapses := time.Unix(1_900_000_000, 0).UTC()
+	if err := f.repository.SetUserExpiration(ctx, f.workspaceID, f.userID, lapses, f.event("expire", "user.expiration_set", string(f.userID))); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.repository.GetUserExpiration(ctx, f.workspaceID, f.userID)
+	if err != nil || !stored.Equal(lapses) {
+		t.Fatalf("expiration = %s err = %v, want %s", stored, err, lapses)
+	}
+	// Clearing it returns the zero time rather than an instant near 1970.
+	if err := f.repository.SetUserExpiration(ctx, f.workspaceID, f.userID, time.Time{}, f.event("clear-expire", "user.expiration_set", string(f.userID))); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := f.repository.GetUserExpiration(ctx, f.workspaceID, f.userID)
+	if err != nil || !cleared.IsZero() {
+		t.Fatalf("expiration after clearing = %s err = %v, want the zero time", cleared, err)
+	}
+	if _, err := f.repository.GetUserExpiration(ctx, f.workspaceID, domain.UserID("U-absent-"+f.suffix)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a member who is not here: %v", err)
+	}
+}
+
 // sessionsAreListedWithoutTheirTokens pins what an administrator may see and
 // what they may never see. The identifier both profiles answer with is the
 // stored hash of the token, so the listing can tell two sessions apart and end
