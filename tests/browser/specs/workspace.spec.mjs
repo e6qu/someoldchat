@@ -3582,6 +3582,51 @@ test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', a
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it asked for', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-title')).toHaveText('# general');
+
+  // The client cancels an in-flight refresh when a newer one starts, and drops
+  // any response that arrives after its generation has moved on. That guard is
+  // correct and it is also a cost: every discarded response is a round trip the
+  // browser paid for and threw away, and a wide enough race would let stale
+  // content paint before being replaced. The counter makes the guard
+  // observable, and this journey holds it at zero through ordinary use.
+  const counter = async (name) => Number(await page.locator('html').getAttribute(`data-${name}`));
+  expect(await counter('discarded-refreshes'), 'the counter is not exposed').toBe(0);
+
+  for (let round = 0; round < 3; round += 1) {
+    const composer = page.locator('form.composer textarea[name="text"]');
+    const text = `refresh discipline ${round} ${Date.now()}`;
+    await composer.fill(text);
+    const posted = page.waitForResponse((response) =>
+      response.url().includes('/app/message') && response.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Send' }).click();
+    expect((await posted).status()).toBe(200);
+    await expect(page.locator('.message-text').last()).toHaveText(text);
+  }
+
+  // Moving between conversations is what starts refreshes in quick succession,
+  // so it is the shape most likely to produce a discard.
+  for (const name of ['random', 'general']) {
+    const link = page.locator(`.sidebar a:has-text("${name}")`).first();
+    if (await link.count()) {
+      await link.click();
+      await expect(page.locator('.channel-title')).toHaveText(new RegExp(name));
+    }
+  }
+
+  // The denominator is what makes the zero mean something. Without it a client
+  // that never refreshed at all would report zero discards and look perfect.
+  await expect
+    .poll(async () => counter('refresh-responses'), { message: 'no refresh completed, so zero discards proves nothing' })
+    .toBeGreaterThan(0);
+  expect(await counter('discarded-refreshes'), 'the client paid for a response it discarded').toBe(0);
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
