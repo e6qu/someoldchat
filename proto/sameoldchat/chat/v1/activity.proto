@@ -32,6 +32,8 @@ message ActivityItem {
   ListItemSummary list_item = 21;
   string shared_invite_id = 22;
   string shared_invite_status = 23;
+  string app_reminder_id = 24;
+  Reminder app_reminder = 25;
 }
 
 // ListItemSummary is what an Activity row needs to name assigned work without

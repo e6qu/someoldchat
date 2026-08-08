@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 159
+const schemaVersion = 160
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3148,6 +3148,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 160 {
+		// Which reminders.add reminder an Activity row is about. It is its own
+		// column beside reminder_id because the two are different identifiers
+		// for different things, and one column holding either would make every
+		// reader guess which it was holding.
+		columns, err := s.tableColumns(ctx, db, "activity_items")
+		if err != nil {
+			return err
+		}
+		if !columns["app_reminder_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE activity_items ADD COLUMN app_reminder_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate activity app reminder: %w", err)
+			}
 		}
 	}
 	if version < 159 {
@@ -12293,7 +12308,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	if !request.Valid() {
 		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
 	}
-	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.canvas_id, a.list_item_id, a.list_id, a.shared_invite_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
+	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.app_reminder_id, a.canvas_id, a.list_item_id, a.list_id, a.shared_invite_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
 		FROM activity_items a WHERE a.workspace_id = ? AND a.user_id = ?`
 	args := []any{workspace, user}
 	if request.ClearedOnly {
@@ -12328,7 +12343,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	for rows.Next() {
 		var item domain.ActivityItem
 		var occurredAt, readAt, clearedAt int64
-		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.CanvasID, &item.ListItemID, &item.ListID, &item.SharedInviteID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.AppReminderID, &item.CanvasID, &item.ListItemID, &item.ListID, &item.SharedInviteID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
 			rows.Close()
 			return domain.ActivityPage{}, err
 		}
@@ -12375,6 +12390,14 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 		if item.ReminderID != "" {
 			if reminder, reminderErr := s.GetLaterReminder(ctx, workspace, user, item.ReminderID); reminderErr == nil {
 				item.Reminder = reminder
+				item.SourceAvailable = true
+			} else if !errors.Is(reminderErr, store.ErrNotFound) {
+				return domain.ActivityPage{}, reminderErr
+			}
+		}
+		if item.AppReminderID != "" {
+			if reminder, reminderErr := s.GetReminder(ctx, workspace, user, item.AppReminderID); reminderErr == nil {
+				item.AppReminder = reminder
 				item.SourceAvailable = true
 			} else if !errors.Is(reminderErr, store.ErrNotFound) {
 				return domain.ActivityPage{}, reminderErr
@@ -15296,6 +15319,28 @@ func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.Work
 	}
 	if changed == 0 {
 		return false, nil
+	}
+	// The notice and the Activity row are written with the claim, so a member
+	// cannot be marked reminded without being shown the reminder.
+	var owner domain.UserID
+	if err := tx.QueryRowContext(ctx, `SELECT user_id FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&owner); err != nil {
+		return false, err
+	}
+	activityReminders := 1
+	if err := tx.QueryRowContext(ctx, `SELECT activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, owner).
+		Scan(&activityReminders); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if owner != "" && activityReminders != 0 {
+		activityID := domain.ActivityIDFor(owner, "app-reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, app_reminder_id, occurred_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			activityID, workspace, owner, id, deliveredAt.UTC().UnixNano()); err != nil {
+			return false, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`,
+			activityID, domain.ActivityReminder); err != nil {
+			return false, err
+		}
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return false, err

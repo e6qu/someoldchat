@@ -2714,10 +2714,39 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 	if err != nil || !claimed {
 		t.Fatalf("the first claim did not win: claimed=%t err=%v", claimed, err)
 	}
+	// Delivery the member never sees is the bug this worker exists to fix, so
+	// the Activity row is written with the claim rather than after it.
+	shown, err := repository.ListActivity(ctx, workspaceID, userID, domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reminded := 0
+	for _, item := range shown.Items {
+		if item.AppReminderID == due {
+			reminded++
+		}
+	}
+	if reminded != 1 {
+		t.Fatalf("the member was marked reminded and shown %d reminders", reminded)
+	}
 	// The second claim loses rather than delivering again, and writes no notice.
 	second, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, notice("second"))
 	if err != nil || second {
 		t.Fatalf("a delivered reminder was claimed twice: claimed=%t err=%v", second, err)
+	}
+	// The losing claim shows nothing, so a member is not reminded twice.
+	again, err := repository.ListActivity(ctx, workspaceID, userID, domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated := 0
+	for _, item := range again.Items {
+		if item.AppReminderID == due {
+			repeated++
+		}
+	}
+	if repeated != 1 {
+		t.Fatalf("a lost claim showed the reminder again: %d rows", repeated)
 	}
 	after, err := repository.DueReminders(ctx, workspaceID, now, 10)
 	if err != nil || len(after) != 0 {

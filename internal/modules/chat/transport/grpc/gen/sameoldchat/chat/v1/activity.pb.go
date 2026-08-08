@@ -46,6 +46,8 @@ type ActivityItem struct {
 	ListItem           *ListItemSummary       `protobuf:"bytes,21,opt,name=list_item,json=listItem,proto3" json:"list_item,omitempty"`
 	SharedInviteId     string                 `protobuf:"bytes,22,opt,name=shared_invite_id,json=sharedInviteId,proto3" json:"shared_invite_id,omitempty"`
 	SharedInviteStatus string                 `protobuf:"bytes,23,opt,name=shared_invite_status,json=sharedInviteStatus,proto3" json:"shared_invite_status,omitempty"`
+	AppReminderId      string                 `protobuf:"bytes,24,opt,name=app_reminder_id,json=appReminderId,proto3" json:"app_reminder_id,omitempty"`
+	AppReminder        *Reminder              `protobuf:"bytes,25,opt,name=app_reminder,json=appReminder,proto3" json:"app_reminder,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -239,6 +241,20 @@ func (x *ActivityItem) GetSharedInviteStatus() string {
 		return x.SharedInviteStatus
 	}
 	return ""
+}
+
+func (x *ActivityItem) GetAppReminderId() string {
+	if x != nil {
+		return x.AppReminderId
+	}
+	return ""
+}
+
+func (x *ActivityItem) GetAppReminder() *Reminder {
+	if x != nil {
+		return x.AppReminder
+	}
+	return nil
 }
 
 // ListItemSummary is what an Activity row needs to name assigned work without
@@ -1487,7 +1503,7 @@ var File_sameoldchat_chat_v1_activity_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\xcc\x06\n" +
+	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\xb6\a\n" +
 	"\fActivityItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -1517,7 +1533,9 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\tlist_name\x18\x14 \x01(\tR\blistName\x12A\n" +
 	"\tlist_item\x18\x15 \x01(\v2$.sameoldchat.chat.v1.ListItemSummaryR\blistItem\x12(\n" +
 	"\x10shared_invite_id\x18\x16 \x01(\tR\x0esharedInviteId\x120\n" +
-	"\x14shared_invite_status\x18\x17 \x01(\tR\x12sharedInviteStatus\"~\n" +
+	"\x14shared_invite_status\x18\x17 \x01(\tR\x12sharedInviteStatus\x12&\n" +
+	"\x0fapp_reminder_id\x18\x18 \x01(\tR\rappReminderId\x12@\n" +
+	"\fapp_reminder\x18\x19 \x01(\v2\x1d.sameoldchat.chat.v1.ReminderR\vappReminder\"~\n" +
 	"\x0fListItemSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06fields\x18\x02 \x01(\tR\x06fields\x12\x1a\n" +
@@ -1661,42 +1679,44 @@ var file_sameoldchat_chat_v1_activity_proto_goTypes = []any{
 	(*ThreadFollow)(nil),                                  // 18: sameoldchat.chat.v1.ThreadFollow
 	(*Message)(nil),                                       // 19: sameoldchat.chat.v1.Message
 	(*LaterReminder)(nil),                                 // 20: sameoldchat.chat.v1.LaterReminder
-	(*MutationResponse)(nil),                              // 21: sameoldchat.chat.v1.MutationResponse
+	(*Reminder)(nil),                                      // 21: sameoldchat.chat.v1.Reminder
+	(*MutationResponse)(nil),                              // 22: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_activity_proto_depIdxs = []int32{
 	19, // 0: sameoldchat.chat.v1.ActivityItem.message:type_name -> sameoldchat.chat.v1.Message
 	20, // 1: sameoldchat.chat.v1.ActivityItem.reminder:type_name -> sameoldchat.chat.v1.LaterReminder
 	1,  // 2: sameoldchat.chat.v1.ActivityItem.list_item:type_name -> sameoldchat.chat.v1.ListItemSummary
-	0,  // 3: sameoldchat.chat.v1.ActivityPage.items:type_name -> sameoldchat.chat.v1.ActivityItem
-	10, // 4: sameoldchat.chat.v1.WorkspaceNotificationPreferences.schedule:type_name -> sameoldchat.chat.v1.NotificationSchedule
-	10, // 5: sameoldchat.chat.v1.SetNotificationScheduleRequest.schedule:type_name -> sameoldchat.chat.v1.NotificationSchedule
-	2,  // 6: sameoldchat.chat.v1.ActivityService.ListActivity:input_type -> sameoldchat.chat.v1.ActivityRequest
-	4,  // 7: sameoldchat.chat.v1.ActivityService.MutateActivity:input_type -> sameoldchat.chat.v1.MutateActivityRequest
-	5,  // 8: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:input_type -> sameoldchat.chat.v1.ActivityPreferencesRequest
-	6,  // 9: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:input_type -> sameoldchat.chat.v1.SetActivityPreferencesRequest
-	8,  // 10: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.NotificationPreferencesRequest
-	12, // 11: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest
-	11, // 12: sameoldchat.chat.v1.ActivityService.SetNotificationSchedule:input_type -> sameoldchat.chat.v1.SetNotificationScheduleRequest
-	13, // 13: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.ConversationNotificationPreferencesRequest
-	15, // 14: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.SetConversationNotificationPreferencesRequest
-	16, // 15: sameoldchat.chat.v1.ActivityService.GetThreadFollow:input_type -> sameoldchat.chat.v1.ThreadFollowRequest
-	17, // 16: sameoldchat.chat.v1.ActivityService.SetThreadFollow:input_type -> sameoldchat.chat.v1.SetThreadFollowRequest
-	3,  // 17: sameoldchat.chat.v1.ActivityService.ListActivity:output_type -> sameoldchat.chat.v1.ActivityPage
-	21, // 18: sameoldchat.chat.v1.ActivityService.MutateActivity:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 19: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
-	7,  // 20: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
-	9,  // 21: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
-	9,  // 22: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
-	9,  // 23: sameoldchat.chat.v1.ActivityService.SetNotificationSchedule:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
-	14, // 24: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
-	14, // 25: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
-	18, // 26: sameoldchat.chat.v1.ActivityService.GetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
-	18, // 27: sameoldchat.chat.v1.ActivityService.SetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
-	17, // [17:28] is the sub-list for method output_type
-	6,  // [6:17] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	21, // 3: sameoldchat.chat.v1.ActivityItem.app_reminder:type_name -> sameoldchat.chat.v1.Reminder
+	0,  // 4: sameoldchat.chat.v1.ActivityPage.items:type_name -> sameoldchat.chat.v1.ActivityItem
+	10, // 5: sameoldchat.chat.v1.WorkspaceNotificationPreferences.schedule:type_name -> sameoldchat.chat.v1.NotificationSchedule
+	10, // 6: sameoldchat.chat.v1.SetNotificationScheduleRequest.schedule:type_name -> sameoldchat.chat.v1.NotificationSchedule
+	2,  // 7: sameoldchat.chat.v1.ActivityService.ListActivity:input_type -> sameoldchat.chat.v1.ActivityRequest
+	4,  // 8: sameoldchat.chat.v1.ActivityService.MutateActivity:input_type -> sameoldchat.chat.v1.MutateActivityRequest
+	5,  // 9: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:input_type -> sameoldchat.chat.v1.ActivityPreferencesRequest
+	6,  // 10: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:input_type -> sameoldchat.chat.v1.SetActivityPreferencesRequest
+	8,  // 11: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.NotificationPreferencesRequest
+	12, // 12: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:input_type -> sameoldchat.chat.v1.SetWorkspaceNotificationPreferencesRequest
+	11, // 13: sameoldchat.chat.v1.ActivityService.SetNotificationSchedule:input_type -> sameoldchat.chat.v1.SetNotificationScheduleRequest
+	13, // 14: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.ConversationNotificationPreferencesRequest
+	15, // 15: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:input_type -> sameoldchat.chat.v1.SetConversationNotificationPreferencesRequest
+	16, // 16: sameoldchat.chat.v1.ActivityService.GetThreadFollow:input_type -> sameoldchat.chat.v1.ThreadFollowRequest
+	17, // 17: sameoldchat.chat.v1.ActivityService.SetThreadFollow:input_type -> sameoldchat.chat.v1.SetThreadFollowRequest
+	3,  // 18: sameoldchat.chat.v1.ActivityService.ListActivity:output_type -> sameoldchat.chat.v1.ActivityPage
+	22, // 19: sameoldchat.chat.v1.ActivityService.MutateActivity:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 20: sameoldchat.chat.v1.ActivityService.GetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
+	7,  // 21: sameoldchat.chat.v1.ActivityService.SetActivityPreferences:output_type -> sameoldchat.chat.v1.ActivityPreferences
+	9,  // 22: sameoldchat.chat.v1.ActivityService.GetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
+	9,  // 23: sameoldchat.chat.v1.ActivityService.SetWorkspaceNotificationPreferences:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
+	9,  // 24: sameoldchat.chat.v1.ActivityService.SetNotificationSchedule:output_type -> sameoldchat.chat.v1.WorkspaceNotificationPreferences
+	14, // 25: sameoldchat.chat.v1.ActivityService.GetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
+	14, // 26: sameoldchat.chat.v1.ActivityService.SetConversationNotificationPreferences:output_type -> sameoldchat.chat.v1.ConversationNotificationPreferences
+	18, // 27: sameoldchat.chat.v1.ActivityService.GetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
+	18, // 28: sameoldchat.chat.v1.ActivityService.SetThreadFollow:output_type -> sameoldchat.chat.v1.ThreadFollow
+	18, // [18:29] is the sub-list for method output_type
+	7,  // [7:18] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_activity_proto_init() }

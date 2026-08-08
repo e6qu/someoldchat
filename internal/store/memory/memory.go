@@ -6827,6 +6827,12 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = true
 			}
 		}
+		if item.AppReminderID != "" {
+			if reminder, ok := s.reminders[item.AppReminderID]; ok && reminder.WorkspaceID == workspace && reminder.User == user {
+				item.AppReminder = reminder
+				item.SourceAvailable = true
+			}
+		}
 		if item.MessageID != "" {
 			message, messageErr := s.messageLocked(item.MessageID)
 			conversation, conversationExists := s.conversations[item.Conversation]
@@ -8135,8 +8141,21 @@ func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.Worksp
 	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() {
 		return false, nil
 	}
-	_ = reminder
 	s.reminderDelivery[id] = deliveredAt.UTC()
+	// The notice and the Activity row are written with the claim, so a member
+	// cannot be marked reminded without being shown the reminder.
+	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, reminder.User)
+	if stored, ok := s.workspaceNotificationPrefs[workspaceNotificationKey(workspace, reminder.User)]; ok {
+		preferences = stored
+	}
+	if reminder.User != "" && preferences.ActivityReminders {
+		activityID := domain.ActivityIDFor(reminder.User, "app-reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
+		s.activityItems[activityID] = domain.ActivityItem{
+			ID: activityID, WorkspaceID: workspace, UserID: reminder.User,
+			Kinds: []domain.ActivityKind{domain.ActivityReminder}, AppReminderID: id,
+			OccurredAt: deliveredAt.UTC(),
+		}
+	}
 	s.outbox = append(s.outbox, event)
 	return true, nil
 }
