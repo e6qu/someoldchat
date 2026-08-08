@@ -1616,7 +1616,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.externalInvitePermissions.set/
     evidence:
-      - go-test:internal/api/slack:TestEveryScopedMethodRejectsATokenMissingItsScope
+      - go-test:internal/api/slack:TestExternalInvitePermissionsSetUpgradesAndDowngrades
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
@@ -1650,7 +1650,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.approve/
     evidence:
-      - go-test:internal/api/slack:TestEveryScopedMethodRejectsATokenMissingItsScope
+      - go-test:internal/api/slack:TestRequestSharedInviteApproveDecidesTheSameInvitation
       - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs

@@ -199,3 +199,117 @@ func connectCallAs(t *testing.T, mux http.Handler, path string, values url.Value
 	}
 	return decoded
 }
+
+// TestRequestSharedInviteApproveDecidesTheSameInvitation holds
+// conversations.requestSharedInvite.approve. Slack publishes the same decision
+// under two method names, so the request-oriented one has to reach the same
+// invitation and leave it in the same state; a route that answered ok without
+// deciding anything would read as working and approve nobody.
+func TestRequestSharedInviteApproveDecidesTheSameInvitation(t *testing.T) {
+	_, mux := connectWorkspace(t)
+
+	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{
+		"channel": {"C1"}, "external_limited": {"T2"},
+	})
+	if !created["ok"].(bool) {
+		t.Fatalf("inviteShared=%v", created)
+	}
+	id := created["invite"].(map[string]any)["id"].(string)
+
+	approved := connectCall(t, mux, "/api/conversations.requestSharedInvite.approve", url.Values{"invite_id": {id}})
+	if !approved["ok"].(bool) {
+		t.Fatalf("requestSharedInvite.approve=%v", approved)
+	}
+	if status := approved["invite"].(map[string]any)["status"].(string); status != string(domain.SharedInviteApproved) {
+		t.Fatalf("status after approval=%q", status)
+	}
+
+	// The decision is durable and singular: approving again is a conflict
+	// rather than a second approval, and the invited organization can now
+	// accept exactly as it could through the other method name.
+	if again := connectCall(t, mux, "/api/conversations.requestSharedInvite.approve", url.Values{"invite_id": {id}}); again["ok"] == true {
+		t.Fatalf("an already approved invitation was approved again: %v", again)
+	}
+	accepted := connectCallAs(t, mux, "/api/conversations.acceptSharedInvite", url.Values{"invite_id": {id}}, "session-two")
+	if !accepted["ok"].(bool) {
+		t.Fatalf("acceptSharedInvite after requestSharedInvite.approve=%v", accepted)
+	}
+	if missing := connectCall(t, mux, "/api/conversations.requestSharedInvite.approve", url.Values{"invite_id": {"I-nobody"}}); missing["ok"] == true {
+		t.Fatalf("an invitation that does not exist was approved: %v", missing)
+	}
+}
+
+// TestExternalInvitePermissionsSetUpgradesAndDowngrades holds
+// conversations.externalInvitePermissions.set. Withdrawing the ability to
+// invite is a downgrade of the association and not a removal of the
+// organization: an implementation that disconnected instead would look like it
+// worked and would quietly evict everybody that organization had added.
+func TestExternalInvitePermissionsSetUpgradesAndDowngrades(t *testing.T) {
+	_, mux := connectWorkspace(t)
+
+	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{
+		"channel": {"C1"}, "external_limited": {"T2"},
+	})
+	id := created["invite"].(map[string]any)["id"].(string)
+	if !connectCall(t, mux, "/api/conversations.approveSharedInvite", url.Values{"invite_id": {id}})["ok"].(bool) {
+		t.Fatal("the invitation was not approved")
+	}
+	if !connectCallAs(t, mux, "/api/conversations.acceptSharedInvite", url.Values{"invite_id": {id}}, "session-two")["ok"].(bool) {
+		t.Fatal("the invitation was not accepted")
+	}
+
+	for _, action := range []string{"upgrade", "downgrade"} {
+		result := connectCall(t, mux, "/api/conversations.externalInvitePermissions.set", url.Values{
+			"channel": {"C1"}, "target_team": {"T2"}, "action": {action},
+		})
+		if !result["ok"].(bool) || result["channel"].(map[string]any)["id"].(string) != "C1" {
+			t.Fatalf("%s=%v", action, result)
+		}
+		// The organization is still connected either way. A downgrade that
+		// disconnected would pass an ok check and lose the association.
+		teams := connectCall(t, mux, "/api/admin.conversations.getTeams", url.Values{"channel_id": {"C1"}})
+		if !teams["ok"].(bool) {
+			t.Fatalf("getTeams after %s=%v", action, teams)
+		}
+		if !slices.Contains(stringsOf(teams["team_ids"]), "T2") {
+			t.Fatalf("%s removed the organization instead of changing its permission: %v", action, teams)
+		}
+	}
+
+	for _, values := range []url.Values{
+		{"target_team": {"T2"}, "action": {"upgrade"}},
+		{"channel": {"C1"}, "action": {"upgrade"}},
+		{"channel": {"C1"}, "target_team": {"T2"}},
+		{"channel": {"C1"}, "target_team": {"T2"}, "action": {"sideways"}},
+	} {
+		if refused := connectCall(t, mux, "/api/conversations.externalInvitePermissions.set", values); refused["error"] != "invalid_arg_name" {
+			t.Fatalf("values=%v refused=%v", values, refused)
+		}
+	}
+	// An organization that is not on the channel has no permission to change.
+	if absent := connectCall(t, mux, "/api/conversations.externalInvitePermissions.set", url.Values{
+		"channel": {"C1"}, "target_team": {"T-nobody"}, "action": {"upgrade"},
+	}); absent["ok"] == true {
+		t.Fatalf("a permission was set for an organization that is not connected: %v", absent)
+	}
+}
+
+func stringsOf(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, isText := item.(string); isText {
+			result = append(result, text)
+			continue
+		}
+		if object, isObject := item.(map[string]any); isObject {
+			if id, hasID := object["id"].(string); hasID {
+				result = append(result, id)
+			}
+		}
+	}
+	return result
+}

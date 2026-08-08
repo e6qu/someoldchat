@@ -128,3 +128,54 @@ func TestEvidenceRefusesAKindPointingOutsideItsTree(t *testing.T) {
 		t.Fatal("a journey entry pointing outside specs/journeys was accepted")
 	}
 }
+
+// TestOperationEvidenceMustNameItsMethod holds the rule that closed the
+// cheapest way to be wrong about evidence: a Web API test cited for a method
+// has to mention that method. Two rows named the scope-enforcement table, which
+// proves scope handling and nothing about the method it was cited for.
+func TestOperationEvidenceMustNameItsMethod(t *testing.T) {
+	root := t.TempDir()
+	pkg := filepath.Join(root, "internal", "api", "slack")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `package slack
+
+import "testing"
+
+func TestCallsTheMethod(t *testing.T) {
+	call(t, "chat.postMessage")
+}
+
+func TestCallsSomethingElse(t *testing.T) {
+	call(t, "chat.delete")
+}
+`
+	if err := os.WriteFile(filepath.Join(pkg, "handler_test.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver := newEvidenceResolver(root)
+	if err := resolver.validate("chat.postMessage", "go-test:internal/api/slack:TestCallsTheMethod", false); err != nil {
+		t.Fatalf("a test that names its method was refused: %v", err)
+	}
+	if err := resolver.validate("chat.postMessage", "go-test:internal/api/slack:TestCallsSomethingElse", false); err == nil {
+		t.Fatal("a test that never mentions the method was accepted as operation evidence")
+	}
+	// A downgrade audit cites what showed the claim was overstated, which is
+	// often about the behaviour rather than the method.
+	if err := resolver.validate("chat.postMessage", "go-test:internal/api/slack:TestCallsSomethingElse", true); err != nil {
+		t.Fatalf("an audit citation was refused: %v", err)
+	}
+	// Only Web API tests speak in method names. A store or service test would
+	// never mention one and must not have to.
+	other := filepath.Join(root, "internal", "service")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "messages_test.go"), []byte("package service\n\nimport \"testing\"\n\nfunc TestSomething(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.validate("chat.postMessage", "go-test:internal/service:TestSomething", false); err != nil {
+		t.Fatalf("a service test was refused: %v", err)
+	}
+}
