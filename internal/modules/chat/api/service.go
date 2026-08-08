@@ -429,7 +429,7 @@ type Service interface {
 	SearchChannels(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.ConversationPage, error)
 	EditCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) error
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
-	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string, []domain.ConversationID, []domain.UserID) error
+	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.AccessLevel, []domain.ConversationID, []domain.UserID) error
 	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error
 	LookupCanvasSections(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) ([]domain.CanvasSection, error)
 	CreateList(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, domain.ListID, bool, bool) (domain.List, error)
@@ -447,7 +447,7 @@ type Service interface {
 	ListAccessFor(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) error
 	UpdateListCells(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string) ([]domain.ListItem, error)
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, []domain.ListItemID) error
-	SetListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string, []domain.ConversationID, []domain.UserID) error
+	SetListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.AccessLevel, []domain.ConversationID, []domain.UserID) error
 	DeleteListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, []domain.ConversationID, []domain.UserID) error
 	StartListDownload(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, bool) (domain.ListDownload, error)
 	GetListDownload(context.Context, domain.WorkspaceID, domain.UserID, domain.ListDownloadID) (domain.ListDownload, error)

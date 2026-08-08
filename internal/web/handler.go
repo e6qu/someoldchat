@@ -645,9 +645,9 @@ type shareTargetView struct {
 // carry the same grant model and want the same sharing surface, and the surface
 // does not care which kind of document it is describing.
 type documentGrant struct {
-	EntityType string
+	EntityType domain.GrantEntity
 	EntityID   string
-	Access     string
+	Access     domain.AccessLevel
 }
 
 type canvasSectionView struct {
@@ -8093,7 +8093,7 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owner := value.OwnerID == principal.UserID
-	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
+	canWrite := access.Access == domain.AccessWrite || access.Access == domain.AccessOwner
 	sections, readable := canvasSections(value)
 	canEdit := canWrite && principal.HasScope(auth.ScopeCanvasesWrite)
 	readOnlyReason := ""
@@ -8161,7 +8161,7 @@ func (h Handler) documentSharing(ctx context.Context, principal auth.Principal, 
 	for _, grant := range listed {
 		view := grantView{Access: documentAccessLabel(grant.Access)}
 		switch grant.EntityType {
-		case "user":
+		case domain.GrantUser:
 			if domain.UserID(grant.EntityID) == ownerID {
 				// The owner already leads the list; a second row for the same
 				// person would read as two people with the same name.
@@ -8169,7 +8169,7 @@ func (h Handler) documentSharing(ctx context.Context, principal auth.Principal, 
 			}
 			view.Name = names.name(domain.UserID(grant.EntityID))
 			view.Target = "user:" + grant.EntityID
-		case "channel":
+		case domain.GrantChannel:
 			view.Name = names.channelName(domain.ConversationID(grant.EntityID))
 			view.Target = "channel:" + grant.EntityID
 		default:
@@ -8179,7 +8179,7 @@ func (h Handler) documentSharing(ctx context.Context, principal auth.Principal, 
 			view.Name = names.channelName(domain.ConversationID(grant.EntityID))
 			view.Reason = "this is the channel's canvas"
 		}
-		shared[grant.EntityType+":"+grant.EntityID] = true
+		shared[string(grant.EntityType)+":"+grant.EntityID] = true
 		grants = append(grants, view)
 	}
 	if !owner {
@@ -8237,17 +8237,16 @@ func (h Handler) listSharing(ctx context.Context, principal auth.Principal, valu
 // documentAccessLabel says what a grant lets someone do. The stored words are
 // the API's — "read", "write", "owner" — and a sharing list is read by whoever
 // is deciding what to give, not by whoever wrote the schema.
-func documentAccessLabel(access string) string {
+func documentAccessLabel(access domain.AccessLevel) string {
 	switch access {
-	case "owner":
+	case domain.AccessOwner:
 		return "Owner"
-	case "write":
+	case domain.AccessWrite:
 		return "Can edit"
-	case "read":
+	case domain.AccessRead:
 		return "Can view"
-	default:
-		return access
 	}
+	return string(access)
 }
 
 // shareCanvas grants access to one person or one channel. The target arrives as
@@ -8317,11 +8316,13 @@ func parseShareTarget(raw string) ([]domain.ConversationID, []domain.UserID, boo
 
 // shareAccessLevel defaults to the weaker grant. A form that lost its access
 // field must not hand out editing.
-func shareAccessLevel(raw string) string {
-	if access := strings.TrimSpace(raw); access != "" {
+func shareAccessLevel(raw string) domain.AccessLevel {
+	if access := domain.AccessLevel(strings.TrimSpace(raw)); access.Valid() {
 		return access
 	}
-	return "read"
+	// A form that lost its access field, or carried one this build does not
+	// declare, must not hand out editing.
+	return domain.AccessRead
 }
 
 func (h Handler) changeCanvasSharing(w http.ResponseWriter, r *http.Request, granting bool) {
@@ -8759,7 +8760,7 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 	if page.HasMore {
 		more = "/app/lists/" + url.PathEscape(string(id)) + "?cursor=" + url.QueryEscape(string(page.NextCursor))
 	}
-	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
+	canWrite := access.Access == domain.AccessWrite || access.Access == domain.AccessOwner
 	owner := value.OwnerID == principal.UserID
 	grants, shareTargets := h.listSharing(r.Context(), principal, value, owner)
 	h.writeHTML(w, listTemplate, listData{Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeListsWrite), SharePath: "/app/lists/" + url.PathEscape(string(id)), ShareNoun: "list", ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")

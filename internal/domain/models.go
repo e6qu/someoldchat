@@ -1683,11 +1683,76 @@ type CanvasRevisionPage struct {
 // first screen of, and Slack's own history is not infinite either.
 const CanvasRevisionLimit = 50
 
+// AccessLevel is what a grant lets someone do with a document. It is a closed
+// set because every layer compares it — the service to decide an operation, the
+// stores to write it, the client to label it — and a level nobody declared can
+// only be a typo that silently grants nothing or, worse, ranks unexpectedly.
+type AccessLevel string
+
+const (
+	AccessRead  AccessLevel = "read"
+	AccessWrite AccessLevel = "write"
+	AccessOwner AccessLevel = "owner"
+)
+
+// Valid reports whether the level is one the product declares. The two
+// validators this replaces were near-identical chains of != in the canvas and
+// list services, one of which could drift from the other.
+func (a AccessLevel) Valid() bool {
+	switch a {
+	case AccessRead, AccessWrite, AccessOwner:
+		return true
+	}
+	return false
+}
+
+// Rank orders levels so a resolved grant can be compared with what an operation
+// requires. An undeclared level ranks 0, below every real grant, so a value cast
+// in from outside can never satisfy a requirement.
+func (a AccessLevel) Rank() int {
+	switch a {
+	case AccessRead:
+		return 1
+	case AccessWrite:
+		return 2
+	case AccessOwner:
+		return 3
+	}
+	return 0
+}
+
+// GrantEntity is who a grant names. A channel grant reaches everyone in that
+// channel; a channel_canvas grant is the tab that makes a canvas the channel's
+// own, which is why it exists separately and why it cannot be revoked like an
+// ordinary share.
+type GrantEntity string
+
+const (
+	GrantUser          GrantEntity = "user"
+	GrantChannel       GrantEntity = "channel"
+	GrantChannelCanvas GrantEntity = "channel_canvas"
+)
+
+func (g GrantEntity) Valid() bool {
+	switch g {
+	case GrantUser, GrantChannel, GrantChannelCanvas:
+		return true
+	}
+	return false
+}
+
+// ReachesChannelMembers reports whether a grant is held by a conversation
+// rather than by one person, which is the question every access resolution asks
+// and which used to be written as a two-value string comparison in four places.
+func (g GrantEntity) ReachesChannelMembers() bool {
+	return g == GrantChannel || g == GrantChannelCanvas
+}
+
 type CanvasAccess struct {
 	CanvasID   CanvasID
-	EntityType string
+	EntityType GrantEntity
 	EntityID   string
-	Access     string
+	Access     AccessLevel
 }
 
 type CanvasSection struct {
@@ -2423,9 +2488,9 @@ type ListItemPage struct {
 
 type ListAccess struct {
 	ListID     ListID
-	EntityType string
+	EntityType GrantEntity
 	EntityID   string
-	Access     string
+	Access     AccessLevel
 }
 
 type ListDownload struct {

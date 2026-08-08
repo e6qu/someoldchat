@@ -204,7 +204,7 @@ func emojiKey(workspace domain.WorkspaceID, name string) string {
 }
 
 func canvasAccessKey(value domain.CanvasAccess) string {
-	return string(value.CanvasID) + "\x00" + value.EntityType + "\x00" + value.EntityID
+	return string(value.CanvasID) + "\x00" + string(value.EntityType) + "\x00" + value.EntityID
 }
 
 func (s *Store) CreateCanvas(_ context.Context, canvas domain.Canvas, event events.Event) error {
@@ -272,7 +272,7 @@ func (s *Store) CreateChannelCanvas(_ context.Context, canvas domain.Canvas, eve
 	if canvas.Version == 0 {
 		canvas.Version = 1
 	}
-	access := domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "channel_canvas", EntityID: string(channel), Access: store.AccessWrite}
+	access := domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "channel_canvas", EntityID: string(channel), Access: domain.AccessWrite}
 	s.canvases[canvas.ID] = canvas
 	s.canvasAccess[canvasAccessKey(access)] = access
 	s.outbox = append(s.outbox, event, accessEvent)
@@ -323,7 +323,7 @@ func (s *Store) ListCanvases(_ context.Context, workspace domain.WorkspaceID, us
 		if canvas.WorkspaceID != workspace || (after != "" && string(canvas.ID) <= after) {
 			continue
 		}
-		_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, userID, func(visit func(string, string, string)) {
+		_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, userID, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 			for _, grant := range s.canvasAccess {
 				if grant.CanvasID == canvas.ID {
 					visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -392,7 +392,7 @@ func (s *Store) SearchCanvases(_ context.Context, workspace domain.WorkspaceID, 
 		if !containsEveryTerm(folded, terms) || containsAnyTerm(folded, excluded) {
 			continue
 		}
-		_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, userID, func(visit func(string, string, string)) {
+		_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, userID, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 			for _, grant := range s.canvasAccess {
 				if grant.CanvasID == canvas.ID {
 					visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -475,7 +475,7 @@ func (s *Store) ListCanvasGrants(_ context.Context, workspace domain.WorkspaceID
 			grants = append(grants, grant)
 		}
 	}
-	sortGrants(grants, func(grant domain.CanvasAccess) (string, string) { return grant.EntityType, grant.EntityID })
+	sortGrants(grants, func(grant domain.CanvasAccess) (string, string) { return string(grant.EntityType), grant.EntityID })
 	return grants, nil
 }
 
@@ -493,7 +493,7 @@ func (s *Store) ListListGrants(_ context.Context, workspace domain.WorkspaceID, 
 			grants = append(grants, grant)
 		}
 	}
-	sortGrants(grants, func(grant domain.ListAccess) (string, string) { return grant.EntityType, grant.EntityID })
+	sortGrants(grants, func(grant domain.ListAccess) (string, string) { return string(grant.EntityType), grant.EntityID })
 	return grants, nil
 }
 
@@ -518,7 +518,7 @@ func (s *Store) canvasReadableLocked(workspace domain.WorkspaceID, user domain.U
 	if !ok || canvas.WorkspaceID != workspace {
 		return false
 	}
-	_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, user, func(visit func(string, string, string)) {
+	_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, user, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 		for _, grant := range s.canvasAccess {
 			if grant.CanvasID == id {
 				visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -620,7 +620,7 @@ func (s *Store) ListCanvasRevisions(_ context.Context, workspace domain.Workspac
 	if !ok || canvas.WorkspaceID != workspace {
 		return domain.CanvasRevisionPage{}, store.ErrNotFound
 	}
-	_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, user, func(visit func(string, string, string)) {
+	_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, user, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 		for _, grant := range s.canvasAccess {
 			if grant.CanvasID == id {
 				visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -5989,7 +5989,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.ListItem = stored.Summary()
 				if list, listOK := s.lists[item.ListID]; listOK && list.WorkspaceID == workspace {
 					item.ListName = list.Name
-					_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, user, func(visit func(string, string, string)) {
+					_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, user, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 						for _, grant := range s.listAccess {
 							if grant.ListID == list.ID {
 								visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -6007,7 +6007,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 			// rather than being shown a link that would refuse them.
 			if canvas, ok := s.canvases[item.CanvasID]; ok && canvas.WorkspaceID == workspace {
 				item.CanvasTitle = canvas.Title
-				_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, user, func(visit func(string, string, string)) {
+				_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, user, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 					for _, grant := range s.canvasAccess {
 						if grant.CanvasID == canvas.ID {
 							visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -9568,7 +9568,7 @@ func threadMessageBeforeOrEqual(message domain.Message, cursorTime time.Time, cu
 }
 
 func listAccessKey(value domain.ListAccess) string {
-	return string(value.ListID) + "\x00" + value.EntityType + "\x00" + value.EntityID
+	return string(value.ListID) + "\x00" + string(value.EntityType) + "\x00" + value.EntityID
 }
 
 func (s *Store) CreateList(ctx context.Context, value domain.List, event events.Event) error {
@@ -9649,7 +9649,7 @@ func (s *Store) ListLists(_ context.Context, workspace domain.WorkspaceID, userI
 		if list.WorkspaceID != workspace || (after != "" && string(list.ID) <= after) {
 			continue
 		}
-		_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, userID, func(visit func(string, string, string)) {
+		_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, userID, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 			for _, grant := range s.listAccess {
 				if grant.ListID == list.ID {
 					visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -9877,22 +9877,22 @@ func (s *Store) SetListAccess(_ context.Context, value domain.ListAccess, event 
 // member of that channel in the document's workspace. It reports false when no
 // grant applies, so a caller cannot mistake an absent grant for an empty one.
 // Lists and canvases share it because they share the model.
-func (s *Store) resolveAccessLocked(workspace domain.WorkspaceID, owner, userID domain.UserID, grants func(func(entityType, entityID, level string))) (string, string, string, bool) {
+func (s *Store) resolveAccessLocked(workspace domain.WorkspaceID, owner, userID domain.UserID, grants func(func(entityType domain.GrantEntity, entityID string, level domain.AccessLevel))) (domain.GrantEntity, string, domain.AccessLevel, bool) {
 	user, exists := s.users[userID]
 	if !exists || user.WorkspaceID != workspace || user.Deleted {
 		return "", "", "", false
 	}
-	bestType, bestID, bestLevel := "", "", ""
+	bestType, bestID, bestLevel := domain.GrantEntity(""), "", domain.AccessLevel("")
 	if owner == userID {
-		bestType, bestID, bestLevel = "user", string(userID), store.AccessOwner
+		bestType, bestID, bestLevel = domain.GrantUser, string(userID), domain.AccessOwner
 	}
-	grants(func(entityType, entityID, level string) {
-		switch entityType {
-		case "user":
+	grants(func(entityType domain.GrantEntity, entityID string, level domain.AccessLevel) {
+		switch {
+		case entityType == domain.GrantUser:
 			if domain.UserID(entityID) != userID {
 				return
 			}
-		case "channel", "channel_canvas":
+		case entityType.ReachesChannelMembers():
 			conversation, ok := s.conversations[domain.ConversationID(entityID)]
 			if !ok || conversation.WorkspaceID != workspace {
 				return
@@ -9923,7 +9923,7 @@ func (s *Store) GetListAccess(_ context.Context, listID domain.ListID, userID do
 	if !exists {
 		return domain.ListAccess{}, store.ErrNotFound
 	}
-	entityType, entityID, level, ok := s.resolveAccessLocked(list.WorkspaceID, list.OwnerID, userID, func(visit func(string, string, string)) {
+	entityType, entityID, level, ok := s.resolveAccessLocked(list.WorkspaceID, list.OwnerID, userID, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 		for _, grant := range s.listAccess {
 			if grant.ListID == listID {
 				visit(grant.EntityType, grant.EntityID, grant.Access)
@@ -9945,7 +9945,7 @@ func (s *Store) GetCanvasAccess(_ context.Context, canvasID domain.CanvasID, use
 	if !exists {
 		return domain.CanvasAccess{}, store.ErrNotFound
 	}
-	entityType, entityID, level, ok := s.resolveAccessLocked(canvas.WorkspaceID, canvas.OwnerID, userID, func(visit func(string, string, string)) {
+	entityType, entityID, level, ok := s.resolveAccessLocked(canvas.WorkspaceID, canvas.OwnerID, userID, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
 		for _, grant := range s.canvasAccess {
 			if grant.CanvasID == canvasID {
 				visit(grant.EntityType, grant.EntityID, grant.Access)

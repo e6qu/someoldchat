@@ -288,23 +288,23 @@ func TestListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 	if err := s.CreateCanvas(ctx, canvas, event("E-canvas")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: "Ureader", Access: store.AccessRead}, event("E-list-user")); err != nil {
+	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantUser, EntityID: "Ureader", Access: domain.AccessRead}, event("E-list-user")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "channel", EntityID: "C1", Access: store.AccessWrite}, event("E-list-channel")); err != nil {
+	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantChannel, EntityID: "C1", Access: domain.AccessWrite}, event("E-list-channel")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "channel", EntityID: "C1", Access: store.AccessRead}, event("E-canvas-channel")); err != nil {
+	if err := s.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantChannel, EntityID: "C1", Access: domain.AccessRead}, event("E-canvas-channel")); err != nil {
 		t.Fatal(err)
 	}
 	for _, expectation := range []struct {
 		name  string
 		user  domain.UserID
-		level string
+		level domain.AccessLevel
 	}{
-		{"owner", "U1", store.AccessOwner},
-		{"direct user grant", "Ureader", store.AccessRead},
-		{"channel grant through membership", "Uchannel", store.AccessWrite},
+		{"owner", "U1", domain.AccessOwner},
+		{"direct user grant", "Ureader", domain.AccessRead},
+		{"channel grant through membership", "Uchannel", domain.AccessWrite},
 	} {
 		access, err := s.GetListAccess(ctx, list.ID, expectation.user)
 		if err != nil || access.Access != expectation.level || access.ListID != list.ID {
@@ -333,7 +333,7 @@ func TestListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 		t.Fatalf("missing canvas error=%v, want %v", err, store.ErrNotFound)
 	}
 	access, err := s.GetCanvasAccess(ctx, canvas.ID, "Uchannel")
-	if err != nil || access.Access != store.AccessRead || access.EntityType != "channel" || access.EntityID != "C1" {
+	if err != nil || access.Access != domain.AccessRead || access.EntityType != "channel" || access.EntityID != "C1" {
 		t.Fatalf("canvas channel grant=%+v err=%v", access, err)
 	}
 	for _, expectation := range []struct {
@@ -346,7 +346,7 @@ func TestListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 			t.Fatalf("visible documents for %s: lists=%d/%v canvases=%d/%v", expectation.user, len(lists.Lists), listErr, len(canvases.Canvases), canvasErr)
 		}
 	}
-	if err := s.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: "Ureader"}, event("E-list-revoke")); err != nil {
+	if err := s.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantUser, EntityID: "Ureader"}, event("E-list-revoke")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.GetListAccess(ctx, list.ID, "Ureader"); !errors.Is(err, store.ErrNotFound) {

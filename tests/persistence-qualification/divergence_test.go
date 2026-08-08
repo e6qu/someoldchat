@@ -693,7 +693,7 @@ func referentialFailuresAreSentinels(t *testing.T, open opener) {
 
 	// A driver-level constraint failure must never escape: the transport maps an
 	// unrecognized error to a retryable status carrying the constraint name.
-	access := domain.ListAccess{ListID: domain.ListID("F-missing-" + f.suffix), EntityType: "channel", EntityID: string(f.channelID), Access: "read"}
+	access := domain.ListAccess{ListID: domain.ListID("F-missing-" + f.suffix), EntityType: domain.GrantChannel, EntityID: string(f.channelID), Access: domain.AccessRead}
 	if err := f.repository.SetListAccess(ctx, access, f.event("missing-list-access", "list.access.set", string(access.ListID))); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("access on a missing list error=%v, want %v", err, store.ErrNotFound)
 	}
@@ -1189,7 +1189,7 @@ func resolvedAccessNamesOneGrantDeterministically(t *testing.T, open opener) {
 		if err := f.repository.SeedConversationMember(ctx, channel, f.userID); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: listID, EntityType: "channel", EntityID: string(channel), Access: store.AccessWrite}, f.event(fmt.Sprintf("grant-%d", index), "list.access_set", string(listID))); err != nil {
+		if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: listID, EntityType: domain.GrantChannel, EntityID: string(channel), Access: domain.AccessWrite}, f.event(fmt.Sprintf("grant-%d", index), "list.access_set", string(listID))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1198,8 +1198,8 @@ func resolvedAccessNamesOneGrantDeterministically(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Access != store.AccessWrite {
-		t.Fatalf("resolved level=%q, want %q", first.Access, store.AccessWrite)
+	if first.Access != domain.AccessWrite {
+		t.Fatalf("resolved level=%q, want %q", first.Access, domain.AccessWrite)
 	}
 	for attempt := 0; attempt < 40; attempt++ {
 		again, err := f.repository.GetListAccess(ctx, listID, f.userID)
@@ -2826,7 +2826,7 @@ func canvasShareReachesActivity(t *testing.T, open opener) {
 	if err := f.repository.CreateCanvas(ctx, canvas, f.event("canvas", "canvas.created", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}
-	grant := domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(recipient), Access: "read"}
+	grant := domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: string(recipient), Access: domain.AccessRead}
 	shareEvent := f.event("share", "canvas.access_changed", string(canvas.ID))
 	shareEvent.ActorID = f.userID
 	if err := f.repository.SetCanvasAccess(ctx, grant, shareEvent); err != nil {
@@ -2948,7 +2948,7 @@ func listAssignmentReachesActivity(t *testing.T, open opener) {
 	if err := f.repository.CreateList(ctx, list, f.event("list", "list.created", string(list.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: string(assignee), Access: "read"}, f.event("list-access", "list.access_changed", string(list.ID))); err != nil {
+	if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantUser, EntityID: string(assignee), Access: domain.AccessRead}, f.event("list-access", "list.access_changed", string(list.ID))); err != nil {
 		t.Fatal(err)
 	}
 	due := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -3417,7 +3417,7 @@ func deletingAListItemIsAllOrNothingAndSurvivesInActivity(t *testing.T, open ope
 	if err := f.repository.CreateList(ctx, list, f.event("delete-list", "list.created", string(list.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: string(assignee), Access: "read"}, f.event("delete-grant", "list.access_set", string(list.ID))); err != nil {
+	if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantUser, EntityID: string(assignee), Access: domain.AccessRead}, f.event("delete-grant", "list.access_set", string(list.ID))); err != nil {
 		t.Fatal(err)
 	}
 	kept := domain.ListItem{ID: domain.ListItemID("Li-kept-" + f.suffix), ListID: list.ID, WorkspaceID: f.workspaceID, Fields: `[{"column_id":"title","value":"keep me"}]`, CreatedBy: f.userID, UpdatedBy: f.userID, CreatedAt: now, UpdatedAt: now}
@@ -3684,7 +3684,7 @@ func aConversationHasExactlyOneCanvas(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatalf("a member could not reach the channel canvas: %v", err)
 	}
-	if access.EntityType != "channel_canvas" || access.EntityID != string(f.channelID) || access.Access != store.AccessWrite {
+	if access.EntityType != "channel_canvas" || access.EntityID != string(f.channelID) || access.Access != domain.AccessWrite {
 		t.Fatalf("member access = %+v, want write through the conversation", access)
 	}
 
@@ -3725,9 +3725,9 @@ func canvasGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 	// Written in an order no profile would return them in, so a list that came
 	// back in insertion order would fail here rather than pass by accident.
 	written := []domain.CanvasAccess{
-		{CanvasID: canvas.ID, EntityType: "user", EntityID: "U-zoe-" + f.suffix, Access: "read"},
-		{CanvasID: canvas.ID, EntityType: "channel", EntityID: string(channel), Access: "write"},
-		{CanvasID: canvas.ID, EntityType: "user", EntityID: "U-ada-" + f.suffix, Access: "write"},
+		{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: "U-zoe-" + f.suffix, Access: domain.AccessRead},
+		{CanvasID: canvas.ID, EntityType: domain.GrantChannel, EntityID: string(channel), Access: domain.AccessWrite},
+		{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: "U-ada-" + f.suffix, Access: domain.AccessWrite},
 	}
 	for index, grant := range written {
 		if err := f.repository.SetCanvasAccess(ctx, grant, f.event("grant"+strconv.Itoa(index), "canvas.access_set", string(canvas.ID))); err != nil {
@@ -3740,7 +3740,7 @@ func canvasGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 	}
 	described := make([]string, 0, len(listed))
 	for _, grant := range listed {
-		described = append(described, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+		described = append(described, string(grant.EntityType)+":"+grant.EntityID+":"+string(grant.Access))
 	}
 	expected := []string{
 		"channel:C-review-" + f.suffix + ":write",
@@ -3767,7 +3767,7 @@ func canvasGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 		t.Fatalf("grants after raising a level = %+v, want three with the raised one at write", afterRaise)
 	}
 
-	if err := f.repository.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: raised.EntityID}, f.event("revoke", "canvas.access_deleted", string(canvas.ID))); err != nil {
+	if err := f.repository.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: raised.EntityID}, f.event("revoke", "canvas.access_deleted", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}
 	afterRevoke, err := f.repository.ListCanvasGrants(ctx, f.workspaceID, canvas.ID)
@@ -3815,9 +3815,9 @@ func listGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 		}
 	}
 	written := []domain.ListAccess{
-		{ListID: value.ID, EntityType: "user", EntityID: "U-list-zoe-" + f.suffix, Access: "read"},
-		{ListID: value.ID, EntityType: "channel", EntityID: string(channel), Access: "write"},
-		{ListID: value.ID, EntityType: "user", EntityID: "U-list-ada-" + f.suffix, Access: "write"},
+		{ListID: value.ID, EntityType: domain.GrantUser, EntityID: "U-list-zoe-" + f.suffix, Access: domain.AccessRead},
+		{ListID: value.ID, EntityType: domain.GrantChannel, EntityID: string(channel), Access: domain.AccessWrite},
+		{ListID: value.ID, EntityType: domain.GrantUser, EntityID: "U-list-ada-" + f.suffix, Access: domain.AccessWrite},
 	}
 	for index, grant := range written {
 		if err := f.repository.SetListAccess(ctx, grant, f.event("list-grant"+strconv.Itoa(index), "list.access_set", string(value.ID))); err != nil {
@@ -3830,7 +3830,7 @@ func listGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 	}
 	described := make([]string, 0, len(listed))
 	for _, grant := range listed {
-		described = append(described, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+		described = append(described, string(grant.EntityType)+":"+grant.EntityID+":"+string(grant.Access))
 	}
 	expected := []string{
 		"channel:" + string(channel) + ":write",
@@ -3841,7 +3841,7 @@ func listGrantsAreListedInOneStableOrder(t *testing.T, open opener) {
 		t.Fatalf("grants = %v, want %v", described, expected)
 	}
 
-	if err := f.repository.DeleteListAccess(ctx, domain.ListAccess{ListID: value.ID, EntityType: "channel", EntityID: string(channel)}, f.event("list-revoke", "list.access_deleted", string(value.ID))); err != nil {
+	if err := f.repository.DeleteListAccess(ctx, domain.ListAccess{ListID: value.ID, EntityType: domain.GrantChannel, EntityID: string(channel)}, f.event("list-revoke", "list.access_deleted", string(value.ID))); err != nil {
 		t.Fatal(err)
 	}
 	afterRevoke, err := f.repository.ListListGrants(ctx, f.workspaceID, value.ID)
@@ -3879,7 +3879,7 @@ func canvasCommentsOutliveTheirSection(t *testing.T, open opener) {
 	if err := f.repository.CreateCanvas(ctx, canvas, f.event("canvas", "canvas.created", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.repository.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(reader), Access: "read"}, f.event("grant", "canvas.access_changed", string(canvas.ID))); err != nil {
+	if err := f.repository.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: string(reader), Access: domain.AccessRead}, f.event("grant", "canvas.access_changed", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}
 

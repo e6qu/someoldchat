@@ -987,10 +987,10 @@ func listsRepositoryContract(t *testing.T, open opener) {
 	if err != nil || !strings.Contains(loaded.Fields, "after") {
 		t.Fatalf("loaded item=%+v err=%v", loaded, err)
 	}
-	if err := repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "channel", EntityID: string(conversationID), Access: "read"}, event("access-set", "list.access.set", string(list.ID))); err != nil {
+	if err := repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantChannel, EntityID: string(conversationID), Access: domain.AccessRead}, event("access-set", "list.access.set", string(list.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "channel", EntityID: string(conversationID)}, event("access-delete", "list.access.deleted", string(list.ID))); err != nil {
+	if err := repository.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantChannel, EntityID: string(conversationID)}, event("access-delete", "list.access.deleted", string(list.ID))); err != nil {
 		t.Fatal(err)
 	}
 	download := domain.ListDownload{ID: domain.ListDownloadID("export_" + suffix), ListID: list.ID, WorkspaceID: workspaceID, Status: "COMPLETED", URL: "https://example.invalid/export", IncludeArchived: true, CreatedAt: now}
@@ -1185,10 +1185,10 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if err := repository.UpdateCanvas(ctx, canvas, event("canvas-update", "canvas.updated", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(userID), Access: "write"}, event("canvas-access", "canvas.access_set", string(canvas.ID))); err != nil {
+	if err := repository.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: string(userID), Access: domain.AccessWrite}, event("canvas-access", "canvas.access_set", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(userID)}, event("canvas-access-delete", "canvas.access_deleted", string(canvas.ID))); err != nil {
+	if err := repository.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: string(userID)}, event("canvas-access-delete", "canvas.access_deleted", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.DeleteCanvas(ctx, workspaceID, canvas.ID, event("canvas-delete", "canvas.deleted", string(canvas.ID))); err != nil {
