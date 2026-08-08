@@ -150,6 +150,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
 		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
+		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2663,5 +2664,75 @@ func oneAppApprovalReadsBackByItself(t *testing.T, open opener) {
 	// Another workspace cannot read this workspace's decision.
 	if _, err := repository.GetAppApproval(ctx, domain.WorkspaceID("T-other-"+suffix), appID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-workspace read error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// aReminderIsDeliveredOnce holds the storage contract behind reminders.add.
+// The claim is the mark, so two workers reading the same batch deliver a
+// reminder once between them; without that, a member is reminded twice for one
+// reminder, and before this existed nothing read the row at all.
+func aReminderIsDeliveredOnce(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-reminder-" + suffix)
+	userID := domain.UserID("U-reminder-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Reminders"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	due := domain.ReminderID("Rm-due-" + suffix)
+	future := domain.ReminderID("Rm-future-" + suffix)
+	for id, at := range map[domain.ReminderID]time.Time{due: now.Add(-time.Minute), future: now.Add(time.Hour)} {
+		if err := repository.CreateReminder(ctx, domain.Reminder{
+			WorkspaceID: workspaceID, ID: id, Creator: userID, User: userID, Text: string(id), Time: at,
+		}, events.Event{ID: domain.EventID("evt-" + string(id)), WorkspaceID: workspaceID, ActorID: userID,
+			Topic: "reminder.created", Payload: string(id), CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only the reminder that has come due is offered, and the earliest instant
+	// is what tells a sleeping workspace when to wake.
+	pending, err := repository.DueReminders(ctx, workspaceID, now, 10)
+	if err != nil || len(pending) != 1 || pending[0].ID != due {
+		t.Fatalf("due=%+v err=%v", pending, err)
+	}
+	earliest, err := repository.EarliestReminder(ctx, workspaceID)
+	if err != nil || !earliest.Equal(now.Add(-time.Minute)) {
+		t.Fatalf("earliest=%v err=%v", earliest, err)
+	}
+	notice := func(name string) events.Event {
+		return events.Event{ID: domain.EventID(name + "-" + suffix), WorkspaceID: workspaceID, ActorID: userID,
+			Topic: "reminder.delivered", Payload: "{}", CreatedAt: now}
+	}
+	claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, notice("first"))
+	if err != nil || !claimed {
+		t.Fatalf("the first claim did not win: claimed=%t err=%v", claimed, err)
+	}
+	// The second claim loses rather than delivering again, and writes no notice.
+	second, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, notice("second"))
+	if err != nil || second {
+		t.Fatalf("a delivered reminder was claimed twice: claimed=%t err=%v", second, err)
+	}
+	after, err := repository.DueReminders(ctx, workspaceID, now, 10)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("a delivered reminder is still due: %+v err=%v", after, err)
+	}
+	// The future one is untouched, so it still sets the wake instant.
+	remaining, err := repository.EarliestReminder(ctx, workspaceID)
+	if err != nil || !remaining.Equal(now.Add(time.Hour)) {
+		t.Fatalf("remaining earliest=%v err=%v", remaining, err)
+	}
+	// A reminder that is not there loses the claim rather than failing. The
+	// worker only claims what it has just read as due, so losing and never
+	// existing are the same answer to it.
+	absent, err := repository.MarkReminderDelivered(ctx, workspaceID, domain.ReminderID("Rm-absent-"+suffix), now, notice("absent"))
+	if err != nil || absent {
+		t.Fatalf("claiming a reminder that does not exist: claimed=%t err=%v", absent, err)
 	}
 }
