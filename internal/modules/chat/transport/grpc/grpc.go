@@ -3160,7 +3160,7 @@ func decodeWorkflowStepChanges(changes []*chatv1.WorkflowStepChange) []domain.Wo
 func encodeWorkflowTrigger(value domain.WorkflowTrigger) *chatv1.WorkflowTrigger {
 	return &chatv1.WorkflowTrigger{
 		Id: string(value.ID), WorkflowId: string(value.WorkflowID), WorkspaceId: string(value.WorkspaceID),
-		AppId: string(value.AppID), Title: value.Title, Type: value.Type, Config: value.Config,
+		AppId: string(value.AppID), Title: value.Title, Type: string(value.Type), Config: value.Config,
 		Enabled: value.Enabled, Version: value.Version,
 		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
 		NextRunAtUnixNano: optionalUnixNano(value.NextRunAt),
@@ -3174,7 +3174,7 @@ func decodeWorkflowTrigger(value *chatv1.WorkflowTrigger) domain.WorkflowTrigger
 	return domain.WorkflowTrigger{
 		ID: domain.WorkflowTriggerID(value.GetId()), WorkflowID: domain.WorkflowID(value.GetWorkflowId()),
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
-		Title: value.GetTitle(), Type: value.GetType(), Config: value.GetConfig(),
+		Title: value.GetTitle(), Type: domain.WorkflowTriggerType(value.GetType()), Config: value.GetConfig(),
 		Enabled: value.GetEnabled(), Version: value.GetVersion(),
 		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
@@ -3550,7 +3550,7 @@ func (r Remote) CompleteFunction(ctx context.Context, workspaceID domain.Workspa
 func encodeAutomationPermission(value domain.AutomationPermission) *chatv1.AutomationPermission {
 	return &chatv1.AutomationPermission{
 		ResourceType: value.ResourceType, ResourceId: value.ResourceID, WorkspaceId: string(value.WorkspaceID),
-		AppId: string(value.AppID), PermissionType: value.PermissionType,
+		AppId: string(value.AppID), PermissionType: string(value.PermissionType),
 		UserIds: userStrings(value.UserIDs), ChannelIds: conversationStrings(value.ChannelIDs),
 		TeamIds: workspaceStrings(value.TeamIDs), OrgIds: append([]string(nil), value.OrgIDs...),
 		UpdatedAtUnixNano: value.UpdatedAt.UnixNano(),
@@ -3572,7 +3572,7 @@ func decodeAutomationPermission(value *chatv1.AutomationPermission) domain.Autom
 	result := domain.AutomationPermission{
 		ResourceType: value.GetResourceType(), ResourceID: value.GetResourceId(),
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
-		PermissionType: value.GetPermissionType(), OrgIDs: append([]string(nil), value.GetOrgIds()...),
+		PermissionType: domain.PermissionType(value.GetPermissionType()), OrgIDs: append([]string(nil), value.GetOrgIds()...),
 	}
 	for _, id := range value.GetUserIds() {
 		result.UserIDs = append(result.UserIDs, domain.UserID(id))
@@ -3594,6 +3594,71 @@ func functionPermissionRequest(workspaceID domain.WorkspaceID, userID domain.Use
 		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
 		FunctionId: functionID, FunctionCallbackId: callbackID, Permission: encodeAutomationPermission(permission),
 	}
+}
+
+func (r Remote) AdminFunctionPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, functionIDs []string) ([]domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminFunctionPermissions(ctx, adminPermissionsRequest(workspaceID, userID, functionIDs))
+	if err != nil {
+		return nil, err
+	}
+	return decodeAutomationPermissions(out.GetPermissions()), nil
+}
+
+func (r Remote) AdminWorkflowPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowIDs []domain.WorkflowID) ([]domain.AutomationPermission, error) {
+	ids := make([]string, 0, len(workflowIDs))
+	for _, id := range workflowIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.workflows.AdminWorkflowPermissions(ctx, adminPermissionsRequest(workspaceID, userID, ids))
+	if err != nil {
+		return nil, err
+	}
+	return decodeAutomationPermissions(out.GetPermissions()), nil
+}
+
+func (r Remote) AdminTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind domain.WorkflowTriggerType) (domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminTriggerTypePermission(ctx, adminPermissionsRequest(workspaceID, userID, []string{string(kind)}))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) AdminSetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, functionID string, permission domain.AutomationPermission) (domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminSetFunctionPermission(ctx, adminPermissionMutation(workspaceID, userID, functionID, permission))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func (r Remote) AdminSetTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind domain.WorkflowTriggerType, permission domain.AutomationPermission) (domain.AutomationPermission, error) {
+	out, err := r.workflows.AdminSetTriggerTypePermission(ctx, adminPermissionMutation(workspaceID, userID, string(kind), permission))
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return decodeAutomationPermission(out), nil
+}
+
+func adminPermissionsRequest(workspaceID domain.WorkspaceID, userID domain.UserID, ids []string) *chatv1.AdminPermissionsRequest {
+	values := make([]string, 0, len(ids))
+	values = append(values, ids...)
+	return &chatv1.AdminPermissionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ResourceIds: values}
+}
+
+func adminPermissionMutation(workspaceID domain.WorkspaceID, userID domain.UserID, id string, permission domain.AutomationPermission) *chatv1.AdminPermissionMutationRequest {
+	return &chatv1.AdminPermissionMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ResourceId: id,
+		Permission: encodeAutomationPermission(permission),
+	}
+}
+
+func decodeAutomationPermissions(values []*chatv1.AutomationPermission) []domain.AutomationPermission {
+	permissions := make([]domain.AutomationPermission, 0, len(values))
+	for _, value := range values {
+		permissions = append(permissions, decodeAutomationPermission(value))
+	}
+	return permissions
 }
 
 func (r Remote) GetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, functionID, callbackID string) (domain.AutomationPermission, error) {
@@ -7095,6 +7160,64 @@ func (s *Server) CompleteFunction(ctx context.Context, input *chatv1.FunctionCom
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminFunctionPermissions(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AdminPermissionsResponse, error) {
+	values, err := s.implementation.AdminFunctionPermissions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetResourceIds())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AdminPermissionsResponse{Permissions: encodeAutomationPermissions(values)}, nil
+}
+
+func (s *Server) AdminWorkflowPermissions(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AdminPermissionsResponse, error) {
+	ids := make([]domain.WorkflowID, 0, len(input.GetResourceIds()))
+	for _, id := range input.GetResourceIds() {
+		ids = append(ids, domain.WorkflowID(id))
+	}
+	values, err := s.implementation.AdminWorkflowPermissions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AdminPermissionsResponse{Permissions: encodeAutomationPermissions(values)}, nil
+}
+
+func (s *Server) AdminTriggerTypePermission(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AutomationPermission, error) {
+	kind := domain.WorkflowTriggerType("")
+	if ids := input.GetResourceIds(); len(ids) > 0 {
+		kind = domain.WorkflowTriggerType(ids[0])
+	}
+	value, err := s.implementation.AdminTriggerTypePermission(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), kind)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) AdminSetFunctionPermission(ctx context.Context, input *chatv1.AdminPermissionMutationRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.AdminSetFunctionPermission(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		input.GetResourceId(), decodeAutomationPermission(input.GetPermission()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func (s *Server) AdminSetTriggerTypePermission(ctx context.Context, input *chatv1.AdminPermissionMutationRequest) (*chatv1.AutomationPermission, error) {
+	value, err := s.implementation.AdminSetTriggerTypePermission(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowTriggerType(input.GetResourceId()), decodeAutomationPermission(input.GetPermission()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeAutomationPermission(value), nil
+}
+
+func encodeAutomationPermissions(values []domain.AutomationPermission) []*chatv1.AutomationPermission {
+	encoded := make([]*chatv1.AutomationPermission, 0, len(values))
+	for _, value := range values {
+		encoded = append(encoded, encodeAutomationPermission(value))
+	}
+	return encoded
 }
 
 func (s *Server) GetFunctionPermission(ctx context.Context, input *chatv1.FunctionPermissionRequest) (*chatv1.AutomationPermission, error) {

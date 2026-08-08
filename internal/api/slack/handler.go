@@ -26,7 +26,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -201,6 +200,14 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
+	mux.HandleFunc("POST /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
+	mux.HandleFunc("POST /api/admin.functions.permissions.set", h.adminFunctionsPermissionsSet)
+	mux.HandleFunc("GET /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
+	mux.HandleFunc("POST /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
+	mux.HandleFunc("GET /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
+	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
+	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.set", h.adminWorkflowsTriggerTypePermissionsSet)
 	mux.HandleFunc("POST /api/admin.barriers.create", h.adminBarriersCreate)
 	mux.HandleFunc("POST /api/admin.barriers.update", h.adminBarriersUpdate)
 	mux.HandleFunc("POST /api/admin.barriers.delete", h.adminBarriersDelete)
@@ -1659,12 +1666,12 @@ func (h Handler) functionsDistributionsPermissionsSet(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	permissionType := strings.TrimSpace(fields["permission_type"])
+	permissionType := domain.PermissionType(strings.TrimSpace(fields["permission_type"]))
 	if permissionType == "" {
 		writeError(w, "permission_type_required")
 		return
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities", "system"}, permissionType) {
+	if !permissionType.Valid() {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -1838,8 +1845,8 @@ func (h Handler) workflowsTriggersPermissionsSet(w http.ResponseWriter, r *http.
 	if !requireTriggerApp(w, principal) {
 		return
 	}
-	permissionType := strings.TrimSpace(fields["permission_type"])
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, permissionType) {
+	permissionType := domain.PermissionType(strings.TrimSpace(fields["permission_type"]))
+	if !permissionType.SettableBy() || permissionType == domain.PermissionNoOne {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -3240,6 +3247,155 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.functions.permissions.lookup, admin.workflows.permissions.lookup and
+// admin.workflows.triggers.types.permissions.lookup report who may run an
+// automation. A resource with no stored permission answers the default rather
+// than being left out, so the caller learns the effective answer for every
+// identifier it named instead of having to infer it from an absence.
+func (h Handler) adminFunctionsPermissionsLookup(w http.ResponseWriter, r *http.Request) {
+	h.lookupAutomationPermissions(w, r, "function_ids", func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, ids []string) ([]domain.AutomationPermission, error) {
+		return h.Messages.AdminFunctionPermissions(ctx, workspace, actor, ids)
+	})
+}
+
+func (h Handler) adminWorkflowsPermissionsLookup(w http.ResponseWriter, r *http.Request) {
+	h.lookupAutomationPermissions(w, r, "workflow_ids", func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, ids []string) ([]domain.AutomationPermission, error) {
+		workflows := make([]domain.WorkflowID, 0, len(ids))
+		for _, id := range ids {
+			workflows = append(workflows, domain.WorkflowID(id))
+		}
+		return h.Messages.AdminWorkflowPermissions(ctx, workspace, actor, workflows)
+	})
+}
+
+func (h Handler) lookupAutomationPermissions(w http.ResponseWriter, r *http.Request, field string, read func(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.AutomationPermission, error)) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ids := parseIDList[string](fields[field])
+	if len(ids) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	values, err := read(r.Context(), principal.WorkspaceID, principal.UserID, ids)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	permissions := make(map[string]any, len(values))
+	for _, value := range values {
+		permissions[value.ResourceID] = automationPermissionResponse(value)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "permissions": permissions})
+}
+
+func (h Handler) adminWorkflowsTriggerTypePermissionsLookup(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	kind := domain.WorkflowTriggerType(strings.TrimSpace(fields["trigger_type_id"]))
+	if !kind.Valid() {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value, err := h.Messages.AdminTriggerTypePermission(r.Context(), principal.WorkspaceID, principal.UserID, kind)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	response := automationPermissionResponse(value)
+	response["ok"] = true
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h Handler) adminFunctionsPermissionsSet(w http.ResponseWriter, r *http.Request) {
+	h.setAutomationPermission(w, r, "function_id",
+		func(fields map[string]string) bool { return strings.TrimSpace(fields["function_id"]) != "" },
+		func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, fields map[string]string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+			return h.Messages.AdminSetFunctionPermission(ctx, workspace, actor, strings.TrimSpace(fields["function_id"]), value)
+		})
+}
+
+func (h Handler) adminWorkflowsTriggerTypePermissionsSet(w http.ResponseWriter, r *http.Request) {
+	h.setAutomationPermission(w, r, "trigger_type_id",
+		func(fields map[string]string) bool {
+			return domain.WorkflowTriggerType(strings.TrimSpace(fields["trigger_type_id"])).Valid()
+		},
+		func(ctx context.Context, workspace domain.WorkspaceID, actor domain.UserID, fields map[string]string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+			return h.Messages.AdminSetTriggerTypePermission(ctx, workspace, actor, domain.WorkflowTriggerType(strings.TrimSpace(fields["trigger_type_id"])), value)
+		})
+}
+
+// setAutomationPermission checks the resource identifier before it reaches the
+// service, so a request naming no resource answers invalid_arguments rather
+// than the service's own name for a malformed automation.
+func (h Handler) setAutomationPermission(w http.ResponseWriter, r *http.Request, _ string, valid func(map[string]string) bool, write func(context.Context, domain.WorkspaceID, domain.UserID, map[string]string, domain.AutomationPermission) (domain.AutomationPermission, error)) {
+	principal, err := h.authenticate(r, auth.ScopeAdminWorkflowsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// Slack names this argument visibility on the set methods and reports it as
+	// permission_type on the lookups. Accepting both spellings here keeps a
+	// caller from having to know which surface it is on.
+	visibility := domain.PermissionType(strings.TrimSpace(fields["visibility"]))
+	if visibility == "" {
+		visibility = domain.PermissionType(strings.TrimSpace(fields["permission_type"]))
+	}
+	if !visibility.SettableBy() || !valid(fields) {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value := domain.AutomationPermission{
+		PermissionType: visibility,
+		UserIDs:        parseIDList[domain.UserID](fields["user_ids"]),
+		ChannelIDs:     parseIDList[domain.ConversationID](fields["channel_ids"]),
+		TeamIDs:        parseIDList[domain.WorkspaceID](fields["team_ids"]),
+		OrgIDs:         parseIDList[string](fields["org_ids"]),
+	}
+	// named_entities that names nobody would open the resource to nobody while
+	// reading as a narrowing, so Slack refuses it and so does this.
+	if visibility == domain.PermissionNamedEntities && len(value.UserIDs)+len(value.ChannelIDs)+len(value.TeamIDs)+len(value.OrgIDs) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	stored, err := write(r.Context(), principal.WorkspaceID, principal.UserID, fields, value)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	response := automationPermissionResponse(stored)
+	response["ok"] = true
+	writeJSON(w, http.StatusOK, response)
+}
+
+func automationPermissionResponse(value domain.AutomationPermission) map[string]any {
+	userIDs := make([]string, 0, len(value.UserIDs))
+	for _, id := range value.UserIDs {
+		userIDs = append(userIDs, string(id))
+	}
+	return map[string]any{"permission_type": string(value.PermissionType), "user_ids": userIDs}
 }
 
 // admin.barriers.create, update, delete and list govern who may reach whom.

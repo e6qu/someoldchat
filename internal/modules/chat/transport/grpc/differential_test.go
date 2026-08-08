@@ -790,6 +790,56 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A resource nobody has set a permission on answers the default, so
+			// both compositions must report the same effective answer rather
+			// than one answering nothing.
+			name: "administrative automation permissions default and page identically",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				functions, err := chat.AdminFunctionPermissions(ctx, "T1", "UA", []string{"Fn1", "Fn2"})
+				if err != nil {
+					return nil, err
+				}
+				set, err := chat.AdminSetFunctionPermission(ctx, "T1", "UA", "Fn1", domain.AutomationPermission{
+					PermissionType: domain.PermissionNamedEntities, UserIDs: []domain.UserID{"U1"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, system := chat.AdminSetFunctionPermission(ctx, "T1", "UA", "Fn1", domain.AutomationPermission{PermissionType: domain.PermissionSystem})
+				_, unnamed := chat.AdminSetFunctionPermission(ctx, "T1", "UA", "", domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+				after, err := chat.AdminFunctionPermissions(ctx, "T1", "UA", []string{"Fn1", "Fn2"})
+				if err != nil {
+					return nil, err
+				}
+				trigger, err := chat.AdminSetTriggerTypePermission(ctx, "T1", "UA", domain.WorkflowTriggerScheduled, domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+				if err != nil {
+					return nil, err
+				}
+				_, badType := chat.AdminSetTriggerTypePermission(ctx, "T1", "UA", "sundial", domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+				readTrigger, err := chat.AdminTriggerTypePermission(ctx, "T1", "UA", domain.WorkflowTriggerScheduled)
+				if err != nil {
+					return nil, err
+				}
+				workflows, err := chat.AdminWorkflowPermissions(ctx, "T1", "UA", []domain.WorkflowID{"Wf1"})
+				if err != nil {
+					return nil, err
+				}
+				described := func(values []domain.AutomationPermission) []string {
+					out := make([]string, 0, len(values))
+					for _, value := range values {
+						out = append(out, value.ResourceID+"/"+string(value.PermissionType))
+					}
+					return out
+				}
+				return []any{
+					described(functions), described(after), described(workflows),
+					set.PermissionType, set.UserIDs, trigger.ResourceID, readTrigger.PermissionType,
+					system != nil, unnamed != nil, badType != nil,
+				}, nil
+			},
+		},
+		{
 			// A barrier that restricts a subset of the subjects is not a
 			// barrier, so both compositions must refuse one the same way.
 			name: "information barriers are built, listed, and refused identically",

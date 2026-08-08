@@ -196,7 +196,7 @@ func TestWorkflowPermissionReadAndWriteContracts(t *testing.T) {
 	if err := repository.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "third"}); err != nil {
 		t.Fatal(err)
 	}
-	for scope, want := range map[string]string{"find": "everyone", "use": "everyone", "copy": "app_collaborators"} {
+	for scope, want := range map[string]domain.PermissionType{"find": domain.PermissionEveryone, "use": domain.PermissionEveryone, "copy": domain.PermissionAppCollaborators} {
 		value, err := messages.GetWorkflowPermission(ctx, "T1", "U1", workflow.ID, scope)
 		if err != nil {
 			t.Fatal(err)

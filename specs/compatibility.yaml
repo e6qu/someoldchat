@@ -1209,13 +1209,19 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.list/
   - method: admin.functions.permissions.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.permissions.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.functions.permissions.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.roles.addAssignments
     status: behavior-compatible
     provenance: slack-reference
@@ -1289,21 +1295,30 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.remove/
   - method: admin.workflows.permissions.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.permissions.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.workflows.search
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.search/
   - method: admin.workflows.triggers.types.permissions.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.triggers.types.permissions.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.workflows.triggers.types.permissions.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.triggers.types.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAutomationPermissions
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: admin.workflows.unpublish
     status: behavior-compatible
     provenance: slack-reference

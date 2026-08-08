@@ -285,6 +285,11 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	AdminFunctionPermissions(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.AutomationPermission, error)
+	AdminWorkflowPermissions(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID) ([]domain.AutomationPermission, error)
+	AdminTriggerTypePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerType) (domain.AutomationPermission, error)
+	AdminSetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, string, domain.AutomationPermission) (domain.AutomationPermission, error)
+	AdminSetTriggerTypePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerType, domain.AutomationPermission) (domain.AutomationPermission, error)
 	AdminCreateBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserGroupID, []domain.BarrierSubject) (domain.InformationBarrier, error)
 	AdminUpdateBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.BarrierID, domain.UserGroupID, []domain.UserGroupID, []domain.BarrierSubject) (domain.InformationBarrier, error)
 	AdminDeleteBarrier(context.Context, domain.WorkspaceID, domain.UserID, domain.BarrierID) error

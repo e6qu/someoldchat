@@ -1344,6 +1344,23 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const functionPermissions = await client.apiCall("admin.functions.permissions.lookup", { function_ids: "Fn1" });
+assert.equal(functionPermissions.ok, true);
+assert.equal(functionPermissions.permissions.Fn1.permission_type, "everyone");
+assert.equal((await client.apiCall("admin.functions.permissions.set", {
+	function_id: "Fn1",
+	visibility: "named_entities",
+	user_ids: "U1",
+})).permission_type, "named_entities");
+assert.equal((await client.apiCall("admin.workflows.permissions.lookup", { workflow_ids: "Wf1" })).ok, true);
+assert.equal((await client.apiCall("admin.workflows.triggers.types.permissions.set", {
+	trigger_type_id: "scheduled",
+	visibility: "app_collaborators",
+})).permission_type, "app_collaborators");
+assert.equal((await client.apiCall("admin.workflows.triggers.types.permissions.lookup", {
+	trigger_type_id: "scheduled",
+})).permission_type, "app_collaborators");
+
 const barrier = await client.apiCall("admin.barriers.create", {
 	primary_usergroup_id: usergroupId,
 	barriered_from_usergroup_ids: accessGroup.usergroup.id,

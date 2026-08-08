@@ -385,6 +385,23 @@ message WorkflowStepVersionsResponse {
   repeated WorkflowStepVersion steps_versions = 1;
 }
 
+message AdminPermissionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string resource_ids = 3;
+}
+
+message AdminPermissionsResponse {
+  repeated AutomationPermission permissions = 1;
+}
+
+message AdminPermissionMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string resource_id = 3;
+  AutomationPermission permission = 4;
+}
+
 service WorkflowsService {
   rpc StepCompleted(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
   rpc StepFailed(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
@@ -418,6 +435,11 @@ service WorkflowsService {
   rpc GetWorkflowRun(WorkflowRunGetRequest) returns (WorkflowRun);
   rpc CompleteFunction(FunctionCompletionRequest) returns (WorkflowStepMutationResponse);
   rpc GetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);
+  rpc AdminFunctionPermissions(AdminPermissionsRequest) returns (AdminPermissionsResponse);
+  rpc AdminWorkflowPermissions(AdminPermissionsRequest) returns (AdminPermissionsResponse);
+  rpc AdminTriggerTypePermission(AdminPermissionsRequest) returns (AutomationPermission);
+  rpc AdminSetFunctionPermission(AdminPermissionMutationRequest) returns (AutomationPermission);
+  rpc AdminSetTriggerTypePermission(AdminPermissionMutationRequest) returns (AutomationPermission);
   rpc SetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);
   rpc GetTriggerPermission(TriggerPermissionRequest) returns (AutomationPermission);
   rpc SetTriggerPermission(TriggerPermissionRequest) returns (AutomationPermission);

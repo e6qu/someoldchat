@@ -127,6 +127,26 @@ const (
 	WorkflowTriggerList      WorkflowTriggerType = "list"
 )
 
+// Valid reports whether this is a trigger type the platform runs. The field on
+// WorkflowTrigger used to be a bare string, so a misspelt type stored cleanly
+// and then matched no dispatcher: the trigger existed and never fired.
+func (kind WorkflowTriggerType) Valid() bool {
+	switch kind {
+	case WorkflowTriggerLink, WorkflowTriggerShortcut, WorkflowTriggerScheduled, WorkflowTriggerWebhook,
+		WorkflowTriggerMessage, WorkflowTriggerReaction, WorkflowTriggerJoin, WorkflowTriggerList:
+		return true
+	}
+	return false
+}
+
+// WorkflowTriggerTypes is every trigger type, in a stable order.
+func WorkflowTriggerTypes() []WorkflowTriggerType {
+	return []WorkflowTriggerType{
+		WorkflowTriggerLink, WorkflowTriggerShortcut, WorkflowTriggerScheduled, WorkflowTriggerWebhook,
+		WorkflowTriggerMessage, WorkflowTriggerReaction, WorkflowTriggerJoin, WorkflowTriggerList,
+	}
+}
+
 // EventWorkflowTriggerTypes are the trigger types a workspace event dispatcher
 // fires. Scheduled and webhook triggers have their own execution paths.
 var EventWorkflowTriggerTypes = []WorkflowTriggerType{
@@ -139,7 +159,7 @@ type WorkflowTrigger struct {
 	WorkspaceID WorkspaceID
 	AppID       AppID
 	Title       string
-	Type        string
+	Type        WorkflowTriggerType
 	Config      string
 	Enabled     bool
 	// NextRunAt is the next scheduled fire time for a scheduled trigger. It is
@@ -182,12 +202,41 @@ type WorkflowRun struct {
 	CompletedAt     time.Time
 }
 
+// PermissionType is who may exercise one automation. Slack names four values
+// and this used to be an untyped string in the domain, the store, the seam and
+// the handler, so a misspelling read as "nobody but the collaborators" - the
+// safest-looking answer and the wrong one.
+type PermissionType string
+
+const (
+	PermissionEveryone         PermissionType = "everyone"
+	PermissionAppCollaborators PermissionType = "app_collaborators"
+	PermissionNamedEntities    PermissionType = "named_entities"
+	PermissionNoOne            PermissionType = "no_one"
+	// Slack sets a trigger's permission to system when the platform owns it.
+	PermissionSystem PermissionType = "system"
+)
+
+func (permission PermissionType) Valid() bool {
+	switch permission {
+	case PermissionEveryone, PermissionAppCollaborators, PermissionNamedEntities, PermissionNoOne, PermissionSystem:
+		return true
+	}
+	return false
+}
+
+// SettableBy reports whether an administrator may set this value on a resource.
+// system is the platform's own answer and never an administrator's.
+func (permission PermissionType) SettableBy() bool {
+	return permission.Valid() && permission != PermissionSystem
+}
+
 type AutomationPermission struct {
 	ResourceType   string
 	ResourceID     string
 	WorkspaceID    WorkspaceID
 	AppID          AppID
-	PermissionType string
+	PermissionType PermissionType
 	UserIDs        []UserID
 	ChannelIDs     []ConversationID
 	TeamIDs        []WorkspaceID

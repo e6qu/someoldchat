@@ -107,7 +107,7 @@ func workflowTriggerFiredEvent(trigger domain.WorkflowTrigger, occurrence, fired
 		"workflow.trigger_fired",
 		events.String("workflow_id", string(trigger.WorkflowID)),
 		events.String("trigger_id", string(trigger.ID)),
-		events.String("trigger_type", trigger.Type),
+		events.String("trigger_type", string(trigger.Type)),
 		events.String("occurrence", occurrence.UTC().Format(time.RFC3339)),
 	), firedAt)
 }

@@ -3614,6 +3614,97 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminFunctionPermissions reports who may run each named function. A function
+// with no stored permission answers Slack's default rather than being left out,
+// so the caller learns the effective answer for every identifier it named.
+func (m Messages) AdminFunctionPermissions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, functionIDs []string) ([]domain.AutomationPermission, error) {
+	return m.adminAutomationPermissions(ctx, workspaceID, actorID, "function", functionIDs, domain.PermissionEveryone)
+}
+
+// AdminWorkflowPermissions reports who may run each named workflow.
+func (m Messages) AdminWorkflowPermissions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowIDs []domain.WorkflowID) ([]domain.AutomationPermission, error) {
+	ids := make([]string, 0, len(workflowIDs))
+	for _, id := range workflowIDs {
+		ids = append(ids, string(id))
+	}
+	return m.adminAutomationPermissions(ctx, workspaceID, actorID, "workflow_use", ids, domain.PermissionEveryone)
+}
+
+// AdminTriggerTypePermission reports who may build triggers of one type.
+func (m Messages) AdminTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind domain.WorkflowTriggerType) (domain.AutomationPermission, error) {
+	if !kind.Valid() {
+		return domain.AutomationPermission{}, ErrInvalidTriggerConfig
+	}
+	values, err := m.adminAutomationPermissions(ctx, workspaceID, actorID, "trigger_type", []string{string(kind)}, domain.PermissionEveryone)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return values[0], nil
+}
+
+// AdminSetFunctionPermission decides who may run one function.
+func (m Messages) AdminSetFunctionPermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, functionID string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	return m.adminSetAutomationPermission(ctx, workspaceID, actorID, "function", strings.TrimSpace(functionID), value)
+}
+
+// AdminSetTriggerTypePermission decides who may build triggers of one type.
+func (m Messages) AdminSetTriggerTypePermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind domain.WorkflowTriggerType, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	if !kind.Valid() {
+		return domain.AutomationPermission{}, ErrInvalidTriggerConfig
+	}
+	return m.adminSetAutomationPermission(ctx, workspaceID, actorID, "trigger_type", string(kind), value)
+}
+
+func (m Messages) adminAutomationPermissions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, resourceType string, ids []string, fallback domain.PermissionType) ([]domain.AutomationPermission, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, ErrInvalidWorkflowStep
+	}
+	values := make([]domain.AutomationPermission, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, ErrInvalidWorkflowStep
+		}
+		value, err := m.Store.GetAutomationPermission(ctx, workspaceID, resourceType, id)
+		if errors.Is(err, store.ErrNotFound) {
+			value = domain.AutomationPermission{
+				ResourceType: resourceType, ResourceID: id, WorkspaceID: workspaceID, PermissionType: fallback,
+			}
+		} else if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
+func (m Messages) adminSetAutomationPermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, resourceType, resourceID string, value domain.AutomationPermission) (domain.AutomationPermission, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if resourceID == "" || !value.PermissionType.SettableBy() {
+		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
+	}
+	value.ResourceType, value.ResourceID, value.WorkspaceID = resourceType, resourceID, workspaceID
+	value.UpdatedAt = time.Now().UTC()
+	if err := m.validateAutomationEntities(ctx, &value); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("automation.permission_set",
+		events.String("resource_type", resourceType), events.String("resource_id", resourceID),
+		events.String("permission_type", string(value.PermissionType))), value.UpdatedAt)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := m.Store.SetAutomationPermission(ctx, value, event); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	return value, nil
+}
+
 // AdminCreateBarrier builds an information barrier. Every named group is
 // checked before the barrier is stored, so a barrier never names a group that
 // does not exist and therefore stops nothing.

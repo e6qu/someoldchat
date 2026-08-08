@@ -2245,6 +2245,73 @@ func TestAdminBarriers(t *testing.T) {
 	}
 }
 
+// TestAdminAutomationPermissions holds the admin.*.permissions.* contract. A
+// resource nobody has set a permission on answers the default rather than being
+// left out of the reply, and named_entities naming nobody is refused: it would
+// read as a narrowing and open the resource to no one.
+func TestAdminAutomationPermissions(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	defaults := call(t, http.MethodPost, "admin.functions.permissions.lookup", "function_ids=Fn1,Fn2")
+	permissions, ok := defaults["permissions"].(map[string]any)
+	if !ok || len(permissions) != 2 {
+		t.Fatalf("defaults=%v", defaults)
+	}
+	if permissions["Fn1"].(map[string]any)["permission_type"] != "everyone" {
+		t.Fatalf("Fn1 default=%v", permissions["Fn1"])
+	}
+	set := call(t, http.MethodPost, "admin.functions.permissions.set", "function_id=Fn1&visibility=named_entities&user_ids=U1")
+	if set["permission_type"] != "named_entities" || len(set["user_ids"].([]any)) != 1 {
+		t.Fatalf("set=%v", set)
+	}
+	after := call(t, http.MethodGet, "admin.functions.permissions.lookup?function_ids=Fn1,Fn2", "")
+	stored := after["permissions"].(map[string]any)
+	if stored["Fn1"].(map[string]any)["permission_type"] != "named_entities" ||
+		stored["Fn2"].(map[string]any)["permission_type"] != "everyone" {
+		t.Fatalf("after=%v", after)
+	}
+	for _, body := range []string{
+		"function_id=Fn1&visibility=named_entities",
+		"function_id=Fn1&visibility=system",
+		"function_id=Fn1&visibility=nobody",
+		"visibility=everyone",
+	} {
+		if refused := call(t, http.MethodPost, "admin.functions.permissions.set", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if workflows := call(t, http.MethodPost, "admin.workflows.permissions.lookup", "workflow_ids=Wf1"); len(workflows["permissions"].(map[string]any)) != 1 {
+		t.Fatalf("workflows=%v", workflows)
+	}
+	if triggerSet := call(t, http.MethodPost, "admin.workflows.triggers.types.permissions.set", "trigger_type_id=scheduled&visibility=app_collaborators"); triggerSet["permission_type"] != "app_collaborators" {
+		t.Fatalf("triggerSet=%v", triggerSet)
+	}
+	if triggerRead := call(t, http.MethodGet, "admin.workflows.triggers.types.permissions.lookup?trigger_type_id=scheduled", ""); triggerRead["permission_type"] != "app_collaborators" {
+		t.Fatalf("triggerRead=%v", triggerRead)
+	}
+	// A trigger type the platform does not run cannot carry a permission.
+	for _, endpoint := range []string{"admin.workflows.triggers.types.permissions.set", "admin.workflows.triggers.types.permissions.lookup"} {
+		if refused := call(t, http.MethodPost, endpoint, "trigger_type_id=sundial&visibility=everyone"); refused["error"] != "invalid_arguments" {
+			t.Fatalf("%s refused=%v", endpoint, refused)
+		}
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))

@@ -293,7 +293,7 @@ type workflowData struct {
 type workflowPermissionView struct {
 	Scope          string
 	Title          string
-	PermissionType string
+	PermissionType domain.PermissionType
 	UserIDs        string
 }
 
@@ -824,7 +824,7 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 			canRun = workflowPermissionAllows(permission, principal, value.OwnerID) && (canManage || canUse)
 		}
 		view := workflowTriggerView{
-			ID: string(trigger.ID), Title: trigger.Title, Type: trigger.Type, Enabled: trigger.Enabled,
+			ID: string(trigger.ID), Title: trigger.Title, Type: string(trigger.Type), Enabled: trigger.Enabled,
 			Version: trigger.Version, Config: trigger.Config, IdempotencyKey: key, CanRun: canRun,
 			CanManage: canManage, WorkflowVersion: value.PublishedVersion,
 		}
@@ -1255,8 +1255,8 @@ func (h Handler) setWorkflowPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
-	permission := domain.AutomationPermission{PermissionType: strings.TrimSpace(fields["permission_type"])}
-	if permission.PermissionType == "named_entities" {
+	permission := domain.AutomationPermission{PermissionType: domain.PermissionType(strings.TrimSpace(fields["permission_type"]))}
+	if permission.PermissionType == domain.PermissionNamedEntities {
 		permission.UserIDs = splitUserIDs(fields["user_ids"])
 	}
 	if _, err := h.Messages.SetWorkflowPermission(r.Context(), principal.WorkspaceID, principal.UserID, id, strings.TrimSpace(fields["scope"]), permission); err != nil {
@@ -1381,7 +1381,7 @@ func (h Handler) createWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
-		WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]), Type: triggerType, Config: config, Enabled: true,
+		WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]), Type: domain.WorkflowTriggerType(triggerType), Config: config, Enabled: true,
 	}, 0)
 	if err != nil {
 		h.writeWorkflowMutationError(w, r, "The trigger was not created", err)
@@ -1408,7 +1408,7 @@ func (h Handler) updateWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
 		ID: triggerID, WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]),
-		Type: strings.TrimSpace(fields["type"]), Config: strings.TrimSpace(fields["config"]), Enabled: fields["enabled"] == "true",
+		Type: domain.WorkflowTriggerType(strings.TrimSpace(fields["type"])), Config: strings.TrimSpace(fields["config"]), Enabled: fields["enabled"] == "true",
 	}, version)
 	if err != nil {
 		h.writeWorkflowMutationError(w, r, "The trigger was not updated", err)

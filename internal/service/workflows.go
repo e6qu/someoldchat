@@ -703,7 +703,7 @@ func (m Messages) SetWorkflowPermission(ctx context.Context, workspaceID domain.
 	if err := m.requireWorkflowManager(ctx, workflow, actor); err != nil {
 		return domain.AutomationPermission{}, err
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, value.PermissionType) {
+	if !slices.Contains([]domain.PermissionType{domain.PermissionEveryone, domain.PermissionAppCollaborators, domain.PermissionNamedEntities}, value.PermissionType) {
 		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
 	}
 	value.ResourceType = "workflow_" + scope
@@ -717,7 +717,7 @@ func (m Messages) SetWorkflowPermission(ctx context.Context, workspaceID domain.
 	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.permission_set",
 		events.String("workflow_id", string(workflowID)),
 		events.String("scope", scope),
-		events.String("permission_type", value.PermissionType),
+		events.String("permission_type", string(value.PermissionType)),
 	), value.UpdatedAt)
 	if err != nil {
 		return domain.AutomationPermission{}, err
@@ -758,9 +758,9 @@ func (m Messages) GetWorkflowPermission(ctx context.Context, workspaceID domain.
 	}
 	value, err := m.Store.GetAutomationPermission(ctx, workspaceID, "workflow_"+scope, string(workflowID))
 	if errors.Is(err, store.ErrNotFound) {
-		permissionType := "everyone"
+		permissionType := domain.PermissionEveryone
 		if scope == "copy" {
-			permissionType = "app_collaborators"
+			permissionType = domain.PermissionAppCollaborators
 		}
 		return domain.AutomationPermission{
 			ResourceType: "workflow_" + scope, ResourceID: string(workflowID), WorkspaceID: workspaceID,
@@ -1495,12 +1495,8 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 		return domain.WorkflowTrigger{}, err
 	}
 	value.Title = strings.TrimSpace(value.Title)
-	value.Type = strings.TrimSpace(value.Type)
-	switch domain.WorkflowTriggerType(value.Type) {
-	case domain.WorkflowTriggerLink, domain.WorkflowTriggerShortcut, domain.WorkflowTriggerScheduled,
-		domain.WorkflowTriggerWebhook, domain.WorkflowTriggerMessage, domain.WorkflowTriggerReaction,
-		domain.WorkflowTriggerJoin, domain.WorkflowTriggerList:
-	default:
+	value.Type = domain.WorkflowTriggerType(strings.TrimSpace(string(value.Type)))
+	if !value.Type.Valid() {
 		return domain.WorkflowTrigger{}, ErrInvalidTriggerConfig
 	}
 	if value.ID == "" {
@@ -2553,7 +2549,7 @@ func (m Messages) SetFunctionPermission(ctx context.Context, workspaceID domain.
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.AutomationPermission{}, err
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities", "system"}, value.PermissionType) {
+	if !slices.Contains([]domain.PermissionType{domain.PermissionEveryone, domain.PermissionAppCollaborators, domain.PermissionNamedEntities, domain.PermissionSystem}, value.PermissionType) {
 		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
 	}
 	value.ResourceType = "function"
@@ -2567,7 +2563,7 @@ func (m Messages) SetFunctionPermission(ctx context.Context, workspaceID domain.
 	event, err := newEvent(workspaceID, actor, events.NewPayload("function.permission_set",
 		events.String("target_app_id", string(appID)),
 		events.String("function_id", function.ID),
-		events.String("permission_type", value.PermissionType),
+		events.String("permission_type", string(value.PermissionType)),
 	), value.UpdatedAt)
 	if err != nil {
 		return domain.AutomationPermission{}, err
@@ -2614,7 +2610,7 @@ func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.W
 	if trigger.AppID != appID {
 		return domain.AutomationPermission{}, ErrFunctionAccessDenied
 	}
-	if !slices.Contains([]string{"everyone", "app_collaborators", "named_entities"}, value.PermissionType) {
+	if !slices.Contains([]domain.PermissionType{domain.PermissionEveryone, domain.PermissionAppCollaborators, domain.PermissionNamedEntities}, value.PermissionType) {
 		return domain.AutomationPermission{}, ErrInvalidWorkflowStep
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
@@ -2631,7 +2627,7 @@ func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.W
 	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.trigger_permission_set",
 		events.String("target_app_id", string(appID)),
 		events.String("trigger_id", string(triggerID)),
-		events.String("permission_type", value.PermissionType),
+		events.String("permission_type", string(value.PermissionType)),
 	), value.UpdatedAt)
 	if err != nil {
 		return domain.AutomationPermission{}, err

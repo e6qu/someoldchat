@@ -3870,7 +3870,7 @@ func (s *Store) DueScheduledWorkflowTriggers(_ context.Context, workspace domain
 	defer s.mu.RUnlock()
 	values := make([]domain.WorkflowTrigger, 0)
 	for _, value := range s.workflowTriggers {
-		if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || value.NextRunAt.IsZero() || value.NextRunAt.After(now) {
+		if value.Type != domain.WorkflowTriggerScheduled || !value.Enabled || value.NextRunAt.IsZero() || value.NextRunAt.After(now) {
 			continue
 		}
 		if workspace != "" && value.WorkspaceID != workspace {
@@ -3895,7 +3895,7 @@ func (s *Store) EarliestScheduledWorkflowTrigger(_ context.Context, workspace do
 	defer s.mu.RUnlock()
 	var earliest time.Time
 	for _, value := range s.workflowTriggers {
-		if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || value.NextRunAt.IsZero() {
+		if value.Type != domain.WorkflowTriggerScheduled || !value.Enabled || value.NextRunAt.IsZero() {
 			continue
 		}
 		if workspace != "" && value.WorkspaceID != workspace {
@@ -3918,7 +3918,7 @@ func (s *Store) CompleteScheduledWorkflowTrigger(_ context.Context, workspace do
 	if !exists || value.WorkspaceID != workspace {
 		return false, nil
 	}
-	if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || !value.NextRunAt.Equal(expectedNextRunAt) {
+	if value.Type != domain.WorkflowTriggerScheduled || !value.Enabled || !value.NextRunAt.Equal(expectedNextRunAt) {
 		return false, nil
 	}
 	value.NextRunAt = nextRunAt.UTC()
