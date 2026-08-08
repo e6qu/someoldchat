@@ -1004,7 +1004,7 @@ func TestWorkflowTriggerWebhookRunsOnlyWithThePathSecret(t *testing.T) {
 		Type: "webhook", Config: `{"webhook_secret_hash":"` + domain.HashToken("hook-secret") + `"}`,
 		Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := repository.SetWorkflowTrigger(ctx, trigger, 0, events.Event{ID: "trigger-hook", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
+	if err := repository.SetWorkflowTrigger(ctx, trigger, events.Event{ID: "trigger-hook", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	post := func(path, body string) *httptest.ResponseRecorder {
@@ -1075,7 +1075,7 @@ func TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable(t *testing.T)
 		ID: "FtHTTP", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run triage",
 		Type: "link", Config: `{}`, Enabled: true, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := repository.SetWorkflowTrigger(ctx, trigger, 0, events.Event{ID: "trigger-http", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
+	if err := repository.SetWorkflowTrigger(ctx, trigger, events.Event{ID: "trigger-http", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	call := func(path string, values url.Values) map[string]any {

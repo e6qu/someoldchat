@@ -463,11 +463,12 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	workflow.Icon = "📋"
 	workflow.Status = domain.WorkflowPublished
 	workflow.PublishedVersion = 2
+	workflow.Version = 2
 	workflow.UpdatedAt = now.Add(time.Second)
-	if err := repository.UpdateWorkflow(ctx, workflow, 1, event("publish", "workflow.published", workflow.UpdatedAt)); err != nil {
+	if err := repository.UpdateWorkflow(ctx, workflow, event("publish", "workflow.published", workflow.UpdatedAt)); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.UpdateWorkflow(ctx, workflow, 1, event("stale", "workflow.updated", workflow.UpdatedAt)); !errors.Is(err, store.ErrConflict) {
+	if err := repository.UpdateWorkflow(ctx, workflow, event("stale", "workflow.updated", workflow.UpdatedAt)); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale workflow update error=%v, want ErrConflict", err)
 	}
 	revisions, err := repository.ListWorkflowRevisions(ctx, workspaceID, workflowID)
@@ -495,8 +496,9 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	}
 	edited := workflow
 	edited.Icon = "🔁"
+	edited.Version = withManagers.Version + 1
 	edited.UpdatedAt = now.Add(3 * time.Second)
-	if err := repository.UpdateWorkflow(ctx, edited, withManagers.Version, event("icon-edit", "workflow.updated", edited.UpdatedAt)); err != nil {
+	if err := repository.UpdateWorkflow(ctx, edited, event("icon-edit", "workflow.updated", edited.UpdatedAt)); err != nil {
 		t.Fatal(err)
 	}
 	afterEdit, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
@@ -514,7 +516,7 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		Title: "Run triage", Type: "link", Config: `{}`, Enabled: true,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := repository.SetWorkflowTrigger(ctx, trigger, 0, event("trigger", "workflow.trigger_created", now)); err != nil {
+	if err := repository.SetWorkflowTrigger(ctx, trigger, event("trigger", "workflow.trigger_created", now)); err != nil {
 		t.Fatal(err)
 	}
 	otherWorkflow := workflow
@@ -528,8 +530,9 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	}
 	movedTrigger := trigger
 	movedTrigger.WorkflowID = otherWorkflow.ID
+	movedTrigger.Version = 2
 	movedTrigger.UpdatedAt = now.Add(3 * time.Second)
-	if err := repository.SetWorkflowTrigger(ctx, movedTrigger, 1, event("move-trigger", "workflow.trigger_updated", movedTrigger.UpdatedAt)); !errors.Is(err, store.ErrNotFound) {
+	if err := repository.SetWorkflowTrigger(ctx, movedTrigger, event("move-trigger", "workflow.trigger_updated", movedTrigger.UpdatedAt)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("trigger moved across workflows: %v", err)
 	}
 	triggers, err := repository.ListWorkflowTriggers(ctx, workspaceID, workflowID)
@@ -641,8 +644,9 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	stagedWorkflow := published
 	stagedWorkflow.Title = "Staged and discarded"
 	stagedWorkflow.Icon = "🗑"
+	stagedWorkflow.Version = published.Version + 1
 	stagedWorkflow.UpdatedAt = now.Add(5 * time.Second)
-	if err := repository.UpdateWorkflow(ctx, stagedWorkflow, published.Version, event("staged", "workflow.updated", stagedWorkflow.UpdatedAt)); err != nil {
+	if err := repository.UpdateWorkflow(ctx, stagedWorkflow, event("staged", "workflow.updated", stagedWorkflow.UpdatedAt)); err != nil {
 		t.Fatal(err)
 	}
 	stagedHead, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
@@ -677,8 +681,9 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	}
 	unpublished := workflow
 	unpublished.Status = domain.WorkflowDisabled
+	unpublished.Version = afterDiscard.Version + 1
 	unpublished.UpdatedAt = now.Add(6 * time.Second)
-	if err := repository.UpdateWorkflow(ctx, unpublished, afterDiscard.Version, event("unpublish", "workflow.unpublished", unpublished.UpdatedAt)); err != nil {
+	if err := repository.UpdateWorkflow(ctx, unpublished, event("unpublish", "workflow.unpublished", unpublished.UpdatedAt)); err != nil {
 		t.Fatal(err)
 	}
 	cancelledRun, err := repository.GetWorkflowRun(ctx, workspaceID, cancellableRun.ID)
@@ -697,7 +702,7 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		Config:  `{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"hourly"}}`,
 		Enabled: true, NextRunAt: occurrence, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := repository.SetWorkflowTrigger(ctx, scheduledTrigger, 0, event("scheduled-trigger", "workflow.trigger_created", now)); err != nil {
+	if err := repository.SetWorkflowTrigger(ctx, scheduledTrigger, event("scheduled-trigger", "workflow.trigger_created", now)); err != nil {
 		t.Fatal(err)
 	}
 	storedScheduled, err := repository.GetWorkflowTrigger(ctx, workspaceID, scheduledTrigger.ID)
@@ -733,7 +738,7 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		AppID: workflow.AppID, Title: "On message", Type: "message",
 		Config: `{"channel_ids":["` + string(conversationID) + `"]}`, Enabled: true, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := repository.SetWorkflowTrigger(ctx, eventTrigger, 0, event("event-trigger", "workflow.trigger_created", now)); err != nil {
+	if err := repository.SetWorkflowTrigger(ctx, eventTrigger, event("event-trigger", "workflow.trigger_created", now)); err != nil {
 		t.Fatal(err)
 	}
 	eventTriggers, err := repository.ListWorkflowEventTriggers(ctx, workspaceID)

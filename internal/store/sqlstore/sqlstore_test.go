@@ -547,15 +547,16 @@ func TestSQLiteWorkflowAutomationLifecycleIsDurableAndVersioned(t *testing.T) {
 	}
 	workflow.Status = domain.WorkflowPublished
 	workflow.PublishedVersion = 2
+	workflow.Version = 2
 	workflow.UpdatedAt = now.Add(time.Second)
-	if err := s.UpdateWorkflow(ctx, workflow, 1, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "workflow.published", CreatedAt: workflow.UpdatedAt}); err != nil {
+	if err := s.UpdateWorkflow(ctx, workflow, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "workflow.published", CreatedAt: workflow.UpdatedAt}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateWorkflow(ctx, workflow, 1, events.Event{ID: "E3", WorkspaceID: "T1", Topic: "workflow.updated", CreatedAt: workflow.UpdatedAt}); !errors.Is(err, store.ErrConflict) {
+	if err := s.UpdateWorkflow(ctx, workflow, events.Event{ID: "E3", WorkspaceID: "T1", Topic: "workflow.updated", CreatedAt: workflow.UpdatedAt}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale update error=%v", err)
 	}
 	trigger := domain.WorkflowTrigger{ID: "Ft1", WorkflowID: "Wf1", WorkspaceID: "T1", AppID: "A1", Title: "Run triage", Type: "link", Config: `{}`, Enabled: true, CreatedAt: now, UpdatedAt: now}
-	if err := s.SetWorkflowTrigger(ctx, trigger, 0, events.Event{ID: "E4", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
+	if err := s.SetWorkflowTrigger(ctx, trigger, events.Event{ID: "E4", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	otherWorkflow := workflow
@@ -568,8 +569,9 @@ func TestSQLiteWorkflowAutomationLifecycleIsDurableAndVersioned(t *testing.T) {
 	}
 	movedTrigger := trigger
 	movedTrigger.WorkflowID = otherWorkflow.ID
+	movedTrigger.Version = 2
 	movedTrigger.UpdatedAt = now.Add(2 * time.Second)
-	if err := s.SetWorkflowTrigger(ctx, movedTrigger, 1, events.Event{ID: "E4c", WorkspaceID: "T1", Topic: "workflow.trigger_updated", CreatedAt: movedTrigger.UpdatedAt}); !errors.Is(err, store.ErrNotFound) {
+	if err := s.SetWorkflowTrigger(ctx, movedTrigger, events.Event{ID: "E4c", WorkspaceID: "T1", Topic: "workflow.trigger_updated", CreatedAt: movedTrigger.UpdatedAt}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("trigger moved across workflows: %v", err)
 	}
 	permission := domain.AutomationPermission{ResourceType: "trigger", ResourceID: "Ft1", WorkspaceID: "T1", AppID: "A1", PermissionType: "named_entities", UserIDs: []domain.UserID{"U1"}, UpdatedAt: now}

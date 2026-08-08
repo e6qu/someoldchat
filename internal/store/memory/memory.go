@@ -3191,8 +3191,9 @@ func (s *Store) SetWorkflowStatus(_ context.Context, workspace domain.WorkspaceI
 	return nil
 }
 
-func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinition, expectedVersion uint64, event events.Event) error {
-	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || expectedVersion == 0 {
+func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinition, event events.Event) error {
+	expectedVersion := value.Version - 1
+	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || value.Version < 2 {
 		return store.InvalidArgument("invalid workflow update")
 	}
 	s.mu.Lock()
@@ -3205,7 +3206,6 @@ func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 		return store.ErrConflict
 	}
 	value.CreatedAt = current.CreatedAt
-	value.Version = expectedVersion + 1
 	// The manager list is workflow-level metadata written only by
 	// SetWorkflowManagers; a content update preserves it, matching the SQL
 	// store, whose UPDATE leaves the manager_ids column untouched.
@@ -3412,7 +3412,11 @@ func (s *Store) ListWorkflowRevisions(_ context.Context, workspace domain.Worksp
 	return slices.Clone(s.workflowRevisions[workflowID]), nil
 }
 
-func (s *Store) SetWorkflowTrigger(_ context.Context, value domain.WorkflowTrigger, expectedVersion uint64, event events.Event) error {
+func (s *Store) SetWorkflowTrigger(_ context.Context, value domain.WorkflowTrigger, event events.Event) error {
+	expectedVersion := uint64(0)
+	if value.Version > 1 {
+		expectedVersion = value.Version - 1
+	}
 	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
 		value.Type == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow trigger")
