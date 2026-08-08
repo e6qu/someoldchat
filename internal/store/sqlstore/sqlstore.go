@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 149
+const schemaVersion = 150
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,20 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 150 {
+		// System role assignments. Slack scopes a role to a channel or to the
+		// workspace, so entity_id carries which one.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS role_assignments (
+			role_id TEXT NOT NULL, entity_id TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id),
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), created_at INTEGER NOT NULL,
+			PRIMARY KEY (role_id, entity_id, user_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate role assignments: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS role_assignments_role ON role_assignments(workspace_id, role_id, user_id)`); err != nil {
+			return fmt.Errorf("index role assignments: %w", err)
+		}
+	}
 	if version < 149 {
 		// When a session began. An administrator judging whether a session is
 		// one the member still recognises needs to know when it started; an
@@ -4546,6 +4560,90 @@ func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.Workspac
 		return domain.User{}, err
 	}
 	return user, nil
+}
+
+func (s *Store) SetRoleAssignments(ctx context.Context, assignments []domain.RoleAssignment, event events.Event) error {
+	if len(assignments) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, assignment := range assignments {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO role_assignments(role_id, entity_id, user_id, workspace_id, created_at)
+			VALUES (?, ?, ?, ?, ?) ON CONFLICT(role_id, entity_id, user_id) DO NOTHING`,
+			assignment.RoleID, assignment.EntityID, assignment.UserID, assignment.WorkspaceID, assignment.CreatedAt.UTC().UnixNano()); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteRoleAssignments(ctx context.Context, assignments []domain.RoleAssignment, event events.Event) error {
+	if len(assignments) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, assignment := range assignments {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM role_assignments WHERE role_id = ? AND entity_id = ? AND user_id = ? AND workspace_id = ?`,
+			assignment.RoleID, assignment.EntityID, assignment.UserID, assignment.WorkspaceID); err != nil {
+			return err
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.WorkspaceID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	after, err := domain.DecodePairCursor(request.Cursor)
+	if err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	query := `SELECT role_id, entity_id, user_id, workspace_id, created_at FROM role_assignments
+		WHERE workspace_id = ? AND role_id = ? AND (? = '' OR user_id > ? OR (user_id = ? AND entity_id > ?))
+		ORDER BY user_id, entity_id LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, query, workspace, roleID, after.First, after.First, after.First, after.Second, request.Limit+1)
+	if err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	defer rows.Close()
+	assignments := make([]domain.RoleAssignment, 0, request.Limit+1)
+	for rows.Next() {
+		var assignment domain.RoleAssignment
+		var created int64
+		if err := rows.Scan(&assignment.RoleID, &assignment.EntityID, &assignment.UserID, &assignment.WorkspaceID, &created); err != nil {
+			return domain.RoleAssignmentPage{}, err
+		}
+		assignment.CreatedAt = timeFromUnixNanoOrZero(created)
+		assignments = append(assignments, assignment)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	hasMore := len(assignments) > request.Limit
+	if hasMore {
+		assignments = assignments[:request.Limit]
+	}
+	page := domain.RoleAssignmentPage{Assignments: assignments, HasMore: hasMore}
+	if hasMore && len(assignments) > 0 {
+		last := assignments[len(assignments)-1]
+		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
+	}
+	return page, err
 }
 
 func (s *Store) GetUserExpiration(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (time.Time, error) {

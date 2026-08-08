@@ -1631,6 +1631,70 @@ func (r Remote) DiscoverableContacts(ctx context.Context, workspaceID domain.Wor
 	return users, nil
 }
 
+func (r Remote) AdminAddRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) error {
+	out, err := r.directory.AdminAddRoleAssignments(ctx, roleAssignmentMutation(workspaceID, userID, roleID, entityIDs, targets))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed role assignment was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminRemoveRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) error {
+	out, err := r.directory.AdminRemoveRoleAssignments(ctx, roleAssignmentMutation(workspaceID, userID, roleID, entityIDs, targets))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed role removal was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	out, err := r.directory.AdminListRoleAssignments(ctx, &chatv1.RoleAssignmentsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), RoleId: roleID, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	assignments := make([]domain.RoleAssignment, 0, len(out.GetAssignments()))
+	for _, encoded := range out.GetAssignments() {
+		assignments = append(assignments, decodeProtoRoleAssignment(encoded))
+	}
+	return domain.RoleAssignmentPage{Assignments: assignments, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func roleAssignmentMutation(workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) *chatv1.RoleAssignmentMutationRequest {
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, string(target))
+	}
+	entities := make([]string, 0, len(entityIDs))
+	entities = append(entities, entityIDs...)
+	return &chatv1.RoleAssignmentMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), RoleId: roleID, EntityIds: entities, TargetUserIds: ids}
+}
+
+func encodeProtoRoleAssignment(value domain.RoleAssignment) *chatv1.RoleAssignment {
+	return &chatv1.RoleAssignment{
+		RoleId:      value.RoleID,
+		EntityId:    value.EntityID,
+		UserId:      string(value.UserID),
+		WorkspaceId: string(value.WorkspaceID),
+		CreatedAt:   optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoRoleAssignment(value *chatv1.RoleAssignment) domain.RoleAssignment {
+	return domain.RoleAssignment{
+		RoleID:      value.GetRoleId(),
+		EntityID:    value.GetEntityId(),
+		UserID:      domain.UserID(value.GetUserId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		CreatedAt:   optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
 func (r Remote) UserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) (time.Time, error) {
 	out, err := r.directory.UserExpiration(ctx, &chatv1.SetUserExpirationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
 	if err != nil {
@@ -2820,19 +2884,18 @@ func decodeWorkflowDefinition(value *chatv1.WorkflowDefinition) domain.WorkflowD
 		ID: domain.WorkflowID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		AppID: domain.AppID(value.GetAppId()), OwnerID: domain.UserID(value.GetOwnerId()),
 		CallbackID: value.GetCallbackId(), Title: value.GetTitle(), Description: value.GetDescription(),
-		Icon: value.GetIcon(), ManagerIDs: decodeWorkflowUserIDs(value.GetManagerIds()), InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
+		Icon: value.GetIcon(), ManagerIDs: decodeUserIDs(value.GetManagerIds()), InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
 		Version: value.GetVersion(), PublishedVersion: value.GetPublishedVersion(),
 		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
 	}
 }
 
-// decodeWorkflowUserIDs answers with an empty list rather than nil when there
-// are none. It used to answer nil, which is the same thing to most Go code and
-// a different answer at the seam: the local composition returns the empty list
-// the store holds, so the remote one returning nil made the two compositions
-// disagree about a workflow nobody manages. The parity gate caught it.
-func decodeWorkflowUserIDs(ids []string) []domain.UserID {
+// decodeUserIDs answers with an empty list rather than nil when there are
+// none. Nil and the empty list are the same thing to most Go code and a
+// different answer at the seam: the local composition returns the empty list
+// the store holds, so a nil here makes the two compositions disagree.
+func decodeUserIDs(ids []string) []domain.UserID {
 	values := make([]domain.UserID, 0, len(ids))
 	for _, id := range ids {
 		values = append(values, domain.UserID(id))
@@ -5308,6 +5371,32 @@ func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleReque
 	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
+func (s *Server) AdminAddRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminAddRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetRoleId(), input.GetEntityIds(), decodeUserIDs(input.GetTargetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminRemoveRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminRemoveRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetRoleId(), input.GetEntityIds(), decodeUserIDs(input.GetTargetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminListRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentsRequest) (*chatv1.RoleAssignmentPage, error) {
+	page, err := s.implementation.AdminListRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetRoleId(), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	assignments := make([]*chatv1.RoleAssignment, 0, len(page.Assignments))
+	for _, value := range page.Assignments {
+		assignments = append(assignments, encodeProtoRoleAssignment(value))
+	}
+	return &chatv1.RoleAssignmentPage{Assignments: assignments, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
 func (s *Server) DiscoverableContacts(ctx context.Context, input *chatv1.DiscoverableContactsRequest) (*chatv1.DiscoverableContactsResponse, error) {
 	users, err := s.implementation.DiscoverableContacts(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetEmails())
 	if err != nil {
@@ -6491,7 +6580,7 @@ func (s *Server) WorkflowFormResponseExport(ctx context.Context, input *chatv1.W
 func (s *Server) SetWorkflowManagers(ctx context.Context, input *chatv1.WorkflowManagersRequest) (*chatv1.WorkflowDefinition, error) {
 	value, err := s.implementation.SetWorkflowManagers(ctx,
 		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		domain.WorkflowID(input.GetWorkflowId()), decodeWorkflowUserIDs(input.GetManagerIds()),
+		domain.WorkflowID(input.GetWorkflowId()), decodeUserIDs(input.GetManagerIds()),
 	)
 	if err != nil {
 		return nil, mapError(err)

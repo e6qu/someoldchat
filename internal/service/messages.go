@@ -3614,6 +3614,73 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminAddRoleAssignments gives members a system role over entities. The
+// service checks every member before it writes one row, so an administrator who
+// names somebody outside the workspace learns it before the request lands.
+func (m Messages) AdminAddRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, entityIDs []string, userIDs []domain.UserID) error {
+	assignments, err := m.roleAssignments(ctx, workspaceID, actorID, roleID, entityIDs, userIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("role.assignments_added",
+		events.String("role_id", roleID), events.Int("assignments", int64(len(assignments)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetRoleAssignments(ctx, assignments, event)
+}
+
+// AdminRemoveRoleAssignments takes the role away again.
+func (m Messages) AdminRemoveRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, entityIDs []string, userIDs []domain.UserID) error {
+	assignments, err := m.roleAssignments(ctx, workspaceID, actorID, roleID, entityIDs, userIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("role.assignments_removed",
+		events.String("role_id", roleID), events.Int("assignments", int64(len(assignments)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteRoleAssignments(ctx, assignments, event)
+}
+
+// AdminListRoleAssignments reports who holds one role.
+func (m Messages) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.RoleAssignmentPage{}, err
+	}
+	return m.Store.ListRoleAssignments(ctx, workspaceID, strings.TrimSpace(roleID), request)
+}
+
+func (m Messages) roleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, entityIDs []string, userIDs []domain.UserID) ([]domain.RoleAssignment, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" || len(entityIDs) == 0 || len(userIDs) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	for _, userID := range userIDs {
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, userID); err != nil {
+			return nil, store.ErrNotFound
+		}
+	}
+	now := time.Now().UTC()
+	assignments := make([]domain.RoleAssignment, 0, len(entityIDs)*len(userIDs))
+	for _, entityID := range entityIDs {
+		entityID = strings.TrimSpace(entityID)
+		if entityID == "" {
+			return nil, ErrInvalidWorkspace
+		}
+		for _, userID := range userIDs {
+			assignments = append(assignments, domain.RoleAssignment{
+				RoleID: roleID, EntityID: entityID, UserID: userID, WorkspaceID: workspaceID, CreatedAt: now,
+			})
+		}
+	}
+	return assignments, nil
+}
+
 // DiscoverableContacts reports which of the named email addresses belong to a
 // member this workspace lets others find. A workspace that is not discoverable
 // answers no contacts, whatever the addresses match.

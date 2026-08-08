@@ -1344,6 +1344,24 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+// admin.roles.* runs before the member leaves: a role assignment names a
+// member, so removing U2 first would make the walk unreachable.
+assert.equal((await client.apiCall("admin.roles.addAssignments", {
+	role_id: "Rl0A",
+	entity_ids: "C1,C2",
+	user_ids: "U2",
+})).ok, true);
+const roleAssignments = await client.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" });
+assert.equal(roleAssignments.ok, true);
+assert.equal(roleAssignments.role_assignments.length, 2);
+assert.equal(roleAssignments.role_assignments[0].user_id, "U2");
+assert.equal((await client.apiCall("admin.roles.removeAssignments", {
+	role_id: "Rl0A",
+	entity_ids: "C1,C2",
+	user_ids: "U2",
+})).ok, true);
+assert.equal((await client.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" })).role_assignments.length, 0);
+
 assert.equal((await client.admin.users.remove({ team_id: "T1", user_id: "U2" })).ok, true);
 
 // files.getUploadURLExternal hands back a file_id before any bytes exist, and

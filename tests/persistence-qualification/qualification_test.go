@@ -139,6 +139,7 @@ func runQualification(t *testing.T, open opener) {
 		{"canvas grants are listed in one stable order", canvasGrantsAreListedInOneStableOrder},
 		{"list grants are listed in one stable order", listGrantsAreListedInOneStableOrder},
 		{"a Slack Connect decision reaches its requester", connectDecisionReachesItsRequester},
+		{"role assignments agree on every profile", roleAssignmentsAgreeOnEveryProfile},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -1855,5 +1856,85 @@ func durableEventDeliveryRepositoryContract(t *testing.T, open opener) {
 	}
 	if err := repository.AckEvents(ctx, "blob-worker", []uint64{blobs[0].Sequence}); !errors.Is(err, store.ErrLeaseConflict) {
 		t.Fatalf("repeated acknowledgement error=%v, want ErrLeaseConflict", err)
+	}
+}
+
+// roleAssignmentsAgreeOnEveryProfile holds the storage contract for
+// admin.roles.*. A role assignment is a triple, so writing the same triple
+// twice must not create a second row, paging must order by member and then by
+// entity, and removing one entity must leave the others in place.
+func roleAssignmentsAgreeOnEveryProfile(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-roles-" + suffix)
+	first := domain.UserID("U-roles-a-" + suffix)
+	second := domain.UserID("U-roles-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Roles"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.UserID{first, second} {
+		if err := repository.SeedUser(ctx, domain.User{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assignments := []domain.RoleAssignment{
+		{RoleID: "Rl0A", EntityID: "C1", UserID: second, WorkspaceID: workspaceID, CreatedAt: now},
+		{RoleID: "Rl0A", EntityID: "C2", UserID: first, WorkspaceID: workspaceID, CreatedAt: now},
+		{RoleID: "Rl0A", EntityID: "C1", UserID: first, WorkspaceID: workspaceID, CreatedAt: now},
+	}
+	if err := repository.SetRoleAssignments(ctx, assignments, event("roles-add", "role.assignments_added")); err != nil {
+		t.Fatal(err)
+	}
+	// The same triple again must not double the rows.
+	if err := repository.SetRoleAssignments(ctx, assignments, event("roles-again", "role.assignments_added")); err != nil {
+		t.Fatal(err)
+	}
+	page, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Assignments) != 3 || page.HasMore {
+		t.Fatalf("assignments=%+v err=%v", page, err)
+	}
+	ordered := make([]string, 0, len(page.Assignments))
+	for _, assignment := range page.Assignments {
+		ordered = append(ordered, string(assignment.UserID)+"/"+assignment.EntityID)
+	}
+	want := []string{string(first) + "/C1", string(first) + "/C2", string(second) + "/C1"}
+	if strings.Join(ordered, ",") != strings.Join(want, ",") {
+		t.Fatalf("order=%v want=%v", ordered, want)
+	}
+	// A page boundary must resume without repeating or dropping a row.
+	head, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2})
+	if err != nil || len(head.Assignments) != 2 || !head.HasMore || head.NextCursor == "" {
+		t.Fatalf("head=%+v err=%v", head, err)
+	}
+	tail, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
+	if err != nil || len(tail.Assignments) != 1 || tail.Assignments[0].UserID != second {
+		t.Fatalf("tail=%+v err=%v", tail, err)
+	}
+	// Another role is a different set entirely.
+	if other, otherErr := repository.ListRoleAssignments(ctx, workspaceID, "Rl0B", domain.PageRequest{Limit: 10}); otherErr != nil || len(other.Assignments) != 0 {
+		t.Fatalf("other role=%+v err=%v", other, otherErr)
+	}
+	if err := repository.DeleteRoleAssignments(ctx, assignments[:1], event("roles-remove", "role.assignments_removed")); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	if err != nil || len(remaining.Assignments) != 2 {
+		t.Fatalf("remaining=%+v err=%v", remaining, err)
+	}
+	for _, assignment := range remaining.Assignments {
+		if assignment.UserID == second {
+			t.Fatalf("removed assignment survived: %+v", assignment)
+		}
+	}
+	// Removing a triple that is not there is not an error.
+	if err := repository.DeleteRoleAssignments(ctx, assignments[:1], event("roles-remove-again", "role.assignments_removed")); err != nil {
+		t.Fatal(err)
 	}
 }

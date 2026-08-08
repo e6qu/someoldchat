@@ -2275,6 +2275,22 @@ type AppManifestSnapshot struct {
 // in one workspace. It deliberately excludes developer credentials and the raw
 // manifest from the process boundary.
 // AppFunction is one function an installed app declares in its manifest.
+// RoleAssignment gives one member a system role over one entity. Slack scopes a
+// role to a channel or to the workspace, so the entity identifier carries which.
+type RoleAssignment struct {
+	RoleID      string
+	EntityID    string
+	UserID      UserID
+	WorkspaceID WorkspaceID
+	CreatedAt   time.Time
+}
+
+type RoleAssignmentPage struct {
+	Assignments []RoleAssignment
+	NextCursor  Cursor
+	HasMore     bool
+}
+
 type AppFunction struct {
 	AppID       AppID
 	AppName     string

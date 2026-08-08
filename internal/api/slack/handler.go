@@ -201,6 +201,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("POST /api/admin.roles.addAssignments", h.adminRolesAddAssignments)
+	mux.HandleFunc("POST /api/admin.roles.removeAssignments", h.adminRolesRemoveAssignments)
+	mux.HandleFunc("GET /api/admin.roles.listAssignments", h.adminRolesListAssignments)
+	mux.HandleFunc("POST /api/admin.roles.listAssignments", h.adminRolesListAssignments)
 	mux.HandleFunc("GET /api/admin.users.getExpiration", h.adminUsersGetExpiration)
 	mux.HandleFunc("POST /api/admin.users.getExpiration", h.adminUsersGetExpiration)
 	mux.HandleFunc("POST /api/admin.users.invite", h.adminUsersInvite)
@@ -3223,6 +3227,86 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.roles.addAssignments and admin.roles.removeAssignments give and take a
+// system role. Slack scopes a role to one entity, so the caller names both the
+// entities and the members, and the server writes the cross product.
+func (h Handler) adminRolesAddAssignments(w http.ResponseWriter, r *http.Request) {
+	h.changeRoleAssignments(w, r, true)
+}
+
+func (h Handler) adminRolesRemoveAssignments(w http.ResponseWriter, r *http.Request) {
+	h.changeRoleAssignments(w, r, false)
+}
+
+func (h Handler) changeRoleAssignments(w http.ResponseWriter, r *http.Request, adding bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminRolesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	roleID := strings.TrimSpace(fields["role_id"])
+	entityIDs := parseIDList[string](fields["entity_ids"])
+	userIDs := parseIDList[domain.UserID](fields["user_ids"])
+	if roleID == "" || len(entityIDs) == 0 || len(userIDs) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	change := h.Messages.AdminRemoveRoleAssignments
+	if adding {
+		change = h.Messages.AdminAddRoleAssignments
+	}
+	if err := change(r.Context(), principal.WorkspaceID, principal.UserID, roleID, entityIDs, userIDs); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.roles.listAssignments reports who holds one role.
+func (h Handler) adminRolesListAssignments(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminRolesRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	roleID := strings.TrimSpace(fields["role_id"])
+	if roleID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminListRoleAssignments(r.Context(), principal.WorkspaceID, principal.UserID, roleID, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	assignments := make([]map[string]any, 0, len(page.Assignments))
+	for _, assignment := range page.Assignments {
+		assignments = append(assignments, map[string]any{
+			"role_id":     assignment.RoleID,
+			"entity_id":   assignment.EntityID,
+			"user_id":     string(assignment.UserID),
+			"date_create": assignment.CreatedAt.UTC().Unix(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role_assignments": assignments,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
 // admin.users.getExpiration reports when a guest account lapses. An account

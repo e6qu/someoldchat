@@ -29,6 +29,9 @@ const (
 	DirectoryService_SetUserExpiration_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
 	DirectoryService_UserExpiration_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/UserExpiration"
 	DirectoryService_DiscoverableContacts_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/DiscoverableContacts"
+	DirectoryService_AdminAddRoleAssignments_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AdminAddRoleAssignments"
+	DirectoryService_AdminRemoveRoleAssignments_FullMethodName  = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveRoleAssignments"
+	DirectoryService_AdminListRoleAssignments_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AdminListRoleAssignments"
 	DirectoryService_ResetUserSessions_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
 	DirectoryService_UserSessions_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
 	DirectoryService_ResetUserSessionsBulk_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
@@ -84,6 +87,9 @@ type DirectoryServiceClient interface {
 	SetUserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*UserExpirationResponse, error)
 	DiscoverableContacts(ctx context.Context, in *DiscoverableContactsRequest, opts ...grpc.CallOption) (*DiscoverableContactsResponse, error)
+	AdminAddRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminRemoveRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminListRoleAssignments(ctx context.Context, in *RoleAssignmentsRequest, opts ...grpc.CallOption) (*RoleAssignmentPage, error)
 	ResetUserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -227,6 +233,36 @@ func (c *directoryServiceClient) DiscoverableContacts(ctx context.Context, in *D
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DiscoverableContactsResponse)
 	err := c.cc.Invoke(ctx, DirectoryService_DiscoverableContacts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAddRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAddRoleAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminRemoveRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminRemoveRoleAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminListRoleAssignments(ctx context.Context, in *RoleAssignmentsRequest, opts ...grpc.CallOption) (*RoleAssignmentPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RoleAssignmentPage)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminListRoleAssignments_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -637,6 +673,9 @@ type DirectoryServiceServer interface {
 	SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error)
 	UserExpiration(context.Context, *SetUserExpirationRequest) (*UserExpirationResponse, error)
 	DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error)
+	AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
+	AdminRemoveRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
+	AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error)
 	ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error)
 	UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error)
@@ -714,6 +753,15 @@ func (UnimplementedDirectoryServiceServer) UserExpiration(context.Context, *SetU
 }
 func (UnimplementedDirectoryServiceServer) DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DiscoverableContacts not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAddRoleAssignments not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminRemoveRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRemoveRoleAssignments not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminListRoleAssignments not implemented")
 }
 func (UnimplementedDirectoryServiceServer) ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetUserSessions not implemented")
@@ -1028,6 +1076,60 @@ func _DirectoryService_DiscoverableContacts_Handler(srv interface{}, ctx context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).DiscoverableContacts(ctx, req.(*DiscoverableContactsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAddRoleAssignments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoleAssignmentMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAddRoleAssignments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAddRoleAssignments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAddRoleAssignments(ctx, req.(*RoleAssignmentMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminRemoveRoleAssignments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoleAssignmentMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminRemoveRoleAssignments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminRemoveRoleAssignments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminRemoveRoleAssignments(ctx, req.(*RoleAssignmentMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminListRoleAssignments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RoleAssignmentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminListRoleAssignments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminListRoleAssignments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminListRoleAssignments(ctx, req.(*RoleAssignmentsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1780,6 +1882,18 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DiscoverableContacts",
 			Handler:    _DirectoryService_DiscoverableContacts_Handler,
+		},
+		{
+			MethodName: "AdminAddRoleAssignments",
+			Handler:    _DirectoryService_AdminAddRoleAssignments_Handler,
+		},
+		{
+			MethodName: "AdminRemoveRoleAssignments",
+			Handler:    _DirectoryService_AdminRemoveRoleAssignments_Handler,
+		},
+		{
+			MethodName: "AdminListRoleAssignments",
+			Handler:    _DirectoryService_AdminListRoleAssignments_Handler,
 		},
 		{
 			MethodName: "ResetUserSessions",

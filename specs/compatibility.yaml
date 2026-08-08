@@ -1175,17 +1175,29 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.permissions.set/
   - method: admin.roles.addAssignments
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.roles.addAssignments/
+    evidence:
+      - go-test:internal/api/slack:TestAdminRoleAssignments
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
   - method: admin.roles.listAssignments
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.roles.listAssignments/
+    evidence:
+      - go-test:internal/api/slack:TestAdminRoleAssignments
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
   - method: admin.roles.removeAssignments
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.roles.removeAssignments/
+    evidence:
+      - go-test:internal/api/slack:TestAdminRoleAssignments
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
   - method: admin.users.getExpiration
     status: behavior-compatible
     provenance: slack-reference

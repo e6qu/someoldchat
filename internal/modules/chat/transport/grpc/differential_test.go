@@ -774,6 +774,42 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A role assignment is a triple, so the two compositions must agree
+			// on the order it pages in and on what a repeat write does.
+			name: "role assignments are written, paged, and removed identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C2", "C1"}, []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				repeat := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"})
+				stranger := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U-nobody"})
+				page, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				first := make([]string, 0, len(page.Assignments))
+				for _, assignment := range page.Assignments {
+					first = append(first, string(assignment.UserID)+"/"+assignment.EntityID)
+				}
+				rest, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+				if err != nil {
+					return nil, err
+				}
+				second := make([]string, 0, len(rest.Assignments))
+				for _, assignment := range rest.Assignments {
+					second = append(second, string(assignment.UserID)+"/"+assignment.EntityID)
+				}
+				if err := chat.AdminRemoveRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				left, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{first, page.HasMore, second, rest.HasMore, len(left.Assignments), repeat != nil, stranger != nil}, nil
+			},
+		},
+		{
 			// A workspace that hides itself answers no contacts, whatever the
 			// addresses match. Both compositions must agree on that, because
 			// the answer tells the caller who works here.

@@ -577,10 +577,11 @@ func conversionCases() map[string]conversionCase {
 		"SocketModeInteraction": {sample: &domain.SocketModeInteraction{}, through: through(func(value domain.SocketModeInteraction) *chatv1.SocketModeInteraction {
 			return encodeProtoSocketModeInteraction(value, true)
 		}, decodeProtoSocketModeInteraction)},
-		"Bot":           {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
-		"InviteRequest": {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
-		"AppApproval":   {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
-		"RTMConnection": {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
+		"Bot":            {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
+		"InviteRequest":  {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
+		"RoleAssignment": {sample: &domain.RoleAssignment{}, through: throughInfallible(encodeProtoRoleAssignment, decodeProtoRoleAssignment)},
+		"AppApproval":    {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
+		"RTMConnection":  {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
 		"IncomingWebhook": {
 			sample: &domain.IncomingWebhook{},
 			omitted: map[string]string{

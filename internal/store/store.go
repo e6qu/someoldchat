@@ -330,6 +330,14 @@ type Store interface {
 	// state, not something a consumer needs delivered.
 	TouchUserActivity(context.Context, domain.WorkspaceID, domain.UserID, time.Time) error
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
+	// SetRoleAssignments gives members a system role over entities. The store
+	// writes one row for each member and entity pair.
+	SetRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
+	// DeleteRoleAssignments removes those rows.
+	DeleteRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
+	// ListRoleAssignments reports the members who hold one role, in a stable
+	// order so two reads agree.
+	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// GetUserExpiration reports when a guest account lapses. A zero time means
 	// the account does not lapse.
 	GetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)

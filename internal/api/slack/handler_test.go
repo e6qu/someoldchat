@@ -205,7 +205,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -1985,6 +1985,70 @@ func TestAdminUsersSetExpirationAcceptsEpochAndClear(t *testing.T) {
 		if response.Code != http.StatusOK || response.Body.String() != `{"ok":true}`+"\n" {
 			t.Fatalf("expiration=%s status=%d body=%s", expiration, response.Code, response.Body)
 		}
+	}
+}
+
+// TestAdminRoleAssignments holds the admin.roles.* contract: a role is written
+// over named entities, read back in one order, and taken away again. A member
+// outside the workspace is refused before any row lands, so a request that
+// names one leaves nothing behind.
+func TestAdminRoleAssignments(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if added := call(t, http.MethodPost, "admin.roles.addAssignments", "role_id=Rl0A&entity_ids=C2,C1&user_ids=U1,U2"); added["ok"] != true {
+		t.Fatalf("added=%v", added)
+	}
+	listed := call(t, http.MethodPost, "admin.roles.listAssignments", "role_id=Rl0A")
+	assignments, ok := listed["role_assignments"].([]any)
+	if !ok || len(assignments) != 4 {
+		t.Fatalf("listed=%v", listed)
+	}
+	order := make([]string, 0, len(assignments))
+	for _, value := range assignments {
+		assignment, isMap := value.(map[string]any)
+		if !isMap {
+			t.Fatalf("assignment=%v", value)
+		}
+		order = append(order, assignment["user_id"].(string)+"/"+assignment["entity_id"].(string))
+	}
+	if want := "U1/C1,U1/C2,U2/C1,U2/C2"; strings.Join(order, ",") != want {
+		t.Fatalf("order=%v want=%v", order, want)
+	}
+	// A member the workspace does not hold is refused, and the refusal is not
+	// a partial write: the rows the same request named must not appear.
+	stranger := call(t, http.MethodPost, "admin.roles.addAssignments", "role_id=Rl0B&entity_ids=C1&user_ids=U1,U-nobody")
+	if stranger["error"] != "user_not_found" {
+		t.Fatalf("stranger=%v", stranger)
+	}
+	if empty := call(t, http.MethodPost, "admin.roles.listAssignments", "role_id=Rl0B"); len(empty["role_assignments"].([]any)) != 0 {
+		t.Fatalf("partial write survived: %v", empty)
+	}
+	for _, body := range []string{"entity_ids=C1&user_ids=U1", "role_id=Rl0A&user_ids=U1", "role_id=Rl0A&entity_ids=C1"} {
+		if refused := call(t, http.MethodPost, "admin.roles.addAssignments", body); refused["error"] != "invalid_arg_name" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if removed := call(t, http.MethodPost, "admin.roles.removeAssignments", "role_id=Rl0A&entity_ids=C1&user_ids=U1,U2"); removed["ok"] != true {
+		t.Fatalf("removed=%v", removed)
+	}
+	left := call(t, http.MethodGet, "admin.roles.listAssignments?role_id=Rl0A", "")
+	if remaining := left["role_assignments"].([]any); len(remaining) != 2 {
+		t.Fatalf("left=%v", left)
 	}
 }
 

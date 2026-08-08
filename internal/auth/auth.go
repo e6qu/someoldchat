@@ -106,6 +106,10 @@ const (
 	// workflow without being trusted to install or remove the app that owns it.
 	ScopeAdminWorkflowsRead  Scope = "admin.workflows:read"
 	ScopeAdminWorkflowsWrite Scope = "admin.workflows:write"
+	// System roles carry their own scopes. Holding a role over a channel is not
+	// workspace membership, so admin.users does not cover it.
+	ScopeAdminRolesRead  Scope = "admin.roles:read"
+	ScopeAdminRolesWrite Scope = "admin.roles:write"
 )
 
 type Principal struct {
@@ -562,6 +566,8 @@ var allScopes = []Scope{
 	ScopeAdminAppsWrite,
 	ScopeAdminWorkflowsRead,
 	ScopeAdminWorkflowsWrite,
+	ScopeAdminRolesRead,
+	ScopeAdminRolesWrite,
 }
 
 // AllScopes returns a fresh copy on every call, so a caller that appends to or
