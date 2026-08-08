@@ -1344,6 +1344,11 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const adminActivities = await client.apiCall("admin.apps.activities.list", { app_id: "A1", limit: 10 });
+assert.equal(adminActivities.ok, true);
+assert.ok(Array.isArray(adminActivities.activities));
+assert.equal((await client.apiCall("apps.activities.list", { limit: 10 })).ok, true);
+
 const channelLookup = await client.apiCall("admin.conversations.lookup", { limit: 100 });
 assert.equal(channelLookup.ok, true);
 assert.ok(channelLookup.channels.length > 0);

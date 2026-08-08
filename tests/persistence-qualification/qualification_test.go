@@ -145,6 +145,7 @@ func runQualification(t *testing.T, open opener) {
 		{"information barriers keep their groups and subjects", informationBarriersKeepTheirGroupsAndSubjects},
 		{"app configuration and resolution survive on every profile", appConfigurationAndResolutionSurvive},
 		{"administrative channel batches are all or nothing", administrativeChannelBatchesAreAllOrNothing},
+		{"app activity filters by rank on every profile", appActivityFiltersByRank},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2307,5 +2308,86 @@ func administrativeChannelBatchesAreAllOrNothing(t *testing.T, open opener) {
 	page, err := repository.LookupConversations(ctx, workspaceID, domain.ConversationLookup{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].ID != second {
 		t.Fatalf("lookup=%+v err=%v", page, err)
+	}
+}
+
+// appActivityFiltersByRank holds the storage contract for apps.activities.list.
+// The level filter is a rank comparison and the storage keeps the name, so a
+// profile that compared names would answer a different set. The filter also has
+// to run before the page limit: filtering the rows the limit already chose
+// returns short pages and reports has_more against an unrelated count.
+func appActivityFiltersByRank(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-activity-" + suffix)
+	userID := domain.UserID("U-activity-" + suffix)
+	appID := domain.AppID("A-activity-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Activity"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	app := domain.App{
+		ID: appID, DevelopmentWorkspaceID: workspaceID, OwnerID: userID, Name: "Activity app",
+		ClientID: "activity-" + suffix, SigningSecretHash: "hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}
+	revision := domain.AppManifestRevision{AppID: appID, Version: 1, Manifest: `{"display_information":{"name":"Activity app"}}`, CreatedBy: userID, CreatedAt: now}
+	if err := repository.CreateApp(ctx, app, revision, domain.OAuthClient{ID: app.ClientID, SecretHash: "secret", AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	levels := []domain.ActivityLevel{domain.ActivityTrace, domain.ActivityInfo, domain.ActivityWarn, domain.ActivityError, domain.ActivityFatal}
+	for index, level := range levels {
+		if err := repository.RecordAppActivity(ctx, domain.AppActivity{
+			AppID: appID, WorkspaceID: workspaceID, ComponentType: "function", ComponentID: "triage",
+			Level: level, EventType: "function_execution", Source: "slack",
+			Message: string(level), TraceID: fmt.Sprintf("trace-%d", index),
+			CreatedAt: now.Add(time.Duration(index) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A level the platform does not emit cannot be recorded.
+	if err := repository.RecordAppActivity(ctx, domain.AppActivity{AppID: appID, WorkspaceID: workspaceID, Level: "shouted", CreatedAt: now}); err == nil {
+		t.Fatal("an unrecognised level was recorded")
+	}
+	all, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID}, domain.PageRequest{Limit: 10})
+	if err != nil || len(all.Activities) != len(levels) {
+		t.Fatalf("all=%+v err=%v", all, err)
+	}
+	// warn and above is three of the five, whatever order the names sort in.
+	warned, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 10})
+	if err != nil || len(warned.Activities) != 3 {
+		t.Fatalf("warned=%+v err=%v", warned, err)
+	}
+	for _, activity := range warned.Activities {
+		if activity.Level.Rank() < domain.ActivityWarn.Rank() {
+			t.Fatalf("a level below warn survived the filter: %+v", activity)
+		}
+	}
+	// The filter runs before the limit, so a page of two is two warnings.
+	head, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 2})
+	if err != nil || len(head.Activities) != 2 || !head.HasMore {
+		t.Fatalf("head=%+v err=%v", head, err)
+	}
+	tail, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
+	if err != nil || len(tail.Activities) != 1 || tail.HasMore {
+		t.Fatalf("tail=%+v err=%v", tail, err)
+	}
+	traced, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{AppID: appID, TraceID: "trace-0"}, domain.PageRequest{Limit: 10})
+	if err != nil || len(traced.Activities) != 1 || traced.Activities[0].Level != domain.ActivityTrace {
+		t.Fatalf("traced=%+v err=%v", traced, err)
+	}
+	windowed, err := repository.ListAppActivities(ctx, workspaceID, domain.AppActivityFilter{
+		AppID: appID, MinCreatedAt: now.Add(time.Minute), MaxCreatedAt: now.Add(2 * time.Minute),
+	}, domain.PageRequest{Limit: 10})
+	if err != nil || len(windowed.Activities) != 2 {
+		t.Fatalf("windowed=%+v err=%v", windowed, err)
 	}
 }

@@ -2258,7 +2258,30 @@ func (m Messages) CompleteFunction(ctx context.Context, workspaceID domain.Works
 	if execution.Status != domain.WorkflowStepExecuting {
 		return ErrFunctionNotRunning
 	}
+	// The entry is recorded before the step advances, so a recording that
+	// cannot be written leaves the step running and the app free to retry.
+	// Recording after the advance would make the retry answer not_running and
+	// lose the entry for good.
+	if err := m.recordFunctionActivity(ctx, workspaceID, execution, failure); err != nil {
+		return err
+	}
 	return m.advanceStep(ctx, workspaceID, actor, execution, outputs, failure)
+}
+
+// recordFunctionActivity writes what the app answered to its activity log. A
+// function that reported a failure is an error entry; one that completed is an
+// info entry, which is what Slack's own activity log shows.
+func (m Messages) recordFunctionActivity(ctx context.Context, workspaceID domain.WorkspaceID, execution domain.WorkflowStep, failure string) error {
+	level, message := domain.ActivityInfo, "function completed"
+	if strings.TrimSpace(failure) != "" {
+		level, message = domain.ActivityError, failure
+	}
+	return m.Store.RecordAppActivity(ctx, domain.AppActivity{
+		AppID: execution.AppID, WorkspaceID: workspaceID,
+		ComponentType: "function", ComponentID: execution.EditID,
+		Level: level, EventType: "function_execution", Source: "slack",
+		Message: message, TraceID: string(execution.ID), CreatedAt: time.Now().UTC(),
+	})
 }
 
 // SubmitWorkflowForm completes a waiting form step with the submitted inputs.

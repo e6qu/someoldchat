@@ -199,6 +199,41 @@ message OAuthAuthorization {
   string code_challenge_method = 14;
 }
 
+message AppActivity {
+  int64 id = 1;
+  string app_id = 2;
+  string workspace_id = 3;
+  string component_type = 4;
+  string component_id = 5;
+  string level = 6;
+  string event_type = 7;
+  string source = 8;
+  string message = 9;
+  string trace_id = 10;
+  int64 created_at = 11;
+}
+
+message AppActivitiesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string min_level = 4;
+  int64 min_created_at = 5;
+  int64 max_created_at = 6;
+  string component_type = 7;
+  string component_id = 8;
+  string source = 9;
+  string trace_id = 10;
+  int32 limit = 11;
+  string cursor = 12;
+}
+
+message AppActivityPage {
+  repeated AppActivity activities = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
 message AppConfig {
   string app_id = 1;
   string workspace_id = 2;
@@ -231,6 +266,8 @@ message AppResolutionRequest {
 }
 
 service AppsService {
+  rpc AppActivities(AppActivitiesRequest) returns (AppActivityPage);
+  rpc AdminAppActivities(AppActivitiesRequest) returns (AppActivityPage);
   rpc AdminAppConfigs(AppConfigsRequest) returns (AppConfigsResponse);
   rpc AdminSetAppConfig(AppConfigMutationRequest) returns (AppConfig);
   rpc AdminClearAppResolution(AppResolutionRequest) returns (AppMutationResponse);

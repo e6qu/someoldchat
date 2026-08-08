@@ -1028,9 +1028,15 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.analytics.messages.metadata/
   - method: admin.apps.activities.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.activities.list/
+    evidence:
+      - go-test:internal/api/slack:TestAppActivityLog
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appActivityFiltersByRank
+    deviations:
+      - Entries come from function executions the platform runs; an app cannot write its own log entry, and Slack declares no method for one either.
   - method: admin.apps.clearResolution
     status: behavior-compatible
     provenance: slack-reference
@@ -1360,9 +1366,15 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.unpublish/
   - method: apps.activities.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.activities.list/
+    evidence:
+      - go-test:internal/api/slack:TestAppActivityLog
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appActivityFiltersByRank
+    deviations:
+      - Entries come from function executions the platform runs; an app cannot write its own log entry, and Slack declares no method for one either.
   - method: apps.auth.external.delete
     status: unimplemented
     provenance: slack-reference

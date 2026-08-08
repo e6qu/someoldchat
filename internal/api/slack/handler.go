@@ -200,6 +200,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/apps.activities.list", h.appsActivitiesList)
+	mux.HandleFunc("POST /api/apps.activities.list", h.appsActivitiesList)
+	mux.HandleFunc("GET /api/admin.apps.activities.list", h.adminAppsActivitiesList)
+	mux.HandleFunc("POST /api/admin.apps.activities.list", h.adminAppsActivitiesList)
 	mux.HandleFunc("GET /api/admin.conversations.lookup", h.adminConversationsLookup)
 	mux.HandleFunc("POST /api/admin.conversations.lookup", h.adminConversationsLookup)
 	mux.HandleFunc("POST /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
@@ -3258,6 +3262,118 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apps.activities.list reports one app's own activity log, and
+// admin.apps.activities.list reports any app's to an administrator. The app's
+// own read takes the app from the credential rather than an argument: an app
+// that could name another app's identifier could read its log.
+func (h Handler) appsActivitiesList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAuthorizationsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if principal.AppID == "" {
+		writeError(w, "not_allowed_token_type")
+		return
+	}
+	filter, request, ok := appActivityArguments(w, r)
+	if !ok {
+		return
+	}
+	page, err := h.Messages.AppActivities(r.Context(), principal.WorkspaceID, principal.AppID, filter, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeActivityPage(w, page)
+}
+
+func (h Handler) adminAppsActivitiesList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	filter, request, ok := appActivityArguments(w, r)
+	if !ok {
+		return
+	}
+	page, err := h.Messages.AdminAppActivities(r.Context(), principal.WorkspaceID, principal.UserID, filter, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeActivityPage(w, page)
+}
+
+// appActivityArguments reads the filter both activity reads accept. A level the
+// platform does not emit is refused rather than ignored: ignoring it would
+// answer every entry to a caller that asked for a narrow set.
+func appActivityArguments(w http.ResponseWriter, r *http.Request) (domain.AppActivityFilter, domain.PageRequest, bool) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return domain.AppActivityFilter{}, domain.PageRequest{}, false
+	}
+	filter := domain.AppActivityFilter{
+		AppID:         domain.AppID(strings.TrimSpace(fields["app_id"])),
+		ComponentType: strings.TrimSpace(fields["component_type"]),
+		ComponentID:   strings.TrimSpace(fields["component_id"]),
+		Source:        strings.TrimSpace(fields["source"]),
+		TraceID:       strings.TrimSpace(fields["trace_id"]),
+	}
+	if level := strings.TrimSpace(fields["min_log_level"]); level != "" {
+		filter.MinLevel = domain.ActivityLevel(level)
+		if !filter.MinLevel.Valid() {
+			writeError(w, "invalid_arguments")
+			return domain.AppActivityFilter{}, domain.PageRequest{}, false
+		}
+	}
+	for _, bound := range []struct {
+		name  string
+		apply func(time.Time)
+	}{
+		{"min_date_created", func(value time.Time) { filter.MinCreatedAt = value }},
+		{"max_date_created", func(value time.Time) { filter.MaxCreatedAt = value }},
+	} {
+		raw := strings.TrimSpace(fields[bound.name])
+		if raw == "" {
+			continue
+		}
+		seconds, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || seconds < 0 {
+			writeError(w, "invalid_arguments")
+			return domain.AppActivityFilter{}, domain.PageRequest{}, false
+		}
+		bound.apply(time.Unix(seconds, 0).UTC())
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return domain.AppActivityFilter{}, domain.PageRequest{}, false
+	}
+	return filter, request, true
+}
+
+func writeActivityPage(w http.ResponseWriter, page domain.AppActivityPage) {
+	activities := make([]map[string]any, 0, len(page.Activities))
+	for _, activity := range page.Activities {
+		activities = append(activities, map[string]any{
+			"app_id":         string(activity.AppID),
+			"component_type": activity.ComponentType,
+			"component_id":   activity.ComponentID,
+			"level":          string(activity.Level),
+			"event_type":     activity.EventType,
+			"source":         activity.Source,
+			"message":        activity.Message,
+			"trace_id":       activity.TraceID,
+			"created":        activity.CreatedAt.UTC().UnixMilli(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "activities": activities,
+		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
 // admin.conversations.lookup finds channels that have gone quiet or stayed

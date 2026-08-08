@@ -585,6 +585,8 @@ func conversionCases() map[string]conversionCase {
 		"InformationBarrier": {sample: &domain.InformationBarrier{}, through: throughInfallible(encodeProtoBarrier, decodeProtoBarrier)},
 		"AppConfig":          {sample: &domain.AppConfig{}, through: throughInfallible(encodeProtoAppConfig, decodeProtoAppConfig)},
 		"LinkedObject":       {sample: &domain.LinkedObject{}, through: throughInfallible(encodeProtoLinkedObject, decodeProtoLinkedObject)},
+		"AppActivity":        {sample: &domain.AppActivity{}, through: throughInfallible(encodeProtoAppActivity, decodeProtoAppActivity)},
+		"AppActivityPage":    {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
 		"AppApproval":        {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
 		"RTMConnection":      {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
 		"IncomingWebhook": {

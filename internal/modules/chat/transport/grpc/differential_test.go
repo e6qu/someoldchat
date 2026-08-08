@@ -790,6 +790,26 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An app's activity log is written when the app answers a function,
+			// and a level filter is a rank comparison rather than a name match.
+			// Both compositions must order and filter identically.
+			name: "app activity is recorded and filtered by rank identically",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				empty, err := chat.AppActivities(ctx, "T1", "A1", domain.AppActivityFilter{}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				_, badLevel := chat.AdminAppActivities(ctx, "T1", "U-nobody", domain.AppActivityFilter{}, domain.PageRequest{Limit: 10})
+				admin, err := chat.AdminAppActivities(ctx, "T1", "UA", domain.AppActivityFilter{MinLevel: domain.ActivityWarn}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				unnamedApp, unnamedErr := chat.AppActivities(ctx, "T1", "", domain.AppActivityFilter{}, domain.PageRequest{Limit: 10})
+				return []any{len(empty.Activities), empty.HasMore, len(admin.Activities), len(unnamedApp.Activities), badLevel != nil, unnamedErr != nil}, nil
+			},
+		},
+		{
 			// A lookup that names no filter answers every channel, and a batch
 			// that names a channel the workspace does not hold changes nothing.
 			// Both compositions must agree on each.

@@ -12372,6 +12372,77 @@ func decodeProtoAppFunctions(values []*chatv1.AppFunction) []domain.AppFunction 
 	return functions
 }
 
+func (r Remote) AppActivities(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	out, err := r.apps.AppActivities(ctx, appActivitiesRequest(workspaceID, "", appID, filter, request))
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	return decodeProtoAppActivityPage(out), nil
+}
+
+func (r Remote) AdminAppActivities(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	out, err := r.apps.AdminAppActivities(ctx, appActivitiesRequest(workspaceID, userID, filter.AppID, filter, request))
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	return decodeProtoAppActivityPage(out), nil
+}
+
+func appActivitiesRequest(workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, filter domain.AppActivityFilter, request domain.PageRequest) *chatv1.AppActivitiesRequest {
+	return &chatv1.AppActivitiesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		MinLevel: string(filter.MinLevel), MinCreatedAt: optionalUnixNano(filter.MinCreatedAt),
+		MaxCreatedAt: optionalUnixNano(filter.MaxCreatedAt), ComponentType: filter.ComponentType,
+		ComponentId: filter.ComponentID, Source: filter.Source, TraceId: filter.TraceID,
+		Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	}
+}
+
+func appActivityFilter(input *chatv1.AppActivitiesRequest) domain.AppActivityFilter {
+	return domain.AppActivityFilter{
+		AppID: domain.AppID(input.GetAppId()), MinLevel: domain.ActivityLevel(input.GetMinLevel()),
+		MinCreatedAt:  optionalTimeFromUnixNano(input.GetMinCreatedAt()),
+		MaxCreatedAt:  optionalTimeFromUnixNano(input.GetMaxCreatedAt()),
+		ComponentType: input.GetComponentType(), ComponentID: input.GetComponentId(),
+		Source: input.GetSource(), TraceID: input.GetTraceId(),
+	}
+}
+
+func encodeProtoAppActivity(value domain.AppActivity) *chatv1.AppActivity {
+	return &chatv1.AppActivity{
+		Id: value.ID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
+		ComponentType: value.ComponentType, ComponentId: value.ComponentID, Level: string(value.Level),
+		EventType: value.EventType, Source: value.Source, Message: value.Message,
+		TraceId: value.TraceID, CreatedAt: optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoAppActivity(value *chatv1.AppActivity) domain.AppActivity {
+	return domain.AppActivity{
+		ID: value.GetId(), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		ComponentType: value.GetComponentType(), ComponentID: value.GetComponentId(),
+		Level: domain.ActivityLevel(value.GetLevel()), EventType: value.GetEventType(),
+		Source: value.GetSource(), Message: value.GetMessage(), TraceID: value.GetTraceId(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
+func decodeProtoAppActivityPage(value *chatv1.AppActivityPage) domain.AppActivityPage {
+	activities := make([]domain.AppActivity, 0, len(value.GetActivities()))
+	for _, encoded := range value.GetActivities() {
+		activities = append(activities, decodeProtoAppActivity(encoded))
+	}
+	return domain.AppActivityPage{Activities: activities, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}
+}
+
+func encodeProtoAppActivityPage(page domain.AppActivityPage) *chatv1.AppActivityPage {
+	activities := make([]*chatv1.AppActivity, 0, len(page.Activities))
+	for _, value := range page.Activities {
+		activities = append(activities, encodeProtoAppActivity(value))
+	}
+	return &chatv1.AppActivityPage{Activities: activities, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+}
+
 func (r Remote) AdminAppConfigs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appIDs []domain.AppID) ([]domain.AppConfig, error) {
 	ids := make([]string, 0, len(appIDs))
 	for _, id := range appIDs {
@@ -12624,6 +12695,24 @@ func (s *Server) AdminFunctions(ctx context.Context, input *chatv1.AppListReques
 		return nil, mapError(err)
 	}
 	return &chatv1.AppFunctionListResponse{Functions: encodeProtoAppFunctions(functions)}, nil
+}
+
+func (s *Server) AppActivities(ctx context.Context, input *chatv1.AppActivitiesRequest) (*chatv1.AppActivityPage, error) {
+	page, err := s.implementation.AppActivities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()),
+		appActivityFilter(input), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppActivityPage(page), nil
+}
+
+func (s *Server) AdminAppActivities(ctx context.Context, input *chatv1.AppActivitiesRequest) (*chatv1.AppActivityPage, error) {
+	page, err := s.implementation.AdminAppActivities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		appActivityFilter(input), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppActivityPage(page), nil
 }
 
 func (s *Server) AdminAppConfigs(ctx context.Context, input *chatv1.AppConfigsRequest) (*chatv1.AppConfigsResponse, error) {

@@ -19,6 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AppsService_AppActivities_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AppActivities"
+	AppsService_AdminAppActivities_FullMethodName            = "/sameoldchat.chat.v1.AppsService/AdminAppActivities"
 	AppsService_AdminAppConfigs_FullMethodName               = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
 	AppsService_AdminSetAppConfig_FullMethodName             = "/sameoldchat.chat.v1.AppsService/AdminSetAppConfig"
 	AppsService_AdminClearAppResolution_FullMethodName       = "/sameoldchat.chat.v1.AppsService/AdminClearAppResolution"
@@ -48,6 +50,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AppsServiceClient interface {
+	AppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error)
+	AdminAppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error)
 	AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error)
 	AdminSetAppConfig(ctx context.Context, in *AppConfigMutationRequest, opts ...grpc.CallOption) (*AppConfig, error)
 	AdminClearAppResolution(ctx context.Context, in *AppResolutionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
@@ -79,6 +83,26 @@ type appsServiceClient struct {
 
 func NewAppsServiceClient(cc grpc.ClientConnInterface) AppsServiceClient {
 	return &appsServiceClient{cc}
+}
+
+func (c *appsServiceClient) AppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppActivityPage)
+	err := c.cc.Invoke(ctx, AppsService_AppActivities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminAppActivities(ctx context.Context, in *AppActivitiesRequest, opts ...grpc.CallOption) (*AppActivityPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppActivityPage)
+	err := c.cc.Invoke(ctx, AppsService_AdminAppActivities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *appsServiceClient) AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error) {
@@ -315,6 +339,8 @@ func (c *appsServiceClient) AuthorizeOAuth(ctx context.Context, in *OAuthAuthori
 // All implementations should embed UnimplementedAppsServiceServer
 // for forward compatibility.
 type AppsServiceServer interface {
+	AppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error)
+	AdminAppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error)
 	AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error)
 	AdminSetAppConfig(context.Context, *AppConfigMutationRequest) (*AppConfig, error)
 	AdminClearAppResolution(context.Context, *AppResolutionRequest) (*AppMutationResponse, error)
@@ -347,6 +373,12 @@ type AppsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAppsServiceServer struct{}
 
+func (UnimplementedAppsServiceServer) AppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AppActivities not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminAppActivities(context.Context, *AppActivitiesRequest) (*AppActivityPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAppActivities not implemented")
+}
 func (UnimplementedAppsServiceServer) AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminAppConfigs not implemented")
 }
@@ -434,6 +466,42 @@ func RegisterAppsServiceServer(s grpc.ServiceRegistrar, srv AppsServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AppsService_ServiceDesc, srv)
+}
+
+func _AppsService_AppActivities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppActivitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AppActivities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AppActivities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AppActivities(ctx, req.(*AppActivitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminAppActivities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppActivitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminAppActivities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminAppActivities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminAppActivities(ctx, req.(*AppActivitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AppsService_AdminAppConfigs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -857,6 +925,14 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sameoldchat.chat.v1.AppsService",
 	HandlerType: (*AppsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "AppActivities",
+			Handler:    _AppsService_AppActivities_Handler,
+		},
+		{
+			MethodName: "AdminAppActivities",
+			Handler:    _AppsService_AdminAppActivities_Handler,
+		},
 		{
 			MethodName: "AdminAppConfigs",
 			Handler:    _AppsService_AdminAppConfigs_Handler,

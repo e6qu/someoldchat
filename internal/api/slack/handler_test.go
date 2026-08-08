@@ -2450,6 +2450,76 @@ func TestAdminConversationAdministration(t *testing.T) {
 	}
 }
 
+// TestAppActivityLog holds the apps.activities.list and
+// admin.apps.activities.list contract. An app reads its own log from its
+// credential rather than from an argument, and a level the platform does not
+// emit is refused rather than ignored: ignoring it would answer every entry to
+// a caller that asked for a narrow set.
+func TestAppActivityLog(t *testing.T) {
+	handler, target := testHandlerWithStore()
+	now := time.Now().UTC()
+	for index, level := range []domain.ActivityLevel{domain.ActivityInfo, domain.ActivityError} {
+		if err := target.RecordAppActivity(context.Background(), domain.AppActivity{
+			AppID: "A1", WorkspaceID: "T1", ComponentType: "function", ComponentID: "triage",
+			Level: level, EventType: "function_execution", Source: "slack", Message: string(level),
+			TraceID: fmt.Sprintf("trace-%d", index), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	listed := call(t, http.MethodPost, "admin.apps.activities.list", "app_id=A1")
+	activities, ok := listed["activities"].([]any)
+	if !ok || len(activities) != 2 {
+		t.Fatalf("listed=%v", listed)
+	}
+	first := activities[0].(map[string]any)
+	if first["component_type"] != "function" || first["level"] != "info" || first["source"] != "slack" {
+		t.Fatalf("first=%v", first)
+	}
+	// warn and above is the error entry alone, though "error" sorts before
+	// "info" and "warn" by name.
+	errors := call(t, http.MethodGet, "admin.apps.activities.list?app_id=A1&min_log_level=warn", "")
+	if len(errors["activities"].([]any)) != 1 {
+		t.Fatalf("errors=%v", errors)
+	}
+	for _, body := range []string{"app_id=A1&min_log_level=shouted", "app_id=A1&min_date_created=soon", "app_id=A1&max_date_created=-1"} {
+		if refused := call(t, http.MethodPost, "admin.apps.activities.list", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if traced := call(t, http.MethodPost, "admin.apps.activities.list", "app_id=A1&trace_id=trace-1"); len(traced["activities"].([]any)) != 1 {
+		t.Fatalf("traced=%v", traced)
+	}
+	// The app's own read takes the app from the credential. Naming another app
+	// changes nothing, because an app that could name one could read its log.
+	own := call(t, http.MethodPost, "apps.activities.list", "app_id=A-somebody-else")
+	entries, ok := own["activities"].([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("own=%v", own)
+	}
+	for _, entry := range entries {
+		if entry.(map[string]any)["app_id"] != "A1" {
+			t.Fatalf("an app read another app's log: %v", entry)
+		}
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))

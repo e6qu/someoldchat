@@ -126,6 +126,7 @@ type Store struct {
 	appConfigs                    map[string]domain.AppConfig
 	aiExcludedConversations       map[domain.ConversationID]struct{}
 	conversationObjects           map[string]domain.LinkedObject
+	appActivities                 []domain.AppActivity
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -1830,6 +1831,82 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) RecordAppActivity(_ context.Context, activity domain.AppActivity) error {
+	if activity.AppID == "" || !activity.Level.Valid() {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.apps[activity.AppID]; !exists {
+		return store.ErrNotFound
+	}
+	activity.ID = int64(len(s.appActivities)) + 1
+	s.appActivities = append(s.appActivities, activity)
+	return nil
+}
+
+func (s *Store) ListAppActivities(_ context.Context, workspace domain.WorkspaceID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	afterID := int64(0)
+	if after != "" {
+		afterID, err = strconv.ParseInt(after, 10, 64)
+		if err != nil {
+			return domain.AppActivityPage{}, domain.ErrInvalidCursor
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	activities := make([]domain.AppActivity, 0, request.Limit+1)
+	for _, activity := range s.appActivities {
+		if activity.WorkspaceID != workspace || activity.ID <= afterID {
+			continue
+		}
+		if filter.AppID != "" && activity.AppID != filter.AppID {
+			continue
+		}
+		if filter.ComponentType != "" && activity.ComponentType != filter.ComponentType {
+			continue
+		}
+		if filter.ComponentID != "" && activity.ComponentID != filter.ComponentID {
+			continue
+		}
+		if filter.Source != "" && activity.Source != filter.Source {
+			continue
+		}
+		if filter.TraceID != "" && activity.TraceID != filter.TraceID {
+			continue
+		}
+		if !filter.MinCreatedAt.IsZero() && activity.CreatedAt.Before(filter.MinCreatedAt) {
+			continue
+		}
+		if !filter.MaxCreatedAt.IsZero() && activity.CreatedAt.After(filter.MaxCreatedAt) {
+			continue
+		}
+		if filter.MinLevel.Valid() && activity.Level.Rank() < filter.MinLevel.Rank() {
+			continue
+		}
+		activities = append(activities, activity)
+		if len(activities) > request.Limit {
+			break
+		}
+	}
+	hasMore := len(activities) > request.Limit
+	if hasMore {
+		activities = activities[:request.Limit]
+	}
+	page := domain.AppActivityPage{Activities: activities, HasMore: hasMore}
+	if hasMore && len(activities) > 0 {
+		page.NextCursor, err = domain.NewListCursor(strconv.FormatInt(activities[len(activities)-1].ID, 10))
+	}
+	return page, err
 }
 
 func (s *Store) SetConversationsExcludedFromAI(_ context.Context, workspace domain.WorkspaceID, ids []domain.ConversationID, excluded bool, event events.Event) error {

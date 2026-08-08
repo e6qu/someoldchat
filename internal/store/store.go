@@ -340,6 +340,10 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// RecordAppActivity appends one entry to an app's activity log.
+	RecordAppActivity(context.Context, domain.AppActivity) error
+	// ListAppActivities reports the entries that match a filter, newest last.
+	ListAppActivities(context.Context, domain.WorkspaceID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)
 	// SetConversationsExcludedFromAI marks channels in or out of the
 	// workspace's generative features. Exclusion is its own row rather than a
 	// column on conversations: every conversation read names its columns

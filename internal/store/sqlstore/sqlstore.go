@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 155
+const schemaVersion = 156
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,23 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 156 {
+		// One app's activity log. The identifier is a row number rather than a
+		// public identifier because an entry is only ever read in order.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_activities (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			app_id TEXT NOT NULL REFERENCES slack_apps(id),
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			component_type TEXT NOT NULL DEFAULT '', component_id TEXT NOT NULL DEFAULT '',
+			level TEXT NOT NULL, event_type TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL DEFAULT '', trace_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate app activities: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS app_activities_app ON app_activities(workspace_id, app_id, id)`); err != nil {
+			return fmt.Errorf("index app activities: %w", err)
+		}
+	}
 	if version < 155 {
 		// Channels an administrator keeps out of the workspace's generative
 		// features, and the external records a channel is linked to. Exclusion
@@ -4716,6 +4733,112 @@ func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.Worksp
 	if hasMore && len(assignments) > 0 {
 		last := assignments[len(assignments)-1]
 		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
+	}
+	return page, err
+}
+
+// activityLevelRankExpression mirrors domain.ActivityLevel.Rank in SQL. The two
+// have to agree, and TestActivityLevelRankMatchesSQL holds them together.
+const activityLevelRankExpression = `(CASE level WHEN 'trace' THEN 1 WHEN 'debug' THEN 2 WHEN 'info' THEN 3 ` +
+	`WHEN 'warn' THEN 4 WHEN 'error' THEN 5 WHEN 'fatal' THEN 6 ELSE 0 END)`
+
+func (s *Store) RecordAppActivity(ctx context.Context, activity domain.AppActivity) error {
+	if activity.AppID == "" || !activity.Level.Valid() {
+		return store.ErrInvalidArgument
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO app_activities(app_id, workspace_id, component_type, component_id, level, event_type, source, message, trace_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		activity.AppID, activity.WorkspaceID, activity.ComponentType, activity.ComponentID, string(activity.Level),
+		activity.EventType, activity.Source, activity.Message, activity.TraceID, activity.CreatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	return nil
+}
+
+func (s *Store) ListAppActivities(ctx context.Context, workspace domain.WorkspaceID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	afterID := int64(0)
+	if after != "" {
+		afterID, err = strconv.ParseInt(after, 10, 64)
+		if err != nil {
+			return domain.AppActivityPage{}, domain.ErrInvalidCursor
+		}
+	}
+	query := `SELECT id, app_id, workspace_id, component_type, component_id, level, event_type, source, message, trace_id, created_at
+		FROM app_activities WHERE workspace_id = ? AND id > ?`
+	arguments := []any{workspace, afterID}
+	if filter.AppID != "" {
+		query += ` AND app_id = ?`
+		arguments = append(arguments, filter.AppID)
+	}
+	if filter.ComponentType != "" {
+		query += ` AND component_type = ?`
+		arguments = append(arguments, filter.ComponentType)
+	}
+	if filter.ComponentID != "" {
+		query += ` AND component_id = ?`
+		arguments = append(arguments, filter.ComponentID)
+	}
+	if filter.Source != "" {
+		query += ` AND source = ?`
+		arguments = append(arguments, filter.Source)
+	}
+	if filter.TraceID != "" {
+		query += ` AND trace_id = ?`
+		arguments = append(arguments, filter.TraceID)
+	}
+	if !filter.MinCreatedAt.IsZero() {
+		query += ` AND created_at >= ?`
+		arguments = append(arguments, filter.MinCreatedAt.UTC().UnixNano())
+	}
+	if !filter.MaxCreatedAt.IsZero() {
+		query += ` AND created_at <= ?`
+		arguments = append(arguments, filter.MaxCreatedAt.UTC().UnixNano())
+	}
+	if filter.MinLevel.Valid() {
+		// The rank has to be in the query, not applied after it: filtering the
+		// rows the LIMIT already chose would return short pages and report
+		// has_more against a count that had nothing to do with the filter.
+		query += ` AND ` + activityLevelRankExpression + ` >= ?`
+		arguments = append(arguments, filter.MinLevel.Rank())
+	}
+	query += ` ORDER BY id LIMIT ?`
+	arguments = append(arguments, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	defer rows.Close()
+	activities := make([]domain.AppActivity, 0, request.Limit+1)
+	for rows.Next() {
+		var activity domain.AppActivity
+		var level string
+		var created int64
+		if err := rows.Scan(&activity.ID, &activity.AppID, &activity.WorkspaceID, &activity.ComponentType,
+			&activity.ComponentID, &level, &activity.EventType, &activity.Source, &activity.Message,
+			&activity.TraceID, &created); err != nil {
+			return domain.AppActivityPage{}, err
+		}
+		activity.Level = domain.ActivityLevel(level)
+		activity.CreatedAt = timeFromUnixNanoOrZero(created)
+		activities = append(activities, activity)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	hasMore := len(activities) > request.Limit
+	if hasMore {
+		activities = activities[:request.Limit]
+	}
+	page := domain.AppActivityPage{Activities: activities, HasMore: hasMore}
+	if hasMore && len(activities) > 0 {
+		page.NextCursor, err = domain.NewListCursor(strconv.FormatInt(activities[len(activities)-1].ID, 10))
 	}
 	return page, err
 }

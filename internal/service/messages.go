@@ -3614,6 +3614,25 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AppActivities reports one app's activity log to that app. An app reads only
+// its own entries, so the caller's identity decides the filter rather than an
+// argument it could set to somebody else's.
+func (m Messages) AppActivities(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	if appID == "" {
+		return domain.AppActivityPage{}, ErrInvalidWorkspace
+	}
+	filter.AppID = appID
+	return m.Store.ListAppActivities(ctx, workspaceID, filter, request)
+}
+
+// AdminAppActivities reports any app's activity log to an administrator.
+func (m Messages) AdminAppActivities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, filter domain.AppActivityFilter, request domain.PageRequest) (domain.AppActivityPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AppActivityPage{}, err
+	}
+	return m.Store.ListAppActivities(ctx, workspaceID, filter, request)
+}
+
 // AdminLookupConversations finds channels an administrator is looking for. A
 // filter left at its zero value is not applied, so a lookup that names nothing
 // answers every channel rather than none.

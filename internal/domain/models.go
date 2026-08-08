@@ -2291,6 +2291,75 @@ type RoleAssignmentPage struct {
 	HasMore     bool
 }
 
+// ActivityLevel is how severe one app activity entry is. Slack orders them, and
+// a caller asking for warnings and above needs the order rather than the names.
+type ActivityLevel string
+
+const (
+	ActivityTrace ActivityLevel = "trace"
+	ActivityDebug ActivityLevel = "debug"
+	ActivityInfo  ActivityLevel = "info"
+	ActivityWarn  ActivityLevel = "warn"
+	ActivityError ActivityLevel = "error"
+	ActivityFatal ActivityLevel = "fatal"
+)
+
+// Rank orders the levels. An unrecognised level ranks below trace, so a filter
+// asking for warnings and above never admits one by accident.
+func (level ActivityLevel) Rank() int {
+	switch level {
+	case ActivityTrace:
+		return 1
+	case ActivityDebug:
+		return 2
+	case ActivityInfo:
+		return 3
+	case ActivityWarn:
+		return 4
+	case ActivityError:
+		return 5
+	case ActivityFatal:
+		return 6
+	}
+	return 0
+}
+
+func (level ActivityLevel) Valid() bool { return level.Rank() > 0 }
+
+// AppActivity is one entry in an app's activity log: what the platform ran on
+// the app's behalf, and how it went.
+type AppActivity struct {
+	ID            int64
+	AppID         AppID
+	WorkspaceID   WorkspaceID
+	ComponentType string
+	ComponentID   string
+	Level         ActivityLevel
+	EventType     string
+	Source        string
+	Message       string
+	TraceID       string
+	CreatedAt     time.Time
+}
+
+type AppActivityPage struct {
+	Activities []AppActivity
+	NextCursor Cursor
+	HasMore    bool
+}
+
+// AppActivityFilter narrows an activity read. A zero field is not applied.
+type AppActivityFilter struct {
+	AppID         AppID
+	MinLevel      ActivityLevel
+	MinCreatedAt  time.Time
+	MaxCreatedAt  time.Time
+	ComponentType string
+	ComponentID   string
+	Source        string
+	TraceID       string
+}
+
 // LinkedObject is an external record a channel is linked to. Slack links a
 // channel to a Salesforce record, so the pair names the organization and the
 // record inside it.

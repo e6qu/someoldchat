@@ -47,6 +47,8 @@ var pageRequestExemptions = func() map[string]map[string]string {
 		"AdminConversationTeams",
 		"AdminListApps",
 		"AdminListInviteRequests",
+		"AppActivities",
+		"AdminAppActivities",
 		"AdminLookupConversations",
 		"AdminBarriers",
 		"AdminAuthPolicyEntities",
