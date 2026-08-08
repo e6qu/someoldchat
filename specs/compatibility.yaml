@@ -1594,7 +1594,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/tooling.tokens.rotate/
   - method: users.discoverableContacts.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/users.discoverableContacts.lookup/
   - method: workflows.featured.add

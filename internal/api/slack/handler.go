@@ -185,6 +185,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
 	mux.HandleFunc("POST /api/admin.apps.uninstall", h.adminAppsUninstall)
 	mux.HandleFunc("POST /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
+	mux.HandleFunc("GET /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
+	mux.HandleFunc("POST /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
 	mux.HandleFunc("GET /api/admin.functions.list", h.adminFunctionsList)
 	mux.HandleFunc("POST /api/admin.functions.list", h.adminFunctionsList)
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
@@ -2996,6 +2998,36 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// users.discoverableContacts.lookup reports which addresses belong to a member
+// this workspace lets others find. A workspace that hides itself answers none.
+func (h Handler) usersDiscoverableContacts(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersReadEmail)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	emails := parseIDList[string](fields["emails"])
+	if len(emails) == 0 {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	users, err := h.Messages.DiscoverableContacts(r.Context(), principal.WorkspaceID, principal.UserID, emails)
+	if err != nil {
+		writeError(w, mapServiceError(err, "invalid_arg_name"))
+		return
+	}
+	contacts := make([]map[string]any, 0, len(users))
+	for _, user := range users {
+		contacts = append(contacts, map[string]any{"email": user.Email, "user_id": string(user.ID), "team_id": string(user.WorkspaceID)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "contacts": contacts})
 }
 
 // admin.functions.list reports the functions the installed apps declare. A

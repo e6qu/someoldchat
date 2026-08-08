@@ -278,6 +278,10 @@ const expiration = await client.apiCall("admin.users.getExpiration", { user_id: 
 assert.equal(expiration.ok, true);
 assert.equal(typeof expiration.expiration_ts, "number");
 
+const contacts = await client.apiCall("users.discoverableContacts.lookup", { emails: "alice@example.com" });
+assert.equal(contacts.ok, true);
+assert.equal(Array.isArray(contacts.contacts), true);
+
 const adminFunctions = await client.apiCall("admin.functions.list", {});
 assert.equal(adminFunctions.ok, true);
 assert.equal(Array.isArray(adminFunctions.functions), true);

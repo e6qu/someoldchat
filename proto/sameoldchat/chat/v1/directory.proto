@@ -135,6 +135,16 @@ message SetUserRoleRequest {
   string role = 4;
 }
 
+message DiscoverableContactsResponse {
+  repeated User users = 1;
+}
+
+message DiscoverableContactsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string emails = 3;
+}
+
 message UserExpirationResponse {
   int64 expiration_unix_nano = 1;
 }
@@ -445,6 +455,7 @@ service DirectoryService {
   rpc SetUserRole(SetUserRoleRequest) returns (MutationResponse);
   rpc SetUserExpiration(SetUserExpirationRequest) returns (MutationResponse);
   rpc UserExpiration(SetUserExpirationRequest) returns (UserExpirationResponse);
+  rpc DiscoverableContacts(DiscoverableContactsRequest) returns (DiscoverableContactsResponse);
   rpc ResetUserSessions(ResetUserSessionsRequest) returns (MutationResponse);
   rpc UserSessions(ResetUserSessionsRequest) returns (UserSessionsResponse);
   rpc ResetUserSessionsBulk(ResetUserSessionsBulkRequest) returns (MutationResponse);

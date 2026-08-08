@@ -3614,6 +3614,41 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// DiscoverableContacts reports which of the named email addresses belong to a
+// member this workspace lets others find. A workspace that is not discoverable
+// answers no contacts, whatever the addresses match.
+func (m Messages) DiscoverableContacts(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, emails []string) ([]domain.User, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(emails) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if workspace.Discoverability != domain.WorkspaceDiscoverabilityOpen {
+		return []domain.User{}, nil
+	}
+	found := make([]domain.User, 0, len(emails))
+	for _, email := range emails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" {
+			continue
+		}
+		user, err := m.Store.FindUserByEmail(ctx, workspaceID, email)
+		if err != nil {
+			continue
+		}
+		if user.Deleted {
+			continue
+		}
+		found = append(found, user)
+	}
+	return found, nil
+}
+
 func (m Messages) AdminCreateWorkspace(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, domainName, name, description string, discoverability domain.WorkspaceDiscoverability) (domain.Workspace, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err

@@ -28,6 +28,7 @@ const (
 	DirectoryService_SetUserRole_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
 	DirectoryService_SetUserExpiration_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
 	DirectoryService_UserExpiration_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/UserExpiration"
+	DirectoryService_DiscoverableContacts_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/DiscoverableContacts"
 	DirectoryService_ResetUserSessions_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
 	DirectoryService_UserSessions_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
 	DirectoryService_ResetUserSessionsBulk_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
@@ -82,6 +83,7 @@ type DirectoryServiceClient interface {
 	SetUserRole(ctx context.Context, in *SetUserRoleRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*UserExpirationResponse, error)
+	DiscoverableContacts(ctx context.Context, in *DiscoverableContactsRequest, opts ...grpc.CallOption) (*DiscoverableContactsResponse, error)
 	ResetUserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -215,6 +217,16 @@ func (c *directoryServiceClient) UserExpiration(ctx context.Context, in *SetUser
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UserExpirationResponse)
 	err := c.cc.Invoke(ctx, DirectoryService_UserExpiration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) DiscoverableContacts(ctx context.Context, in *DiscoverableContactsRequest, opts ...grpc.CallOption) (*DiscoverableContactsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DiscoverableContactsResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_DiscoverableContacts_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -624,6 +636,7 @@ type DirectoryServiceServer interface {
 	SetUserRole(context.Context, *SetUserRoleRequest) (*MutationResponse, error)
 	SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error)
 	UserExpiration(context.Context, *SetUserExpirationRequest) (*UserExpirationResponse, error)
+	DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error)
 	ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error)
 	UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error)
@@ -698,6 +711,9 @@ func (UnimplementedDirectoryServiceServer) SetUserExpiration(context.Context, *S
 }
 func (UnimplementedDirectoryServiceServer) UserExpiration(context.Context, *SetUserExpirationRequest) (*UserExpirationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UserExpiration not implemented")
+}
+func (UnimplementedDirectoryServiceServer) DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DiscoverableContacts not implemented")
 }
 func (UnimplementedDirectoryServiceServer) ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetUserSessions not implemented")
@@ -994,6 +1010,24 @@ func _DirectoryService_UserExpiration_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).UserExpiration(ctx, req.(*SetUserExpirationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_DiscoverableContacts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DiscoverableContactsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).DiscoverableContacts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_DiscoverableContacts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).DiscoverableContacts(ctx, req.(*DiscoverableContactsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1742,6 +1776,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UserExpiration",
 			Handler:    _DirectoryService_UserExpiration_Handler,
+		},
+		{
+			MethodName: "DiscoverableContacts",
+			Handler:    _DirectoryService_DiscoverableContacts_Handler,
 		},
 		{
 			MethodName: "ResetUserSessions",

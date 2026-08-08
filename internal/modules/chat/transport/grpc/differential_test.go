@@ -774,6 +774,24 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A workspace that hides itself answers no contacts, whatever the
+			// addresses match. Both compositions must agree on that, because
+			// the answer tells the caller who works here.
+			name: "discoverable contacts follow the workspace setting",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				open, err := chat.DiscoverableContacts(ctx, "T1", "U1", []string{"u1@example.com", "nobody@example.com"})
+				if err != nil {
+					return nil, err
+				}
+				found := make([]string, 0, len(open))
+				for _, user := range open {
+					found = append(found, string(user.ID))
+				}
+				_, empty := chat.DiscoverableContacts(ctx, "T1", "U1", nil)
+				return []any{found, empty != nil}, nil
+			},
+		},
+		{
 			// admin.functions.list reads the manifests of the installed apps,
 			// because a function exists in a manifest and nowhere else.
 			name: "an administrator lists the functions the installed apps declare",

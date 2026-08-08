@@ -281,6 +281,7 @@ type Service interface {
 	WorkspaceInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.Workspace, error)
 	AuthorizedAppWorkspaces(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.PageRequest) (domain.WorkspacePage, error)
 	AdminCreateWorkspace(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, domain.WorkspaceDiscoverability) (domain.Workspace, error)
+	DiscoverableContacts(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.User, error)
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)
 	Conversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	OpenConversation(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) (domain.Conversation, error)

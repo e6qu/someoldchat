@@ -1615,6 +1615,22 @@ func (r Remote) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceID,
 	return nil
 }
 
+func (r Remote) DiscoverableContacts(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, emails []string) ([]domain.User, error) {
+	out, err := r.directory.DiscoverableContacts(ctx, &chatv1.DiscoverableContactsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Emails: emails})
+	if err != nil {
+		return nil, err
+	}
+	users := make([]domain.User, 0, len(out.GetUsers()))
+	for _, encoded := range out.GetUsers() {
+		user, decodeErr := decodeProtoUser(encoded)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		users = append(users, user)
+	}
+	return users, nil
+}
+
 func (r Remote) UserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) (time.Time, error) {
 	out, err := r.directory.UserExpiration(ctx, &chatv1.SetUserExpirationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
 	if err != nil {
@@ -5290,6 +5306,18 @@ func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleReque
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) DiscoverableContacts(ctx context.Context, input *chatv1.DiscoverableContactsRequest) (*chatv1.DiscoverableContactsResponse, error) {
+	users, err := s.implementation.DiscoverableContacts(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetEmails())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.User, 0, len(users))
+	for _, user := range users {
+		encoded = append(encoded, encodeProtoUser(user))
+	}
+	return &chatv1.DiscoverableContactsResponse{Users: encoded}, nil
 }
 
 func (s *Server) UserExpiration(ctx context.Context, input *chatv1.SetUserExpirationRequest) (*chatv1.UserExpirationResponse, error) {
