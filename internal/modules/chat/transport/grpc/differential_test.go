@@ -844,6 +844,27 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The step responses report is what the export acknowledges, so
+			// both compositions must collect the same answers and refuse the
+			// same callers.
+			name: "workflow step responses are collected identically",
+			seed: seedFormParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				collected, err := chat.WorkflowStepResponses(ctx, "T1", "U1", "WfForm", "intake")
+				if err != nil {
+					return nil, err
+				}
+				described := make([]string, 0, len(collected))
+				for _, response := range collected {
+					described = append(described, string(response.ActorID)+"/"+string(response.Status))
+				}
+				_, unnamedStep := chat.WorkflowStepResponses(ctx, "T1", "U1", "WfForm", "")
+				_, missingWorkflow := chat.WorkflowStepResponses(ctx, "T1", "U1", "Wf-nobody", "intake")
+				_, stranger := chat.WorkflowStepResponses(ctx, "T1", "U2", "WfForm", "intake")
+				return []any{described, unnamedStep != nil, missingWorkflow != nil, stranger != nil}, nil
+			},
+		},
+		{
 			// An empty allow list is the state a workspace starts in, not a
 			// missing one, and an address without a reason is refused. Both
 			// compositions must answer the same on each.

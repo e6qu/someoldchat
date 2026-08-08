@@ -2640,6 +2640,15 @@ func TestAdminAuditBillingAndExports(t *testing.T) {
 			t.Fatalf("body=%q refused=%v", body, refused)
 		}
 	}
+	// The export is fetchable, which is what makes the acknowledgement mean
+	// something: the report used to be acknowledged and never produced.
+	fetch := httptest.NewRequest(http.MethodGet, "/internal/exports/workflow-step-responses.csv?workflow_id=Wf-nobody&step_id=intake", nil)
+	fetch.Header.Set("Authorization", "Bearer token")
+	fetched := httptest.NewRecorder()
+	handler.ServeHTTP(fetched, fetch)
+	if fetched.Code != http.StatusOK || !strings.Contains(fetched.Body.String(), "workflow_not_found") {
+		t.Fatalf("an export for a workflow that is not here: status=%d body=%s", fetched.Code, fetched.Body)
+	}
 	if noStep := call(t, http.MethodPost, "functions.workflows.steps.responses.export", "workflow_id=Wf1"); noStep["error"] != "invalid_arguments" {
 		t.Fatalf("noStep=%v", noStep)
 	}

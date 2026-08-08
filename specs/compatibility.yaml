@@ -1763,7 +1763,7 @@ operations:
       - go-test:internal/api/slack:TestAdminAuditBillingAndExports
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
-      - The request is acknowledged and recorded in the workspace journal; the report itself is not built or delivered.
+      - The report lists members running unsupported client versions. This deployment records no client version, so the request is acknowledged and journalled and there is nothing to report.
   - method: admin.workflows.collaborators.add
     status: behavior-compatible
     provenance: slack-reference
@@ -2162,7 +2162,7 @@ operations:
       - go-test:internal/api/slack:TestAdminAuditBillingAndExports
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
-      - The request is acknowledged and recorded in the workspace journal; the report itself is not built or delivered.
+      - Slack mails the report; this deployment serves it as CSV at /internal/exports/workflow-step-responses.csv to the workflow managers who could have asked for it.
   - method: rtm.start
     status: sdk-compatible
     provenance: slack-reference

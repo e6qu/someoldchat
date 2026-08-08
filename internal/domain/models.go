@@ -342,6 +342,18 @@ const (
 	WorkflowStepCancelled  WorkflowStepStatus = "cancelled"
 )
 
+// WorkflowStepResponse is one member's answer to one interactive step, across
+// every run of the workflow. It is what
+// functions.workflows.steps.responses.export reports.
+type WorkflowStepResponse struct {
+	RunID       WorkflowRunID
+	StepID      WorkflowStepID
+	ActorID     UserID
+	Status      WorkflowStepStatus
+	Outputs     string
+	CompletedAt time.Time
+}
+
 type WorkflowStep struct {
 	ID            WorkflowStepID
 	WorkflowRunID WorkflowRunID

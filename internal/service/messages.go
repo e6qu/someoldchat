@@ -3769,11 +3769,7 @@ func (m Messages) AdminRequestExport(ctx context.Context, workspaceID domain.Wor
 // responses. Only somebody who may manage the workflow may ask, because the
 // responses are what its members submitted.
 func (m Messages) RequestWorkflowStepResponsesExport(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowID domain.WorkflowID, stepID string) error {
-	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
-	if err != nil {
-		return err
-	}
-	if err := m.requireWorkflowManager(ctx, workflow, actorID); err != nil {
+	if _, err := m.WorkflowStepResponses(ctx, workspaceID, actorID, workflowID, stepID); err != nil {
 		return err
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("export.requested",
@@ -3784,6 +3780,54 @@ func (m Messages) RequestWorkflowStepResponsesExport(ctx context.Context, worksp
 		return err
 	}
 	return m.Store.AppendEvent(ctx, event)
+}
+
+// WorkflowStepResponses collects what members submitted to one step across
+// every run of the workflow. The export used to acknowledge a request and
+// produce nothing; this is the report it acknowledges.
+func (m Messages) WorkflowStepResponses(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowID domain.WorkflowID, stepID string) ([]domain.WorkflowStepResponse, error) {
+	stepID = strings.TrimSpace(stepID)
+	if workflowID == "" || stepID == "" {
+		return nil, ErrInvalidWorkflowStep
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.requireWorkflowManager(ctx, workflow, actorID); err != nil {
+		return nil, err
+	}
+	responses := make([]domain.WorkflowStepResponse, 0)
+	cursor := domain.Cursor("")
+	for {
+		runs, more, next, err := m.Store.ListWorkflowRuns(ctx, workspaceID, workflowID, domain.PageRequest{Limit: 100, Cursor: cursor})
+		if err != nil {
+			return nil, err
+		}
+		for _, run := range runs {
+			executions, err := m.Store.ListWorkflowRunSteps(ctx, workspaceID, run.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, execution := range executions {
+				// EditID carries which step of the definition this execution
+				// is, which is how one step's answers are picked out of every
+				// run's executions.
+				if execution.EditID != stepID {
+					continue
+				}
+				responses = append(responses, domain.WorkflowStepResponse{
+					RunID: run.ID, StepID: execution.ID, ActorID: execution.UserID,
+					Status: execution.Status, Outputs: execution.Outputs, CompletedAt: execution.UpdatedAt,
+				})
+			}
+		}
+		if !more || next == "" {
+			break
+		}
+		cursor = next
+	}
+	return responses, nil
 }
 
 // AdminAnomalyAllowList reports what audit is told not to flag.

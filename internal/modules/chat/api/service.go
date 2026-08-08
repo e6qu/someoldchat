@@ -293,6 +293,7 @@ type Service interface {
 	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	AdminRequestExport(context.Context, domain.WorkspaceID, domain.UserID, string, map[string]int64) error
 	RequestWorkflowStepResponsesExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) error
+	WorkflowStepResponses(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) ([]domain.WorkflowStepResponse, error)
 	AdminAnomalyAllowList(context.Context, domain.WorkspaceID, domain.UserID) (domain.AnomalyAllowList, error)
 	AdminSetAnomalyAllowList(context.Context, domain.WorkspaceID, domain.UserID, []string, []string) (domain.AnomalyAllowList, error)
 	TeamBillingInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspacePlan, error)

@@ -441,6 +441,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/entity.presentComments", h.presentEntityComments)
 	mux.HandleFunc("POST /api/entity.acknowledgeCommentAction", h.acknowledgeEntityCommentAction)
 	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
+	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
@@ -11799,6 +11800,49 @@ func (h Handler) startListDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "job_id": value.ID})
+}
+
+// downloadWorkflowStepResponsesCSV serves what
+// functions.workflows.steps.responses.export acknowledges. Slack mails the
+// report; this deployment serves it to anybody who could have asked for it,
+// which is the workflow's managers and nobody else.
+func (h Handler) downloadWorkflowStepResponsesCSV(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeWorkflowStepsExecute)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	workflowID := domain.WorkflowID(strings.TrimSpace(r.URL.Query().Get("workflow_id")))
+	stepID := strings.TrimSpace(r.URL.Query().Get("step_id"))
+	if workflowID == "" || stepID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	responses, err := h.Messages.WorkflowStepResponses(r.Context(), principal.WorkspaceID, principal.UserID, workflowID, stepID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(string(workflowID)+"-"+stepID+".csv"))
+	writer := csv.NewWriter(w)
+	if err := writer.Write([]string{"run_id", "step_id", "user_id", "status", "outputs", "completed_at"}); err != nil {
+		return
+	}
+	for _, response := range responses {
+		completed := ""
+		if !response.CompletedAt.IsZero() {
+			completed = response.CompletedAt.UTC().Format(time.RFC3339)
+		}
+		if err := writer.Write([]string{
+			string(response.RunID), string(response.StepID), string(response.ActorID),
+			string(response.Status), response.Outputs, completed,
+		}); err != nil {
+			return
+		}
+	}
+	writer.Flush()
 }
 
 func (h Handler) downloadListCSV(w http.ResponseWriter, r *http.Request) {

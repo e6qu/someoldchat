@@ -3698,6 +3698,35 @@ func functionPermissionRequest(workspaceID domain.WorkspaceID, userID domain.Use
 	}
 }
 
+func (r Remote) WorkflowStepResponses(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, stepID string) ([]domain.WorkflowStepResponse, error) {
+	out, err := r.workflows.WorkflowStepResponses(ctx, &chatv1.WorkflowStepResponsesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID), StepId: stepID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]domain.WorkflowStepResponse, 0, len(out.GetResponses()))
+	for _, encoded := range out.GetResponses() {
+		responses = append(responses, decodeProtoWorkflowStepResponse(encoded))
+	}
+	return responses, nil
+}
+
+func encodeProtoWorkflowStepResponse(value domain.WorkflowStepResponse) *chatv1.WorkflowStepResponse {
+	return &chatv1.WorkflowStepResponse{
+		RunId: string(value.RunID), StepId: string(value.StepID), ActorId: string(value.ActorID),
+		Status: string(value.Status), Outputs: value.Outputs, CompletedAt: optionalUnixNano(value.CompletedAt),
+	}
+}
+
+func decodeProtoWorkflowStepResponse(value *chatv1.WorkflowStepResponse) domain.WorkflowStepResponse {
+	return domain.WorkflowStepResponse{
+		RunID: domain.WorkflowRunID(value.GetRunId()), StepID: domain.WorkflowStepID(value.GetStepId()),
+		ActorID: domain.UserID(value.GetActorId()), Status: domain.WorkflowStepStatus(value.GetStatus()),
+		Outputs: value.GetOutputs(), CompletedAt: optionalTimeFromUnixNano(value.GetCompletedAt()),
+	}
+}
+
 func (r Remote) AdminFunctionPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, functionIDs []string) ([]domain.AutomationPermission, error) {
 	out, err := r.workflows.AdminFunctionPermissions(ctx, adminPermissionsRequest(workspaceID, userID, functionIDs))
 	if err != nil {
@@ -7316,6 +7345,19 @@ func (s *Server) CompleteFunction(ctx context.Context, input *chatv1.FunctionCom
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) WorkflowStepResponses(ctx context.Context, input *chatv1.WorkflowStepResponsesRequest) (*chatv1.WorkflowStepResponsesResponse, error) {
+	responses, err := s.implementation.WorkflowStepResponses(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetStepId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.WorkflowStepResponse, 0, len(responses))
+	for _, response := range responses {
+		encoded = append(encoded, encodeProtoWorkflowStepResponse(response))
+	}
+	return &chatv1.WorkflowStepResponsesResponse{Responses: encoded}, nil
 }
 
 func (s *Server) AdminFunctionPermissions(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AdminPermissionsResponse, error) {
