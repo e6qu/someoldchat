@@ -161,7 +161,7 @@ func seedListAssignmentParity(t *testing.T, target *memory.Store) {
 		Schema: "[]", Version: 1, CreatedAt: now, UpdatedAt: now,
 	}, events.Event{ID: "ELx", WorkspaceID: "T1", Topic: "list.created", CreatedAt: now}))
 	requireSeed(t, target.SetListAccess(ctx, domain.ListAccess{
-		ListID: "Lx-assign", EntityType: "user", EntityID: "U2", Access: "read",
+		ListID: "Lx-assign", EntityType: domain.GrantUser, EntityID: "U2", Access: domain.AccessRead,
 	}, events.Event{ID: "ELa", WorkspaceID: "T1", Topic: "list.access_changed", CreatedAt: now}))
 	requireSeed(t, target.CreateListItem(ctx, domain.ListItem{
 		ID: "Li-assign", ListID: "Lx-assign", WorkspaceID: "T1", Fields: `[{"column_id":"title","value":"ship it"}]`,
@@ -2316,7 +2316,7 @@ func parityCases() []parityCase {
 				}
 				listed := make([]string, 0, len(grants))
 				for _, grant := range grants {
-					listed = append(listed, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+					listed = append(listed, string(grant.EntityType)+":"+grant.EntityID+":"+string(grant.Access))
 				}
 				readerGrant := chat.SetListAccess(ctx, "T1", "U2", created.ID, "write", nil, []domain.UserID{"U3"}) != nil
 				_, strangerErr := chat.ListGrants(ctx, "T1", "U3", created.ID)
@@ -2355,7 +2355,7 @@ func parityCases() []parityCase {
 				}
 				listed := make([]string, 0, len(grants))
 				for _, grant := range grants {
-					listed = append(listed, grant.EntityType+":"+grant.EntityID+":"+grant.Access)
+					listed = append(listed, string(grant.EntityType)+":"+grant.EntityID+":"+string(grant.Access))
 				}
 				// A reader may not change them: granting is the strongest
 				// operation on a canvas and belongs to its owner.

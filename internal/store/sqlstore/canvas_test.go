@@ -34,10 +34,10 @@ func TestCanvasPersistence(t *testing.T) {
 	if err != nil || loaded.DocumentContent != canvas.DocumentContent {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
-	if err := store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(user.ID), Access: "write"}, events.Event{ID: "E-canvas-access", WorkspaceID: workspace.ID, Topic: "canvas.access_set", CreatedAt: now}); err != nil {
+	if err := store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: string(user.ID), Access: domain.AccessWrite}, events.Event{ID: "E-canvas-access", WorkspaceID: workspace.ID, Topic: "canvas.access_set", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(user.ID)}, events.Event{ID: "E-canvas-access-delete", WorkspaceID: workspace.ID, Topic: "canvas.access_deleted", CreatedAt: now}); err != nil {
+	if err := store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantUser, EntityID: string(user.ID)}, events.Event{ID: "E-canvas-access-delete", WorkspaceID: workspace.ID, Topic: "canvas.access_deleted", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.DeleteCanvas(ctx, workspace.ID, canvas.ID, events.Event{ID: "E-canvas-delete", WorkspaceID: workspace.ID, Topic: "canvas.deleted", CreatedAt: now}); err != nil {

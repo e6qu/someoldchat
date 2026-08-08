@@ -58,7 +58,7 @@ func (m Messages) CreateCanvas(ctx context.Context, workspaceID domain.Workspace
 		return domain.Canvas{}, err
 	}
 	if channelID != "" {
-		access := domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(channelID), Access: "write"}
+		access := domain.CanvasAccess{CanvasID: id, EntityType: domain.GrantChannel, EntityID: string(channelID), Access: domain.AccessWrite}
 		accessEvent, eventErr := canvasEvent(workspaceID, userID, "canvas.access_set", id, now,
 			events.String("entity_type", "channel"), events.String("entity_id", string(channelID)), events.String("access", "write"))
 		if eventErr != nil {
@@ -105,7 +105,7 @@ func (m Messages) CreateConversationCanvas(ctx context.Context, workspaceID doma
 		return domain.Canvas{}, err
 	}
 	accessEvent, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, now,
-		events.String("entity_type", "channel_canvas"), events.String("entity_id", string(channelID)), events.String("access", store.AccessWrite))
+		events.String("entity_type", "channel_canvas"), events.String("entity_id", string(channelID)), events.String("access", string(domain.AccessWrite)))
 	if err != nil {
 		return domain.Canvas{}, err
 	}
@@ -123,7 +123,7 @@ func (m Messages) ConversationCanvas(ctx context.Context, workspaceID domain.Wor
 }
 
 func (m Messages) Canvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) (domain.Canvas, error) {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessRead); err != nil {
 		return domain.Canvas{}, err
 	}
 	return m.Store.GetCanvas(ctx, workspaceID, id)
@@ -142,7 +142,7 @@ func (m Messages) CanvasAccess(ctx context.Context, workspaceID domain.Workspace
 // secret — and a member deciding whether to share it needs to know it is not
 // already shared.
 func (m Messages) CanvasGrants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) ([]domain.CanvasAccess, error) {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessRead); err != nil {
 		return nil, err
 	}
 	return m.Store.ListCanvasGrants(ctx, workspaceID, id)
@@ -156,7 +156,7 @@ func (m Messages) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, 
 }
 
 func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessWrite); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessWrite); err != nil {
 		return err
 	}
 	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
@@ -193,7 +193,7 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 func (m Messages) DeleteCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) error {
 	// Destroying a canvas is reserved to whoever owns it: a collaborator granted
 	// write access may change the document, not remove it from everyone else.
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessOwner); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessOwner); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -204,10 +204,10 @@ func (m Messages) DeleteCanvas(ctx context.Context, workspaceID domain.Workspace
 	return m.Store.DeleteCanvas(ctx, workspaceID, id, event)
 }
 
-func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, access domain.AccessLevel, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
 	// Granting access is the strongest operation on a canvas: write access must not
 	// be enough to hand the canvas to anyone else.
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessOwner); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessOwner); err != nil {
 		return err
 	}
 	if _, err := m.Store.GetCanvas(ctx, workspaceID, id); err != nil {
@@ -216,7 +216,7 @@ func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.Worksp
 	if err := validateCanvasAccess(access, channelIDs, userIDs); err != nil {
 		return err
 	}
-	if len(channelIDs) > 0 && access == "owner" {
+	if len(channelIDs) > 0 && access == domain.AccessOwner {
 		return ErrInvalidCanvas
 	}
 	if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, channelIDs); err != nil {
@@ -229,20 +229,20 @@ func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.Worksp
 		}
 	}
 	for _, targetID := range channelIDs {
-		event, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, time.Now().UTC(), events.String("entity_type", "channel"), events.String("entity_id", string(targetID)), events.String("access", access))
+		event, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, time.Now().UTC(), events.String("entity_type", "channel"), events.String("entity_id", string(targetID)), events.String("access", string(access)))
 		if err != nil {
 			return err
 		}
-		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(targetID), Access: access}, event); err != nil {
+		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: domain.GrantChannel, EntityID: string(targetID), Access: access}, event); err != nil {
 			return err
 		}
 	}
 	for _, targetID := range userIDs {
-		event, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, time.Now().UTC(), events.String("entity_type", "user"), events.String("entity_id", string(targetID)), events.String("access", access))
+		event, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, time.Now().UTC(), events.String("entity_type", "user"), events.String("entity_id", string(targetID)), events.String("access", string(access)))
 		if err != nil {
 			return err
 		}
-		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "user", EntityID: string(targetID), Access: access}, event); err != nil {
+		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: domain.GrantUser, EntityID: string(targetID), Access: access}, event); err != nil {
 			return err
 		}
 	}
@@ -250,7 +250,7 @@ func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessOwner); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessOwner); err != nil {
 		return err
 	}
 	if _, err := m.Store.GetCanvas(ctx, workspaceID, id); err != nil {
@@ -274,7 +274,7 @@ func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.Wor
 		if err != nil {
 			return err
 		}
-		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(targetID)}, event); err != nil {
+		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: domain.GrantChannel, EntityID: string(targetID)}, event); err != nil {
 			return err
 		}
 	}
@@ -283,7 +283,7 @@ func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.Wor
 		if err != nil {
 			return err
 		}
-		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "user", EntityID: string(targetID)}, event); err != nil {
+		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: domain.GrantUser, EntityID: string(targetID)}, event); err != nil {
 			return err
 		}
 	}
@@ -291,7 +291,7 @@ func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.Wor
 }
 
 func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, criteria string) ([]domain.CanvasSection, error) {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessRead); err != nil {
 		return nil, err
 	}
 	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
@@ -336,7 +336,7 @@ func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.W
 // the reason it changed — so an anchor is a record of what was being discussed
 // rather than a foreign key.
 func (m Messages) CommentOnCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, sectionID, text string) (domain.CanvasComment, error) {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessRead); err != nil {
 		return domain.CanvasComment{}, err
 	}
 	text = strings.TrimSpace(text)
@@ -364,7 +364,7 @@ func (m Messages) CommentOnCanvas(ctx context.Context, workspaceID domain.Worksp
 // CanvasComments reads a canvas's remarks, oldest first, which is how a
 // conversation reads.
 func (m Messages) CanvasComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessRead); err != nil {
 		return domain.CanvasCommentPage{}, err
 	}
 	return m.Store.ListCanvasComments(ctx, workspaceID, userID, id, request)
@@ -389,7 +389,7 @@ func (m Messages) DeleteCanvasComment(ctx context.Context, workspaceID domain.Wo
 // the history is the same document at an earlier moment and withholding it
 // would be withholding content they can already see the successor of.
 func (m Messages) CanvasRevisions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasRevisionPage, error) {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessRead); err != nil {
 		return domain.CanvasRevisionPage{}, err
 	}
 	return m.Store.ListCanvasRevisions(ctx, workspaceID, userID, id, request)
@@ -400,7 +400,7 @@ func (m Messages) CanvasRevisions(ctx context.Context, workspaceID domain.Worksp
 // restoring the wrong one is itself undoable, and the version keeps counting
 // forward. A history you can fall out of is worse than none.
 func (m Messages) RestoreCanvasRevision(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64) (domain.Canvas, error) {
-	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessWrite); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessWrite); err != nil {
 		return domain.Canvas{}, err
 	}
 	page, err := m.Store.ListCanvasRevisions(ctx, workspaceID, userID, id, domain.PageRequest{Limit: domain.CanvasRevisionLimit})
@@ -481,8 +481,8 @@ func (m Messages) SearchCanvases(ctx context.Context, workspaceID domain.Workspa
 	return m.Store.SearchCanvases(ctx, workspaceID, userID, search)
 }
 
-func validateCanvasAccess(access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	if access != "read" && access != "write" && access != "owner" || (len(channelIDs) == 0) == (len(userIDs) == 0) {
+func validateCanvasAccess(access domain.AccessLevel, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+	if !access.Valid() || (len(channelIDs) == 0) == (len(userIDs) == 0) {
 		return ErrInvalidCanvas
 	}
 	return nil

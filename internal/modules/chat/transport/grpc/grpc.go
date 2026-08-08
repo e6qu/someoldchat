@@ -1222,8 +1222,8 @@ func (r Remote) DeleteListItems(ctx context.Context, workspaceID domain.Workspac
 	return requireAcknowledgement(out.GetOk(), "list item deletion")
 }
 
-func (r Remote) SetListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	out, err := r.lists.SetListAccess(ctx, &chatv1.ListAccessRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), Access: access, ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
+func (r Remote) SetListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, access domain.AccessLevel, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+	out, err := r.lists.SetListAccess(ctx, &chatv1.ListAccessRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), Access: string(access), ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
 	if err != nil {
 		return err
 	}
@@ -1396,7 +1396,7 @@ func (r Remote) CanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.CanvasAccess{}, err
 	}
-	return domain.CanvasAccess{CanvasID: domain.CanvasID(out.GetCanvasId()), EntityType: out.GetEntityType(), EntityID: out.GetEntityId(), Access: out.GetAccess()}, nil
+	return domain.CanvasAccess{CanvasID: domain.CanvasID(out.GetCanvasId()), EntityType: domain.GrantEntity(out.GetEntityType()), EntityID: out.GetEntityId(), Access: domain.AccessLevel(out.GetAccess())}, nil
 }
 
 func (r Remote) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.CanvasPage, error) {
@@ -1498,8 +1498,8 @@ func (r Remote) DeleteCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 	return requireAcknowledgement(out.GetOk(), "canvas delete")
 }
 
-func (r Remote) SetCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	out, err := r.canvases.SetCanvasAccess(ctx, &chatv1.CanvasAccessRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), AccessLevel: access, ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
+func (r Remote) SetCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, access domain.AccessLevel, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+	out, err := r.canvases.SetCanvasAccess(ctx, &chatv1.CanvasAccessRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), AccessLevel: string(access), ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
 	if err != nil {
 		return err
 	}
@@ -4756,7 +4756,7 @@ func (s *Server) GetCanvasAccess(ctx context.Context, input *chatv1.CanvasReques
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &chatv1.CanvasAccessResponse{CanvasId: string(value.CanvasID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}, nil
+	return &chatv1.CanvasAccessResponse{CanvasId: string(value.CanvasID), EntityType: string(value.EntityType), EntityId: value.EntityID, Access: string(value.Access)}, nil
 }
 
 func (s *Server) CommentOnCanvas(ctx context.Context, input *chatv1.CommentOnCanvasRequest) (*chatv1.CanvasComment, error) {
@@ -4831,8 +4831,8 @@ func (s *Server) CanvasGrants(ctx context.Context, input *chatv1.CanvasGrantsReq
 
 func encodeProtoCanvasGrant(value domain.CanvasAccess) *chatv1.CanvasGrant {
 	return &chatv1.CanvasGrant{
-		CanvasId: string(value.CanvasID), EntityType: value.EntityType,
-		EntityId: value.EntityID, Access: value.Access,
+		CanvasId: string(value.CanvasID), EntityType: string(value.EntityType),
+		EntityId: value.EntityID, Access: string(value.Access),
 	}
 }
 
@@ -4841,8 +4841,8 @@ func decodeProtoCanvasGrant(value *chatv1.CanvasGrant) domain.CanvasAccess {
 		return domain.CanvasAccess{}
 	}
 	return domain.CanvasAccess{
-		CanvasID: domain.CanvasID(value.GetCanvasId()), EntityType: value.GetEntityType(),
-		EntityID: value.GetEntityId(), Access: value.GetAccess(),
+		CanvasID: domain.CanvasID(value.GetCanvasId()), EntityType: domain.GrantEntity(value.GetEntityType()),
+		EntityID: value.GetEntityId(), Access: domain.AccessLevel(value.GetAccess()),
 	}
 }
 
@@ -4982,7 +4982,7 @@ func (s *Server) deleteCanvasProto(ctx context.Context, input *chatv1.CanvasRequ
 }
 
 func (s *Server) setCanvasAccessProto(ctx context.Context, input *chatv1.CanvasAccessRequest) (*chatv1.MutationResponse, error) {
-	if err := s.implementation.SetCanvasAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetAccessLevel(), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
+	if err := s.implementation.SetCanvasAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), domain.AccessLevel(input.GetAccessLevel()), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -7146,14 +7146,14 @@ func (s *Server) ListGrants(ctx context.Context, input *chatv1.ListItemRequest) 
 }
 
 func encodeProtoListGrant(value domain.ListAccess) *chatv1.ListAccessResponse {
-	return &chatv1.ListAccessResponse{ListId: string(value.ListID), EntityType: value.EntityType, EntityId: value.EntityID, Access: value.Access}
+	return &chatv1.ListAccessResponse{ListId: string(value.ListID), EntityType: string(value.EntityType), EntityId: value.EntityID, Access: string(value.Access)}
 }
 
 func decodeProtoListGrant(value *chatv1.ListAccessResponse) domain.ListAccess {
 	if value == nil {
 		return domain.ListAccess{}
 	}
-	return domain.ListAccess{ListID: domain.ListID(value.GetListId()), EntityType: value.GetEntityType(), EntityID: value.GetEntityId(), Access: value.GetAccess()}
+	return domain.ListAccess{ListID: domain.ListID(value.GetListId()), EntityType: domain.GrantEntity(value.GetEntityType()), EntityID: value.GetEntityId(), Access: domain.AccessLevel(value.GetAccess())}
 }
 
 func encodeProtoListGrants(values []domain.ListAccess) []*chatv1.ListAccessResponse {
@@ -7267,7 +7267,7 @@ func (s *Server) DeleteListItems(ctx context.Context, input *chatv1.DeleteListIt
 }
 
 func (s *Server) SetListAccess(ctx context.Context, input *chatv1.ListAccessRequest) (*chatv1.ListOKResponse, error) {
-	if err := s.implementation.SetListAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetAccess(), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
+	if err := s.implementation.SetListAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.AccessLevel(input.GetAccess()), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.ListOKResponse{Ok: true}, nil

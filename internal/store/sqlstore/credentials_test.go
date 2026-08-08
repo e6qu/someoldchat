@@ -628,24 +628,24 @@ func TestSQLiteListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 	if err := s.CreateCanvas(ctx, canvas, event("E-canvas")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: "Ureader", Access: store.AccessRead}, event("E-list-user")); err != nil {
+	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantUser, EntityID: "Ureader", Access: domain.AccessRead}, event("E-list-user")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "channel", EntityID: "C1", Access: store.AccessWrite}, event("E-list-channel")); err != nil {
+	if err := s.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantChannel, EntityID: "C1", Access: domain.AccessWrite}, event("E-list-channel")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "channel", EntityID: "C1", Access: store.AccessRead}, event("E-canvas-channel")); err != nil {
+	if err := s.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: domain.GrantChannel, EntityID: "C1", Access: domain.AccessRead}, event("E-canvas-channel")); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, expectation := range []struct {
 		name  string
 		user  domain.UserID
-		level string
+		level domain.AccessLevel
 	}{
-		{"owner", "U1", store.AccessOwner},
-		{"direct user grant", "Ureader", store.AccessRead},
-		{"channel grant through membership", "Uchannel", store.AccessWrite},
+		{"owner", "U1", domain.AccessOwner},
+		{"direct user grant", "Ureader", domain.AccessRead},
+		{"channel grant through membership", "Uchannel", domain.AccessWrite},
 	} {
 		access, err := s.GetListAccess(ctx, list.ID, expectation.user)
 		if err != nil {
@@ -657,8 +657,8 @@ func TestSQLiteListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 	}
 	// The owner of the channel-granted list is also a member of C1, so the
 	// highest ranked grant has to win over the channel's write grant.
-	if access, err := s.GetListAccess(ctx, list.ID, "U1"); err != nil || access.Access != store.AccessOwner {
-		t.Fatalf("owner and channel member access=%+v err=%v, want %s", access, err, store.AccessOwner)
+	if access, err := s.GetListAccess(ctx, list.ID, "U1"); err != nil || access.Access != domain.AccessOwner {
+		t.Fatalf("owner and channel member access=%+v err=%v, want %s", access, err, domain.AccessOwner)
 	}
 	for _, refusal := range []struct {
 		name string
@@ -682,7 +682,7 @@ func TestSQLiteListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 		t.Fatalf("missing canvas error=%v, want %v", err, store.ErrNotFound)
 	}
 	canvasAccess, err := s.GetCanvasAccess(ctx, canvas.ID, "Uchannel")
-	if err != nil || canvasAccess.Access != store.AccessRead || canvasAccess.EntityType != "channel" || canvasAccess.EntityID != "C1" {
+	if err != nil || canvasAccess.Access != domain.AccessRead || canvasAccess.EntityType != "channel" || canvasAccess.EntityID != "C1" {
 		t.Fatalf("canvas channel grant=%+v err=%v", canvasAccess, err)
 	}
 	for _, expectation := range []struct {
@@ -696,13 +696,15 @@ func TestSQLiteListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 		}
 	}
 	// A revoked grant stops resolving.
-	if err := s.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: "Ureader"}, event("E-list-revoke")); err != nil {
+	if err := s.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: domain.GrantUser, EntityID: "Ureader"}, event("E-list-revoke")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.GetListAccess(ctx, list.ID, "Ureader"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked grant error=%v, want %v", err, store.ErrNotFound)
 	}
-	if got := fmt.Sprintf("%d", store.AccessRank("unknown")); got != "0" {
-		t.Fatalf("unknown access level ranks %s, want 0", got)
+	// A level this build does not declare ranks below every real grant, so a
+	// row written by a future version cannot be read as access.
+	if rank := domain.AccessLevel("unknown").Rank(); rank != 0 {
+		t.Fatalf("unknown access level ranks %d, want 0", rank)
 	}
 }

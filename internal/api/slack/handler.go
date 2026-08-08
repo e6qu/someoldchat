@@ -6001,7 +6001,7 @@ func (h Handler) setCanvasAccess(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), strings.TrimSpace(fields["access_level"]), parseIDList[domain.ConversationID](fields["channel_ids"]), parseIDList[domain.UserID](fields["user_ids"])); err != nil {
+	if err := h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), domain.AccessLevel(strings.TrimSpace(fields["access_level"])), parseIDList[domain.ConversationID](fields["channel_ids"]), parseIDList[domain.UserID](fields["user_ids"])); err != nil {
 		writeError(w, mapServiceError(err, "canvas_not_found"))
 		return
 	}
@@ -10085,7 +10085,7 @@ func (h Handler) changeListAccess(w http.ResponseWriter, r *http.Request, set bo
 	channels := parseIDList[domain.ConversationID](fields["channel_ids"])
 	users := parseIDList[domain.UserID](fields["user_ids"])
 	if set {
-		err = h.Messages.SetListAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), fields["access_level"], channels, users)
+		err = h.Messages.SetListAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.AccessLevel(strings.TrimSpace(fields["access_level"])), channels, users)
 	} else {
 		err = h.Messages.DeleteListAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), channels, users)
 	}

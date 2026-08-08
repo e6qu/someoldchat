@@ -11298,9 +11298,9 @@ func (s *Store) ListListGrants(ctx context.Context, workspace domain.WorkspaceID
 
 type grantRow struct {
 	documentID string
-	entityType string
+	entityType domain.GrantEntity
 	entityID   string
-	access     string
+	access     domain.AccessLevel
 }
 
 // listGrants reports every grant on one document, in a stable order so a
@@ -13243,7 +13243,7 @@ func (s *Store) CreateChannelCanvas(ctx context.Context, canvas domain.Canvas, e
 	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
 		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, 'channel_canvas', ?, ?)`, canvas.ID, channel, store.AccessWrite); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, 'channel_canvas', ?, ?)`, canvas.ID, channel, domain.AccessWrite); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -13819,14 +13819,14 @@ var (
 // store.ErrNotFound, including a document that does not exist and a user who is
 // not a live member of its workspace, so a caller cannot mistake "no grant" for
 // an empty grant.
-func (s *Store) resolveAccess(ctx context.Context, scope accessScope, id string, userID domain.UserID) (string, string, string, error) {
+func (s *Store) resolveAccess(ctx context.Context, scope accessScope, id string, userID domain.UserID) (domain.GrantEntity, string, domain.AccessLevel, error) {
 	var owner domain.UserID
 	if err := s.db.QueryRowContext(ctx, `SELECT d.owner_id FROM `+scope.documentTable+` d WHERE d.id = ? AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)`, id, userID).Scan(&owner); err != nil {
 		return "", "", "", translateNotFound(err)
 	}
-	bestType, bestID, bestLevel := "", "", ""
+	bestType, bestID, bestLevel := domain.GrantEntity(""), "", domain.AccessLevel("")
 	if owner == userID {
-		bestType, bestID, bestLevel = "user", string(userID), store.AccessOwner
+		bestType, bestID, bestLevel = domain.GrantUser, string(userID), domain.AccessOwner
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT a.entity_type, a.entity_id, a.access_level FROM `+scope.accessTable+` a JOIN `+scope.documentTable+` d ON d.id = a.`+scope.keyColumn+` WHERE a.`+scope.keyColumn+` = ? AND ((a.entity_type = 'user' AND a.entity_id = ?) OR (a.entity_type IN ('channel', 'channel_canvas') AND EXISTS (SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))`, id, string(userID), userID)
 	if err != nil {
@@ -13834,7 +13834,9 @@ func (s *Store) resolveAccess(ctx context.Context, scope accessScope, id string,
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var entityType, entityID, level string
+		var entityType domain.GrantEntity
+		var entityID string
+		var level domain.AccessLevel
 		if err := rows.Scan(&entityType, &entityID, &level); err != nil {
 			return "", "", "", err
 		}

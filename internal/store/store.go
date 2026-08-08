@@ -84,28 +84,6 @@ const MaxSearchHistoryEntries = 50
 // service layer already writes through SetListAccess and SetCanvasAccess; naming
 // them here keeps the readers, the writers and the authorization decision that
 // consumes them from drifting apart.
-const (
-	AccessRead  = "read"
-	AccessWrite = "write"
-	AccessOwner = "owner"
-)
-
-// AccessRank orders the access levels so a resolved grant can be compared with
-// the level an operation requires: AccessRank(granted) >= AccessRank(required).
-// An unrecognised level ranks 0, below every real grant, so an unknown string
-// can never satisfy a requirement.
-func AccessRank(level string) int {
-	switch level {
-	case AccessRead:
-		return 1
-	case AccessWrite:
-		return 2
-	case AccessOwner:
-		return 3
-	default:
-		return 0
-	}
-}
 
 // ListItemCreation pairs a list item with the event that announces it. The two
 // are carried together so a caller cannot hand CreateListWithItems a set of
@@ -140,8 +118,8 @@ type FileUnshare struct {
 // channel grant, then the lower entity identifier. A level this build does not
 // recognise ranks zero and can never win, so an unknown string cannot become the
 // reported reason.
-func BetterAccessGrant(entityType, entityID, level, bestType, bestID, bestLevel string) bool {
-	rank, bestRank := AccessRank(level), AccessRank(bestLevel)
+func BetterAccessGrant(entityType domain.GrantEntity, entityID string, level domain.AccessLevel, bestType domain.GrantEntity, bestID string, bestLevel domain.AccessLevel) bool {
+	rank, bestRank := level.Rank(), bestLevel.Rank()
 	if rank == 0 {
 		return false
 	}
@@ -154,8 +132,8 @@ func BetterAccessGrant(entityType, entityID, level, bestType, bestID, bestLevel 
 	return entityID < bestID
 }
 
-func accessEntityRank(entityType string) int {
-	if entityType == "user" {
+func accessEntityRank(entityType domain.GrantEntity) int {
+	if entityType == domain.GrantUser {
 		return 0
 	}
 	return 1
