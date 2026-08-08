@@ -6756,6 +6756,15 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				view.SourceURL = "/app/later?channel=" + url.QueryEscape(channel) + "&state=completed"
 			}
 		}
+		// A reminders.add reminder carries its own text and no source message,
+		// so the row says what the member asked to be reminded of and links
+		// nowhere rather than to a message that does not exist.
+		if item.AppReminderID != "" {
+			view.ActorName = "Reminder"
+			if item.AppReminder.ID != "" {
+				view.Text = template.HTML(template.HTMLEscapeString(item.AppReminder.Text))
+			}
+		}
 		if item.Message.ID != "" {
 			messageViews := h.newResultViews(r.Context(), principal, []domain.Message{item.Message}, names)
 			if len(messageViews) == 1 {

@@ -1113,7 +1113,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - Natural-language time descriptions and the recurrence object are not implemented.
-      - Delivery emits a reminder.delivered notice at the due instant; Slack posts it as a Slackbot direct message.
+      - Delivery shows the reminder in the member's Activity at the due instant; Slack posts it as a Slackbot direct message.
       - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible

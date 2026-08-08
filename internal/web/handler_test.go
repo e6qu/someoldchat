@@ -4850,3 +4850,50 @@ func TestCanvasSearchTabFindsProseAndNotStoredSyntax(t *testing.T) {
 	syntax := get(t, mux, "/app/search?q=sections&type=canvases&channel=Cdev")
 	requireContains(t, "canvas search for stored syntax", syntax.Body.String(), "No matching canvases.")
 }
+
+// TestADeliveredReminderIsVisibleWithItsText holds what REMIND-04 asks for at
+// the surface: at the due instant the member is shown the reminder, and shown
+// what it says.
+//
+// The delivery worker used to emit a notice and stop there. later_reminder
+// events were wired to the Later view and reminder.delivered reached nothing,
+// so a reminders.add reminder fired into a topic no surface read - which is the
+// same outcome as never firing, from the member's side.
+func TestADeliveredReminderIsVisibleWithItsText(t *testing.T) {
+	store, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	messages := service.Messages{Store: store}
+	reminder, err := messages.AddReminder(ctx, "T1", "U1", "U1", "call the dentist", now.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Before delivery the member is told nothing: a reminder that has not come
+	// due is not news.
+	before := get(t, mux, "/app/activity?channel=Cdev").Body.String()
+	requireMissing(t, "activity before delivery", before, "call the dentist")
+
+	worker, err := scheduler.NewReminderDeliveryWorker(store, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := worker.RunOnceAt(ctx, "T1", now)
+	if err != nil || delivered != 1 {
+		t.Fatalf("delivered=%d err=%v", delivered, err)
+	}
+
+	after := get(t, mux, "/app/activity?channel=Cdev").Body.String()
+	requireContains(t, "activity after delivery", after, "call the dentist", "Reminder")
+
+	// Running again delivers nothing, so the member is not told twice.
+	again, err := worker.RunOnceAt(ctx, "T1", now)
+	if err != nil || again != 0 {
+		t.Fatalf("a delivered reminder fired again: %d err=%v", again, err)
+	}
+	if count := strings.Count(after, "call the dentist"); count != 1 {
+		t.Fatalf("the reminder appears %d times in Activity", count)
+	}
+	_ = reminder
+}

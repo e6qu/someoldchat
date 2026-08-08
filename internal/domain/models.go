@@ -1509,12 +1509,23 @@ type ActivityItem struct {
 	SharedInviteID SharedInviteID
 	MessageID      MessageID
 	ReminderID     LaterReminderID
-	ReactionName   string
-	OccurredAt     time.Time
-	ReadAt         time.Time
-	ClearedAt      time.Time
-	Message        Message
-	Reminder       LaterReminder
+	// AppReminderID is a reminders.add reminder coming due. It sits beside
+	// ReminderID rather than replacing it because the two are different
+	// identifiers for different things: Later is where a member puts something
+	// to come back to, and reminders.add is the deprecated app surface Slack
+	// keeps for compatibility. One column holding either would make every
+	// reader guess which it was holding.
+	AppReminderID ReminderID
+	ReactionName  string
+	OccurredAt    time.Time
+	ReadAt        time.Time
+	ClearedAt     time.Time
+	Message       Message
+	Reminder      LaterReminder
+	// AppReminder is resolved when the item is read, like Reminder. Without it
+	// the row says a reminder came due and not which one, which reminds the
+	// member of nothing.
+	AppReminder Reminder
 	// CanvasTitle is resolved when the item is read, like Message and Reminder,
 	// so a row can name what was shared without the reader following the link.
 	CanvasTitle string

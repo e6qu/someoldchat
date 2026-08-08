@@ -11471,7 +11471,7 @@ func encodeProtoActivityItem(value domain.ActivityItem) *chatv1.ActivityItem {
 	result := &chatv1.ActivityItem{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
 		Kinds: kinds, ActorId: string(value.ActorID), ConversationId: string(value.Conversation),
-		MessageId: string(value.MessageID), ReminderId: string(value.ReminderID),
+		MessageId: string(value.MessageID), ReminderId: string(value.ReminderID), AppReminderId: string(value.AppReminderID),
 		ReactionName: value.ReactionName, OccurredAt: value.OccurredAt.UTC().UnixNano(),
 		SourceAvailable: value.SourceAvailable,
 		CanvasId:        string(value.CanvasID), CanvasTitle: value.CanvasTitle,
@@ -11491,6 +11491,9 @@ func encodeProtoActivityItem(value domain.ActivityItem) *chatv1.ActivityItem {
 	if value.SourceAvailable && value.Reminder.ID != "" {
 		result.Reminder = encodeProtoLaterReminder(value.Reminder)
 	}
+	if value.SourceAvailable && value.AppReminder.ID != "" {
+		result.AppReminder = encodeProtoReminder(value.AppReminder)
+	}
 	return result
 }
 
@@ -11502,7 +11505,7 @@ func decodeProtoActivityItem(value *chatv1.ActivityItem) (domain.ActivityItem, e
 		ID: domain.ActivityID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		UserID: domain.UserID(value.GetUserId()), ActorID: domain.UserID(value.GetActorId()),
 		Conversation: domain.ConversationID(value.GetConversationId()), MessageID: domain.MessageID(value.GetMessageId()),
-		ReminderID: domain.LaterReminderID(value.GetReminderId()), ReactionName: value.GetReactionName(),
+		ReminderID: domain.LaterReminderID(value.GetReminderId()), AppReminderID: domain.ReminderID(value.GetAppReminderId()), ReactionName: value.GetReactionName(),
 		OccurredAt: time.Unix(0, value.GetOccurredAt()).UTC(), SourceAvailable: value.GetSourceAvailable(),
 		CanvasID: domain.CanvasID(value.GetCanvasId()), CanvasTitle: value.GetCanvasTitle(),
 		ListItemID: domain.ListItemID(value.GetListItemId()), ListID: domain.ListID(value.GetListId()), ListName: value.GetListName(),
@@ -11531,6 +11534,12 @@ func decodeProtoActivityItem(value *chatv1.ActivityItem) (domain.ActivityItem, e
 	}
 	if value.GetReminder() != nil {
 		item.Reminder, err = decodeProtoLaterReminder(value.GetReminder())
+		if err != nil {
+			return domain.ActivityItem{}, err
+		}
+	}
+	if value.GetAppReminder() != nil {
+		item.AppReminder, err = decodeProtoReminder(value.GetAppReminder())
 		if err != nil {
 			return domain.ActivityItem{}, err
 		}
