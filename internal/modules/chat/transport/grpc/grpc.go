@@ -807,7 +807,7 @@ func (r Remote) ListAppAuthorizations(ctx context.Context, appID domain.AppID, w
 		values = append(values, domain.AppAuthorization{
 			AppID: domain.AppID(item.GetAppId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()),
 			UserID: domain.UserID(item.GetUserId()), BotID: domain.BotID(item.GetBotId()),
-			TokenType: item.GetTokenType(), Scopes: domain.NormalizeScopes(item.GetScopes()),
+			TokenType: domain.TokenType(item.GetTokenType()), Scopes: domain.NormalizeScopes(item.GetScopes()),
 		})
 	}
 	return values, nil
@@ -1521,7 +1521,7 @@ func (r Remote) LookupCanvasSections(ctx context.Context, workspaceID domain.Wor
 	}
 	result := make([]domain.CanvasSection, 0, len(out.GetSections()))
 	for _, section := range out.GetSections() {
-		result = append(result, domain.CanvasSection{ID: section.GetId(), Type: section.GetType(), Text: section.GetText()})
+		result = append(result, domain.CanvasSection{ID: section.GetId(), Type: domain.CanvasSectionType(section.GetType()), Text: section.GetText()})
 	}
 	return result, nil
 }
@@ -3401,7 +3401,7 @@ func decodeWorkflowInteraction(value *chatv1.WorkflowInteraction) domain.Workflo
 		return domain.WorkflowInteraction{}
 	}
 	interaction := domain.WorkflowInteraction{
-		StepID: domain.WorkflowStepID(value.GetStepId()), Kind: value.GetKind(),
+		StepID: domain.WorkflowStepID(value.GetStepId()), Kind: domain.WorkflowStepType(value.GetKind()),
 		Title: value.GetTitle(), Label: value.GetLabel(),
 	}
 	for _, field := range value.GetFields() {
@@ -3997,7 +3997,7 @@ func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
 		InstallerID:            domain.UserID(value.GetInstallerId()),
 		BotID:                  domain.BotID(value.GetBotId()),
 		Scopes:                 append([]string(nil), value.GetScopes()...),
-		TokenType:              value.GetTokenType(),
+		TokenType:              domain.TokenType(value.GetTokenType()),
 		AuthedUserAccessToken:  value.GetAuthedUserAccessToken(),
 		AuthedUserScopes:       append([]string(nil), value.GetAuthedUserScopes()...),
 		RefreshToken:           value.GetRefreshToken(),
@@ -5520,7 +5520,7 @@ func (s *Server) lookupCanvasSectionsProto(ctx context.Context, input *chatv1.Ca
 	}
 	result := make([]*chatv1.CanvasSection, 0, len(sections))
 	for _, section := range sections {
-		result = append(result, &chatv1.CanvasSection{Id: section.ID, Type: section.Type, Text: section.Text})
+		result = append(result, &chatv1.CanvasSection{Id: section.ID, Type: string(section.Type), Text: section.Text})
 	}
 	return &chatv1.CanvasSectionsResponse{Sections: result}, nil
 }
@@ -6673,7 +6673,7 @@ func (s *Server) ListAppAuthorizations(ctx context.Context, input *chatv1.AppAut
 		result.Authorizations = append(result.Authorizations, &chatv1.AppAuthorization{
 			AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
 			UserId: string(value.UserID), BotId: string(value.BotID),
-			TokenType: value.TokenType, Scopes: domain.NormalizeScopes(value.Scopes),
+			TokenType: string(value.TokenType), Scopes: domain.NormalizeScopes(value.Scopes),
 		})
 	}
 	return result, nil
@@ -7086,7 +7086,7 @@ func (s *Server) WorkflowRunInteraction(ctx context.Context, input *chatv1.Workf
 		fields = append(fields, &chatv1.WorkflowInteractionField{Name: field.Name, Label: field.Label})
 	}
 	return &chatv1.WorkflowInteraction{
-		StepId: string(interaction.StepID), Kind: interaction.Kind, Title: interaction.Title,
+		StepId: string(interaction.StepID), Kind: string(interaction.Kind), Title: interaction.Title,
 		Label: interaction.Label, Fields: fields,
 	}, nil
 }
@@ -7620,7 +7620,7 @@ func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
 		InstallerId:            string(value.InstallerID),
 		BotId:                  string(value.BotID),
 		Scopes:                 value.Scopes,
-		TokenType:              value.TokenType,
+		TokenType:              string(value.TokenType),
 		AuthedUserAccessToken:  value.AuthedUserAccessToken,
 		AuthedUserScopes:       value.AuthedUserScopes,
 		RefreshToken:           value.RefreshToken,
@@ -10993,7 +10993,7 @@ func encodeProtoToken(value domain.TokenRecord) *chatv1.TokenRecord {
 	if !value.ExpiresAt.IsZero() {
 		expiresAt = value.ExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID), BotId: string(value.BotID), Scopes: domain.NormalizeScopes(value.Scopes), TokenType: value.TokenType, ExpiresAt: expiresAt, Revoked: value.Revoked}
+	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID), BotId: string(value.BotID), Scopes: domain.NormalizeScopes(value.Scopes), TokenType: string(value.TokenType), ExpiresAt: expiresAt, Revoked: value.Revoked}
 }
 
 func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
@@ -11004,7 +11004,7 @@ func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
 	if err != nil {
 		return domain.TokenRecord{}, err
 	}
-	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), Scopes: domain.NormalizeScopes(value.GetScopes()), TokenType: value.GetTokenType(), ExpiresAt: expiresAt, Revoked: value.GetRevoked()}, nil
+	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), Scopes: domain.NormalizeScopes(value.GetScopes()), TokenType: domain.TokenType(value.GetTokenType()), ExpiresAt: expiresAt, Revoked: value.GetRevoked()}, nil
 }
 
 func encodeProtoSession(value domain.SessionRecord) *chatv1.SessionRecord {

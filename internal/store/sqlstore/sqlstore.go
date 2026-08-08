@@ -1288,9 +1288,9 @@ func (s *Store) seedUser(ctx context.Context, value domain.User, initialRole dom
 
 func (s *Store) SeedToken(ctx context.Context, token string, record domain.TokenRecord) error {
 	privateScopes := strings.Join(domain.NormalizeScopes(record.Scopes), " ")
-	tokenType := strings.TrimSpace(record.TokenType)
+	tokenType := domain.TokenType(strings.TrimSpace(string(record.TokenType)))
 	if tokenType == "" {
-		tokenType = "user"
+		tokenType = domain.TokenUser
 	}
 	var expiresAt int64
 	if !record.ExpiresAt.IsZero() {
@@ -6012,11 +6012,11 @@ func (s *Store) ListAppAuthorizations(ctx context.Context, appID domain.AppID, w
 		if err := rows.Scan(&userID, &botID, &tokenType, &scopes); err != nil {
 			return nil, err
 		}
-		key := tokenType + "\x00" + string(userID) + "\x00" + string(botID)
+		key := string(tokenType) + "\x00" + string(userID) + "\x00" + string(botID)
 		value, exists := byKey[key]
 		if !exists {
 			keys = append(keys, key)
-			value = domain.AppAuthorization{AppID: appID, WorkspaceID: workspaceID, UserID: userID, BotID: botID, TokenType: tokenType}
+			value = domain.AppAuthorization{AppID: appID, WorkspaceID: workspaceID, UserID: userID, BotID: botID, TokenType: domain.TokenType(tokenType)}
 		}
 		value.Scopes = domain.NormalizeScopes(append(value.Scopes, strings.Fields(scopes)...))
 		byKey[key] = value
@@ -9768,9 +9768,9 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	token.CodeVerifier = ""
-	tokenType := strings.TrimSpace(token.TokenType)
+	tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 	if tokenType == "" {
-		tokenType = "user"
+		tokenType = domain.TokenUser
 	}
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
@@ -9778,7 +9778,7 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	if len(tokenScopes) == 0 {
 		tokenScopes = grant.Scopes
 	}
-	if tokenType == "bot" {
+	if tokenType == domain.TokenBot {
 		if grant.BotID == "" || grant.BotUserID == "" {
 			return domain.OAuthToken{}, store.ErrNotFound
 		}
@@ -9790,11 +9790,11 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	normalizedUserScopes := domain.NormalizeScopes(grant.UserScopes)
-	if tokenType == "bot" && len(normalizedUserScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
+	if tokenType == domain.TokenBot && len(normalizedUserScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
 		return domain.OAuthToken{}, store.InvalidArgument("missing installer user access token")
 	}
 	rotating := strings.TrimSpace(token.RefreshToken) != ""
-	if rotating && (!token.ExpiresAt.After(now) || tokenType == "bot" && len(normalizedUserScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
+	if rotating && (!token.ExpiresAt.After(now) || tokenType == domain.TokenBot && len(normalizedUserScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
 		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, codeHash, clientID, redirect)
@@ -9821,7 +9821,7 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 			return domain.OAuthToken{}, err
 		}
 	}
-	if tokenType == "bot" && len(normalizedUserScopes) != 0 {
+	if tokenType == domain.TokenBot && len(normalizedUserScopes) != 0 {
 		userAccessHash := domain.HashToken(token.AuthedUserAccessToken)
 		userExpiresAt := int64(0)
 		if !token.AuthedUserExpiresAt.IsZero() {
@@ -10011,7 +10011,7 @@ func (s *Store) exchangeOAuthAccessTokenOnce(ctx context.Context, clientID, secr
 	if err := translateNotFound(err); err != nil {
 		return domain.OAuthToken{}, err
 	}
-	if revoked != 0 || record.AppID != appID || oldExpiresAt != 0 || record.TokenType != "bot" && record.TokenType != "user" {
+	if revoked != 0 || record.AppID != appID || oldExpiresAt != 0 || !record.TokenType.Valid() {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	var alreadyExchanged int

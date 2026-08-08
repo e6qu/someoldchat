@@ -8003,8 +8003,8 @@ func canvasSections(value domain.Canvas) ([]canvasSectionView, bool) {
 	views := make([]canvasSectionView, 0, len(document.Sections))
 	for index, section := range document.Sections {
 		views = append(views, canvasSectionView{
-			ID: section.ID, Type: section.Type, Text: section.Text,
-			Editable: section.Type == "markdown" || section.Type == "",
+			ID: section.ID, Type: string(section.Type), Text: section.Text,
+			Editable: section.Type.Editable(),
 			Position: index + 1,
 		})
 	}

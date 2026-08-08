@@ -131,7 +131,7 @@ type Principal struct {
 	// its secret. Slack scopes scheduled-message listing and deletion to the
 	// token that created the message, not merely to the token's user.
 	CredentialHash string
-	TokenType      string
+	TokenType      domain.TokenType
 	Scopes         map[Scope]struct{}
 }
 

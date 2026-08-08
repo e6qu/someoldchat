@@ -78,7 +78,7 @@ func TestStoredAuthenticatorUsesPersistedScopes(t *testing.T) {
 	if !principal.HasScope(ScopeChannelsHistory) || principal.HasScope(ScopeChatWrite) {
 		t.Fatalf("principal = %+v", principal)
 	}
-	if principal.AppID != "A1" || principal.BotID != "B1" || principal.TokenType != "bot" {
+	if principal.AppID != "A1" || principal.BotID != "B1" || !principal.TokenType.IsBot() {
 		t.Fatalf("principal lost app/bot identity: %+v", principal)
 	}
 	if principal.CredentialHash != domain.HashToken("token") || strings.Contains(principal.CredentialHash, "token") {

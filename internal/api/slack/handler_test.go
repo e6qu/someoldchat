@@ -4460,7 +4460,7 @@ func TestJoinPublicConversation(t *testing.T) {
 
 func TestJoinPublicConversationUsesCurrentTokenTypeScopes(t *testing.T) {
 	_, repository := testHandlerWithStore()
-	call := func(tokenType string, botID domain.BotID, scopes ...auth.Scope) string {
+	call := func(tokenType domain.TokenType, botID domain.BotID, scopes ...auth.Scope) string {
 		granted := make(map[auth.Scope]struct{}, len(scopes))
 		for _, scope := range scopes {
 			granted[scope] = struct{}{}

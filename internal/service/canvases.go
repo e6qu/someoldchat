@@ -306,15 +306,15 @@ func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.W
 	if err := json.Unmarshal([]byte(criteria), &filter); err != nil {
 		return nil, ErrInvalidCanvas
 	}
-	allowed := make(map[string]struct{}, len(filter.SectionTypes))
+	allowed := make(map[domain.CanvasSectionType]struct{}, len(filter.SectionTypes))
 	for _, value := range filter.SectionTypes {
-		allowed[strings.TrimSpace(value)] = struct{}{}
+		allowed[domain.CanvasSectionType(strings.TrimSpace(value))] = struct{}{}
 	}
 	result := make([]domain.CanvasSection, 0, len(document.Sections))
 	for _, section := range document.Sections {
 		if len(allowed) > 0 {
 			if _, ok := allowed[section.Type]; !ok {
-				if _, ok := allowed["any_header"]; !(ok && strings.HasPrefix(section.Type, "h")) {
+				if _, ok := allowed[domain.CanvasSectionAnyHeader]; !(ok && section.Type.IsHeader()) {
 					continue
 				}
 			}
@@ -509,7 +509,7 @@ func normalizeCanvasContent(value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	section := domain.CanvasSection{ID: sectionID, Type: stringValue(raw["type"]), Text: stringValue(raw["markdown"])}
+	section := domain.CanvasSection{ID: sectionID, Type: domain.CanvasSectionType(stringValue(raw["type"])), Text: stringValue(raw["markdown"])}
 	if section.Text == "" {
 		section.Text = stringValue(raw["text"])
 	}
@@ -552,7 +552,7 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 		if err != nil {
 			return domain.CanvasSection{}, err
 		}
-		return domain.CanvasSection{ID: sectionID, Type: stringValue(raw["type"]), Text: text}, nil
+		return domain.CanvasSection{ID: sectionID, Type: domain.CanvasSectionType(stringValue(raw["type"])), Text: text}, nil
 	}
 	if change.Operation == "delete" {
 		if change.SectionID == "" {

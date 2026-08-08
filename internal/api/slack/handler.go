@@ -1098,7 +1098,7 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 		teamName = string(workspace.ID)
 	}
 	response := map[string]any{"ok": true, "url": "http://localhost/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID}
-	if principal.TokenType == "bot" {
+	if principal.TokenType.IsBot() {
 		response["bot_id"] = principal.BotID
 		response["is_enterprise_install"] = false
 	}
@@ -2152,7 +2152,7 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if principal.TokenType == "bot" {
+	if principal.TokenType.IsBot() {
 		writeError(w, "no_permission")
 		return
 	}
@@ -2583,7 +2583,7 @@ func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any
 		response["authed_user"] = authedUser
 		return response
 	}
-	if token.TokenType == "bot" {
+	if token.TokenType.IsBot() {
 		response["bot_user_id"] = token.UserID
 		authedUser := map[string]any{"id": token.InstallerID}
 		if token.AuthedUserAccessToken != "" {
@@ -6612,7 +6612,7 @@ func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userSco
 	// other conversation mutators and requiring channels:manage made an
 	// official bot installation unable to join any public channel.
 	needed := userScope
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		needed = botScope
 	}
 	if !principal.HasScope(needed) {
@@ -6658,7 +6658,7 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		required = []auth.Scope{auth.ScopeMPIMWrite}
 	case conversation.Kind == domain.ConversationTypePrivate:
 		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
-	case principal.TokenType == "bot" || principal.BotID != "":
+	case principal.TokenType.IsBot() || principal.BotID != "":
 		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}
 	default:
 		required = []auth.Scope{auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites}
@@ -7751,7 +7751,7 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 	// current page separately notes a bot-token exception, so preserve that
 	// explicit token distinction instead of accepting the obsolete path for
 	// every credential.
-	if targetID != "" && targetID != principal.UserID && principal.TokenType != "bot" {
+	if targetID != "" && targetID != principal.UserID && !principal.TokenType.IsBot() {
 		writeError(w, "cannot_add_others")
 		return
 	}
@@ -7864,7 +7864,7 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		writeError(w, "not_allowed_token_type")
 		return
 	}
@@ -7900,7 +7900,7 @@ func (h Handler) searchFiles(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		writeError(w, "not_allowed_token_type")
 		return
 	}
@@ -7931,7 +7931,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType == "bot" || principal.BotID != "" {
+	if principal.TokenType.IsBot() || principal.BotID != "" {
 		writeError(w, "not_allowed_token_type")
 		return
 	}
@@ -9661,7 +9661,7 @@ func (h Handler) messageStreamRequest(w http.ResponseWriter, r *http.Request) (a
 		writeAuthError(w, err)
 		return auth.Principal{}, nil, false
 	}
-	if principal.TokenType != "bot" || principal.AppID == "" {
+	if !principal.TokenType.IsBot() || principal.AppID == "" {
 		writeError(w, "not_allowed_token_type")
 		return auth.Principal{}, nil, false
 	}

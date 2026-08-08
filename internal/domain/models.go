@@ -555,7 +555,7 @@ type OAuthToken struct {
 	InstallerID            UserID
 	BotID                  BotID
 	Scopes                 []string
-	TokenType              string
+	TokenType              TokenType
 	RefreshToken           string
 	ExpiresAt              time.Time
 	AuthedUserAccessToken  string
@@ -578,7 +578,7 @@ type OAuthRefreshGrant struct {
 	InstallerID     UserID
 	BotID           BotID
 	Scopes          []string
-	TokenType       string
+	TokenType       TokenType
 	AccessExpiresAt time.Time
 	CreatedAt       time.Time
 	Revoked         bool
@@ -664,7 +664,7 @@ type TokenRecord struct {
 	AppID       AppID
 	BotID       BotID
 	Scopes      []string
-	TokenType   string
+	TokenType   TokenType
 	ExpiresAt   time.Time
 	Revoked     bool
 }
@@ -1828,9 +1828,39 @@ type CanvasAccess struct {
 	Access     AccessLevel
 }
 
+// CanvasSectionType is what one canvas section holds. The set is deliberately
+// open: a document may carry a kind this deployment does not enumerate, and
+// refusing one would lose the author's content. What is named here is the two
+// rules that were inline string tests in three places - which kinds are headers,
+// and which the editor may edit.
+type CanvasSectionType string
+
+const (
+	CanvasSectionMarkdown CanvasSectionType = "markdown"
+	CanvasSectionHeading1 CanvasSectionType = "h1"
+	CanvasSectionHeading2 CanvasSectionType = "h2"
+	CanvasSectionHeading3 CanvasSectionType = "h3"
+	// CanvasSectionAnyHeader is a filter term rather than a stored kind: Slack
+	// accepts it in a section filter to mean every heading level at once.
+	CanvasSectionAnyHeader CanvasSectionType = "any_header"
+)
+
+// IsHeader reports whether this is a heading of any level. Slack numbers them
+// h1 upward, so the prefix is the rule rather than an enumeration that would
+// stop being true at h4.
+func (kind CanvasSectionType) IsHeader() bool {
+	return strings.HasPrefix(string(kind), "h")
+}
+
+// Editable reports whether the editor may change this section. An unset kind is
+// prose, which is what a section written before kinds existed holds.
+func (kind CanvasSectionType) Editable() bool {
+	return kind == CanvasSectionMarkdown || kind == ""
+}
+
 type CanvasSection struct {
 	ID   string
-	Type string
+	Type CanvasSectionType
 	Text string
 }
 
@@ -2221,7 +2251,7 @@ type AppAuthorization struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	BotID       BotID
-	TokenType   string
+	TokenType   TokenType
 	Scopes      []string
 }
 
@@ -2459,6 +2489,21 @@ type AppConfig struct {
 	WorkflowAuthStrategy WorkflowAuthStrategy
 	UpdatedAt            time.Time
 }
+
+// TokenType is which kind of credential a token is. It was a bare string
+// compared against "bot" in about fifteen authorisation decisions, so a
+// misspelling read as "not a bot" and sent a bot token down the user path.
+type TokenType string
+
+const (
+	TokenBot  TokenType = "bot"
+	TokenUser TokenType = "user"
+)
+
+func (kind TokenType) Valid() bool { return kind == TokenBot || kind == TokenUser }
+
+// IsBot is the question every one of those decisions was really asking.
+func (kind TokenType) IsBot() bool { return kind == TokenBot }
 
 type BarrierID string
 

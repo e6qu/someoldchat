@@ -2754,16 +2754,16 @@ func (m Messages) OAuthExchange(ctx context.Context, clientID, clientSecret, cod
 }
 
 func (m Messages) OAuthV2Exchange(ctx context.Context, clientID, clientSecret, code, redirectURI string, userOnly bool) (domain.OAuthToken, error) {
-	tokenType := "bot"
+	tokenType := domain.TokenBot
 	if userOnly {
-		tokenType = "user"
+		tokenType = domain.TokenUser
 	}
 	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", tokenType, true)
 }
 
 const oauthRotatingTokenLifetime = 12 * time.Hour
 
-func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier, tokenType string, rotationAllowed bool) (domain.OAuthToken, error) {
+func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier string, tokenType domain.TokenType, rotationAllowed bool) (domain.OAuthToken, error) {
 	clientID = strings.TrimSpace(clientID)
 	clientSecret = strings.TrimSpace(clientSecret)
 	code = strings.TrimSpace(code)
@@ -2792,7 +2792,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	var accessToken string
 	if tokenType == "bot" && rotating {
 		accessToken, err = domain.NewRotatingBotToken()
-	} else if tokenType == "bot" {
+	} else if tokenType == domain.TokenBot {
 		accessToken, err = domain.NewBotToken()
 	} else if rotating {
 		accessToken, err = domain.NewRotatingUserToken()
@@ -2803,7 +2803,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		return domain.OAuthToken{}, err
 	}
 	exchange := domain.OAuthToken{TokenType: tokenType, CodeVerifier: codeVerifier}
-	if tokenType == "bot" {
+	if tokenType == domain.TokenBot {
 		if rotating {
 			exchange.AuthedUserAccessToken, err = domain.NewRotatingUserToken()
 		} else {
@@ -2819,7 +2819,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 			return domain.OAuthToken{}, err
 		}
 		exchange.ExpiresAt = time.Now().UTC().Add(oauthRotatingTokenLifetime)
-		if tokenType == "bot" {
+		if tokenType == domain.TokenBot {
 			exchange.AuthedUserRefreshToken, err = domain.NewRefreshToken()
 			if err != nil {
 				return domain.OAuthToken{}, err
@@ -2836,7 +2836,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	}
 	token.AppID = client.AppID
 	token.TokenType = tokenType
-	if tokenType == "bot" {
+	if tokenType == domain.TokenBot {
 		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, accessToken, token.InstallerID); err != nil {
 			return domain.OAuthToken{}, err
 		}
@@ -2915,7 +2915,7 @@ func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, re
 		return domain.OAuthToken{}, err
 	}
 	var nextAccessToken string
-	if grant.TokenType == "bot" {
+	if grant.TokenType.IsBot() {
 		nextAccessToken, err = domain.NewRotatingBotToken()
 	} else {
 		nextAccessToken, err = domain.NewRotatingUserToken()
@@ -2963,7 +2963,7 @@ func (m Messages) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecr
 		return domain.OAuthToken{}, err
 	}
 	record, err := m.Store.LookupToken(ctx, accessToken)
-	if err != nil || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || record.TokenType != "bot" && record.TokenType != "user" {
+	if err != nil || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || !record.TokenType.Valid() {
 		if errors.Is(err, store.ErrNotFound) || err == nil {
 			return domain.OAuthToken{}, ErrInvalidOAuth
 		}

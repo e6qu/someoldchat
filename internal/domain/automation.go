@@ -91,7 +91,7 @@ type WorkflowActivity struct {
 // on, if any. Kind is empty when the run is not waiting on a form or button.
 type WorkflowInteraction struct {
 	StepID WorkflowStepID
-	Kind   string
+	Kind   WorkflowStepType
 	Title  string
 	Label  string
 	Fields []WorkflowInteractionField
@@ -112,6 +112,54 @@ type WorkflowFormResponse struct {
 	Field           string
 	Value           string
 	SubmittedAt     time.Time
+}
+
+// WorkflowStepType is what one workflow step does. The service held these as
+// untyped constants while the web builder spelt the same eight values as string
+// literals in its own switch, so a typo on either side fell through to the
+// default and the step silently did nothing. One type, named once.
+type WorkflowStepType string
+
+const (
+	WorkflowStepFunction  WorkflowStepType = "function"
+	WorkflowStepForm      WorkflowStepType = "form"
+	WorkflowStepButton    WorkflowStepType = "button"
+	WorkflowStepMessage   WorkflowStepType = "message"
+	WorkflowStepAddPeople WorkflowStepType = "add_people"
+	WorkflowStepCanvas    WorkflowStepType = "create_canvas"
+	WorkflowStepDelay     WorkflowStepType = "delay"
+	WorkflowStepWaitUntil WorkflowStepType = "wait_until"
+)
+
+// Valid accepts the eight kinds. The empty value is not one of them: a step
+// with no kind is read as a function step by the decoder, and OrFunction says
+// so where that is meant rather than leaving it implicit.
+func (kind WorkflowStepType) Valid() bool {
+	switch kind {
+	case WorkflowStepFunction, WorkflowStepForm, WorkflowStepButton, WorkflowStepMessage,
+		WorkflowStepAddPeople, WorkflowStepCanvas, WorkflowStepDelay, WorkflowStepWaitUntil:
+		return true
+	}
+	return false
+}
+
+// OrFunction reads an unset kind as the function step, which is the default a
+// step with no type has always had.
+func (kind WorkflowStepType) OrFunction() WorkflowStepType {
+	if kind == "" {
+		return WorkflowStepFunction
+	}
+	return kind
+}
+
+// BuiltIn reports whether the run performs this step itself. Every other kind
+// ends when something external arrives.
+func (kind WorkflowStepType) BuiltIn() bool {
+	switch kind {
+	case WorkflowStepMessage, WorkflowStepAddPeople, WorkflowStepCanvas:
+		return true
+	}
+	return false
 }
 
 type WorkflowTriggerType string

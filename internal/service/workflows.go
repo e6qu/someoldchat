@@ -19,21 +19,21 @@ import (
 )
 
 type workflowFunctionDefinition struct {
-	ID           string                 `json:"id,omitempty"`
-	Type         string                 `json:"type,omitempty"`
-	FunctionID   string                 `json:"function_id"`
-	AppID        domain.AppID           `json:"app_id,omitempty"`
-	Title        string                 `json:"title,omitempty"`
-	Inputs       any                    `json:"inputs,omitempty"`
-	InputMapping map[string]string      `json:"input_mapping,omitempty"`
-	Condition    *workflowStepCondition `json:"condition,omitempty"`
-	Form         *workflowFormStep      `json:"form,omitempty"`
-	Button       *workflowButtonStep    `json:"button,omitempty"`
-	Message      *workflowMessageStep   `json:"message,omitempty"`
-	AddPeople    *workflowAddPeopleStep `json:"add_people,omitempty"`
-	Canvas       *workflowCanvasStep    `json:"create_canvas,omitempty"`
-	Delay        *workflowDelayStep     `json:"delay,omitempty"`
-	WaitUntil    *workflowWaitUntilStep `json:"wait_until,omitempty"`
+	ID           string                  `json:"id,omitempty"`
+	Type         domain.WorkflowStepType `json:"type,omitempty"`
+	FunctionID   string                  `json:"function_id"`
+	AppID        domain.AppID            `json:"app_id,omitempty"`
+	Title        string                  `json:"title,omitempty"`
+	Inputs       any                     `json:"inputs,omitempty"`
+	InputMapping map[string]string       `json:"input_mapping,omitempty"`
+	Condition    *workflowStepCondition  `json:"condition,omitempty"`
+	Form         *workflowFormStep       `json:"form,omitempty"`
+	Button       *workflowButtonStep     `json:"button,omitempty"`
+	Message      *workflowMessageStep    `json:"message,omitempty"`
+	AddPeople    *workflowAddPeopleStep  `json:"add_people,omitempty"`
+	Canvas       *workflowCanvasStep     `json:"create_canvas,omitempty"`
+	Delay        *workflowDelayStep      `json:"delay,omitempty"`
+	WaitUntil    *workflowWaitUntilStep  `json:"wait_until,omitempty"`
 }
 
 // workflowDelayStep is Slack's "wait for a set time" step. It is the first step
@@ -109,18 +109,17 @@ type workflowStepCondition struct {
 	Value    string `json:"value"`
 }
 
-// workflowStepTypeFunction is the default step kind: an app function callback.
-// Form and button steps are additional kinds with their own execution model.
-const workflowStepTypeFunction = "function"
-
+// The step kinds live in the domain, so the builder and the run engine cannot
+// spell them differently.
 const (
-	workflowStepTypeForm      = "form"
-	workflowStepTypeButton    = "button"
-	workflowStepTypeMessage   = "message"
-	workflowStepTypeAddPeople = "add_people"
-	workflowStepTypeCanvas    = "create_canvas"
-	workflowStepTypeDelay     = "delay"
-	workflowStepTypeWaitUntil = "wait_until"
+	workflowStepTypeFunction  = domain.WorkflowStepFunction
+	workflowStepTypeForm      = domain.WorkflowStepForm
+	workflowStepTypeButton    = domain.WorkflowStepButton
+	workflowStepTypeMessage   = domain.WorkflowStepMessage
+	workflowStepTypeAddPeople = domain.WorkflowStepAddPeople
+	workflowStepTypeCanvas    = domain.WorkflowStepCanvas
+	workflowStepTypeDelay     = domain.WorkflowStepDelay
+	workflowStepTypeWaitUntil = domain.WorkflowStepWaitUntil
 )
 
 // workflowDelayMaximum bounds how long a run may be suspended. Slack's builder
@@ -132,13 +131,7 @@ const workflowDelayMaximum = 30 * 24 * time.Hour
 // itself. Every other kind ends when something external arrives — a function
 // completion, a form submission, a click — and a built-in one finishes inside
 // the call that starts it, so the run must carry itself past it.
-func builtInWorkflowStep(stepType string) bool {
-	switch stepType {
-	case workflowStepTypeMessage, workflowStepTypeAddPeople, workflowStepTypeCanvas:
-		return true
-	}
-	return false
-}
+func builtInWorkflowStep(stepType domain.WorkflowStepType) bool { return stepType.BuiltIn() }
 
 // workflowConditionOperators are the comparisons a step condition supports,
 // matching the operators Slack's conditional branch editor offers.
@@ -159,7 +152,7 @@ type slackFunctionSnapshot struct {
 	CallbackID       string                          `json:"callback_id"`
 	Title            string                          `json:"title"`
 	Description      string                          `json:"description,omitempty"`
-	Type             string                          `json:"type"`
+	Type             domain.WorkflowStepType         `json:"type"`
 	InputParameters  []appmanifest.FunctionParameter `json:"input_parameters"`
 	OutputParameters []appmanifest.FunctionParameter `json:"output_parameters"`
 	AppID            domain.AppID                    `json:"app_id"`
@@ -197,12 +190,10 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 	seen := make(map[string]int, len(values))
 	for index := range values {
 		values[index].ID = strings.TrimSpace(values[index].ID)
-		values[index].Type = strings.TrimSpace(values[index].Type)
+		values[index].Type = domain.WorkflowStepType(strings.TrimSpace(string(values[index].Type)))
 		values[index].FunctionID = strings.TrimSpace(values[index].FunctionID)
 		values[index].Title = strings.TrimSpace(values[index].Title)
-		if values[index].Type == "" {
-			values[index].Type = workflowStepTypeFunction
-		}
+		values[index].Type = values[index].Type.OrFunction()
 		switch values[index].Type {
 		case workflowStepTypeFunction:
 			if values[index].FunctionID == "" {
@@ -1726,7 +1717,7 @@ func (m Messages) newWorkflowDelayExecution(run domain.WorkflowRun, step workflo
 	event, err := newEvent(run.WorkspaceID, actor, events.NewPayload("workflow.step_waiting",
 		events.String("workflow_run_id", string(run.ID)),
 		events.String("step_id", step.ID),
-		events.String("step_type", step.Type),
+		events.String("step_type", string(step.Type)),
 		events.String("function_execution_id", string(execution.ID)),
 	), now)
 	if err != nil {
@@ -1824,7 +1815,7 @@ func (m Messages) newBuiltInStepExecution(ctx context.Context, run domain.Workfl
 	event, err := newEvent(run.WorkspaceID, actor, events.NewPayload("workflow.step_configured",
 		events.String("workflow_run_id", string(run.ID)),
 		events.String("step_id", step.ID),
-		events.String("step_type", step.Type),
+		events.String("step_type", string(step.Type)),
 		events.String("function_execution_id", string(execution.ID)),
 	), now)
 	if err != nil {
@@ -1839,12 +1830,12 @@ func (m Messages) newBuiltInStepExecution(ctx context.Context, run domain.Workfl
 // one.
 func (m Messages) performBuiltInStep(ctx context.Context, run domain.WorkflowRun, execution domain.WorkflowStep) error {
 	var inputs struct {
-		Builtin      string   `json:"builtin"`
-		Conversation string   `json:"conversation"`
-		Text         string   `json:"text"`
-		Title        string   `json:"title"`
-		Content      string   `json:"content"`
-		Users        []string `json:"users"`
+		Builtin      domain.WorkflowStepType `json:"builtin"`
+		Conversation string                  `json:"conversation"`
+		Text         string                  `json:"text"`
+		Title        string                  `json:"title"`
+		Content      string                  `json:"content"`
+		Users        []string                `json:"users"`
 	}
 	if err := json.Unmarshal([]byte(execution.Inputs), &inputs); err != nil {
 		return m.advanceStep(ctx, run.WorkspaceID, run.ActorID, execution, "{}", "the step inputs could not be read")
@@ -1870,7 +1861,7 @@ type builtInStepInputs struct {
 // one would attribute a real change to nobody. It also means each action is
 // authorized against a real person, so a workflow can do nothing its owner
 // could not.
-func (m Messages) builtInStepResult(ctx context.Context, run domain.WorkflowRun, execution domain.WorkflowStep, kind string, inputs builtInStepInputs) (string, string) {
+func (m Messages) builtInStepResult(ctx context.Context, run domain.WorkflowRun, execution domain.WorkflowStep, kind domain.WorkflowStepType, inputs builtInStepInputs) (string, string) {
 	switch kind {
 	case workflowStepTypeMessage:
 		posted, err := m.Post(ctx, run.WorkspaceID, run.ActorID, domain.ConversationID(inputs.Conversation), inputs.Text, "", string(execution.ID))
@@ -2004,7 +1995,7 @@ func (m Messages) newWorkflowStepExecution(ctx context.Context, run domain.Workf
 		event, err := newEvent(run.WorkspaceID, actor, events.NewPayload(topic,
 			events.String("workflow_run_id", string(run.ID)),
 			events.String("step_id", step.ID),
-			events.String("step_type", step.Type),
+			events.String("step_type", string(step.Type)),
 			events.String("function_execution_id", string(execution.ID)),
 		), now)
 		if err != nil {

@@ -1042,7 +1042,7 @@ func (s *Store) SeedToken(_ context.Context, token string, record domain.TokenRe
 		return nil
 	}
 	record.Scopes = domain.NormalizeScopes(record.Scopes)
-	if strings.TrimSpace(record.TokenType) == "" {
+	if strings.TrimSpace(string(record.TokenType)) == "" {
 		record.TokenType = "user"
 	}
 	s.tokens[key] = record
@@ -1074,11 +1074,11 @@ func (s *Store) ListAppAuthorizations(_ context.Context, appID domain.AppID, wor
 		if token.AppID != appID || token.WorkspaceID != workspaceID || token.Revoked || (!token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now)) {
 			continue
 		}
-		tokenType := strings.TrimSpace(token.TokenType)
+		tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 		if tokenType != "bot" && tokenType != "user" {
 			continue
 		}
-		key := tokenType + "\x00" + string(token.UserID) + "\x00" + string(token.BotID)
+		key := string(tokenType) + "\x00" + string(token.UserID) + "\x00" + string(token.BotID)
 		value := byKey[key]
 		value.AppID = appID
 		value.WorkspaceID = workspaceID
@@ -1164,7 +1164,7 @@ func (s *Store) RevokeToken(_ context.Context, token string) error {
 	// application token produces one — a personal token has no app to tell —
 	// and re-revoking announces nothing.
 	if record.AppID != "" && !alreadyRevoked {
-		event, err := events.TokensRevokedEvent(record.WorkspaceID, record.UserID, record.AppID, record.TokenType, time.Now().UTC())
+		event, err := events.TokensRevokedEvent(record.WorkspaceID, record.UserID, record.AppID, string(record.TokenType), time.Now().UTC())
 		if err != nil {
 			return err
 		}
@@ -5195,9 +5195,9 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
-	tokenType := strings.TrimSpace(token.TokenType)
+	tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 	if tokenType == "" {
-		tokenType = "user"
+		tokenType = domain.TokenUser
 	}
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
@@ -5205,7 +5205,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if len(tokenScopes) == 0 {
 		tokenScopes = grant.Scopes
 	}
-	if tokenType == "bot" {
+	if tokenType == domain.TokenBot {
 		if grant.BotID == "" || grant.BotUserID == "" {
 			return domain.OAuthToken{}, store.ErrNotFound
 		}
@@ -5218,11 +5218,11 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	userScopes := domain.NormalizeScopes(grant.UserScopes)
-	if tokenType == "bot" && len(userScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
+	if tokenType == domain.TokenBot && len(userScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
 		return domain.OAuthToken{}, store.InvalidArgument("missing installer user access token")
 	}
 	rotating := strings.TrimSpace(token.RefreshToken) != ""
-	if rotating && (!token.ExpiresAt.After(now) || token.TokenType == "bot" && len(userScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
+	if rotating && (!token.ExpiresAt.After(now) || token.TokenType.IsBot() && len(userScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
 		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
 	}
 	accessHash := domain.HashToken(accessToken)
@@ -5233,7 +5233,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 		if _, exists := s.oauthRefreshGrants[domain.HashToken(token.RefreshToken)]; exists {
 			return domain.OAuthToken{}, store.ErrAlreadyExists
 		}
-		if tokenType == "bot" && len(userScopes) != 0 {
+		if tokenType == domain.TokenBot && len(userScopes) != 0 {
 			if _, exists := s.oauthRefreshGrants[domain.HashToken(token.AuthedUserRefreshToken)]; exists {
 				return domain.OAuthToken{}, store.ErrAlreadyExists
 			}
@@ -5260,7 +5260,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 		refreshHash := domain.HashToken(token.RefreshToken)
 		s.oauthRefreshGrants[refreshHash] = domain.OAuthRefreshGrant{TokenHash: refreshHash, AccessTokenHash: accessHash, ClientID: clientID, AppID: client.AppID, WorkspaceID: grant.WorkspaceID, UserID: subjectID, InstallerID: grant.UserID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType, AccessExpiresAt: token.ExpiresAt, CreatedAt: now}
 	}
-	if tokenType == "bot" && len(userScopes) != 0 {
+	if tokenType == domain.TokenBot && len(userScopes) != 0 {
 		userAccessHash := domain.HashToken(token.AuthedUserAccessToken)
 		s.tokens[userAccessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, AppID: client.AppID, Scopes: append([]string(nil), userScopes...), TokenType: "user", ExpiresAt: token.AuthedUserExpiresAt}
 		if rotating {
@@ -5342,7 +5342,7 @@ func (s *Store) ExchangeOAuthAccessToken(_ context.Context, clientID, secret, ol
 	now := time.Now().UTC()
 	oldAccessHash := domain.HashToken(strings.TrimSpace(oldAccessToken))
 	record, exists := s.tokens[oldAccessHash]
-	if !exists || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || record.TokenType != "bot" && record.TokenType != "user" || strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
+	if !exists || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || !record.TokenType.Valid() || strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	for _, grant := range s.oauthRefreshGrants {
