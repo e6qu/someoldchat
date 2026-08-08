@@ -774,6 +774,28 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A member withdraws an app request. Cancelling records that nobody
+			// decided it, which is a third state beside approved and
+			// restricted.
+			name: "an app request can be cancelled and lists under its own status",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminCancelAppRequest(ctx, "T1", "UA", "A-cancel", "R-cancel"); err != nil {
+					return nil, err
+				}
+				cancelled, err := chat.AdminListApps(ctx, "T1", "UA", domain.AppApprovalCancelled, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(cancelled.Apps))
+				for _, approval := range cancelled.Apps {
+					listed = append(listed, string(approval.ID)+":"+string(approval.Status))
+				}
+				member := chat.AdminCancelAppRequest(ctx, "T1", "U1", "A-cancel", "R-cancel") != nil
+				empty := chat.AdminCancelAppRequest(ctx, "T1", "UA", "", "") != nil
+				return []any{listed, member, empty}, nil
+			},
+		},
+		{
 			// A guest account lapses at a stored instant. A member who never
 			// received one reads the zero time, which must not decode as an
 			// instant in 1754.
@@ -3572,7 +3594,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 172
+const parityGapCeiling = 171
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -3612,7 +3634,6 @@ var parityGaps = map[string]struct{}{
 	"AdminDisconnectSharedConversation":  {},
 	"AdminInviteConversationMembers":     {},
 	"AdminInviteUser":                    {},
-	"AdminListApps":                      {},
 	"AdminListConversationAccessGroups":  {},
 	"AcceptInvitationForEmail":           {},
 	"ApproveSharedInvite":                {},

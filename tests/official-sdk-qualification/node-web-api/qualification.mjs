@@ -278,6 +278,9 @@ const expiration = await client.apiCall("admin.users.getExpiration", { user_id: 
 assert.equal(expiration.ok, true);
 assert.equal(typeof expiration.expiration_ts, "number");
 
+const cancelled = await client.apiCall("admin.apps.requests.cancel", { request_id: "Rq-sdk" });
+assert.equal(cancelled.ok, true);
+
 // Bulk channel administration. The walk pins the refusal for a channel that is
 // not here; archiving the fixture's channels would take the rest of the walk
 // with them.

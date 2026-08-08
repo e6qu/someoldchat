@@ -2772,7 +2772,7 @@ func (s *Store) AcceptInviteRequest(_ context.Context, acceptance domain.InviteR
 }
 
 func validAppApprovalStatus(status domain.AppApprovalStatus) bool {
-	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted
+	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted || status == domain.AppApprovalCancelled
 }
 
 func appInstallationKey(appID domain.AppID, workspaceID domain.WorkspaceID) string {

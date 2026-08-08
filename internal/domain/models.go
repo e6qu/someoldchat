@@ -2153,6 +2153,9 @@ const (
 	AppApprovalRequested  AppApprovalStatus = "requested"
 	AppApprovalApproved   AppApprovalStatus = "approved"
 	AppApprovalRestricted AppApprovalStatus = "restricted"
+	// AppApprovalCancelled records that the member who asked withdrew the
+	// request. An administrator never decided it, so it is not a restriction.
+	AppApprovalCancelled AppApprovalStatus = "cancelled"
 )
 
 type AppApproval struct {

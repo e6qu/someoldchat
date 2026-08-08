@@ -2204,6 +2204,12 @@ func (m Messages) AdminRestrictApp(ctx context.Context, workspaceID domain.Works
 	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalRestricted)
 }
 
+// AdminCancelAppRequest withdraws an app request. The member who asked or an
+// administrator may cancel it, and cancelling records that nobody decided it.
+func (m Messages) AdminCancelAppRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
+	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalCancelled)
+}
+
 func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID, status domain.AppApprovalStatus) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
@@ -2228,7 +2234,7 @@ func (m Messages) AdminListApps(ctx context.Context, workspaceID domain.Workspac
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.AppApprovalPage{}, err
 	}
-	if status != domain.AppApprovalRequested && status != domain.AppApprovalApproved && status != domain.AppApprovalRestricted {
+	if status != domain.AppApprovalRequested && status != domain.AppApprovalApproved && status != domain.AppApprovalRestricted && status != domain.AppApprovalCancelled {
 		return domain.AppApprovalPage{}, ErrInvalidAppApproval
 	}
 	return m.Store.ListAppApprovals(ctx, workspaceID, status, request)

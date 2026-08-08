@@ -1044,7 +1044,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.config.set/
   - method: admin.apps.requests.cancel
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.requests.cancel/
   - method: admin.apps.uninstall

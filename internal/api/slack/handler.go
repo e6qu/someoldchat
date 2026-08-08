@@ -184,6 +184,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
 	mux.HandleFunc("POST /api/admin.apps.uninstall", h.adminAppsUninstall)
+	mux.HandleFunc("POST /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
@@ -2990,6 +2991,31 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := h.Messages.ResetUserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.apps.requests.cancel withdraws a request nobody has decided.
+func (h Handler) adminAppRequestCancel(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	requestID := domain.AppRequestID(strings.TrimSpace(fields["request_id"]))
+	if appID == "" && requestID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if err := h.Messages.AdminCancelAppRequest(r.Context(), principal.WorkspaceID, principal.UserID, appID, requestID); err != nil {
+		writeError(w, mapServiceError(err, "app_request_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

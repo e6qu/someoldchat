@@ -477,6 +477,7 @@ service DirectoryService {
   rpc InvitationPreview(InvitationPreviewRequest) returns (InviteRequest);
   rpc AcceptInvitationForEmail(AcceptInvitationRequest) returns (User);
   rpc AdminApproveApp(AppApprovalMutationRequest) returns (MutationResponse);
+  rpc AdminCancelAppRequest(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminUninstallApps(AdminUninstallAppsRequest) returns (MutationResponse);
   rpc AdminRestrictApp(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminListApps(AppApprovalsRequest) returns (AppApprovalPage);

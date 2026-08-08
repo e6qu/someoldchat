@@ -6201,7 +6201,7 @@ func (s *Store) ListInviteRequests(ctx context.Context, workspace domain.Workspa
 }
 
 func validAppApprovalStatusSQL(status domain.AppApprovalStatus) bool {
-	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted
+	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted || status == domain.AppApprovalCancelled
 }
 
 func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID, appID domain.AppID, requestID domain.AppRequestID, approvalStatus domain.AppApprovalStatus, updatedAt time.Time, event events.Event) error {

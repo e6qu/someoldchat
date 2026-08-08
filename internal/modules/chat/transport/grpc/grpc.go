@@ -2332,6 +2332,17 @@ func (r Remote) AdminUninstallApps(ctx context.Context, workspaceID domain.Works
 	return nil
 }
 
+func (r Remote) AdminCancelAppRequest(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
+	out, err := r.directory.AdminCancelAppRequest(ctx, &chatv1.AppApprovalMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), RequestId: string(requestID)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app request cancellation was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) AdminApproveApp(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
 	out, err := r.directory.AdminApproveApp(ctx, &chatv1.AppApprovalMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), RequestId: string(requestID)})
 	if err != nil {
@@ -5912,6 +5923,13 @@ func (s *Server) AdminUninstallApps(ctx context.Context, input *chatv1.AdminUnin
 		ids = append(ids, domain.AppID(id))
 	}
 	if err := s.implementation.AdminUninstallApps(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminCancelAppRequest(ctx context.Context, input *chatv1.AppApprovalMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminCancelAppRequest(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.AppRequestID(input.GetRequestId())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
