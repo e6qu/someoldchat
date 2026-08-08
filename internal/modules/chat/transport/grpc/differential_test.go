@@ -254,6 +254,13 @@ func seedRequestedAppParity(t *testing.T, target *memory.Store) {
 func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
+	// A private channel, because restricting a channel to a user group is a
+	// thing only a private channel can have: a public one is already open to
+	// the workspace, so there is nothing for the group to narrow.
+	requireSeed(t, target.SeedConversation(domain.Conversation{
+		ID: "C-private", WorkspaceID: "T1", Name: "restricted", Kind: domain.ConversationTypePrivate,
+	}))
+	requireSeed(t, target.SeedConversationMember("C-private", "U1"))
 	now := time.Unix(1_700_000_300, 0).UTC()
 	for _, group := range []domain.UserGroup{
 		{ID: "S1", WorkspaceID: "T1", Name: "Traders", Handle: "traders", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
@@ -841,6 +848,108 @@ func parityCases() []parityCase {
 					availability.Enabled, availability.SearchableSources, len(found.Messages),
 					notAURL != nil, unknownApp != nil, missingToken != nil, unnamedToken != nil,
 					missingRevocation != nil, connection != nil, unknownConnection != nil, emptyQuery != nil,
+				}, nil
+			},
+		},
+		{
+			// The administrative half of a channel. It reaches channels the
+			// administrator is not in, which is exactly why each refusal has to
+			// answer the same on both compositions.
+			name: "an administrator renames, staffs, restricts, and deletes a channel identically",
+			seed: seedUserGroupParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				renamed, err := chat.AdminRenameConversation(ctx, "T1", "UA", "C2", "admin-renamed")
+				if err != nil {
+					return nil, err
+				}
+				_, renameMissing := chat.AdminRenameConversation(ctx, "T1", "UA", "C-nobody", "nothing")
+				invited, err := chat.AdminInviteConversationMembers(ctx, "T1", "UA", "C2", []domain.UserID{"U2"})
+				if err != nil {
+					return nil, err
+				}
+				_, invitedNobody := chat.AdminInviteConversationMembers(ctx, "T1", "UA", "C2", []domain.UserID{"U-nobody"})
+
+				// Restricting a channel to a user group is a different authority
+				// from membership, and it lists back in one stable order.
+				if err := chat.AdminAddConversationAccessGroup(ctx, "T1", "UA", "C-private", "S1"); err != nil {
+					return nil, err
+				}
+				if err := chat.AdminAddConversationAccessGroup(ctx, "T1", "UA", "C-private", "S2"); err != nil {
+					return nil, err
+				}
+				groupMissing := chat.AdminAddConversationAccessGroup(ctx, "T1", "UA", "C-private", "S-nobody")
+				// A public channel is already open to the workspace, so there
+				// is nothing for a group to narrow.
+				publicChannel := chat.AdminAddConversationAccessGroup(ctx, "T1", "UA", "C2", "S1")
+				groups, err := chat.AdminListConversationAccessGroups(ctx, "T1", "UA", "C-private")
+				if err != nil {
+					return nil, err
+				}
+				sort.Slice(groups, func(left, right int) bool { return groups[left] < groups[right] })
+				if err := chat.AdminRemoveConversationAccessGroup(ctx, "T1", "UA", "C-private", "S2"); err != nil {
+					return nil, err
+				}
+				removedTwice := chat.AdminRemoveConversationAccessGroup(ctx, "T1", "UA", "C-private", "S2")
+				remaining, err := chat.AdminListConversationAccessGroups(ctx, "T1", "UA", "C-private")
+				if err != nil {
+					return nil, err
+				}
+
+				found, err := chat.AdminSearchConversations(ctx, "T1", "UA", "admin-renamed", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				archived, err := chat.AdminSetConversationArchived(ctx, "T1", "UA", "C2", true)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminDeleteConversation(ctx, "T1", "UA", "C2"); err != nil {
+					return nil, err
+				}
+				deletedTwice := chat.AdminDeleteConversation(ctx, "T1", "UA", "C2")
+				member := chat.AdminDeleteConversation(ctx, "T1", "U1", "C1")
+				return []any{
+					renamed.Name, invited.ID, groups, remaining, len(found.Conversations), archived.Archived,
+					renameMissing != nil, invitedNobody != nil, groupMissing != nil, publicChannel != nil,
+					removedTwice != nil, deletedTwice != nil, member != nil,
+				}, nil
+			},
+		},
+		{
+			// What a workspace says about itself. Each setter answers the whole
+			// workspace, so a setter that dropped a neighbouring field would
+			// show up here rather than in whatever read it next.
+			name: "workspace description, discoverability, icon, and defaults are set identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				described, err := chat.AdminSetWorkspaceDescription(ctx, "T1", "UA", "  Where the work happens  ")
+				if err != nil {
+					return nil, err
+				}
+				discoverable, err := chat.AdminSetWorkspaceDiscoverability(ctx, "T1", "UA", domain.WorkspaceDiscoverabilityInviteOnly)
+				if err != nil {
+					return nil, err
+				}
+				_, unknownDiscoverability := chat.AdminSetWorkspaceDiscoverability(ctx, "T1", "UA", "whenever")
+				icon, err := chat.AdminSetWorkspaceIcon(ctx, "T1", "UA", "https://example.invalid/icon.png")
+				if err != nil {
+					return nil, err
+				}
+				_, notAnIcon := chat.AdminSetWorkspaceIcon(ctx, "T1", "UA", "an icon")
+				defaults, err := chat.AdminSetWorkspaceDefaultChannels(ctx, "T1", "UA", []domain.ConversationID{"C1"})
+				if err != nil {
+					return nil, err
+				}
+				_, defaultMissing := chat.AdminSetWorkspaceDefaultChannels(ctx, "T1", "UA", []domain.ConversationID{"C-nobody"})
+				member := func() bool {
+					_, err := chat.AdminSetWorkspaceDescription(ctx, "T1", "U1", "not mine to set")
+					return err != nil
+				}()
+				return []any{
+					described.Description, discoverable.Discoverability, icon.IconURL, defaults.DefaultChannelIDs,
+					// The description survives the three settings that followed
+					// it, which is what says each setter left its neighbours be.
+					defaults.Description, defaults.Discoverability, defaults.IconURL,
+					unknownDiscoverability != nil, notAnIcon != nil, defaultMissing != nil, member,
 				}, nil
 			},
 		},
@@ -4634,7 +4743,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 117
+const parityGapCeiling = 105
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -4650,52 +4759,40 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 }
 
 var parityGaps = map[string]struct{}{
-	"AcceptSharedInvite":                 {},
-	"AcknowledgeEntityCommentAction":     {},
-	"AddCall":                            {},
-	"AddCallParticipants":                {},
-	"AdminAddConversationAccessGroup":    {},
-	"AdminApproveApp":                    {},
-	"AdminApproveInviteRequest":          {},
-	"AdminAssignUser":                    {},
-	"AdminConnectedChannelInfo":          {},
-	"AdminConversationTeams":             {},
-	"AdminCreateIncomingWebhook":         {},
-	"AdminCreateUser":                    {},
-	"AdminCreateWorkspace":               {},
-	"AdminDeleteConversation":            {},
-	"AdminDenyInviteRequest":             {},
-	"AdminDisconnectSharedConversation":  {},
-	"AdminInviteConversationMembers":     {},
-	"AdminInviteUser":                    {},
-	"AdminListConversationAccessGroups":  {},
-	"AcceptInvitationForEmail":           {},
-	"ApproveSharedInvite":                {},
-	"ConversationRetention":              {},
-	"DeclineSharedInvite":                {},
-	"DenySharedInvite":                   {},
-	"InvitationPreview":                  {},
-	"AdminRemoveConversationAccessGroup": {},
-	"AdminRenameConversation":            {},
-	"AdminRestrictApp":                   {},
-	"AdminSearchConversations":           {},
-	"AdminSetConversationArchived":       {},
-	"AdminSetConversationTeams":          {},
-	"AdminSetIncomingWebhookEnabled":     {},
-	"AdminSetWorkspaceDefaultChannels":   {},
-	"AdminSetWorkspaceDescription":       {},
-	"AdminSetWorkspaceDiscoverability":   {},
-	"AdminSetWorkspaceIcon":              {},
-	"AdminTeamUsers":                     {},
-	"BotInfo":                            {},
-	"CompleteExternalUploads":            {},
-	"ConsumeRTMConnection":               {},
-	"CreateAppInstallation":              {},
-	"CreateExternalIdentity":             {},
-	"CreateRTMConnection":                {},
-	"CreateSession":                      {},
-	"DeleteCanvas":                       {},
-	"DeleteScheduledMessage":             {},
+	"AcceptSharedInvite":                {},
+	"AcknowledgeEntityCommentAction":    {},
+	"AddCall":                           {},
+	"AddCallParticipants":               {},
+	"AdminApproveApp":                   {},
+	"AdminApproveInviteRequest":         {},
+	"AdminAssignUser":                   {},
+	"AdminConnectedChannelInfo":         {},
+	"AdminConversationTeams":            {},
+	"AdminCreateIncomingWebhook":        {},
+	"AdminCreateUser":                   {},
+	"AdminCreateWorkspace":              {},
+	"AdminDenyInviteRequest":            {},
+	"AdminDisconnectSharedConversation": {},
+	"AdminInviteUser":                   {},
+	"AcceptInvitationForEmail":          {},
+	"ApproveSharedInvite":               {},
+	"ConversationRetention":             {},
+	"DeclineSharedInvite":               {},
+	"DenySharedInvite":                  {},
+	"InvitationPreview":                 {},
+	"AdminRestrictApp":                  {},
+	"AdminSetConversationTeams":         {},
+	"AdminSetIncomingWebhookEnabled":    {},
+	"AdminTeamUsers":                    {},
+	"BotInfo":                           {},
+	"CompleteExternalUploads":           {},
+	"ConsumeRTMConnection":              {},
+	"CreateAppInstallation":             {},
+	"CreateExternalIdentity":            {},
+	"CreateRTMConnection":               {},
+	"CreateSession":                     {},
+	"DeleteCanvas":                      {},
+	"DeleteScheduledMessage":            {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
 	// focused transport tests because parityCases seeds both compositions with
