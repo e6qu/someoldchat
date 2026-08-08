@@ -22,6 +22,7 @@ service.automation_entities_empty
 service.automation_org_not_found
 service.automation_team_not_found
 service.automation_user_not_found
+service.barriered_from_member
 service.blob_unavailable
 service.cannot_archive_default
 service.cannot_invite_self

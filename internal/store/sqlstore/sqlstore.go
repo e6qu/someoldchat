@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 158
+const schemaVersion = 159
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 159 {
+		// When a reminder was delivered. Reminders were durable and nothing ever
+		// fired them, so the column is what lets a worker deliver each one once.
+		columns, err := s.tableColumns(ctx, db, "reminders")
+		if err != nil {
+			return err
+		}
+		if !columns["delivered_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE reminders ADD COLUMN delivered_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate reminder delivery: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS reminders_due ON reminders(workspace_id, delivered_at, due_at)`); err != nil {
+			return fmt.Errorf("index reminder delivery: %w", err)
+		}
+	}
 	if version < 158 {
 		// An app's icon, and the credentials an app holds with services outside
 		// this deployment. The secret is a ciphertext column for the same
@@ -3988,6 +4004,7 @@ var migratableTables = []string{
 	"workflows",
 	"workspace_members",
 	"workspaces",
+	"reminders",
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
@@ -7385,6 +7402,20 @@ func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) GetAppApproval(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID) (domain.AppApproval, error) {
+	var value domain.AppApproval
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT app_id, request_id, workspace_id, status, created_at, updated_at
+		FROM app_approvals WHERE workspace_id = ? AND app_id = ?`, workspace, app).
+		Scan(&value.ID, &value.RequestID, &value.WorkspaceID, &value.Status, &created, &updated)
+	if err := translateNotFound(err); err != nil {
+		return domain.AppApproval{}, err
+	}
+	value.CreatedAt = timeFromUnixNanoOrZero(created)
+	value.UpdatedAt = timeFromUnixNanoOrZero(updated)
+	return value, nil
 }
 
 func (s *Store) ListAppApprovals(ctx context.Context, workspace domain.WorkspaceID, approvalStatus domain.AppApprovalStatus, request domain.PageRequest) (domain.AppApprovalPage, error) {
@@ -15214,6 +15245,78 @@ func scanLaterReminder(scanner interface{ Scan(...any) error }) (domain.LaterRem
 		value.FailedAt = time.Unix(failed, 0).UTC()
 	}
 	return value, nil
+}
+
+func (s *Store) DueReminders(ctx context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.Reminder, error) {
+	if limit <= 0 || now.IsZero() {
+		return nil, store.InvalidArgument("due reminders need a positive limit and a current time")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring
+		FROM reminders
+		WHERE (? = '' OR workspace_id = ?) AND delivered_at = 0 AND complete_at = 0 AND due_at <= ?
+		ORDER BY due_at, id LIMIT ?`, workspace, workspace, now.UTC().Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.Reminder, 0, limit)
+	for rows.Next() {
+		var value domain.Reminder
+		var due, complete int64
+		var recurring int
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Creator, &value.User, &value.Text, &due, &complete, &recurring); err != nil {
+			return nil, err
+		}
+		value.Time = time.Unix(due, 0).UTC()
+		if complete != 0 {
+			value.CompleteAt = time.Unix(complete, 0).UTC()
+		}
+		value.Recurring = recurring != 0
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	// The claim is the update. Two workers reading the same batch both try, and
+	// only the one whose update finds delivered_at still zero writes the notice.
+	result, err := tx.ExecContext(ctx, `UPDATE reminders SET delivered_at = ? WHERE id = ? AND workspace_id = ? AND delivered_at = 0`,
+		deliveredAt.UTC().Unix(), id, workspace)
+	if err != nil {
+		return false, classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) EarliestReminder(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	var due int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MIN(due_at), 0) FROM reminders
+		WHERE (? = '' OR workspace_id = ?) AND delivered_at = 0 AND complete_at = 0`, workspace, workspace).Scan(&due)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if due == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(due, 0).UTC(), nil
 }
 
 func (s *Store) CreateLaterReminder(ctx context.Context, reminder domain.LaterReminder, event events.Event) error {

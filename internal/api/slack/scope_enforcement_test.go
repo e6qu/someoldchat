@@ -102,6 +102,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/team.billing.info", auth.ScopeTeamRead},
 		{http.MethodPost, "/api/admin.users.unsupportedVersions.export", auth.ScopeAdminUsersRead},
 		{http.MethodPost, "/api/functions.workflows.steps.responses.export", auth.ScopeWorkflowStepsExecute},
+		{http.MethodGet, "/internal/exports/workflow-step-responses.csv", auth.ScopeWorkflowStepsExecute},
 		{http.MethodGet, "/api/admin.analytics.getFile", auth.ScopeAdminAnalyticsRead},
 		{http.MethodPost, "/api/admin.analytics.getFile", auth.ScopeAdminAnalyticsRead},
 		{http.MethodGet, "/api/admin.analytics.messages.activity", auth.ScopeAdminAnalyticsRead},

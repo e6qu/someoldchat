@@ -3098,6 +3098,10 @@ try{browserTimezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catc
 Array.prototype.forEach.call(document.querySelectorAll('[data-browser-timezone]'),function(input){input.value=browserTimezone});
 var narrow=window.matchMedia?window.matchMedia('(max-width:800px)'):null;
 var generation=0;
+var refreshResponses=0;
+var discardedRefreshes=0;
+document.documentElement.setAttribute('data-refresh-responses','0');
+document.documentElement.setAttribute('data-discarded-refreshes','0');
 var inFlight=null;
 var scheduled=null;
 var appliedHTML=new WeakMap();
@@ -3524,7 +3528,9 @@ if(controller)options.signal=controller.signal;
 var activeMessage=focused?document.activeElement.closest('.message'):null;
 var activeMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
 pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){
-if(token!==generation)return;
+refreshResponses++;
+document.documentElement.setAttribute('data-refresh-responses',String(refreshResponses));
+if(token!==generation){discardedRefreshes++;document.documentElement.setAttribute('data-discarded-refreshes',String(discardedRefreshes));return}
 if(!force&&document.activeElement&&region.contains(document.activeElement))return;
 if(appliedHTML.get(region)===html)return;
 appliedHTML.set(region,html);
@@ -8021,7 +8027,7 @@ func canvasEditor(value domain.Canvas) (body, sectionID string, editable bool) {
 	if len(document.Sections) == 0 {
 		return "", "", true
 	}
-	if len(document.Sections) == 1 && document.Sections[0].Type == "markdown" {
+	if len(document.Sections) == 1 && document.Sections[0].Type == domain.CanvasSectionMarkdown {
 		section := document.Sections[0]
 		return section.Text, section.ID, true
 	}

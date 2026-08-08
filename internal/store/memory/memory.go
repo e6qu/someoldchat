@@ -104,6 +104,7 @@ type Store struct {
 	savedItems                    map[domain.SavedItemID]domain.SavedItem
 	bookmarks                     map[domain.BookmarkID]domain.Bookmark
 	reminders                     map[domain.ReminderID]domain.Reminder
+	reminderDelivery              map[domain.ReminderID]time.Time
 	laterReminders                map[domain.LaterReminderID]domain.LaterReminder
 	laterReminderLeases           map[domain.LaterReminderID]memoryLease
 	laterReminderNextAttempt      map[domain.LaterReminderID]time.Time
@@ -295,6 +296,7 @@ func New() *Store {
 		stars:                         make(map[domain.UserID]map[domain.MessageID]domain.Star),
 		savedItems:                    make(map[domain.SavedItemID]domain.SavedItem),
 		reminders:                     make(map[domain.ReminderID]domain.Reminder),
+		reminderDelivery:              make(map[domain.ReminderID]time.Time),
 		laterReminders:                make(map[domain.LaterReminderID]domain.LaterReminder),
 		laterReminderLeases:           make(map[domain.LaterReminderID]memoryLease),
 		laterReminderNextAttempt:      make(map[domain.LaterReminderID]time.Time),
@@ -3750,6 +3752,16 @@ func (s *Store) SetAppApproval(_ context.Context, workspace domain.WorkspaceID, 
 	s.appApprovals[appID] = value
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) GetAppApproval(_ context.Context, workspace domain.WorkspaceID, app domain.AppID) (domain.AppApproval, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.appApprovals[app]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.AppApproval{}, store.ErrNotFound
+	}
+	return value, nil
 }
 
 func (s *Store) ListAppApprovals(_ context.Context, workspace domain.WorkspaceID, status domain.AppApprovalStatus, request domain.PageRequest) (domain.AppApprovalPage, error) {
@@ -8083,6 +8095,68 @@ func (s *Store) DeleteReminder(_ context.Context, workspace domain.WorkspaceID, 
 	delete(s.reminders, id)
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) DueReminders(_ context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.Reminder, error) {
+	if limit <= 0 || now.IsZero() {
+		return nil, store.InvalidArgument("due reminders need a positive limit and a current time")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.Reminder, 0, limit)
+	for id, reminder := range s.reminders {
+		if workspace != "" && reminder.WorkspaceID != workspace {
+			continue
+		}
+		if !s.reminderDelivery[id].IsZero() || !reminder.CompleteAt.IsZero() || reminder.Time.After(now) {
+			continue
+		}
+		values = append(values, reminder)
+	}
+	sort.Slice(values, func(left, right int) bool {
+		if !values[left].Time.Equal(values[right].Time) {
+			return values[left].Time.Before(values[right].Time)
+		}
+		return values[left].ID < values[right].ID
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return values, nil
+}
+
+func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Losing the claim and never having existed are the same answer here: the
+	// worker only claims what it has just read as due, and either way it must
+	// not deliver. Telling them apart would cost a read no caller wants.
+	reminder, exists := s.reminders[id]
+	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() {
+		return false, nil
+	}
+	_ = reminder
+	s.reminderDelivery[id] = deliveredAt.UTC()
+	s.outbox = append(s.outbox, event)
+	return true, nil
+}
+
+func (s *Store) EarliestReminder(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	earliest := time.Time{}
+	for id, reminder := range s.reminders {
+		if workspace != "" && reminder.WorkspaceID != workspace {
+			continue
+		}
+		if !s.reminderDelivery[id].IsZero() || !reminder.CompleteAt.IsZero() {
+			continue
+		}
+		if earliest.IsZero() || reminder.Time.Before(earliest) {
+			earliest = reminder.Time.UTC()
+		}
+	}
+	return earliest, nil
 }
 
 func (s *Store) CreateLaterReminder(_ context.Context, reminder domain.LaterReminder, event events.Event) error {

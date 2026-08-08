@@ -137,6 +137,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	var reminderWorker scheduler.ReminderWorker
 	var statusWorker scheduler.StatusWorker
 	var scheduledStatusWorker scheduler.ScheduledStatusWorker
+	var reminderDeliveryWorker scheduler.ReminderDeliveryWorker
 	var appEventProcessor slackapp.EventProcessor
 	if *deliveryFormat == "record" {
 		worker, err = outbox.NewWorker(runtime.OutboxSource, *owner, *limit, *lease, delivery)
@@ -168,6 +169,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	scheduledStatusWorker, err = scheduler.NewScheduledStatusWorker(runtime.Store, *limit)
 	if err != nil {
 		logger.Error("configure scheduled status worker", "error", err)
+		return exitConfiguration
+	}
+	reminderDeliveryWorker, err = scheduler.NewReminderDeliveryWorker(runtime.Store, *limit)
+	if err != nil {
+		logger.Error("configure reminder delivery worker", "error", err)
 		return exitConfiguration
 	}
 	workflowDelayWorker, err := scheduler.NewWorkflowDelayWorker(runtime.Service, *limit)
@@ -227,6 +233,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if scheduledStatusErr != nil {
 				logger.Error("scheduled status execution failed", "count", scheduledStatusCount, "error", scheduledStatusErr)
 			}
+			reminderDeliveryCount, reminderDeliveryErr := reminderDeliveryWorker.RunOnce(cycleContext, "")
+			if reminderDeliveryErr != nil {
+				logger.Error("reminder delivery failed", "count", reminderDeliveryCount, "error", reminderDeliveryErr)
+			}
 			statusCount, statusErr := statusWorker.RunOnce(cycleContext, "")
 			if statusErr != nil {
 				logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
@@ -273,6 +283,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		if scheduledStatusErr != nil {
 			failures = errors.Join(failures, scheduledStatusErr)
 			logger.Error("scheduled status execution failed", "count", scheduledStatusCount, "error", scheduledStatusErr)
+		}
+		reminderDeliveryCount, reminderDeliveryErr := reminderDeliveryWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if reminderDeliveryErr != nil {
+			failures = errors.Join(failures, reminderDeliveryErr)
+			logger.Error("reminder delivery failed", "count", reminderDeliveryCount, "error", reminderDeliveryErr)
 		}
 		statusCount, statusErr := statusWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if statusErr != nil {

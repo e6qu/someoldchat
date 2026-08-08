@@ -524,6 +524,7 @@ func sentinelDrivenCodes() map[string]string {
 		"not_in_channel":             "service.ErrNotInConversation, classified by sentinel",
 		"cant_invite_self":           "service.ErrCannotInviteSelf, classified by sentinel",
 		"cant_delete_primary_owner":  "service.ErrLastWorkspaceOwner, classified by sentinel",
+		"barriered_from_member":      "service.ErrBarrieredFromMember, classified by sentinel",
 		"message_not_found":          "service.ErrMessageAlreadyDeleted, classified by sentinel",
 		"invalid_presence":           "service.ErrInvalidPresence, classified by sentinel",
 		"emoji_already_exists":       "service.ErrEmojiAlreadyExists, classified by sentinel",

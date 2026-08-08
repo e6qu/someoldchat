@@ -385,6 +385,26 @@ message WorkflowStepVersionsResponse {
   repeated WorkflowStepVersion steps_versions = 1;
 }
 
+message WorkflowStepResponse {
+  string run_id = 1;
+  string step_id = 2;
+  string actor_id = 3;
+  string status = 4;
+  string outputs = 5;
+  int64 completed_at = 6;
+}
+
+message WorkflowStepResponsesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_id = 3;
+  string step_id = 4;
+}
+
+message WorkflowStepResponsesResponse {
+  repeated WorkflowStepResponse responses = 1;
+}
+
 message AdminPermissionsRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -435,6 +455,7 @@ service WorkflowsService {
   rpc GetWorkflowRun(WorkflowRunGetRequest) returns (WorkflowRun);
   rpc CompleteFunction(FunctionCompletionRequest) returns (WorkflowStepMutationResponse);
   rpc GetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);
+  rpc WorkflowStepResponses(WorkflowStepResponsesRequest) returns (WorkflowStepResponsesResponse);
   rpc AdminFunctionPermissions(AdminPermissionsRequest) returns (AdminPermissionsResponse);
   rpc AdminWorkflowPermissions(AdminPermissionsRequest) returns (AdminPermissionsResponse);
   rpc AdminTriggerTypePermission(AdminPermissionsRequest) returns (AutomationPermission);

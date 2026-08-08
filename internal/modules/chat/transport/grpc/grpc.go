@@ -3698,6 +3698,35 @@ func functionPermissionRequest(workspaceID domain.WorkspaceID, userID domain.Use
 	}
 }
 
+func (r Remote) WorkflowStepResponses(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, stepID string) ([]domain.WorkflowStepResponse, error) {
+	out, err := r.workflows.WorkflowStepResponses(ctx, &chatv1.WorkflowStepResponsesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID), StepId: stepID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]domain.WorkflowStepResponse, 0, len(out.GetResponses()))
+	for _, encoded := range out.GetResponses() {
+		responses = append(responses, decodeProtoWorkflowStepResponse(encoded))
+	}
+	return responses, nil
+}
+
+func encodeProtoWorkflowStepResponse(value domain.WorkflowStepResponse) *chatv1.WorkflowStepResponse {
+	return &chatv1.WorkflowStepResponse{
+		RunId: string(value.RunID), StepId: string(value.StepID), ActorId: string(value.ActorID),
+		Status: string(value.Status), Outputs: value.Outputs, CompletedAt: optionalUnixNano(value.CompletedAt),
+	}
+}
+
+func decodeProtoWorkflowStepResponse(value *chatv1.WorkflowStepResponse) domain.WorkflowStepResponse {
+	return domain.WorkflowStepResponse{
+		RunID: domain.WorkflowRunID(value.GetRunId()), StepID: domain.WorkflowStepID(value.GetStepId()),
+		ActorID: domain.UserID(value.GetActorId()), Status: domain.WorkflowStepStatus(value.GetStatus()),
+		Outputs: value.GetOutputs(), CompletedAt: optionalTimeFromUnixNano(value.GetCompletedAt()),
+	}
+}
+
 func (r Remote) AdminFunctionPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, functionIDs []string) ([]domain.AutomationPermission, error) {
 	out, err := r.workflows.AdminFunctionPermissions(ctx, adminPermissionsRequest(workspaceID, userID, functionIDs))
 	if err != nil {
@@ -4614,8 +4643,8 @@ func (r Remote) RemoveSavedItem(ctx context.Context, workspaceID domain.Workspac
 	return requireAcknowledgement(out.GetOk(), "saved item removal")
 }
 
-func (r Remote) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
-	out, err := r.bookmarks.AddBookmark(ctx, &chatv1.AddBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Title: title, Type: bookmarkType, Link: link, Emoji: emoji, EntityId: entityID, AccessLevel: accessLevel, ParentId: parentID})
+func (r Remote) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title string, bookmarkType domain.BookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
+	out, err := r.bookmarks.AddBookmark(ctx, &chatv1.AddBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Title: title, Type: string(bookmarkType), Link: link, Emoji: emoji, EntityId: entityID, AccessLevel: accessLevel, ParentId: parentID})
 	if err != nil {
 		return domain.Bookmark{}, err
 	}
@@ -7318,6 +7347,19 @@ func (s *Server) CompleteFunction(ctx context.Context, input *chatv1.FunctionCom
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
 }
 
+func (s *Server) WorkflowStepResponses(ctx context.Context, input *chatv1.WorkflowStepResponsesRequest) (*chatv1.WorkflowStepResponsesResponse, error) {
+	responses, err := s.implementation.WorkflowStepResponses(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetStepId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.WorkflowStepResponse, 0, len(responses))
+	for _, response := range responses {
+		encoded = append(encoded, encodeProtoWorkflowStepResponse(response))
+	}
+	return &chatv1.WorkflowStepResponsesResponse{Responses: encoded}, nil
+}
+
 func (s *Server) AdminFunctionPermissions(ctx context.Context, input *chatv1.AdminPermissionsRequest) (*chatv1.AdminPermissionsResponse, error) {
 	values, err := s.implementation.AdminFunctionPermissions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetResourceIds())
 	if err != nil {
@@ -9762,7 +9804,7 @@ func (s *Server) addBookmarkProto(ctx context.Context, input *chatv1.AddBookmark
 	// store.ErrNotFound — so the caller derived a different HTTP status depending
 	// on the composition. Delegating makes the two identical for every input
 	// rather than for the inputs a test happens to cover.
-	bookmark, err := s.implementation.AddBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetTitle(), input.GetType(), input.GetLink(), input.GetEmoji(), input.GetEntityId(), input.GetAccessLevel(), input.GetParentId())
+	bookmark, err := s.implementation.AddBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetTitle(), domain.BookmarkType(input.GetType()), input.GetLink(), input.GetEmoji(), input.GetEntityId(), input.GetAccessLevel(), input.GetParentId())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -11282,14 +11324,14 @@ func decodeProtoSavedItemPage(value *chatv1.SavedItemPage) (domain.SavedItemPage
 }
 
 func encodeProtoBookmark(value domain.Bookmark) *chatv1.Bookmark {
-	return &chatv1.Bookmark{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), Title: value.Title, Type: value.Type, Link: value.Link, Emoji: value.Emoji, EntityId: value.EntityID, AccessLevel: value.AccessLevel, ParentId: string(value.ParentID), CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix(), UpdatedBy: string(value.UpdatedBy)}
+	return &chatv1.Bookmark{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), Title: value.Title, Type: string(value.Type), Link: value.Link, Emoji: value.Emoji, EntityId: value.EntityID, AccessLevel: value.AccessLevel, ParentId: string(value.ParentID), CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix(), UpdatedBy: string(value.UpdatedBy)}
 }
 
 func decodeProtoBookmark(value *chatv1.Bookmark) (domain.Bookmark, error) {
 	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetTitle() == "" || value.GetType() == "" || value.GetUpdatedBy() == "" {
 		return domain.Bookmark{}, errors.New("typed bookmark is incomplete")
 	}
-	return domain.Bookmark{ID: domain.BookmarkID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), Title: value.GetTitle(), Type: value.GetType(), Link: value.GetLink(), Emoji: value.GetEmoji(), EntityID: value.GetEntityId(), AccessLevel: value.GetAccessLevel(), ParentID: domain.BookmarkID(value.GetParentId()), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC(), UpdatedBy: domain.UserID(value.GetUpdatedBy())}, nil
+	return domain.Bookmark{ID: domain.BookmarkID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), Title: value.GetTitle(), Type: domain.BookmarkType(value.GetType()), Link: value.GetLink(), Emoji: value.GetEmoji(), EntityID: value.GetEntityId(), AccessLevel: value.GetAccessLevel(), ParentID: domain.BookmarkID(value.GetParentId()), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC(), UpdatedBy: domain.UserID(value.GetUpdatedBy())}, nil
 }
 
 func decodeProtoStar(value *chatv1.Star) (domain.Star, error) {

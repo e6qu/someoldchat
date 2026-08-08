@@ -3582,6 +3582,48 @@ test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', a
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it asked for', async ({ page, context, request }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-title')).toHaveText('# general');
+
+  // The client cancels an in-flight refresh when a newer one starts, and drops
+  // any response that arrives after its generation has moved on. That guard is
+  // correct and it is also a cost: every discarded response is a round trip the
+  // browser paid for and threw away, and a wide enough race would let stale
+  // content paint before being replaced. The counter makes the guard
+  // observable, and this journey holds it at zero through ordinary use.
+  const counter = async (name) => Number(await page.locator('html').getAttribute(`data-${name}`));
+  expect(await counter('discarded-refreshes'), 'the counter is not exposed').toBe(0);
+
+  // A refresh runs when the live stream delivers an event, so the journey has
+  // to cause one rather than wait and hope. Posting from outside the page is
+  // what a colleague typing looks like to this client, and three in quick
+  // succession is the shape most likely to make one refresh overtake another.
+  for (let round = 0; round < 3; round += 1) {
+    const posted = await request.post('/api/chat.postMessage', {
+      headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+      data: { channel: CHANNEL, text: `refresh discipline ${round} ${Date.now()}` },
+    });
+    expect((await posted.json()).ok).toBe(true);
+  }
+
+  // The denominator is what makes the zero mean something. Without it a client
+  // that never refreshed at all would report zero discards and look perfect.
+  // The refresh is driven by the realtime stream rather than a fixed poll, so
+  // how long it takes to arrive depends on the transport the browser chose.
+  // The wait is generous on purpose: a short one would make this journey report
+  // a transport that was merely slow as a client that never refreshed.
+  await expect
+    .poll(async () => counter('refresh-responses'), {
+      timeout: 20000,
+      message: 'no refresh completed, so zero discards proves nothing',
+    })
+    .toBeGreaterThan(0);
+  expect(await counter('discarded-refreshes'), 'the client paid for a response it discarded').toBe(0);
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

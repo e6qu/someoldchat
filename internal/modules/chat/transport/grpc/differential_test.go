@@ -229,6 +229,27 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 
 // seedUserGroupParity gives the fixture two user groups, so a barrier has
 // something real to name on both compositions.
+// seedRequestedAppParity files one request that is still open and one that has
+// been approved, so the cancel rule has both states to answer for.
+func seedRequestedAppParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_400, 0).UTC()
+	for _, approval := range []struct {
+		app    domain.AppID
+		id     domain.AppRequestID
+		status domain.AppApprovalStatus
+	}{
+		{"A-cancel", "R-cancel", domain.AppApprovalRequested},
+		{"A-approved", "R-approved", domain.AppApprovalApproved},
+	} {
+		requireSeed(t, target.SetAppApproval(context.Background(), "T1", approval.app, approval.id, approval.status, now, events.Event{
+			ID: domain.EventID("evt_approval_" + string(approval.app)), WorkspaceID: "T1", Topic: "app.requested",
+			Payload: string(approval.app), CreatedAt: now,
+		}))
+	}
+}
+
 func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
@@ -823,6 +844,27 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The step responses report is what the export acknowledges, so
+			// both compositions must collect the same answers and refuse the
+			// same callers.
+			name: "workflow step responses are collected identically",
+			seed: seedFormParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				collected, err := chat.WorkflowStepResponses(ctx, "T1", "U1", "WfForm", "intake")
+				if err != nil {
+					return nil, err
+				}
+				described := make([]string, 0, len(collected))
+				for _, response := range collected {
+					described = append(described, string(response.ActorID)+"/"+string(response.Status))
+				}
+				_, unnamedStep := chat.WorkflowStepResponses(ctx, "T1", "U1", "WfForm", "")
+				_, missingWorkflow := chat.WorkflowStepResponses(ctx, "T1", "U1", "Wf-nobody", "intake")
+				_, stranger := chat.WorkflowStepResponses(ctx, "T1", "U2", "WfForm", "intake")
+				return []any{described, unnamedStep != nil, missingWorkflow != nil, stranger != nil}, nil
+			},
+		},
+		{
 			// An empty allow list is the state a workspace starts in, not a
 			// missing one, and an address without a reason is refused. Both
 			// compositions must answer the same on each.
@@ -1242,10 +1284,17 @@ func parityCases() []parityCase {
 			// decided it, which is a third state beside approved and
 			// restricted.
 			name: "an app request can be cancelled and lists under its own status",
+			seed: seedRequestedAppParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				if err := chat.AdminCancelAppRequest(ctx, "T1", "UA", "A-cancel", "R-cancel"); err != nil {
 					return nil, err
 				}
+				// Cancelling is not a decision an administrator may take back:
+				// a request that was already decided stays decided, and one
+				// that was never filed cannot be withdrawn.
+				repeat := chat.AdminCancelAppRequest(ctx, "T1", "UA", "A-cancel", "R-cancel") != nil
+				decided := chat.AdminCancelAppRequest(ctx, "T1", "UA", "A-approved", "R-approved") != nil
+				unfiled := chat.AdminCancelAppRequest(ctx, "T1", "UA", "A-nobody", "R-nobody") != nil
 				cancelled, err := chat.AdminListApps(ctx, "T1", "UA", domain.AppApprovalCancelled, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
@@ -1256,7 +1305,7 @@ func parityCases() []parityCase {
 				}
 				member := chat.AdminCancelAppRequest(ctx, "T1", "U1", "A-cancel", "R-cancel") != nil
 				empty := chat.AdminCancelAppRequest(ctx, "T1", "UA", "", "") != nil
-				return []any{listed, member, empty}, nil
+				return []any{listed, member, empty, repeat, decided, unfiled}, nil
 			},
 		},
 		{

@@ -480,6 +480,10 @@ type Store interface {
 	// invitation consumed with no member behind it.
 	AcceptInviteRequest(context.Context, domain.InviteRequestAcceptance, []events.Event) error
 	SetAppApproval(context.Context, domain.WorkspaceID, domain.AppID, domain.AppRequestID, domain.AppApprovalStatus, time.Time, events.Event) error
+	// GetAppApproval reads one app's approval decision. A transition rule needs
+	// the current state, and listing by status to find one app answers a page
+	// when the question is about a single row.
+	GetAppApproval(context.Context, domain.WorkspaceID, domain.AppID) (domain.AppApproval, error)
 	ListAppApprovals(context.Context, domain.WorkspaceID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	CreateAppConfigurationToken(context.Context, string, string, domain.AppConfigurationToken) error
 	LookupAppConfigurationToken(context.Context, string) (domain.AppConfigurationToken, error)
@@ -897,6 +901,19 @@ type Store interface {
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
+	// DueReminders reports the reminders that have come due and have not been
+	// delivered. Delivery is a compare-and-set on delivered_at, so two workers
+	// reading the same batch deliver each reminder once between them.
+	DueReminders(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.Reminder, error)
+	// MarkReminderDelivered claims one reminder and writes its notice in the
+	// same transaction. It reports false when the claim is lost, which covers
+	// both somebody else winning it and the reminder not being there: the
+	// worker only claims what it has just read as due, and either way it must
+	// not deliver.
+	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, events.Event) (bool, error)
+	// EarliestReminder is the next instant a reminder comes due, so a workspace
+	// that is asleep knows when to wake.
+	EarliestReminder(context.Context, domain.WorkspaceID) (time.Time, error)
 	CreateLaterReminder(context.Context, domain.LaterReminder, events.Event) error
 	GetLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
 	ListLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)

@@ -441,6 +441,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/entity.presentComments", h.presentEntityComments)
 	mux.HandleFunc("POST /api/entity.acknowledgeCommentAction", h.acknowledgeEntityCommentAction)
 	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
+	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
@@ -1762,7 +1763,7 @@ func (h Handler) mutateFunctionPermission(w http.ResponseWriter, r *http.Request
 		writeFunctionPermissionError(w, err)
 		return
 	}
-	if current.PermissionType != "named_entities" {
+	if current.PermissionType != domain.PermissionNamedEntities {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -1927,7 +1928,7 @@ func (h Handler) mutateTriggerPermission(w http.ResponseWriter, r *http.Request,
 		writeTriggerPermissionError(w, err)
 		return
 	}
-	if current.PermissionType != "named_entities" {
+	if current.PermissionType != domain.PermissionNamedEntities {
 		writeError(w, "invalid_permission_type")
 		return
 	}
@@ -4860,7 +4861,11 @@ func (h Handler) adminUsersSetExpiration(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	teamID, targetID, rawExpiration := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"])), strings.TrimSpace(fields["expiration_ts"])
-	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" || rawExpiration == "" {
+	// team_id selects a workspace within an organization and is optional for a
+	// token that already names one. admin.users.getExpiration has always read
+	// it that way; requiring it here made the same caller work on the read and
+	// fail on the write.
+	if (teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID) || targetID == "" || rawExpiration == "" {
 		writeError(w, "invalid_arg_name")
 		return
 	}
@@ -7260,7 +7265,7 @@ func (h Handler) addBookmark(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	bookmark, err := h.Messages.AddBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["title"], fields["type"], fields["link"], fields["emoji"], fields["entity_id"], fields["access_level"], fields["parent_id"])
+	bookmark, err := h.Messages.AddBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["title"], domain.BookmarkType(fields["type"]), fields["link"], fields["emoji"], fields["entity_id"], fields["access_level"], fields["parent_id"])
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
@@ -10777,6 +10782,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {
 		return "fatal_error"
 	}
+	// An information barrier is a refusal about who may reach whom, which is
+	// neither a malformed request nor a member who is not here. Reporting it as
+	// either would send the caller looking for the wrong thing.
+	if errors.Is(err, service.ErrBarrieredFromMember) {
+		return "barriered_from_member"
+	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) {
 		return "emoji_already_exists"
 	}
@@ -11789,6 +11800,49 @@ func (h Handler) startListDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "job_id": value.ID})
+}
+
+// downloadWorkflowStepResponsesCSV serves what
+// functions.workflows.steps.responses.export acknowledges. Slack mails the
+// report; this deployment serves it to anybody who could have asked for it,
+// which is the workflow's managers and nobody else.
+func (h Handler) downloadWorkflowStepResponsesCSV(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeWorkflowStepsExecute)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	workflowID := domain.WorkflowID(strings.TrimSpace(r.URL.Query().Get("workflow_id")))
+	stepID := strings.TrimSpace(r.URL.Query().Get("step_id"))
+	if workflowID == "" || stepID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	responses, err := h.Messages.WorkflowStepResponses(r.Context(), principal.WorkspaceID, principal.UserID, workflowID, stepID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "workflow_not_found"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(string(workflowID)+"-"+stepID+".csv"))
+	writer := csv.NewWriter(w)
+	if err := writer.Write([]string{"run_id", "step_id", "user_id", "status", "outputs", "completed_at"}); err != nil {
+		return
+	}
+	for _, response := range responses {
+		completed := ""
+		if !response.CompletedAt.IsZero() {
+			completed = response.CompletedAt.UTC().Format(time.RFC3339)
+		}
+		if err := writer.Write([]string{
+			string(response.RunID), string(response.StepID), string(response.ActorID),
+			string(response.Status), response.Outputs, completed,
+		}); err != nil {
+			return
+		}
+	}
+	writer.Flush()
 }
 
 func (h Handler) downloadListCSV(w http.ResponseWriter, r *http.Request) {

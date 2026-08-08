@@ -162,6 +162,9 @@ func PublishEarliestProductWakeDeadlineComplete(ctx context.Context, scheduled S
 	if scheduled == nil || reminders == nil || statuses == nil || futureStatuses == nil || triggers == nil || publisher == nil {
 		return errors.New("product wake deadline requires all timer sources and a publisher")
 	}
+	// A reminders.add reminder is a timer like any other. A source that cannot
+	// report one is a source whose reminders never wake the workspace.
+	due, hasReminders := reminders.(ReminderDeliverySource)
 	fence, err := publisher.Fence(ctx)
 	if err != nil {
 		return err
@@ -171,13 +174,19 @@ func PublishEarliestProductWakeDeadlineComplete(ctx context.Context, scheduled S
 	}
 	var earliest time.Time
 	for _, workspace := range workspaces {
-		candidates := make([]time.Time, 0, 5)
+		candidates := make([]time.Time, 0, 6)
 		for _, read := range []func() (time.Time, error){
 			func() (time.Time, error) { return scheduled.EarliestScheduledMessage(ctx, workspace) },
 			func() (time.Time, error) { return reminders.EarliestLaterReminder(ctx, workspace) },
 			func() (time.Time, error) { return statuses.EarliestUserStatusExpiration(ctx, workspace) },
 			func() (time.Time, error) { return futureStatuses.EarliestScheduledStatusStart(ctx, workspace) },
 			func() (time.Time, error) { return triggers.EarliestScheduledWorkflowTrigger(ctx, workspace) },
+			func() (time.Time, error) {
+				if !hasReminders {
+					return time.Time{}, nil
+				}
+				return due.EarliestReminder(ctx, workspace)
+			},
 		} {
 			value, err := read()
 			if err != nil {

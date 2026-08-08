@@ -29,11 +29,16 @@ import (
 )
 
 var (
-	ErrInvalidMessage           = errors.New("message text and conversation are required")
-	ErrInvalidTimestamp         = errors.New("message timestamp is invalid")
-	ErrMessageNotOwned          = errors.New("message is not owned by user")
-	ErrMessageAlreadyDeleted    = errors.New("message is already deleted")
-	ErrInvalidConversation      = errors.New("conversation name is invalid")
+	ErrInvalidMessage        = errors.New("message text and conversation are required")
+	ErrInvalidTimestamp      = errors.New("message timestamp is invalid")
+	ErrMessageNotOwned       = errors.New("message is not owned by user")
+	ErrMessageAlreadyDeleted = errors.New("message is already deleted")
+	ErrInvalidConversation   = errors.New("conversation name is invalid")
+	// ErrBarrieredFromMember is refusal by an information barrier. It is its
+	// own error because "you may not reach this person" is a different fact
+	// from a malformed request or a member who is not here, and an
+	// administrator reading a support question needs to tell them apart.
+	ErrBarrieredFromMember      = errors.New("an information barrier separates these members")
 	ErrInvalidWorkspace         = errors.New("workspace settings are invalid")
 	ErrInvalidConversationPrefs = errors.New("conversation preferences are invalid")
 	ErrInvalidReaction          = errors.New("reaction name is invalid")
@@ -2208,8 +2213,36 @@ func (m Messages) AdminRestrictApp(ctx context.Context, workspaceID domain.Works
 
 // AdminCancelAppRequest withdraws an app request. The member who asked or an
 // administrator may cancel it, and cancelling records that nobody decided it.
+// AdminCancelAppRequest withdraws a request nobody has decided. Cancelling is
+// not a decision an administrator may take back: cancelling an approved request
+// used to write cancelled straight over the approval, which reads as "the
+// request went away" while the app stays installed and approved.
 func (m Messages) AdminCancelAppRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	// The identifier has to be resolved the same way the write resolves it, or
+	// the guard reads one row and the write changes another. A request named by
+	// its own identifier alone is stored under a synthesised app id.
+	current, err := m.Store.GetAppApproval(ctx, workspaceID, appApprovalKey(appID, requestID))
+	if err != nil {
+		return err
+	}
+	if current.Status != domain.AppApprovalRequested {
+		return ErrInvalidAppApproval
+	}
 	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalCancelled)
+}
+
+// appApprovalKey is where one approval row lives. A request named only by its
+// own identifier is stored under a synthesised app id, and every reader and
+// writer has to agree on that or they touch different rows.
+func appApprovalKey(appID domain.AppID, requestID domain.AppRequestID) domain.AppID {
+	appID = domain.AppID(strings.TrimSpace(string(appID)))
+	if appID != "" {
+		return appID
+	}
+	return domain.AppID("request:" + strings.TrimSpace(string(requestID)))
 }
 
 func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID, status domain.AppApprovalStatus) error {
@@ -2221,9 +2254,7 @@ func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.Work
 	if appID == "" && requestID == "" {
 		return ErrInvalidAppApproval
 	}
-	if appID == "" {
-		appID = domain.AppID("request:" + string(requestID))
-	}
+	appID = appApprovalKey(appID, requestID)
 	now := time.Now().UTC()
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("app."+string(status), events.String("app_id", string(appID)), events.String("app_request_id", string(requestID))), now)
 	if err != nil {
@@ -3750,11 +3781,7 @@ func (m Messages) AdminRequestExport(ctx context.Context, workspaceID domain.Wor
 // responses. Only somebody who may manage the workflow may ask, because the
 // responses are what its members submitted.
 func (m Messages) RequestWorkflowStepResponsesExport(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowID domain.WorkflowID, stepID string) error {
-	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
-	if err != nil {
-		return err
-	}
-	if err := m.requireWorkflowManager(ctx, workflow, actorID); err != nil {
+	if _, err := m.WorkflowStepResponses(ctx, workspaceID, actorID, workflowID, stepID); err != nil {
 		return err
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("export.requested",
@@ -3765,6 +3792,54 @@ func (m Messages) RequestWorkflowStepResponsesExport(ctx context.Context, worksp
 		return err
 	}
 	return m.Store.AppendEvent(ctx, event)
+}
+
+// WorkflowStepResponses collects what members submitted to one step across
+// every run of the workflow. The export used to acknowledge a request and
+// produce nothing; this is the report it acknowledges.
+func (m Messages) WorkflowStepResponses(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, workflowID domain.WorkflowID, stepID string) ([]domain.WorkflowStepResponse, error) {
+	stepID = strings.TrimSpace(stepID)
+	if workflowID == "" || stepID == "" {
+		return nil, ErrInvalidWorkflowStep
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.requireWorkflowManager(ctx, workflow, actorID); err != nil {
+		return nil, err
+	}
+	responses := make([]domain.WorkflowStepResponse, 0)
+	cursor := domain.Cursor("")
+	for {
+		runs, more, next, err := m.Store.ListWorkflowRuns(ctx, workspaceID, workflowID, domain.PageRequest{Limit: 100, Cursor: cursor})
+		if err != nil {
+			return nil, err
+		}
+		for _, run := range runs {
+			executions, err := m.Store.ListWorkflowRunSteps(ctx, workspaceID, run.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, execution := range executions {
+				// EditID carries which step of the definition this execution
+				// is, which is how one step's answers are picked out of every
+				// run's executions.
+				if execution.EditID != stepID {
+					continue
+				}
+				responses = append(responses, domain.WorkflowStepResponse{
+					RunID: run.ID, StepID: execution.ID, ActorID: execution.UserID,
+					Status: execution.Status, Outputs: execution.Outputs, CompletedAt: execution.UpdatedAt,
+				})
+			}
+		}
+		if !more || next == "" {
+			break
+		}
+		cursor = next
+	}
+	return responses, nil
 }
 
 // AdminAnomalyAllowList reports what audit is told not to flag.
@@ -4571,6 +4646,74 @@ func (m Messages) Conversations(ctx context.Context, workspaceID domain.Workspac
 	return m.Store.ListConversations(ctx, workspaceID, userID, request)
 }
 
+// barrierSeparates reports whether an information barrier stops any two of the
+// named members from reaching each other. A barrier that is stored and never
+// consulted is a setting an administrator believes in and the product ignores,
+// which is worse than not offering it.
+//
+// The read is deliberately direct rather than cached: a workspace holds a
+// handful of barriers, the groups are small, and a stale cache here would let
+// through exactly the contact the barrier exists to stop.
+func (m Messages) barrierSeparates(ctx context.Context, workspaceID domain.WorkspaceID, members []domain.UserID, subject domain.BarrierSubject) (bool, error) {
+	if len(members) < 2 {
+		return false, nil
+	}
+	page, err := m.Store.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: barrierReadCeiling})
+	if err != nil {
+		return false, err
+	}
+	present := make(map[domain.UserID]struct{}, len(members))
+	for _, member := range members {
+		present[member] = struct{}{}
+	}
+	for _, barrier := range page.Barriers {
+		if !slices.Contains(barrier.Subjects, subject) {
+			continue
+		}
+		primary, err := m.groupHolds(ctx, workspaceID, barrier.PrimaryGroupID, present)
+		if err != nil {
+			return false, err
+		}
+		if !primary {
+			continue
+		}
+		for _, group := range barrier.BarrieredFromIDs {
+			barriered, err := m.groupHolds(ctx, workspaceID, group, present)
+			if err != nil {
+				return false, err
+			}
+			if barriered {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// barrierReadCeiling bounds the barriers one check reads. A workspace with more
+// than this many is beyond what this check was designed for, and answering from
+// a partial list would silently let contact through.
+const barrierReadCeiling = 200
+
+func (m Messages) groupHolds(ctx context.Context, workspaceID domain.WorkspaceID, groupID domain.UserGroupID, members map[domain.UserID]struct{}) (bool, error) {
+	group, err := m.Store.GetUserGroup(ctx, workspaceID, groupID)
+	if err != nil {
+		// A barrier naming a group that has gone is not a reason to allow
+		// contact the barrier was built to stop, but it is also not this
+		// caller's failure to report. It holds nobody, so it separates nobody.
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, member := range group.Users {
+		if _, present := members[member]; present {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, users []domain.UserID) (domain.Conversation, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
@@ -4599,6 +4742,19 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 	// people total, including the caller.
 	if len(members) < 2 || len(members) > 9 {
 		return domain.Conversation{}, ErrInvalidConversation
+	}
+	// Two people or nine, the barrier subject is the kind of conversation this
+	// would be.
+	subject := domain.BarrierSubjectDirect
+	if len(members) > 2 {
+		subject = domain.BarrierSubjectGroupDirect
+	}
+	separated, err := m.barrierSeparates(ctx, workspaceID, members, subject)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if separated {
+		return domain.Conversation{}, ErrBarrieredFromMember
 	}
 	if existing, err := m.Store.FindDirectConversation(ctx, workspaceID, members); err == nil {
 		event, eventErr := newEvent(workspaceID, userID, events.NewPayload("conversation.direct_opened", events.String("channel_id", string(existing.ID))), time.Now().UTC())
@@ -6464,15 +6620,15 @@ func (m Messages) savedItemWithSource(ctx context.Context, item domain.SavedItem
 	return item, nil
 }
 
-func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
+func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title string, bookmarkType domain.BookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Bookmark{}, err
 	}
 	title = strings.TrimSpace(title)
-	bookmarkType = strings.TrimSpace(bookmarkType)
+	bookmarkType = domain.BookmarkType(strings.TrimSpace(string(bookmarkType)))
 	link = strings.TrimSpace(link)
 	accessLevel = strings.TrimSpace(accessLevel)
-	if title == "" || len(title) > 255 || bookmarkType != "link" || link == "" || accessLevel != "" && accessLevel != "read" && accessLevel != "write" {
+	if title == "" || len(title) > 255 || !bookmarkType.Valid() || link == "" || accessLevel != "" && accessLevel != "read" && accessLevel != "write" {
 		return domain.Bookmark{}, ErrInvalidBookmark
 	}
 	id, err := domain.NewBookmarkID()
@@ -6508,7 +6664,7 @@ func (m Messages) EditBookmark(ctx context.Context, workspaceID domain.Workspace
 	if update.SetEmoji {
 		bookmark.Emoji = strings.TrimSpace(update.Emoji)
 	}
-	if bookmark.Title == "" || len(bookmark.Title) > 255 || bookmark.Type != "link" || bookmark.Link == "" {
+	if bookmark.Title == "" || len(bookmark.Title) > 255 || !bookmark.Type.Valid() || bookmark.Link == "" {
 		return domain.Bookmark{}, ErrInvalidBookmark
 	}
 	bookmark.UpdatedAt = time.Now().UTC()
@@ -7425,6 +7581,15 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if err != nil {
 		return domain.Call{}, err
 	}
+	// The people a call would put together must not include two the barrier
+	// separates. The caller is one of them: starting a call is joining it.
+	separated, err := m.barrierSeparates(ctx, workspaceID, append([]domain.UserID{actor}, normalized...), domain.BarrierSubjectCall)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if separated {
+		return domain.Call{}, ErrBarrieredFromMember
+	}
 	if err := m.validateCallUsers(ctx, workspaceID, normalized); err != nil {
 		return domain.Call{}, err
 	}
@@ -7500,6 +7665,19 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 	}
 	if err := m.validateCallUsers(ctx, workspaceID, changed); err != nil {
 		return err
+	}
+	if add {
+		// A barrier stops a call as surely as it stops a direct message, and
+		// the people who must not meet are everybody who would be on the call
+		// together - the ones already there as well as the ones joining.
+		together := append(append([]domain.UserID{}, value.Participants...), changed...)
+		separated, err := m.barrierSeparates(ctx, workspaceID, together, domain.BarrierSubjectCall)
+		if err != nil {
+			return err
+		}
+		if separated {
+			return ErrBarrieredFromMember
+		}
 	}
 	set := make(map[domain.UserID]struct{}, len(value.Participants)+len(changed))
 	if add {

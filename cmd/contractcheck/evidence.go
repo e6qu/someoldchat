@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -19,13 +22,18 @@ import (
 // renamed or deleted — which is the same silent-staleness failure that made the
 // audit's method count and journey count wrong for several releases.
 //
-// So evidence is now typed, and every kind resolves to something on disk. What
-// this does NOT claim is that the target proves the method: no gate can read a
-// test and decide whether it establishes a Slack contract. It closes the
-// mechanical half — deletions, renames, moves, mislabelled kinds — and leaves
-// the judgement half where it belongs, with the reviewer. Saying which half is
-// covered is the point; a checker that implied more would be the same overstated
-// claim in a new place.
+// So evidence is now typed, and every kind resolves to something on disk. A Web
+// API test cited as operation evidence must also name the method it is cited
+// for, because existence alone let a row point at any function that happened to
+// compile — and two rows did, both naming the scope-enforcement table, which
+// proves scope handling and says nothing about the method.
+//
+// What this still does NOT claim is that the target proves the method: no gate
+// can read a test and decide whether it establishes a Slack contract. It closes
+// the mechanical half — deletions, renames, moves, mislabelled kinds, citations
+// that were never about the method — and leaves the judgement half where it
+// belongs, with the reviewer. Saying which half is covered is the point; a
+// checker that implied more would be the same overstated claim in a new place.
 
 // evidenceKinds maps each kind to the directory its target must live under. An
 // empty prefix means the kind is resolved by lookup rather than by path.
@@ -66,12 +74,13 @@ var (
 type evidenceResolver struct {
 	root           string
 	testFuncs      map[string]map[string]bool
+	testBodies     map[string]map[string]string
 	browserID      map[string]bool
 	browserScanned bool
 }
 
 func newEvidenceResolver(root string) *evidenceResolver {
-	return &evidenceResolver{root: root, testFuncs: map[string]map[string]bool{}, browserID: map[string]bool{}}
+	return &evidenceResolver{root: root, testFuncs: map[string]map[string]bool{}, testBodies: map[string]map[string]string{}, browserID: map[string]bool{}}
 }
 
 // validate checks one entry. auditing selects the looser rule that a downgrade
@@ -116,6 +125,13 @@ func (r *evidenceResolver) validate(method, entry string, auditing bool) error {
 		}
 		if !present {
 			return fmt.Errorf("compatibility evidence %q for %q names no test function in %s", entry, method, pkg)
+		}
+		exercises, err := r.testMentionsMethod(pkg, name, method, auditing)
+		if err != nil {
+			return fmt.Errorf("compatibility evidence %q for %q: %w", entry, method, err)
+		}
+		if !exercises {
+			return fmt.Errorf("compatibility evidence %q for %q names a Web API test that never mentions %q; cite the test that calls the method", entry, method, method)
 		}
 	case "browser-journey":
 		if !journeyIDPart.MatchString(target) {
@@ -171,6 +187,80 @@ func (r *evidenceResolver) hasTestFunc(pkg, name string) (bool, error) {
 		r.testFuncs[pkg] = funcs
 	}
 	return funcs[name], nil
+}
+
+// testMentionsMethod requires a Web API test to name the method it is cited for.
+//
+// The existence check above proves a function is there; it cannot prove the
+// function has anything to do with the method. With 219 rows to evidence at
+// once that gap is the whole risk: pointing every row at some test that happens
+// to compile would pass the gate and mean nothing. Requiring the named
+// function's own body to mention the method - as a literal or as its /api/
+// route - closes the cheapest way to be wrong.
+//
+// The rule applies only to tests under internal/api/slack, because only those
+// speak in method names. A cross-profile contract exercises store methods and a
+// service test exercises service methods; neither would mention chat.postMessage
+// and neither should have to. This still does not decide whether the test
+// establishes the contract - no gate can read a test and judge that - so the
+// reviewer's half is unchanged. What it removes is the citation that was never
+// about the method at all.
+func (r *evidenceResolver) testMentionsMethod(pkg, name, method string, auditing bool) (bool, error) {
+	// A downgrade audit cites what showed the claim was overstated, which is
+	// often a test about the behaviour rather than about the method. That is
+	// the looser rule this resolver already draws, and this check keeps to the
+	// same side of it.
+	if auditing {
+		return true, nil
+	}
+	if !strings.HasPrefix(filepath.ToSlash(pkg), "internal/api/slack") {
+		return true, nil
+	}
+	if !strings.Contains(method, ".") {
+		return true, nil
+	}
+	bodies, cached := r.testBodies[pkg]
+	if !cached {
+		bodies = map[string]string{}
+		directory := filepath.Join(r.root, pkg)
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return false, fmt.Errorf("package %s cannot be read", pkg)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			path := filepath.Join(directory, entry.Name())
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return false, err
+			}
+			fileSet := token.NewFileSet()
+			parsed, err := parser.ParseFile(fileSet, path, body, 0)
+			if err != nil {
+				return false, fmt.Errorf("%s cannot be parsed: %w", path, err)
+			}
+			for _, declaration := range parsed.Decls {
+				function, ok := declaration.(*ast.FuncDecl)
+				if !ok || function.Body == nil {
+					continue
+				}
+				start := fileSet.Position(function.Body.Pos()).Offset
+				end := fileSet.Position(function.Body.End()).Offset
+				if start < 0 || end > len(body) || start >= end {
+					continue
+				}
+				bodies[function.Name.Name] = string(body[start:end])
+			}
+		}
+		r.testBodies[pkg] = bodies
+	}
+	source, ok := bodies[name]
+	if !ok {
+		return false, nil
+	}
+	return strings.Contains(source, `"`+method+`"`) || strings.Contains(source, "/api/"+method), nil
 }
 
 func (r *evidenceResolver) browserCites(id string) (bool, error) {
