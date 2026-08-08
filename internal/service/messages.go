@@ -5015,8 +5015,7 @@ func (m Messages) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceI
 		return 0, err
 	}
 	now := time.Now().UTC()
-	cursors := make([]domain.ReadCursor, 0, len(unread))
-	batch := make([]events.Event, 0, len(unread))
+	cursors := make([]store.ReadCursorUpdate, 0, len(unread))
 	for _, conversation := range unread {
 		timestamp, ok := latest[conversation]
 		if !ok {
@@ -5030,13 +5029,15 @@ func (m Messages) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceI
 		if err != nil {
 			return 0, err
 		}
-		cursors = append(cursors, domain.ReadCursor{WorkspaceID: workspaceID, UserID: userID, Conversation: conversation, LastRead: timestamp, UpdatedAt: now})
-		batch = append(batch, event)
+		cursors = append(cursors, store.ReadCursorUpdate{
+			Cursor: domain.ReadCursor{WorkspaceID: workspaceID, UserID: userID, Conversation: conversation, LastRead: timestamp, UpdatedAt: now},
+			Event:  event,
+		})
 	}
 	if len(cursors) == 0 {
 		return 0, nil
 	}
-	if err := m.Store.SetReadCursors(ctx, cursors, batch); err != nil {
+	if err := m.Store.SetReadCursors(ctx, cursors); err != nil {
 		return 0, err
 	}
 	return len(cursors), nil
@@ -8126,12 +8127,22 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 		}
 		messageEvents[index] = emitted
 	}
+	// Paired at the call, so the store cannot be handed a completion without
+	// its file or a message without its event.
+	uploaded := make([]store.UploadedFile, 0, len(completions))
+	for index, completion := range completions {
+		uploaded = append(uploaded, store.UploadedFile{Completion: completion, File: files[index]})
+	}
 	for {
+		posts := make([]store.PostedMessage, 0, len(messages))
+		for index, message := range messages {
+			posts = append(posts, store.PostedMessage{Message: message, Event: messageEvents[index]})
+		}
 		var err error
 		if idempotencyKey == "" {
-			err = m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit, messages, messageEvents)
+			err = m.Store.CompleteExternalUploads(ctx, uploaded, channels, eventsToEmit, posts)
 		} else {
-			err = m.Store.CompleteScheduledExternalUploads(ctx, domain.ScheduledMessageID(idempotencyKey), completions, files, channels, eventsToEmit, messages[0], messageEvents[0])
+			err = m.Store.CompleteScheduledExternalUploads(ctx, domain.ScheduledMessageID(idempotencyKey), uploaded, channels, eventsToEmit, posts[0])
 		}
 		if errors.Is(err, store.ErrMessageTimestampTaken) {
 			// Completion is transactional, so none of the tickets or shares

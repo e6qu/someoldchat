@@ -216,7 +216,10 @@ func batchReadCursorsAgreeWithTheNewestMessage(t *testing.T, open opener) {
 	}
 
 	cursor := domain.ReadCursor{WorkspaceID: f.workspaceID, UserID: f.userID, Conversation: f.channelID, LastRead: want, UpdatedAt: newest}
-	if err := f.repository.SetReadCursors(ctx, []domain.ReadCursor{cursor}, []events.Event{f.event("batch-cursor", "conversation.read", string(f.channelID))}); err != nil {
+	if err := f.repository.SetReadCursors(ctx, []store.ReadCursorUpdate{{
+		Cursor: cursor,
+		Event:  f.event("batch-cursor", "conversation.read", string(f.channelID)),
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := f.repository.GetReadCursor(ctx, f.workspaceID, f.userID, f.channelID)
@@ -224,12 +227,11 @@ func batchReadCursorsAgreeWithTheNewestMessage(t *testing.T, open opener) {
 		t.Fatalf("cursor = %+v err = %v, want the batch write to have landed", stored, err)
 	}
 
-	// Mismatched lengths are rejected rather than silently truncated: an
-	// unpaired cursor would move a read position with nothing in the journal to
-	// say it moved.
-	if err := f.repository.SetReadCursors(ctx, []domain.ReadCursor{cursor}, nil); err == nil {
-		t.Fatal("a cursor with no event was accepted")
-	}
+	// A cursor with no event used to be checked for here, because the call took
+	// two slices and their lengths could disagree. It takes paired values now,
+	// so the case cannot be written: an unpaired cursor would move a read
+	// position with nothing in the journal to say it moved, and that state no
+	// longer has a shape.
 }
 
 // The Threads view is the first read of thread_follows there has ever been:

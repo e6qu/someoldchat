@@ -10948,16 +10948,13 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 // SetReadCursors is SetReadCursor for many conversations at once. The whole
 // batch is one transaction, so "mark everything read" either happens or does
 // not; there is no state in which half the sidebar cleared.
-func (s *Store) SetReadCursors(ctx context.Context, cursors []domain.ReadCursor, batch []events.Event) error {
-	if len(cursors) != len(batch) {
-		return store.InvalidArgument("each read cursor requires exactly one event")
-	}
-	if len(cursors) == 0 {
+func (s *Store) SetReadCursors(ctx context.Context, updates []store.ReadCursorUpdate) error {
+	if len(updates) == 0 {
 		return nil
 	}
-	readAt := make([]time.Time, len(cursors))
-	for index, cursor := range cursors {
-		parsed, err := domain.ParseMessageTimestamp(cursor.LastRead)
+	readAt := make([]time.Time, len(updates))
+	for index, update := range updates {
+		parsed, err := domain.ParseMessageTimestamp(update.Cursor.LastRead)
 		if err != nil {
 			return err
 		}
@@ -10968,8 +10965,8 @@ func (s *Store) SetReadCursors(ctx context.Context, cursors []domain.ReadCursor,
 		return err
 	}
 	defer tx.Rollback()
-	for index, cursor := range cursors {
-		if err := setReadCursorTx(ctx, tx, cursor, readAt[index], batch[index]); err != nil {
+	for index, update := range updates {
+		if err := setReadCursorTx(ctx, tx, update.Cursor, readAt[index], update.Event); err != nil {
 			return err
 		}
 	}
@@ -15982,7 +15979,7 @@ func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.Extern
 }
 
 func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, channels []domain.ConversationID, event events.Event) error {
-	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event}, nil, nil)
+	return s.CompleteExternalUploads(ctx, []store.UploadedFile{{Completion: domain.ExternalUploadCompletion{ID: id, Title: file.Title}, File: file}}, channels, []events.Event{event}, nil)
 }
 
 func (s *Store) SeedFileComment(ctx context.Context, value domain.FileComment) error {
@@ -17749,7 +17746,7 @@ func (s *Store) ListItems(ctx context.Context, workspace domain.WorkspaceID, lis
 }
 
 func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
-	return s.UpdateListItems(ctx, []domain.ListItem{value}, []events.Event{event})
+	return s.UpdateListItems(ctx, []store.ListItemUpdate{{Item: value, Event: event}})
 }
 
 // RemoveListColumn rewrites the schema and every cell under the removed column
@@ -17837,8 +17834,14 @@ func (s *Store) RemoveListColumn(ctx context.Context, value domain.List, key str
 	return tx.Commit()
 }
 
-func (s *Store) UpdateListItems(ctx context.Context, values []domain.ListItem, records []events.Event) error {
-	if len(values) == 0 || len(values) != len(records) {
+func (s *Store) UpdateListItems(ctx context.Context, updates []store.ListItemUpdate) error {
+	values := make([]domain.ListItem, 0, len(updates))
+	records := make([]events.Event, 0, len(updates))
+	for _, update := range updates {
+		values = append(values, update.Item)
+		records = append(records, update.Event)
+	}
+	if len(updates) == 0 {
 		return store.ErrInvalidArgument
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -18155,19 +18158,38 @@ func (s *Store) listFileShares(ctx context.Context, workspace domain.WorkspaceID
 	return values, nil
 }
 
-func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
+func (s *Store) CompleteExternalUploads(ctx context.Context, uploaded []store.UploadedFile, channels []domain.ConversationID, emitted []events.Event, posts []store.PostedMessage) error {
+	completions := make([]domain.ExternalUploadCompletion, 0, len(uploaded))
+	files := make([]domain.File, 0, len(uploaded))
+	for _, value := range uploaded {
+		completions = append(completions, value.Completion)
+		files = append(files, value.File)
+	}
+	messages := make([]domain.Message, 0, len(posts))
+	messageEvents := make([]events.Event, 0, len(posts))
+	for _, post := range posts {
+		messages = append(messages, post.Message)
+		messageEvents = append(messageEvents, post.Event)
+	}
 	return s.completeExternalUploads(ctx, "", completions, files, channels, emitted, messages, messageEvents)
 }
 
-func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, message domain.Message, messageEvent events.Event) error {
+func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.ScheduledMessageID, uploaded []store.UploadedFile, channels []domain.ConversationID, emitted []events.Event, post store.PostedMessage) error {
 	if id == "" {
 		return store.InvalidArgument("scheduled external upload completion requires a schedule")
 	}
-	return s.completeExternalUploads(ctx, id, completions, files, channels, emitted, []domain.Message{message}, []events.Event{messageEvent})
+
+	completions := make([]domain.ExternalUploadCompletion, 0, len(uploaded))
+	files := make([]domain.File, 0, len(uploaded))
+	for _, value := range uploaded {
+		completions = append(completions, value.Completion)
+		files = append(files, value.File)
+	}
+	return s.completeExternalUploads(ctx, id, completions, files, channels, emitted, []domain.Message{post.Message}, []events.Event{post.Event})
 }
 
 func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
-	if len(completions) == 0 || len(completions) != len(files) || len(emitted) == 0 || len(messages) != len(messageEvents) {
+	if len(completions) == 0 || len(emitted) == 0 {
 		return store.ErrInvalidArgument
 	}
 	if scheduledID != "" && len(messages) != 1 {
