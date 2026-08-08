@@ -27,8 +27,7 @@ func TestMemoryStoreConcurrentMessageLoad(t *testing.T) {
 	repository := memory.New()
 	conversation := domain.ConversationID("C-load")
 	if err := repository.CreateConversation(ctx, domain.Conversation{
-		ID: conversation, WorkspaceID: "T-load", Name: "load", IsPrivate: false,
-	}, domain.UserID("U-load"), events.Event{}); err != nil {
+		ID: conversation, WorkspaceID: "T-load", Name: "load"}, domain.UserID("U-load"), events.Event{}); err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
 

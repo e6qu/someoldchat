@@ -175,7 +175,7 @@ func userGroupMentionsCreateVisibilitySafeActivity(t *testing.T, open opener) {
 			return repository.SeedConversation(ctx, domain.Conversation{ID: public, WorkspaceID: workspace, Name: "public"})
 		},
 		func() error {
-			return repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: workspace, Name: "private", IsPrivate: true})
+			return repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: workspace, Name: "private", Kind: domain.ConversationTypePrivate})
 		},
 		func() error { return repository.SeedConversationMember(ctx, public, author) },
 		func() error { return repository.SeedConversationMember(ctx, public, inside) },

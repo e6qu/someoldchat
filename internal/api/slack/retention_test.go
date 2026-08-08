@@ -80,7 +80,7 @@ func TestCustomRetentionRefusesADurationOutsideSlacksRange(t *testing.T) {
 func TestCustomRetentionRefusesUnsupportedConversationTypes(t *testing.T) {
 	store, mux := connectWorkspace(t)
 	ctx := context.Background()
-	store.SeedConversation(domain.Conversation{ID: "CMPIM", WorkspaceID: "T1", Name: "group-dm", IsGroupDirect: true, IsPrivate: true})
+	store.SeedConversation(domain.Conversation{ID: "CMPIM", WorkspaceID: "T1", Name: "group-dm", Kind: domain.ConversationTypeMPIM})
 	if _, err := store.SetWorkspaceDefaultChannels(ctx, "T1", []domain.ConversationID{"C1"}, events.Event{
 		ID: "E-defaults", WorkspaceID: "T1", Topic: "workspace.default_channels_changed",
 		Payload: `{"type":"workspace.default_channels_changed"}`, CreatedAt: time.Now().UTC(),

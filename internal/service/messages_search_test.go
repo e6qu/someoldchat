@@ -20,7 +20,7 @@ func directoryWorld(t *testing.T) (context.Context, Messages) {
 	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "ada", RealName: "Ada Lovelace"})
 	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "grace", RealName: "Grace Hopper"})
 	repository.SeedConversation(domain.Conversation{ID: "Cpublic", WorkspaceID: "T1", Name: "deployment"})
-	repository.SeedConversation(domain.Conversation{ID: "Csecret", WorkspaceID: "T1", Name: "deployment-leadership", IsPrivate: true})
+	repository.SeedConversation(domain.Conversation{ID: "Csecret", WorkspaceID: "T1", Name: "deployment-leadership", Kind: domain.ConversationTypePrivate})
 	repository.SeedConversationMember("Csecret", "U2")
 	return ctx, Messages{Store: repository}
 }

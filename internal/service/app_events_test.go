@@ -21,7 +21,7 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 	state.SeedUser(domain.User{ID: "UB", WorkspaceID: "T1"})
 	state.SeedUser(domain.User{ID: "UO", WorkspaceID: "T1"})
 	state.SeedUser(domain.User{ID: "US", WorkspaceID: "T1"})
-	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", IsPrivate: true})
+	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Kind: domain.ConversationTypePrivate})
 	state.SeedConversationMember("C1", "U1")
 	state.SeedConversationMember("C1", "UB")
 	state.SeedConversationMember("C1", "US")
@@ -150,7 +150,7 @@ func TestPrepareUserEventHydratesOnlyJoinedConversationMessages(t *testing.T) {
 	state.SeedWorkspace(domain.Workspace{ID: "T1"})
 	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	state.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
-	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", IsPrivate: true})
+	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Kind: domain.ConversationTypePrivate})
 	state.SeedConversationMember("C1", "U1")
 	created := time.Unix(1_700_000_100, 456_000_000).UTC()
 	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "real RTM message", CreatedAt: created}
@@ -197,7 +197,7 @@ func TestMessageEventSnapshotsPreserveEveryMutationVersion(t *testing.T) {
 	state.SeedWorkspace(domain.Workspace{ID: "T1"})
 	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	state.SeedUser(domain.User{ID: "UB", WorkspaceID: "T1"})
-	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", IsPrivate: true})
+	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Kind: domain.ConversationTypePrivate})
 	state.SeedConversationMember("C1", "U1")
 	state.SeedConversationMember("C1", "UB")
 	if err := state.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "UB", Name: "bot", UpdatedAt: time.Now().UTC()}); err != nil {

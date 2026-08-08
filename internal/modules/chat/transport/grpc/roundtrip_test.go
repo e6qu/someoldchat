@@ -283,11 +283,29 @@ func setStringField(t *testing.T, value reflect.Value, name, marker string) {
 
 func conversionCases() map[string]conversionCase {
 	return map[string]conversionCase{
-		"User":              {sample: &domain.User{}, through: through(encodeProtoUser, decodeProtoUser)},
-		"Workspace":         {sample: &domain.Workspace{}, through: through(encodeProtoWorkspace, decodeProtoWorkspace)},
-		"WorkspacePage":     {sample: &domain.WorkspacePage{}, through: through(encodeProtoWorkspacePage, decodeProtoWorkspacePage)},
-		"Conversation":      {sample: &domain.Conversation{}, through: through(encodeProtoConversation, decodeProtoConversation)},
-		"ConversationPage":  {sample: &domain.ConversationPage{}, through: through(encodeProtoConversationPage, decodeProtoConversationPage)},
+		"User":          {sample: &domain.User{}, through: through(encodeProtoUser, decodeProtoUser)},
+		"Workspace":     {sample: &domain.Workspace{}, through: through(encodeProtoWorkspace, decodeProtoWorkspace)},
+		"WorkspacePage": {sample: &domain.WorkspacePage{}, through: through(encodeProtoWorkspacePage, decodeProtoWorkspacePage)},
+		"Conversation": {
+			sample: &domain.Conversation{},
+			prepare: func(filled any) {
+				// The wire carries three booleans, so it can express the four
+				// kinds and nothing else. The property fills a string field with
+				// an arbitrary value, which no encoding can return.
+				filled.(*domain.Conversation).Kind = domain.ConversationTypeMPIM
+			},
+			through: through(encodeProtoConversation, decodeProtoConversation),
+		},
+		"ConversationPage": {
+			sample: &domain.ConversationPage{},
+			prepare: func(filled any) {
+				page := filled.(*domain.ConversationPage)
+				for index := range page.Conversations {
+					page.Conversations[index].Kind = domain.ConversationTypeMPIM
+				}
+			},
+			through: through(encodeProtoConversationPage, decodeProtoConversationPage),
+		},
 		"ConversationPrefs": {sample: &domain.ConversationPrefs{}, through: through(encodeProtoConversationPrefs, decodeProtoConversationPrefs)},
 		"UserPage":          {sample: &domain.UserPage{}, through: through(encodeProtoUserPage, decodeProtoUserPage)},
 		"AdminUserPage": {

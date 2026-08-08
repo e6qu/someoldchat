@@ -24,7 +24,7 @@ func TestSQLitePrivateChannelInvitationActivitySurvivesReopen(t *testing.T) {
 		func() error { return s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}) },
 		func() error { return s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1"}) },
 		func() error {
-			return s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+			return s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 		},
 		func() error { return s.SeedConversationMember(ctx, "C1", "U1") },
 	} {
@@ -76,7 +76,7 @@ func TestSQLiteActivitySurvivesReopenWithFiltersAndTriage(t *testing.T) {
 	seed(s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "test"}))
 	seed(s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}))
 	seed(s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}))
-	seed(s.SeedConversation(ctx, domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "dm", IsDirect: true}))
+	seed(s.SeedConversation(ctx, domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "dm", Kind: domain.ConversationTypeIM}))
 	seed(s.SeedConversationMember(ctx, "D1", "U1"))
 	seed(s.SeedConversationMember(ctx, "D1", "U2"))
 	created := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)

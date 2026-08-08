@@ -12,7 +12,7 @@ import (
 func TestFilterSubscribedSlackEventBodiesUsesManifestEventAndConversationKind(t *testing.T) {
 	bodies := [][]byte{[]byte(`{"type":"event_callback","event":{"type":"message","channel":"C1","event_ts":"1700000000.000000"}}`)}
 	resolve := func(_ context.Context, id domain.ConversationID) (domain.Conversation, error) {
-		return domain.Conversation{ID: id, WorkspaceID: "T1", IsPrivate: true}, nil
+		return domain.Conversation{ID: id, WorkspaceID: "T1", Kind: domain.ConversationTypePrivate}, nil
 	}
 	filtered, err := FilterSubscribedSlackEventBodies(context.Background(), bodies, []string{"message.channels"}, nil, resolve)
 	if err != nil {

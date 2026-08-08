@@ -1192,7 +1192,7 @@ func TestAnalyticsCountsWhatTheWorkspaceHolds(t *testing.T) {
 	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
 	ctx := context.Background()
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
-	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design", IsPrivate: true})
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "design", Kind: domain.ConversationTypePrivate})
 	store.SeedConversation(domain.Conversation{ID: "C3", WorkspaceID: "T1", Name: "old", Archived: true})
 	store.SeedConversationMember("C1", "U1")
 	store.SeedConversationMember("C2", "U1")

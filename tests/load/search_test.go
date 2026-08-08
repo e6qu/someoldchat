@@ -162,7 +162,7 @@ func TestSearchNeverLeaksPrivateConversationsToNonMembers(t *testing.T) {
 		churns    = 200
 	)
 	repository := seedSearchWorkspace(t)
-	repository.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	repository.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	ctx := context.Background()
 	base := time.Now().UTC().Add(-time.Hour)
 

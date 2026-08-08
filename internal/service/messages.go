@@ -658,7 +658,7 @@ func (m Messages) authorizeFileAccess(ctx context.Context, userID domain.UserID,
 		if conversation.WorkspaceID != file.WorkspaceID {
 			continue
 		}
-		if !conversation.IsPrivate {
+		if !conversation.PrivateFlag() {
 			return nil
 		}
 		member, err := m.Store.IsConversationMember(ctx, conversationID, userID)
@@ -1748,7 +1748,7 @@ func (m Messages) changeConversationAccessGroup(ctx context.Context, workspaceID
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	if !conversation.IsPrivate || conversation.IsDirectOrGroup() || groupID == "" {
+	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() || groupID == "" {
 		return ErrInvalidConversation
 	}
 	if _, err := m.Store.GetUserGroup(ctx, workspaceID, groupID); err != nil {
@@ -1797,7 +1797,7 @@ func (m Messages) AdminListConversationAccessGroups(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return nil, store.ErrNotFound
 	}
-	if !conversation.IsPrivate || conversation.IsDirectOrGroup() {
+	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
 		return nil, ErrInvalidConversation
 	}
 	return m.Store.ListConversationAccessGroups(ctx, workspaceID, conversationID)
@@ -1969,7 +1969,7 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 			continue
 		}
 		conversation, err := m.Store.GetConversation(ctx, channelID)
-		if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirect {
+		if err != nil || conversation.WorkspaceID != workspaceID || conversation.Kind == domain.ConversationTypeIM {
 			return ErrInvalidInviteRequest
 		}
 		seen[channelID] = struct{}{}
@@ -3676,7 +3676,7 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	conversation := domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: "direct", IsPrivate: true, IsDirect: len(members) == 2, IsGroupDirect: len(members) > 2}
+	conversation := domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: "direct", Kind: domain.ConversationKindFor(true, len(members) == 2, len(members) > 2)}
 	event, err := conversationLifecycleEvent(workspaceID, "conversation.direct_created", conversation, userID)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -3763,7 +3763,7 @@ func (m Messages) AddPeopleToDirectConversation(ctx context.Context, workspaceID
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	target := domain.Conversation{ID: targetID, WorkspaceID: workspaceID, Name: "direct", IsPrivate: true, IsGroupDirect: true}
+	target := domain.Conversation{ID: targetID, WorkspaceID: workspaceID, Name: "direct", Kind: domain.ConversationTypeMPIM}
 	now := time.Now().UTC()
 	sourceNoticeID, err := domain.NewMessageID()
 	if err != nil {
@@ -3877,7 +3877,7 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	conversation := domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: name, IsPrivate: private}
+	conversation := domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: name, Kind: domain.ConversationKindFor(private, false, false)}
 	event, err := conversationLifecycleEvent(workspaceID, "conversation.created", conversation, userID)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -3896,10 +3896,10 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	if conversation.IsDirect {
+	if conversation.Kind == domain.ConversationTypeIM {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
-	if conversation.IsGroupDirect {
+	if conversation.Kind == domain.ConversationTypeMPIM {
 		name = strings.Join(strings.Fields(strings.TrimSpace(name)), " ")
 	} else {
 		name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
@@ -4012,7 +4012,7 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	// refuses this too, inside the write transaction, which is where the race-free
 	// enforcement belongs — but every neighbouring method states its own
 	// precondition, and this one silently depended on a backend detail.
-	if conversation.IsPrivate || conversation.IsDirectOrGroup() {
+	if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, store.ErrNotFound
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload(
@@ -4127,7 +4127,7 @@ func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if conversation.IsPrivate || conversation.IsDirectOrGroup() {
+	if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	event, err := newEvent(workspaceID, userID, conversationPayload("conversation.converted_to_private", conversationID), time.Now().UTC())
@@ -4157,7 +4157,7 @@ func (m Messages) AdminConvertConversationToPublic(ctx context.Context, workspac
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !conversation.IsPrivate || conversation.IsDirectOrGroup() {
+	if !conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	teams, _, err := m.Store.ListConversationTeams(ctx, workspaceID, conversationID)
@@ -7083,9 +7083,9 @@ func conversationLifecycleEvent(workspaceID domain.WorkspaceID, topic string, co
 	fields := []events.Field{
 		events.String("channel_id", string(conversation.ID)),
 		events.String("name", conversation.Name),
-		events.Bool("is_private", conversation.IsPrivate),
+		events.Bool("is_private", conversation.PrivateFlag()),
 	}
-	if conversation.IsGroupDirect {
+	if conversation.Kind == domain.ConversationTypeMPIM {
 		fields = append(fields, events.Bool("is_mpim", true))
 	}
 	if topic == "conversation.created" || topic == "conversation.direct_created" {
@@ -7163,7 +7163,7 @@ func (m Messages) authorizeConversation(ctx context.Context, workspaceID domain.
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
 		return store.ErrNotFound
 	}
-	if conversation.IsPrivate {
+	if conversation.PrivateFlag() {
 		member, err := m.Store.IsConversationMember(ctx, conversationID, userID)
 		if err != nil || !member {
 			return store.ErrNotFound

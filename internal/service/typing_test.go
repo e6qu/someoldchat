@@ -31,7 +31,7 @@ func typingWorld(t *testing.T) (context.Context, *memory.Store, Messages) {
 		}
 	}
 	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
-	repository.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	repository.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	repository.SeedConversationMember("C1", "U1")
 	repository.SeedConversationMember("C1", "U2")
 	repository.SeedConversationMember("C2", "U1")

@@ -5049,7 +5049,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			channelName = participants
 		}
 	}
-	canJoin := !isMember && !conversation.Archived && conversation.Kind() == domain.ConversationTypePublic && principal.HasScope(auth.ScopeChannelsManage)
+	canJoin := !isMember && !conversation.Archived && conversation.Kind.OrPublic() == domain.ConversationTypePublic && principal.HasScope(auth.ScopeChannelsManage)
 	canPost := isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite)
 	var composerMembers []memberView
 	var composerGroups []userGroupView
@@ -5926,7 +5926,7 @@ func (c *appActionOptionCatalog) loadConversations(ctx context.Context, h Handle
 			}
 			option := messageActionOptionView{Text: label, Value: string(conversation.ID)}
 			c.conversations = append(c.conversations, option)
-			if conversation.Kind() == domain.ConversationTypePublic {
+			if conversation.Kind.OrPublic() == domain.ConversationTypePublic {
 				c.channels = append(c.channels, option)
 			}
 		}
@@ -6007,7 +6007,7 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 		if conversation.ID == channel {
 			view.CurrentUnread = conversation.UnreadCount
 		}
-		item := conversationView{ID: string(conversation.ID), Name: conversationName(conversation), Current: conversation.ID == channel, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.IsGroupDirect}
+		item := conversationView{ID: string(conversation.ID), Name: conversationName(conversation), Current: conversation.ID == channel, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.Kind == domain.ConversationTypeMPIM}
 		if item.Current && atLatest {
 			// The page just rendered every message in this conversation; showing
 			// its own unread badge tells the reader to read what they are reading.
@@ -6017,7 +6017,7 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 			view.Channels = append(view.Channels, item)
 			continue
 		}
-		if resolved < directNameWindow && (!conversation.IsGroupDirect || conversation.Name == "" || conversation.Name == "direct") {
+		if resolved < directNameWindow && (conversation.Kind != domain.ConversationTypeMPIM || conversation.Name == "" || conversation.Name == "direct") {
 			resolved++
 			if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
 				item.Name = participants
@@ -6224,19 +6224,19 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 	name := conversationName(conversation)
 	conversationType := "Channel"
 	switch {
-	case conversation.IsDirect:
+	case conversation.Kind == domain.ConversationTypeIM:
 		conversationType = "Direct message"
 		if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
 			name = participants
 		}
-	case conversation.IsGroupDirect:
+	case conversation.Kind == domain.ConversationTypeMPIM:
 		conversationType = "Group direct message"
 		if conversation.Name == "" || conversation.Name == "direct" {
 			if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
 				name = participants
 			}
 		}
-	case conversation.IsPrivate:
+	case conversation.PrivateFlag():
 		conversationType = "Private channel"
 	}
 	archiveVerb := "Archive"
@@ -6253,7 +6253,7 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		}
 	}
 	canConvert := false
-	if canManage && conversation.IsGroupDirect {
+	if canManage && conversation.Kind == domain.ConversationTypeMPIM {
 		membership, err := h.Messages.WorkspaceMembership(ctx, principal.WorkspaceID, principal.UserID, principal.UserID)
 		if err != nil {
 			return nil, err
@@ -6268,7 +6268,7 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		ID:                  string(conversation.ID),
 		Name:                name,
 		IsChannel:           isChannel,
-		IsPrivate:           conversation.IsPrivate,
+		IsPrivate:           conversation.PrivateFlag(),
 		CanChangeVisibility: canChangeVisibility,
 		Topic:               conversation.Topic,
 		Purpose:             conversation.Purpose,
@@ -8996,7 +8996,7 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		if foldedQuery != "" && !strings.Contains(domain.FoldSearchText(name), foldedQuery) {
 			continue
 		}
-		item := conversationView{ID: string(conversation.ID), Name: name, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.IsGroupDirect, OpenUsers: strings.Join(ids, ",")}
+		item := conversationView{ID: string(conversation.ID), Name: name, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.Kind == domain.ConversationTypeMPIM, OpenUsers: strings.Join(ids, ",")}
 		if history, historyErr := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 1, Descending: true}); historyErr == nil && len(history.Messages) == 1 {
 			item.RecentAt = history.Messages[0].CreatedAt
 		}
@@ -10986,7 +10986,7 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, status, heading, reason)
 		return
 	}
-	if name := strings.TrimSpace(fields["name"]); name != "" && conversation.IsGroupDirect {
+	if name := strings.TrimSpace(fields["name"]); name != "" && conversation.Kind == domain.ConversationTypeMPIM {
 		conversation, err = h.Messages.RenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, name)
 		if err != nil {
 			h.writeMutationError(w, r, http.StatusBadRequest, "The group DM was opened but could not be named", "Use a name between one and 80 characters. You can name it from Direct messages.")
@@ -11958,7 +11958,7 @@ func conversationMeta(conversation domain.Conversation) string {
 	if conversation.IsDirectOrGroup() {
 		return "Direct message"
 	}
-	if conversation.IsPrivate {
+	if conversation.PrivateFlag() {
 		return "Private channel"
 	}
 	return "Channel"

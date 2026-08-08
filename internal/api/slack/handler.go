@@ -3828,7 +3828,7 @@ func (h Handler) adminConversationSearch(w http.ResponseWriter, r *http.Request)
 	for _, conversation := range page.Conversations {
 		conversations = append(conversations, map[string]any{
 			"id": conversation.ID, "name": conversation.Name, "purpose": conversation.Purpose,
-			"is_archived": conversation.Archived, "is_private": conversation.IsPrivate,
+			"is_archived": conversation.Archived, "is_private": conversation.PrivateFlag(),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "conversations": conversations, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore, "total_count": len(conversations)})
@@ -4800,7 +4800,7 @@ func profileResponse(user domain.User) map[string]any {
 }
 
 func conversationResponse(conversation domain.Conversation) map[string]any {
-	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.IsPrivate, "is_channel": conversation.Kind() == domain.ConversationTypePublic, "is_im": conversation.IsDirect, "is_mpim": conversation.IsGroupDirect, "is_member": true, "team_id": conversation.WorkspaceID,
+	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.PrivateFlag(), "is_channel": conversation.Kind.OrPublic() == domain.ConversationTypePublic, "is_im": conversation.Kind == domain.ConversationTypeIM, "is_mpim": conversation.Kind == domain.ConversationTypeMPIM, "is_member": true, "team_id": conversation.WorkspaceID,
 		// The Slack Connect identity. Pending and shared are different facts —
 		// an outstanding invitation is not a connection — and a client renders
 		// each differently, so neither is derived from the other.
@@ -4985,11 +4985,11 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	required := []auth.Scope{auth.ScopeChannelsWrite}
 	switch {
-	case conversation.IsDirect:
+	case conversation.Kind == domain.ConversationTypeIM:
 		required = []auth.Scope{auth.ScopeIMWrite}
-	case conversation.IsGroupDirect:
+	case conversation.Kind == domain.ConversationTypeMPIM:
 		required = []auth.Scope{auth.ScopeMPIMWrite}
-	case conversation.IsPrivate:
+	case conversation.PrivateFlag():
 		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
 	case principal.TokenType == "bot" || principal.BotID != "":
 		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}

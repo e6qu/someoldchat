@@ -1361,7 +1361,7 @@ func (s *Store) SetWorkspaceDefaultChannels(_ context.Context, id domain.Workspa
 	}
 	for _, channel := range channels {
 		conversation, exists := s.conversations[channel]
-		if !exists || conversation.WorkspaceID != id || conversation.IsPrivate || conversation.IsDirectOrGroup() {
+		if !exists || conversation.WorkspaceID != id || conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
 			return domain.Workspace{}, store.ErrNotFound
 		}
 	}
@@ -1775,7 +1775,7 @@ func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, us
 	}
 	for _, channelID := range channels {
 		conversation, exists := s.conversations[channelID]
-		if !exists || conversation.WorkspaceID != workspaceID || conversation.IsDirect {
+		if !exists || conversation.WorkspaceID != workspaceID || conversation.Kind == domain.ConversationTypeIM {
 			return store.ErrNotFound
 		}
 	}
@@ -2056,7 +2056,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.IsPrivate || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
+	if !conversation.PrivateFlag() || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
@@ -2111,7 +2111,7 @@ func (s *Store) ExpandDirectConversation(_ context.Context, expansion domain.Dir
 	if !exists || source.WorkspaceID != expansion.Target.WorkspaceID || (!source.IsDirectOrGroup()) {
 		return store.ErrNotFound
 	}
-	if !expansion.Target.IsPrivate || expansion.Target.IsDirect || !expansion.Target.IsGroupDirect || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
+	if expansion.Target.Kind != domain.ConversationTypeMPIM || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
 		return store.InvalidArgument("expanded conversation must be a group DM")
 	}
 	if _, exists := s.conversations[expansion.Target.ID]; exists {
@@ -2218,7 +2218,7 @@ func (s *Store) ConvertGroupDirectToPrivate(_ context.Context, conversion domain
 	if !exists {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !value.IsPrivate || value.IsDirect || !value.IsGroupDirect || strings.TrimSpace(conversion.Name) == "" {
+	if value.Kind != domain.ConversationTypeMPIM || strings.TrimSpace(conversion.Name) == "" {
 		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
 	for id, existing := range s.conversations {
@@ -2240,9 +2240,7 @@ func (s *Store) ConvertGroupDirectToPrivate(_ context.Context, conversion domain
 		return domain.Conversation{}, store.ErrMessageTimestampTaken
 	}
 	value.Name = conversion.Name
-	value.IsDirect = false
-	value.IsGroupDirect = false
-	value.IsPrivate = true
+	value.Kind = domain.ConversationTypePrivate
 	s.conversations[value.ID] = value
 	for key := range s.closedDirects {
 		if strings.HasSuffix(key, "\x00"+string(value.ID)) {
@@ -2658,7 +2656,7 @@ func (s *Store) WorkspaceAnalytics(_ context.Context, workspace domain.Workspace
 			switch {
 			case conversation.Archived:
 				result.ArchivedChannels++
-			case conversation.IsPrivate:
+			case conversation.PrivateFlag():
 				result.PrivateChannels++
 			default:
 				result.PublicChannels++
@@ -5006,10 +5004,13 @@ func (s *Store) setConversationVisibility(conversation domain.ConversationID, pr
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if value.IsDirectOrGroup() || value.IsPrivate == private {
+	if value.IsDirectOrGroup() || value.PrivateFlag() == private {
 		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
-	value.IsPrivate = private
+	value.Kind = domain.ConversationTypePublic
+	if private {
+		value.Kind = domain.ConversationTypePrivate
+	}
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	return value, nil
@@ -5331,7 +5332,7 @@ func (s *Store) AddConversationMember(_ context.Context, conversation domain.Con
 	if !ok {
 		return store.ErrNotFound
 	}
-	if value.IsPrivate {
+	if value.PrivateFlag() {
 		return store.ErrNotFound
 	}
 	if s.memberships[conversation] == nil {
@@ -6123,7 +6124,7 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				continue
 			}
 		}
-		if conversation.IsPrivate || conversation.IsDirectOrGroup() {
+		if conversation.PrivateFlag() || conversation.IsDirectOrGroup() {
 			_, viewerMember := s.memberships[conversation.ID][user]
 			_, subjectMember := s.memberships[conversation.ID][memberUser]
 			if !viewerMember || !subjectMember {
@@ -6464,7 +6465,7 @@ func (s *Store) canViewActivitySourceLocked(workspace domain.WorkspaceID, user d
 	if !ok || !membership.Active {
 		return false
 	}
-	private := conversation.IsPrivate || conversation.IsDirectOrGroup()
+	private := conversation.PrivateFlag() || conversation.IsDirectOrGroup()
 	if !private {
 		return conversation.WorkspaceID == workspace
 	}
@@ -8669,7 +8670,7 @@ func (s *Store) fileVisibleToUser(file domain.File, user domain.UserID) bool {
 		if !exists {
 			continue
 		}
-		if !conversation.IsPrivate {
+		if !conversation.PrivateFlag() {
 			return true
 		}
 		if _, member := s.memberships[conversationID][user]; member {
@@ -9358,7 +9359,7 @@ func (s *Store) ListAuthoredMessages(_ context.Context, workspace domain.Workspa
 			if !exists || conversation.WorkspaceID != workspace {
 				continue
 			}
-			if conversation.IsPrivate {
+			if conversation.PrivateFlag() {
 				if _, member := s.memberships[message.Conversation][user]; !member {
 					continue
 				}
@@ -9404,7 +9405,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 	total := 0
 	for conversationID, messages := range s.messages {
 		conversation, exists := s.conversations[conversationID]
-		if !exists || conversation.WorkspaceID != workspace || conversation.IsPrivate {
+		if !exists || conversation.WorkspaceID != workspace || conversation.PrivateFlag() {
 			if !exists || conversation.WorkspaceID != workspace {
 				continue
 			}

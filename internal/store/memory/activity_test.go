@@ -17,7 +17,7 @@ func TestPrivateChannelInvitationCreatesOneDurableActivityItem(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
-	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	s.SeedConversationMember("C1", "U1")
 	created := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
 	event := events.Event{ID: "E-invite", WorkspaceID: "T1", ActorID: "U1", Topic: "conversation.members_invited", CreatedAt: created}
@@ -51,7 +51,7 @@ func TestActivityPersistsOverlappingFiltersAndIndependentTriage(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
-	s.SeedConversation(domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "dm", IsDirect: true})
+	s.SeedConversation(domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "dm", Kind: domain.ConversationTypeIM})
 	s.SeedConversationMember("D1", "U1")
 	s.SeedConversationMember("D1", "U2")
 

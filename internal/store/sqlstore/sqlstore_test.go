@@ -1099,7 +1099,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	event := func(id, topic string, when time.Time) events.Event {
 		return events.Event{ID: domain.EventID(id), WorkspaceID: "T1", Topic: topic, Payload: "{}", CreatedAt: when}
 	}
-	source := domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "direct", IsPrivate: true, IsDirect: true}
+	source := domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "direct", Kind: domain.ConversationTypeIM}
 	if err := s.CreateDirectConversation(ctx, source, []domain.UserID{"U1", "U2"}, event("E-create-source", "conversation.direct_created", at)); err != nil {
 		t.Fatal(err)
 	}
@@ -1111,7 +1111,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, original, []events.Event{event("E-message", "message.created", original.CreatedAt)}); err != nil {
 		t.Fatal(err)
 	}
-	target := domain.Conversation{ID: "D2", WorkspaceID: "T1", Name: "direct", IsPrivate: true, IsGroupDirect: true}
+	target := domain.Conversation{ID: "D2", WorkspaceID: "T1", Name: "direct", Kind: domain.ConversationTypeMPIM}
 	sourceNotice := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "D1", AuthorID: "U1", Text: "added U3 elsewhere", CreatedAt: at.Add(2 * time.Microsecond)}
 	targetNotice := domain.Message{ID: "M3", WorkspaceID: "T1", Conversation: "D2", AuthorID: "U1", Text: "added U3 here", CreatedAt: at.Add(2 * time.Microsecond)}
 	expansion := domain.DirectConversationExpansion{Source: "D1", Target: target, Members: []domain.UserID{"U1", "U2", "U3"}, History: domain.DirectHistoryAll, SourceNotice: sourceNotice, TargetNotice: targetNotice}
@@ -1122,7 +1122,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C-conflict", WorkspaceID: "T1", Name: "project-room", IsPrivate: true}); err != nil {
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C-conflict", WorkspaceID: "T1", Name: "project-room", Kind: domain.ConversationTypePrivate}); err != nil {
 		t.Fatal(err)
 	}
 	conflictNotice := domain.Message{ID: "M-conflict", WorkspaceID: "T1", Conversation: "D2", AuthorID: "U1", Text: "must roll back", CreatedAt: at.Add(3 * time.Microsecond)}
@@ -1133,7 +1133,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 		t.Fatalf("conflicting conversion error=%v, want already exists", err)
 	}
 	stillGroup, err := s.GetConversation(ctx, "D2")
-	if err != nil || !stillGroup.IsGroupDirect || stillGroup.Name != "direct" {
+	if err != nil || stillGroup.Kind != domain.ConversationTypeMPIM || stillGroup.Name != "direct" {
 		t.Fatalf("conflicting conversion partially changed conversation=%+v err=%v", stillGroup, err)
 	}
 	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
@@ -1145,7 +1145,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 		event("E-convert", "conversation.group_direct_converted", convertedNotice.CreatedAt),
 		event("E-convert-notice", "message.created", convertedNotice.CreatedAt),
 	})
-	if err != nil || converted.ID != "D2" || !converted.IsPrivate || converted.IsGroupDirect {
+	if err != nil || converted.ID != "D2" || !converted.PrivateFlag() || converted.Kind == domain.ConversationTypeMPIM {
 		t.Fatalf("converted=%+v err=%v", converted, err)
 	}
 	if err := s.Close(); err != nil {
@@ -1157,7 +1157,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	}
 	defer s.Close()
 	converted, err = s.GetConversation(ctx, "D2")
-	if err != nil || converted.Name != "project-room-2" || !converted.IsPrivate || converted.IsDirectOrGroup() {
+	if err != nil || converted.Name != "project-room-2" || !converted.PrivateFlag() || converted.IsDirectOrGroup() {
 		t.Fatalf("reopened conversion=%+v err=%v", converted, err)
 	}
 	history, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
@@ -1507,7 +1507,7 @@ func TestSQLiteConversationListFiltersBeforePagination(t *testing.T) {
 	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "public"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true, Archived: true}); err != nil {
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate, Archived: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SeedConversationMember(ctx, "C2", "U1"); err != nil {
@@ -1559,7 +1559,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err != nil || membership.Role != "member" || !membership.Active {
 		t.Fatalf("membership=%+v err=%v", membership, err)
 	}
-	if err := s.SeedConversation(context.Background(), domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true}); err != nil {
+	if err := s.SeedConversation(context.Background(), domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate}); err != nil {
 		t.Fatal(err)
 	}
 	users, err := s.ListUsers(context.Background(), "T1", domain.PageRequest{Limit: 1})
@@ -1607,12 +1607,12 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err != nil || updated.Profile.DisplayName != "bob" || updated.Profile.StatusText != "Ready" {
 		t.Fatalf("updated user=%+v err=%v", updated, err)
 	}
-	direct := domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "direct", IsPrivate: true, IsDirect: true}
+	direct := domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "direct", Kind: domain.ConversationTypeIM}
 	if err := s.CreateDirectConversation(context.Background(), direct, []domain.UserID{"U1", "U2"}, events.Event{ID: "evt_direct", WorkspaceID: "T1", Topic: "conversation.direct_created", Payload: "D1", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	found, err := s.FindDirectConversation(context.Background(), "T1", []domain.UserID{"U2", "U1"})
-	if err != nil || found.ID != "D1" || !found.IsDirect {
+	if err != nil || found.ID != "D1" || found.Kind != domain.ConversationTypeIM {
 		t.Fatalf("found direct=%+v err=%v", found, err)
 	}
 	closedEvent := events.Event{ID: "evt_direct_closed", WorkspaceID: "T1", Topic: "conversation.direct_closed", Payload: "D1", CreatedAt: time.Now().UTC()}
@@ -1774,7 +1774,7 @@ func TestSQLiteSearchPersistsFoldedFilesAndViewerVisibilityAcrossReopen(t *testi
 	}
 	for _, conversation := range []domain.Conversation{
 		{ID: "C1", WorkspaceID: "T1", Name: "general"},
-		{ID: "C2", WorkspaceID: "T1", Name: "secret", IsPrivate: true},
+		{ID: "C2", WorkspaceID: "T1", Name: "secret", Kind: domain.ConversationTypePrivate},
 	} {
 		if err := s.SeedConversation(ctx, conversation); err != nil {
 			t.Fatal(err)

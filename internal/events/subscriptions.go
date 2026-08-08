@@ -51,16 +51,16 @@ func FilterSubscribedSlackEventBodies(ctx context.Context, bodies [][]byte, botE
 			if err != nil {
 				return nil, err
 			}
-			messageSubscription := "message.channels"
-			switch {
-			case conversation.IsDirect:
-				messageSubscription = "message.im"
-			case conversation.IsGroupDirect:
-				messageSubscription = "message.mpim"
-			case conversation.IsPrivate:
-				messageSubscription = "message.groups"
+			switch conversation.Kind {
+			case domain.ConversationTypeIM:
+				eventName = "message.im"
+			case domain.ConversationTypeMPIM:
+				eventName = "message.mpim"
+			case domain.ConversationTypePrivate:
+				eventName = "message.groups"
+			default:
+				eventName = "message.channels"
 			}
-			eventName = messageSubscription
 		}
 		botSubscribed := botSubscriptions[eventName]
 		userSubscribed := userSubscriptions[eventName]

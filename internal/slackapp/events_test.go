@@ -158,7 +158,7 @@ func TestEventProcessorHydratesARealMessageOnlyForTheInstalledBot(t *testing.T) 
 	repository := memory.New()
 	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"})
 	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
-	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	repository.SeedConversationMember("C1", "U1")
 	key := []byte(strings.Repeat("k", 32))
 	messages := service.Messages{Store: repository, AppCredentialKey: key, AppHTTPClient: receiver.Client()}

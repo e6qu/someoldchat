@@ -2378,7 +2378,7 @@ func TestInviteConversationValidatesForceAndCurrentHundredUserLimit(t *testing.T
 
 func TestInviteConversationSupportsPrivateChannels(t *testing.T) {
 	handler, repository := testHandlerWithStore()
-	repository.SeedConversation(domain.Conversation{ID: "C-private", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	repository.SeedConversation(domain.Conversation{ID: "C-private", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	repository.SeedConversationMember("C-private", "U1")
 	req := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C-private&users=U2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -2410,7 +2410,7 @@ func TestInviteConversationUsesCurrentTokenAndChannelScopeMatrix(t *testing.T) {
 
 	t.Run("bot private groups write", func(t *testing.T) {
 		handler, repository := testHandlerWithScopes(auth.ScopeGroupsWrite)
-		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", IsPrivate: true})
+		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", Kind: domain.ConversationTypePrivate})
 		repository.SeedConversationMember("C-private-scope", "U1")
 		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
@@ -2420,7 +2420,7 @@ func TestInviteConversationUsesCurrentTokenAndChannelScopeMatrix(t *testing.T) {
 
 	t.Run("public scope cannot invite to private channel", func(t *testing.T) {
 		handler, repository := testHandlerWithScopes(auth.ScopeChannelsManage)
-		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", IsPrivate: true})
+		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", Kind: domain.ConversationTypePrivate})
 		repository.SeedConversationMember("C-private-scope", "U1")
 		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"missing_scope"`) || !strings.Contains(response.Body.String(), `"needed":"groups:write"`) {

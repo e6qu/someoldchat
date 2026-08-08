@@ -140,7 +140,7 @@ func (m Messages) retentionTarget(ctx context.Context, workspaceID domain.Worksp
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if conversation.IsGroupDirect {
+	if conversation.Kind == domain.ConversationTypeMPIM {
 		return domain.Conversation{}, ErrRetentionNotSupported
 	}
 	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)

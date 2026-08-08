@@ -803,7 +803,7 @@ func parityCases() []parityCase {
 					_, err := chat.AdminConvertConversationToPublic(ctx, "T1", "UA", "C-not-here")
 					return err != nil
 				}()
-				return []any{privately.IsPrivate, repeated, publicly.IsPrivate, memberErr != nil, memberPublic != nil, missing}, nil
+				return []any{privately.PrivateFlag(), repeated, publicly.PrivateFlag(), memberErr != nil, memberPublic != nil, missing}, nil
 			},
 		},
 		{
@@ -1195,7 +1195,7 @@ func parityCases() []parityCase {
 				for index, message := range history.Messages {
 					texts[index] = message.Text
 				}
-				return []any{expanded.IsGroupDirect, converted.IsPrivate, converted.IsDirect, converted.IsGroupDirect, converted.Name, len(members.Users), texts}, nil
+				return []any{expanded.Kind == domain.ConversationTypeMPIM, converted.PrivateFlag(), converted.Kind == domain.ConversationTypeIM, converted.Kind == domain.ConversationTypeMPIM, converted.Name, len(members.Users), texts}, nil
 			},
 		},
 		// The privilege-escalation class. A member calling an administrative

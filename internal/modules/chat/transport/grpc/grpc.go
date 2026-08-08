@@ -9652,7 +9652,7 @@ func encodeProtoConversation(value domain.Conversation) *chatv1.Conversation {
 	return &chatv1.Conversation{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Name: value.Name,
 		Topic: value.Topic, Purpose: value.Purpose, Archived: value.Archived,
-		IsPrivate: value.IsPrivate, IsDirect: value.IsDirect, IsGroupDirect: value.IsGroupDirect,
+		IsPrivate: value.PrivateFlag(), IsDirect: value.Kind == domain.ConversationTypeIM, IsGroupDirect: value.Kind == domain.ConversationTypeMPIM,
 		UnreadCount: int64(value.UnreadCount),
 		IsExtShared: value.IsExtShared, IsPendingExtShared: value.IsPendingExtShared,
 	}
@@ -9670,7 +9670,7 @@ func decodeProtoConversation(value *chatv1.Conversation) (domain.Conversation, e
 	return domain.Conversation{
 		ID: domain.ConversationID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Name: value.GetName(),
 		Topic: value.GetTopic(), Purpose: value.GetPurpose(), Archived: value.GetArchived(),
-		IsPrivate: value.GetIsPrivate(), IsDirect: value.GetIsDirect(), IsGroupDirect: value.GetIsGroupDirect(),
+		Kind:        domain.ConversationKindFor(value.GetIsPrivate(), value.GetIsDirect(), value.GetIsGroupDirect()),
 		UnreadCount: int(value.GetUnreadCount()),
 		IsExtShared: value.GetIsExtShared(), IsPendingExtShared: value.GetIsPendingExtShared(),
 	}, nil
