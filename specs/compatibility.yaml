@@ -491,7 +491,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - Automatic presence is stored as a mode but is not yet derived from live client activity, Slack's ten-minute inactivity rule, or websocket connectivity.
+      - Automatic presence follows Slack's ten-minute inactivity rule against the member's last observed activity; websocket connectivity does not feed it.
       - The optional presence detail fields and current rate-limit behavior have not been qualified against Slack.
     audit:
       downgraded_from: behavior-compatible
@@ -510,7 +510,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - The documented `auto` and `away` values persist and round-trip, but automatic presence does not yet incorporate client activity or connection state.
+      - The documented `auto` and `away` values persist and round-trip; automatic presence follows client activity, and connection state does not feed it.
       - Current Slack rate-limit and token-type behavior has not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible
@@ -2261,7 +2261,6 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
-      - Workspace workflow-manager policy is currently represented by workflow ownership rather than Slack's multi-manager role.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
   - method: workflows.triggers.permissions.add
     status: sdk-compatible
