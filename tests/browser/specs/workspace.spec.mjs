@@ -2406,16 +2406,23 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
 // with workers: 1 and a test per control would cost more wall-clock than the
 // coverage is worth.
 
-test('[HUDDLE-01][HUDDLE-03] a huddle runs its lifecycle and never promises audio', async ({ page, context }) => {
+test('[HUDDLE-01][HUDDLE-03] a huddle runs its lifecycle and offers the media it promises', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
-  // The idle bar offers to start one and says what a huddle is here.
+  // The idle bar offers to start one and says what joining will do. It used to
+  // say the opposite - that no voice or video was carried - and that sentence
+  // was the tripwire protecting an honest claim. The claim changed, so the
+  // assertion changed with it rather than being deleted.
   await expect(page.getByRole('button', { name: 'Start a huddle' })).toBeVisible();
-  await expect(page.getByText('carries no voice or video')).toBeVisible();
+  await expect(page.getByText('your browser connects to each person who joins')).toBeVisible();
 
   await page.getByRole('button', { name: 'Start a huddle' }).click();
-  await expect(page.getByText('No audio here')).toBeVisible();
+  // The controls are offered whether or not this browser can answer for a
+  // device: whether the microphone opens is HUDDLE-02's business, and the
+  // lifecycle here does not depend on it.
+  await expect(page.getByRole('button', { name: 'Mute microphone' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Share screen' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Leave huddle' })).toBeVisible();
   // The person who started it can end it for everyone; that is the whole
   // difference between leaving and ending.
@@ -3621,6 +3628,82 @@ test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it
     })
     .toBeGreaterThan(0);
   expect(await counter('discarded-refreshes'), 'the client paid for a response it discarded').toBe(0);
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
+test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and offers real controls', async ({ page, context, browserName }) => {
+  // WebKit has no synthetic capture device in Playwright, so the media half of
+  // this journey cannot run there. Recording that is the point: a skip that
+  // said nothing would read as coverage.
+  test.skip(browserName === 'webkit', 'WebKit exposes no fake capture device, so getUserMedia cannot be answered here');
+
+  // Allowing the microphone is the member's decision, and HUDDLE-01 is about
+  // what happens once they have made it. Chromium blocks on the prompt without
+  // this; Firefox answers it from a preference set in the project config.
+  if (browserName === 'chromium') {
+    await context.grantPermissions(['microphone', 'camera'], { origin: 'http://127.0.0.1:18080' });
+  }
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-title')).toHaveText('# general');
+
+  // Before joining, the bar offers a huddle and promises media rather than
+  // explaining its absence.
+  await expect(page.locator('.huddle-bar')).toContainText('your browser connects to each person who joins');
+
+  await page.getByRole('button', { name: 'Start a huddle' }).click();
+  const session = page.locator('.huddle-media-session');
+  await expect(session).toBeVisible();
+
+  // The microphone is really opened: the attribute follows getUserMedia
+  // resolving, not the button being pressed.
+  await expect(session).toHaveAttribute('data-huddle-microphone', 'on', { timeout: 15000 });
+
+  // The member's own tile carries a live stream rather than an empty element.
+  const ownTile = page.locator('[data-huddle-tile]').first();
+  await expect(ownTile).toBeVisible();
+  await expect
+    .poll(async () => ownTile.locator('video').evaluate((media) => Boolean(media.srcObject)))
+    .toBe(true);
+
+  // Muting changes the track, which is what the attribute reports. HUDDLE-02
+  // requires the state to match the media session rather than an optimistic
+  // button, so the assertion reads the session and not the label alone.
+  const microphone = page.getByRole('button', { name: 'Mute microphone' });
+  await microphone.click();
+  await expect(session).toHaveAttribute('data-huddle-microphone', 'off');
+  await expect(page.getByRole('button', { name: 'Unmute microphone' })).toHaveAttribute('aria-pressed', 'true');
+  const trackEnabled = await page.evaluate(() => {
+    const media = document.querySelector('[data-huddle-tile] video');
+    const stream = media && media.srcObject;
+    const track = stream && stream.getAudioTracks()[0];
+    return track ? track.enabled : null;
+  });
+  expect(trackEnabled, 'the button said muted while the track was still live').toBe(false);
+
+  await page.getByRole('button', { name: 'Unmute microphone' }).click();
+  await expect(session).toHaveAttribute('data-huddle-microphone', 'on');
+
+  // The camera is a second real device, added to the same session.
+  await page.getByRole('button', { name: 'Turn on camera' }).click();
+  await expect(session).toHaveAttribute('data-huddle-camera', 'on', { timeout: 15000 });
+  const videoTracks = await page.evaluate(() => {
+    const media = document.querySelector('[data-huddle-tile] video');
+    const stream = media && media.srcObject;
+    return stream ? stream.getVideoTracks().length : 0;
+  });
+  expect(videoTracks, 'the camera reported on with no video track').toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Turn off camera' }).click();
+  await expect(session).toHaveAttribute('data-huddle-camera', 'off');
+
+  // The status region says what is happening, continuously, for a reader who
+  // cannot see the tiles.
+  await expect(page.locator('[data-huddle-status]')).not.toBeEmpty();
+
+  // Leaving takes the session away with it, so no control is offered for a
+  // connection this member no longer has.
+  await page.getByRole('button', { name: 'Leave huddle' }).click();
+  await expect(page.locator('.huddle-media-session')).toHaveCount(0);
   await expectNoSeriousAccessibilityViolations(page);
 });
 

@@ -7556,6 +7556,49 @@ func (m Messages) activeHuddleFor(ctx context.Context, workspaceID domain.Worksp
 	return m.Store.ActiveHuddle(ctx, workspaceID, conversationID)
 }
 
+// SendCallSignal carries one peer's half of the WebRTC handshake to another.
+// The server never reads the payload: it is an SDP description or an ICE
+// candidate that means something to the two browsers and nothing here.
+//
+// What the server does decide is who may send one to whom. Both the sender and
+// the recipient have to be in the call right now, which is what stops the
+// signalling path being a way to reach somebody who is not in the huddle, or to
+// keep reaching one who has left.
+func (m Messages) SendCallSignal(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, callID domain.CallID, recipient domain.UserID, kind domain.CallSignalKind, payload string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return err
+	}
+	if !kind.Valid() || recipient == "" || recipient == actor {
+		return ErrInvalidCall
+	}
+	if payload == "" || len(payload) > domain.CallSignalCeiling {
+		return ErrInvalidCall
+	}
+	call, err := m.Store.GetCall(ctx, workspaceID, callID)
+	if err != nil {
+		return err
+	}
+	if !call.EndedAt.IsZero() {
+		return ErrInvalidCall
+	}
+	if !slices.Contains(call.Participants, actor) || !slices.Contains(call.Participants, recipient) {
+		return ErrInvalidCall
+	}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("huddle.signal",
+		events.String("call_id", string(callID)),
+		// user_id is the recipient, because that is the field the event stream
+		// filters a recipient-scoped topic on.
+		events.String("user_id", string(recipient)),
+		events.String("from_user_id", string(actor)),
+		events.String("signal", string(kind)),
+		events.String("payload", payload),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
 func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic string, id domain.CallID, conversationID domain.ConversationID, at time.Time) (events.Event, error) {
 	return newEvent(workspaceID, actor, events.NewPayload(topic,
 		events.String("call_id", string(id)),

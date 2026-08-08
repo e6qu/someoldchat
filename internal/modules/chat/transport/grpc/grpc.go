@@ -262,6 +262,20 @@ func (r Remote) huddle(ctx context.Context, call func(context.Context, *chatv1.H
 	return decodeProtoCall(out)
 }
 
+func (r Remote) SendCallSignal(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, callID domain.CallID, recipient domain.UserID, kind domain.CallSignalKind, payload string) error {
+	out, err := r.calls.SendCallSignal(ctx, &chatv1.CallSignalRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CallId: string(callID),
+		RecipientId: string(recipient), Kind: string(kind), Payload: payload,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed call signal was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) StartHuddle(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title string) (domain.Call, error) {
 	return r.huddle(ctx, r.calls.StartHuddle, workspaceID, userID, conversationID, title)
 }
@@ -5685,6 +5699,15 @@ func (s *Server) AdminAddUserGroupTeams(ctx context.Context, input *chatv1.Admin
 		teams = append(teams, domain.WorkspaceID(value))
 	}
 	if err := s.implementation.AdminAddUserGroupTeams(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserGroupID(input.GetUsergroupId()), teams); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SendCallSignal(ctx context.Context, input *chatv1.CallSignalRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SendCallSignal(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.CallID(input.GetCallId()), domain.UserID(input.GetRecipientId()),
+		domain.CallSignalKind(input.GetKind()), input.GetPayload()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil

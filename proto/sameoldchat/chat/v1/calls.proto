@@ -71,7 +71,17 @@ message CallParticipantsRequest {
   repeated string participants = 4;
 }
 
+message CallSignalRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string call_id = 3;
+  string recipient_id = 4;
+  string kind = 5;
+  string payload = 6;
+}
+
 service CallsService {
+  rpc SendCallSignal(CallSignalRequest) returns (MutationResponse);
   rpc AddCall(AddCallRequest) returns (Call);
   rpc StartHuddle(HuddleRequest) returns (Call);
   rpc JoinHuddle(HuddleRequest) returns (Call);

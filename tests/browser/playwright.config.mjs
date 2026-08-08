@@ -16,12 +16,33 @@ export default defineConfig({
       use: {
         baseURL: 'http://127.0.0.1:18080',
         browserName: 'chromium',
-        launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-          ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
-          : {},
+        launchOptions: {
+          // Synthetic devices, so a huddle can connect without a microphone
+          // and without a permission prompt no test could answer.
+          args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+          ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+            ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+            : {}),
+        },
       },
     },
-    { name: 'firefox', testIgnore: /administration\.spec\.mjs/, use: { baseURL: 'http://127.0.0.1:18081', browserName: 'firefox' } },
+    {
+      name: 'firefox',
+      testIgnore: /administration\.spec\.mjs/,
+      use: {
+        baseURL: 'http://127.0.0.1:18081',
+        browserName: 'firefox',
+        launchOptions: {
+          firefoxUserPrefs: {
+            'media.navigator.streams.fake': true,
+            'media.navigator.permission.disabled': true,
+          },
+        },
+      },
+    },
+    // WebKit has no synthetic capture device in Playwright, so the media half
+    // of HUDDLE-02 cannot run there. The journey records that rather than
+    // pretending the browser was covered.
     { name: 'webkit', testIgnore: /administration\.spec\.mjs/, use: { baseURL: 'http://127.0.0.1:18082', browserName: 'webkit' } },
     // Administration runs against its own server because the escalation is the
     // point: -session-admin gives the shared session control-plane scopes, and

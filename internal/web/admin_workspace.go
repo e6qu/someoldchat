@@ -134,7 +134,7 @@ const workspaceSettingsMarkup = `{{define "title"}}Workspace settings · SameOld
 <section class="card" aria-labelledby="absent-heading">
 <div class="section-head"><h2 id="absent-heading">Not governed here</h2><p>These are absent rather than off. A switch that changed nothing would be worse than no switch, because you would stop looking for the missing capability.</p></div>
 <ul>
-<li><strong>Audio and video.</strong> Huddles and calls carry no media transport here.</li>
+<li><strong>Audio and video.</strong> A huddle connects browsers directly to each other. There is no media server, so a huddle is only as large as every participant can upload to every other.</li>
 </ul>
 <p><a href="/app/admin/analytics">Workspace analytics</a> · <a href="/app/admin/audit">Audit</a> · <a href="/app/admin/auth">Access and invitations</a></p>
 </section>

@@ -60,16 +60,28 @@ authority throughout, checked independently of posting permission — `calls.add
 checks neither, because an app-registered call has no conversation to check
 against.
 
-**There is no media transport of any kind.** No WebRTC, no audio, no video, no
-screen sharing, no device permission request — because there is no device to
-request. The surface says so wherever it offers a control, so nobody presses
-"Join huddle" expecting sound. HUDDLE-02's audio, video, screen sharing and
-reactions are therefore unimplemented, and HUDDLE-01's device-permission
-outcomes cannot arise here.
+**Media is peer to peer, and there is no media server.** Joining opens the
+member's microphone and connects their browser directly to each other
+participant with WebRTC. The server relays the handshake — one peer's SDP
+description or ICE candidate to one other peer — and carries no media itself. A
+signal is addressed to its recipient and delivered only to them, because a
+candidate names how to reach that person's machine.
 
-The alternative — hiding the surface until WebRTC exists — would leave the
-lifecycle unreachable and untestable, and would not make the missing media any
-more present.
+Slack uses a selective forwarding unit. A mesh does not scale the same way: each
+browser uploads one copy of its media per other participant, so a six-person
+huddle asks each of them for five uploads. That is the ceiling this deployment
+has, and it is why the huddle is honest about being small rather than claiming
+Slack's capacity.
+
+Screen sharing is offered where the browser provides `getDisplayMedia`.
+Reactions, captions, and the huddle canvas remain unimplemented.
+
+The peer-to-peer handshake completing between two browsers is not covered by the
+browser suite: the harness authenticates one session, so it can drive one
+browser into a huddle and not two. What it does cover is everything that one
+browser decides — the microphone really opening, the track really muting, the
+camera really starting — and the signalling refusals are covered across both
+compositions by the seam parity suite instead.
 
 ## Evidence
 

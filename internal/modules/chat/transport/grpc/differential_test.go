@@ -844,6 +844,60 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The whole huddle lifecycle, including the signalling that carries
+			// WebRTC between two browsers. The refusals matter most: a signal
+			// is how one member reaches another's machine, so both compositions
+			// must refuse the same senders and recipients.
+			name: "a huddle starts, signals, empties, and ends identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				started, err := chat.StartHuddle(ctx, "T1", "U1", "C1", "Standup")
+				if err != nil {
+					return nil, err
+				}
+				// Nobody else is in it yet, so there is nobody to signal.
+				alone := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
+				joined, err := chat.JoinHuddle(ctx, "T1", "U2", "C1")
+				if err != nil {
+					return nil, err
+				}
+				offered := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0\r\no=- 0 0 IN IP4 0.0.0.0")
+				answered := chat.SendCallSignal(ctx, "T1", "U2", started.ID, "U1", domain.CallSignalAnswer, "v=0")
+				candidate := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalCandidate, "candidate:0 1 UDP 1 127.0.0.1 1 typ host")
+				// Every refusal a signal has to make.
+				self := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U1", domain.CallSignalOffer, "v=0")
+				outsider := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "UA", domain.CallSignalOffer, "v=0")
+				stranger := chat.SendCallSignal(ctx, "T1", "UA", started.ID, "U2", domain.CallSignalOffer, "v=0")
+				unknownKind := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", "hangup", "v=0")
+				empty := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "")
+				oversized := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, strings.Repeat("s", domain.CallSignalCeiling+1))
+				missingCall := chat.SendCallSignal(ctx, "T1", "U1", "call-nobody", "U2", domain.CallSignalOffer, "v=0")
+
+				active, err := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.LeaveHuddle(ctx, "T1", "U2", "C1"); err != nil {
+					return nil, err
+				}
+				// U2 has gone, so U1 can no longer reach them through the call.
+				afterLeaving := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
+				ended, err := chat.EndHuddle(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				afterEnding := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
+				_, gone := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
+				return []any{
+					started.Title, len(started.Participants), len(joined.Participants), len(active.Participants),
+					ended.EndedAt.IsZero(), gone != nil,
+					alone != nil, offered != nil, answered != nil, candidate != nil,
+					self != nil, outsider != nil, stranger != nil, unknownKind != nil,
+					empty != nil, oversized != nil, missingCall != nil,
+					afterLeaving != nil, afterEnding != nil,
+				}, nil
+			},
+		},
+		{
 			// The step responses report is what the export acknowledges, so
 			// both compositions must collect the same answers and refuse the
 			// same callers.
@@ -4107,7 +4161,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 171
+const parityGapCeiling = 166
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -4126,7 +4180,6 @@ var parityGaps = map[string]struct{}{
 	"AcceptSharedInvite":                 {},
 	"AckSocketModeResponses":             {},
 	"AcknowledgeEntityCommentAction":     {},
-	"ActiveHuddle":                       {},
 	"AddCall":                            {},
 	"AddCallParticipants":                {},
 	"AddRemoteFile":                      {},
@@ -4153,7 +4206,6 @@ var parityGaps = map[string]struct{}{
 	"ConversationRetention":              {},
 	"DeclineSharedInvite":                {},
 	"DenySharedInvite":                   {},
-	"EndHuddle":                          {},
 	"InvitationPreview":                  {},
 	"AdminRemoveConversationAccessGroup": {},
 	"AdminRemoveEmoji":                   {},
@@ -4206,11 +4258,9 @@ var parityGaps = map[string]struct{}{
 	"InviteConversationMembers":               {},
 	"InviteShared":                            {},
 	"JoinConversation":                        {},
-	"JoinHuddle":                              {},
 	"KickConversationMember":                  {},
 	"LastRetentionSweep":                      {},
 	"LeaveConversation":                       {},
-	"LeaveHuddle":                             {},
 	"ListWorkspaceApps":                       {},
 	"ListAppEventsAfter":                      {},
 	"ListUserEventsAfter":                     {},
@@ -4276,7 +4326,6 @@ var parityGaps = map[string]struct{}{
 	"SetWorkspaceRetention":                   {},
 	"ShareFilePublic":                         {},
 	"ShareRemoteFile":                         {},
-	"StartHuddle":                             {},
 	"StartListDownload":                       {},
 	"TeamBillableInfo":                        {},
 	"Unfurl":                                  {},
