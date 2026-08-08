@@ -790,6 +790,37 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An app nobody has configured answers the defaults, so both
+			// compositions must report the same effective configuration.
+			name: "app configuration defaults and resolution clearance agree",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				defaults, err := chat.AdminAppConfigs(ctx, "T1", "UA", []domain.AppID{"A1"})
+				if err != nil {
+					return nil, err
+				}
+				written, err := chat.AdminSetAppConfig(ctx, "T1", "UA", domain.AppConfig{
+					AppID: "A1", DomainURLs: []string{"https://example.invalid"},
+					WorkflowAuthStrategy: domain.WorkflowAuthEndUserOnly,
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, badStrategy := chat.AdminSetAppConfig(ctx, "T1", "UA", domain.AppConfig{AppID: "A1", WorkflowAuthStrategy: "whoever"})
+				_, unknownApp := chat.AdminSetAppConfig(ctx, "T1", "UA", domain.AppConfig{AppID: "A-nobody", WorkflowAuthStrategy: domain.WorkflowAuthBuilderChoice})
+				after, err := chat.AdminAppConfigs(ctx, "T1", "UA", []domain.AppID{"A1"})
+				if err != nil {
+					return nil, err
+				}
+				undecided := chat.AdminClearAppResolution(ctx, "T1", "UA", "A1")
+				return []any{
+					defaults[0].WorkflowAuthStrategy, defaults[0].DomainURLs, defaults[0].DomainEmails,
+					written.WorkflowAuthStrategy, after[0].DomainURLs, after[0].WorkflowAuthStrategy,
+					badStrategy != nil, unknownApp != nil, undecided != nil,
+				}, nil
+			},
+		},
+		{
 			// A resource nobody has set a permission on answers the default, so
 			// both compositions must report the same effective answer rather
 			// than one answering nothing.

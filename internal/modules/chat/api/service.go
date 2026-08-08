@@ -285,6 +285,9 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	AdminAppConfigs(context.Context, domain.WorkspaceID, domain.UserID, []domain.AppID) ([]domain.AppConfig, error)
+	AdminSetAppConfig(context.Context, domain.WorkspaceID, domain.UserID, domain.AppConfig) (domain.AppConfig, error)
+	AdminClearAppResolution(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
 	AdminFunctionPermissions(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.AutomationPermission, error)
 	AdminWorkflowPermissions(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID) ([]domain.AutomationPermission, error)
 	AdminTriggerTypePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerType) (domain.AutomationPermission, error)

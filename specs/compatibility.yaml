@@ -1032,17 +1032,29 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.activities.list/
   - method: admin.apps.clearResolution
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.clearResolution/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppConfigAndResolution
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appConfigurationAndResolutionSurvive
   - method: admin.apps.config.lookup
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.config.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppConfigAndResolution
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appConfigurationAndResolutionSurvive
   - method: admin.apps.config.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.config.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppConfigAndResolution
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:appConfigurationAndResolutionSurvive
   - method: admin.apps.requests.cancel
     status: behavior-compatible
     provenance: slack-reference

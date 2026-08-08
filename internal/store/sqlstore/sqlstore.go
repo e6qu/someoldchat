@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 153
+const schemaVersion = 154
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 154 {
+		// One app's administrative configuration. The two destination lists are
+		// JSON because they are read and written whole and no query asks which
+		// apps name one domain.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_configs (
+			app_id TEXT NOT NULL REFERENCES slack_apps(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			domain_urls TEXT NOT NULL DEFAULT '[]', domain_emails TEXT NOT NULL DEFAULT '[]',
+			workflow_auth_strategy TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, app_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate app configs: %w", err)
+		}
+	}
 	if version < 153 {
 		// Information barriers. The two group lists are JSON because a barrier
 		// is read and written whole: no query ever asks which barriers name one
@@ -4686,6 +4699,96 @@ func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.Worksp
 		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
 	}
 	return page, err
+}
+
+func (s *Store) SetAppConfig(ctx context.Context, config domain.AppConfig, event events.Event) error {
+	urls, err := json.Marshal(config.DomainURLs)
+	if err != nil {
+		return err
+	}
+	emails, err := json.Marshal(config.DomainEmails)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_configs(app_id, workspace_id, domain_urls, domain_emails, workflow_auth_strategy, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id, app_id) DO UPDATE SET domain_urls = excluded.domain_urls,
+			domain_emails = excluded.domain_emails, workflow_auth_strategy = excluded.workflow_auth_strategy,
+			updated_at = excluded.updated_at`,
+		config.AppID, config.WorkspaceID, string(urls), string(emails), string(config.WorkflowAuthStrategy),
+		config.UpdatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListAppConfigs(ctx context.Context, workspace domain.WorkspaceID, apps []domain.AppID) ([]domain.AppConfig, error) {
+	if len(apps) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	placeholders := make([]string, 0, len(apps))
+	arguments := make([]any, 0, len(apps)+1)
+	arguments = append(arguments, workspace)
+	for _, app := range apps {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, app)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT app_id, workspace_id, domain_urls, domain_emails, workflow_auth_strategy, updated_at
+		FROM app_configs WHERE workspace_id = ? AND app_id IN (`+strings.Join(placeholders, ", ")+`) ORDER BY app_id`, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	configs := make([]domain.AppConfig, 0, len(apps))
+	for rows.Next() {
+		var config domain.AppConfig
+		var urls, emails, strategy string
+		var updated int64
+		if err := rows.Scan(&config.AppID, &config.WorkspaceID, &urls, &emails, &strategy, &updated); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(urls), &config.DomainURLs); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(emails), &config.DomainEmails); err != nil {
+			return nil, err
+		}
+		config.WorkflowAuthStrategy = domain.WorkflowAuthStrategy(strategy)
+		config.UpdatedAt = timeFromUnixNanoOrZero(updated)
+		configs = append(configs, config)
+	}
+	return configs, rows.Err()
+}
+
+func (s *Store) ClearAppApproval(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM app_approvals WHERE workspace_id = ? AND app_id = ?`, workspace, app)
+	if err != nil {
+		return classify(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateBarrier(ctx context.Context, barrier domain.InformationBarrier, event events.Event) error {

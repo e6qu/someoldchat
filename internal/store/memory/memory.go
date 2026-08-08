@@ -123,6 +123,7 @@ type Store struct {
 	authPolicyEntities            map[string]domain.AuthPolicyEntity
 	sessionSettings               map[string]domain.SessionSettings
 	barriers                      map[domain.BarrierID]domain.InformationBarrier
+	appConfigs                    map[string]domain.AppConfig
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -309,6 +310,7 @@ func New() *Store {
 		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
 		sessionSettings:               make(map[string]domain.SessionSettings),
 		barriers:                      make(map[domain.BarrierID]domain.InformationBarrier),
+		appConfigs:                    make(map[string]domain.AppConfig),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -1824,6 +1826,49 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return user, nil
+}
+
+func (s *Store) SetAppConfig(_ context.Context, config domain.AppConfig, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.apps[config.AppID]; !exists {
+		return store.ErrNotFound
+	}
+	s.appConfigs[appConfigKey(config.WorkspaceID, config.AppID)] = config
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListAppConfigs(_ context.Context, workspace domain.WorkspaceID, apps []domain.AppID) ([]domain.AppConfig, error) {
+	if len(apps) == 0 {
+		return nil, store.ErrInvalidArgument
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	configs := make([]domain.AppConfig, 0, len(apps))
+	for _, app := range apps {
+		if config, exists := s.appConfigs[appConfigKey(workspace, app)]; exists {
+			configs = append(configs, config)
+		}
+	}
+	sort.Slice(configs, func(left, right int) bool { return configs[left].AppID < configs[right].AppID })
+	return configs, nil
+}
+
+func (s *Store) ClearAppApproval(_ context.Context, workspace domain.WorkspaceID, app domain.AppID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.appApprovals[app]
+	if !exists || current.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.appApprovals, app)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func appConfigKey(workspace domain.WorkspaceID, app domain.AppID) string {
+	return string(workspace) + "\x00" + string(app)
 }
 
 func (s *Store) CreateBarrier(_ context.Context, barrier domain.InformationBarrier, event events.Event) error {

@@ -1344,6 +1344,16 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const appConfigs = await client.apiCall("admin.apps.config.lookup", { app_ids: "A1" });
+assert.equal(appConfigs.ok, true);
+assert.equal(appConfigs.configs[0].workflow_auth_strategy, "builder_choice");
+assert.equal((await client.apiCall("admin.apps.config.set", {
+	app_id: "A1",
+	workflow_auth_strategy: "end_user_only",
+	domain_restrictions: JSON.stringify({ urls: ["https://example.invalid"], emails: [] }),
+})).config.workflow_auth_strategy, "end_user_only");
+assert.equal((await client.apiCall("admin.apps.clearResolution", { app_id: "A1" })).ok, true);
+
 const functionPermissions = await client.apiCall("admin.functions.permissions.lookup", { function_ids: "Fn1" });
 assert.equal(functionPermissions.ok, true);
 assert.equal(functionPermissions.permissions.Fn1.permission_type, "everyone");

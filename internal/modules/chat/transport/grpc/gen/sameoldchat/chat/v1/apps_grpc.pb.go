@@ -19,6 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AppsService_AdminAppConfigs_FullMethodName               = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
+	AppsService_AdminSetAppConfig_FullMethodName             = "/sameoldchat.chat.v1.AppsService/AdminSetAppConfig"
+	AppsService_AdminClearAppResolution_FullMethodName       = "/sameoldchat.chat.v1.AppsService/AdminClearAppResolution"
 	AppsService_IssueAppConfigurationToken_FullMethodName    = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
 	AppsService_RotateAppConfigurationToken_FullMethodName   = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
 	AppsService_ValidateAppManifest_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
@@ -45,6 +48,9 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AppsServiceClient interface {
+	AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error)
+	AdminSetAppConfig(ctx context.Context, in *AppConfigMutationRequest, opts ...grpc.CallOption) (*AppConfig, error)
+	AdminClearAppResolution(ctx context.Context, in *AppResolutionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	IssueAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRotateRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error)
 	ValidateAppManifest(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppManifestValidation, error)
@@ -73,6 +79,36 @@ type appsServiceClient struct {
 
 func NewAppsServiceClient(cc grpc.ClientConnInterface) AppsServiceClient {
 	return &appsServiceClient{cc}
+}
+
+func (c *appsServiceClient) AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppConfigsResponse)
+	err := c.cc.Invoke(ctx, AppsService_AdminAppConfigs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminSetAppConfig(ctx context.Context, in *AppConfigMutationRequest, opts ...grpc.CallOption) (*AppConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppConfig)
+	err := c.cc.Invoke(ctx, AppsService_AdminSetAppConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminClearAppResolution(ctx context.Context, in *AppResolutionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_AdminClearAppResolution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *appsServiceClient) IssueAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error) {
@@ -279,6 +315,9 @@ func (c *appsServiceClient) AuthorizeOAuth(ctx context.Context, in *OAuthAuthori
 // All implementations should embed UnimplementedAppsServiceServer
 // for forward compatibility.
 type AppsServiceServer interface {
+	AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error)
+	AdminSetAppConfig(context.Context, *AppConfigMutationRequest) (*AppConfig, error)
+	AdminClearAppResolution(context.Context, *AppResolutionRequest) (*AppMutationResponse, error)
 	IssueAppConfigurationToken(context.Context, *AppConfigurationTokenRequest) (*AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(context.Context, *AppConfigurationTokenRotateRequest) (*AppConfigurationCredentials, error)
 	ValidateAppManifest(context.Context, *AppManifestRequest) (*AppManifestValidation, error)
@@ -308,6 +347,15 @@ type AppsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAppsServiceServer struct{}
 
+func (UnimplementedAppsServiceServer) AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAppConfigs not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminSetAppConfig(context.Context, *AppConfigMutationRequest) (*AppConfig, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetAppConfig not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminClearAppResolution(context.Context, *AppResolutionRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminClearAppResolution not implemented")
+}
 func (UnimplementedAppsServiceServer) IssueAppConfigurationToken(context.Context, *AppConfigurationTokenRequest) (*AppConfigurationCredentials, error) {
 	return nil, status.Error(codes.Unimplemented, "method IssueAppConfigurationToken not implemented")
 }
@@ -386,6 +434,60 @@ func RegisterAppsServiceServer(s grpc.ServiceRegistrar, srv AppsServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AppsService_ServiceDesc, srv)
+}
+
+func _AppsService_AdminAppConfigs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppConfigsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminAppConfigs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminAppConfigs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminAppConfigs(ctx, req.(*AppConfigsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminSetAppConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppConfigMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminSetAppConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminSetAppConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminSetAppConfig(ctx, req.(*AppConfigMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminClearAppResolution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppResolutionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminClearAppResolution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminClearAppResolution_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminClearAppResolution(ctx, req.(*AppResolutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AppsService_IssueAppConfigurationToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -755,6 +857,18 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sameoldchat.chat.v1.AppsService",
 	HandlerType: (*AppsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "AdminAppConfigs",
+			Handler:    _AppsService_AdminAppConfigs_Handler,
+		},
+		{
+			MethodName: "AdminSetAppConfig",
+			Handler:    _AppsService_AdminSetAppConfig_Handler,
+		},
+		{
+			MethodName: "AdminClearAppResolution",
+			Handler:    _AppsService_AdminClearAppResolution_Handler,
+		},
 		{
 			MethodName: "IssueAppConfigurationToken",
 			Handler:    _AppsService_IssueAppConfigurationToken_Handler,

@@ -3614,6 +3614,83 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminAppConfigs reports the administrative configuration of the named apps.
+// An app nobody has configured answers Slack's defaults rather than being left
+// out, so the caller learns the effective answer for every app it named.
+func (m Messages) AdminAppConfigs(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appIDs []domain.AppID) ([]domain.AppConfig, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if len(appIDs) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	stored, err := m.Store.ListAppConfigs(ctx, workspaceID, appIDs)
+	if err != nil {
+		return nil, err
+	}
+	held := make(map[domain.AppID]domain.AppConfig, len(stored))
+	for _, config := range stored {
+		held[config.AppID] = config
+	}
+	configs := make([]domain.AppConfig, 0, len(appIDs))
+	for _, appID := range appIDs {
+		if config, exists := held[appID]; exists {
+			configs = append(configs, config)
+			continue
+		}
+		configs = append(configs, domain.AppConfig{
+			AppID: appID, WorkspaceID: workspaceID,
+			DomainURLs: []string{}, DomainEmails: []string{},
+			WorkflowAuthStrategy: domain.WorkflowAuthBuilderChoice,
+		})
+	}
+	return configs, nil
+}
+
+// AdminSetAppConfig writes one app's administrative configuration.
+func (m Messages) AdminSetAppConfig(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, config domain.AppConfig) (domain.AppConfig, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AppConfig{}, err
+	}
+	if config.AppID == "" || !config.WorkflowAuthStrategy.Valid() {
+		return domain.AppConfig{}, ErrInvalidWorkspace
+	}
+	if config.DomainURLs == nil {
+		config.DomainURLs = []string{}
+	}
+	if config.DomainEmails == nil {
+		config.DomainEmails = []string{}
+	}
+	config.WorkspaceID, config.UpdatedAt = workspaceID, time.Now().UTC()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.config_set",
+		events.String("app_id", string(config.AppID)),
+		events.String("workflow_auth_strategy", string(config.WorkflowAuthStrategy))), config.UpdatedAt)
+	if err != nil {
+		return domain.AppConfig{}, err
+	}
+	if err := m.Store.SetAppConfig(ctx, config, event); err != nil {
+		return domain.AppConfig{}, err
+	}
+	return config, nil
+}
+
+// AdminClearAppResolution undoes an approval decision, so the app is undecided
+// again rather than approved or restricted.
+func (m Messages) AdminClearAppResolution(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if appID == "" {
+		return ErrInvalidWorkspace
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app.resolution_cleared",
+		events.String("app_id", string(appID))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.ClearAppApproval(ctx, workspaceID, appID, event)
+}
+
 // AdminFunctionPermissions reports who may run each named function. A function
 // with no stored permission answers Slack's default rather than being left out,
 // so the caller learns the effective answer for every identifier it named.

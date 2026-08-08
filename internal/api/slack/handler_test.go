@@ -2312,6 +2312,80 @@ func TestAdminAutomationPermissions(t *testing.T) {
 	}
 }
 
+// TestAdminAppConfigAndResolution holds the admin.apps.config.* and
+// admin.apps.clearResolution contract. An app nobody has configured answers the
+// defaults, and clearing a resolution leaves the app undecided rather than
+// restricted.
+func TestAdminAppConfigAndResolution(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	defaults := call(t, http.MethodPost, "admin.apps.config.lookup", "app_ids=A1")
+	configs, ok := defaults["configs"].([]any)
+	if !ok || len(configs) != 1 {
+		t.Fatalf("defaults=%v", defaults)
+	}
+	first := configs[0].(map[string]any)
+	if first["workflow_auth_strategy"] != "builder_choice" {
+		t.Fatalf("default strategy=%v", first)
+	}
+	if urls := first["domain_restrictions"].(map[string]any)["urls"].([]any); len(urls) != 0 {
+		t.Fatalf("default urls=%v", urls)
+	}
+	set := call(t, http.MethodPost, "admin.apps.config.set",
+		`app_id=A1&workflow_auth_strategy=end_user_only&domain_restrictions={"urls":["https://example.invalid"],"emails":["ops@example.invalid"]}`)
+	config := set["config"].(map[string]any)
+	if config["workflow_auth_strategy"] != "end_user_only" {
+		t.Fatalf("set=%v", set)
+	}
+	after := call(t, http.MethodGet, "admin.apps.config.lookup?app_ids=A1", "")
+	stored := after["configs"].([]any)[0].(map[string]any)
+	restrictions := stored["domain_restrictions"].(map[string]any)
+	if len(restrictions["urls"].([]any)) != 1 || len(restrictions["emails"].([]any)) != 1 {
+		t.Fatalf("after=%v", after)
+	}
+	for _, body := range []string{
+		"app_id=A1&workflow_auth_strategy=whoever",
+		`app_id=A1&domain_restrictions={"urls":`,
+		"workflow_auth_strategy=end_user_only",
+	} {
+		if refused := call(t, http.MethodPost, "admin.apps.config.set", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	// Clearing a resolution leaves the app undecided, and clearing an undecided
+	// app is not found: undecided is not the same as restricted.
+	if cleared := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A1"); cleared["ok"] != true {
+		t.Fatalf("cleared=%v", cleared)
+	}
+	if again := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A1"); again["error"] != "app_not_found" {
+		t.Fatalf("again=%v", again)
+	}
+	if approved := call(t, http.MethodPost, "admin.apps.approve", "app_id=A1"); approved["ok"] != true {
+		t.Fatalf("approved=%v", approved)
+	}
+	if reCleared := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A1"); reCleared["ok"] != true {
+		t.Fatalf("reCleared=%v", reCleared)
+	}
+	if missing := call(t, http.MethodPost, "admin.apps.clearResolution", "app_id=A-nobody"); missing["error"] != "app_not_found" {
+		t.Fatalf("missing=%v", missing)
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))

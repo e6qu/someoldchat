@@ -12162,6 +12162,60 @@ func decodeProtoAppFunctions(values []*chatv1.AppFunction) []domain.AppFunction 
 	return functions
 }
 
+func (r Remote) AdminAppConfigs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appIDs []domain.AppID) ([]domain.AppConfig, error) {
+	ids := make([]string, 0, len(appIDs))
+	for _, id := range appIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.apps.AdminAppConfigs(ctx, &chatv1.AppConfigsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	configs := make([]domain.AppConfig, 0, len(out.GetConfigs()))
+	for _, encoded := range out.GetConfigs() {
+		configs = append(configs, decodeProtoAppConfig(encoded))
+	}
+	return configs, nil
+}
+
+func (r Remote) AdminSetAppConfig(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, config domain.AppConfig) (domain.AppConfig, error) {
+	out, err := r.apps.AdminSetAppConfig(ctx, &chatv1.AppConfigMutationRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Config: encodeProtoAppConfig(config),
+	})
+	if err != nil {
+		return domain.AppConfig{}, err
+	}
+	return decodeProtoAppConfig(out), nil
+}
+
+func (r Remote) AdminClearAppResolution(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) error {
+	out, err := r.apps.AdminClearAppResolution(ctx, &chatv1.AppResolutionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app resolution clearance was not acknowledged")
+	}
+	return nil
+}
+
+func encodeProtoAppConfig(value domain.AppConfig) *chatv1.AppConfig {
+	return &chatv1.AppConfig{
+		AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
+		DomainUrls: append([]string{}, value.DomainURLs...), DomainEmails: append([]string{}, value.DomainEmails...),
+		WorkflowAuthStrategy: string(value.WorkflowAuthStrategy), UpdatedAt: optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeProtoAppConfig(value *chatv1.AppConfig) domain.AppConfig {
+	return domain.AppConfig{
+		AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		DomainURLs: append([]string{}, value.GetDomainUrls()...), DomainEmails: append([]string{}, value.GetDomainEmails()...),
+		WorkflowAuthStrategy: domain.WorkflowAuthStrategy(value.GetWorkflowAuthStrategy()),
+		UpdatedAt:            optionalTimeFromUnixNano(value.GetUpdatedAt()),
+	}
+}
+
 func (r Remote) ListWorkspaceApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.InstalledApp, error) {
 	out, err := r.apps.ListWorkspaceApps(ctx, &chatv1.AppListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -12360,6 +12414,37 @@ func (s *Server) AdminFunctions(ctx context.Context, input *chatv1.AppListReques
 		return nil, mapError(err)
 	}
 	return &chatv1.AppFunctionListResponse{Functions: encodeProtoAppFunctions(functions)}, nil
+}
+
+func (s *Server) AdminAppConfigs(ctx context.Context, input *chatv1.AppConfigsRequest) (*chatv1.AppConfigsResponse, error) {
+	ids := make([]domain.AppID, 0, len(input.GetAppIds()))
+	for _, id := range input.GetAppIds() {
+		ids = append(ids, domain.AppID(id))
+	}
+	configs, err := s.implementation.AdminAppConfigs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.AppConfig, 0, len(configs))
+	for _, config := range configs {
+		encoded = append(encoded, encodeProtoAppConfig(config))
+	}
+	return &chatv1.AppConfigsResponse{Configs: encoded}, nil
+}
+
+func (s *Server) AdminSetAppConfig(ctx context.Context, input *chatv1.AppConfigMutationRequest) (*chatv1.AppConfig, error) {
+	config, err := s.implementation.AdminSetAppConfig(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), decodeProtoAppConfig(input.GetConfig()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppConfig(config), nil
+}
+
+func (s *Server) AdminClearAppResolution(ctx context.Context, input *chatv1.AppResolutionRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.AdminClearAppResolution(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
 }
 
 func (s *Server) ListWorkspaceApps(ctx context.Context, input *chatv1.AppListRequest) (*chatv1.InstalledAppListResponse, error) {

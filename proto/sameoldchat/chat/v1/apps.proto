@@ -199,7 +199,41 @@ message OAuthAuthorization {
   string code_challenge_method = 14;
 }
 
+message AppConfig {
+  string app_id = 1;
+  string workspace_id = 2;
+  repeated string domain_urls = 3;
+  repeated string domain_emails = 4;
+  string workflow_auth_strategy = 5;
+  int64 updated_at = 6;
+}
+
+message AppConfigsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string app_ids = 3;
+}
+
+message AppConfigsResponse {
+  repeated AppConfig configs = 1;
+}
+
+message AppConfigMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  AppConfig config = 3;
+}
+
+message AppResolutionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
 service AppsService {
+  rpc AdminAppConfigs(AppConfigsRequest) returns (AppConfigsResponse);
+  rpc AdminSetAppConfig(AppConfigMutationRequest) returns (AppConfig);
+  rpc AdminClearAppResolution(AppResolutionRequest) returns (AppMutationResponse);
   rpc IssueAppConfigurationToken(AppConfigurationTokenRequest) returns (AppConfigurationCredentials);
   rpc RotateAppConfigurationToken(AppConfigurationTokenRotateRequest) returns (AppConfigurationCredentials);
   rpc ValidateAppManifest(AppManifestRequest) returns (AppManifestValidation);

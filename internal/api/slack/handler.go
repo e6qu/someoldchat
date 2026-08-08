@@ -200,6 +200,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
+	mux.HandleFunc("POST /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
+	mux.HandleFunc("POST /api/admin.apps.config.set", h.adminAppsConfigSet)
+	mux.HandleFunc("POST /api/admin.apps.clearResolution", h.adminAppsClearResolution)
 	mux.HandleFunc("GET /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
 	mux.HandleFunc("POST /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
 	mux.HandleFunc("POST /api/admin.functions.permissions.set", h.adminFunctionsPermissionsSet)
@@ -3247,6 +3251,134 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.apps.config.lookup and set decide what an installed app may reach and
+// whose credentials its steps run under. An app nobody has configured answers
+// the defaults rather than being left out of the reply.
+func (h Handler) adminAppsConfigLookup(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appIDs := parseIDList[domain.AppID](fields["app_ids"])
+	if len(appIDs) == 0 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	configs, err := h.Messages.AdminAppConfigs(r.Context(), principal.WorkspaceID, principal.UserID, appIDs)
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	values := make([]map[string]any, 0, len(configs))
+	for _, config := range configs {
+		values = append(values, appConfigResponse(config))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "configs": values})
+}
+
+func (h Handler) adminAppsConfigSet(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	// Slack leaves the strategy out to mean "keep the default", so an absent
+	// argument is the default rather than a refusal.
+	strategy := domain.WorkflowAuthStrategy(strings.TrimSpace(fields["workflow_auth_strategy"]))
+	if strategy == "" {
+		strategy = domain.WorkflowAuthBuilderChoice
+	}
+	if appID == "" || !strategy.Valid() {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	urls, emails, err := domainRestrictions(fields["domain_restrictions"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	config, err := h.Messages.AdminSetAppConfig(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppConfig{
+		AppID: appID, DomainURLs: urls, DomainEmails: emails, WorkflowAuthStrategy: strategy,
+	})
+	if err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config": appConfigResponse(config)})
+}
+
+// admin.apps.clearResolution undoes an approval decision. The app becomes
+// undecided again, which is not the same as restricted: an undecided app is one
+// an administrator has yet to judge.
+func (h Handler) adminAppsClearResolution(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if appID == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.AdminClearAppResolution(r.Context(), principal.WorkspaceID, principal.UserID, appID); err != nil {
+		writeError(w, mapServiceError(err, "app_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// domainRestrictions reads Slack's nested JSON argument. An absent argument
+// restricts nothing, which is not the same as restricting to an empty list.
+func domainRestrictions(value string) ([]string, []string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return []string{}, []string{}, nil
+	}
+	var decoded struct {
+		URLs   []string `json:"urls"`
+		Emails []string `json:"emails"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return nil, nil, err
+	}
+	if decoded.URLs == nil {
+		decoded.URLs = []string{}
+	}
+	if decoded.Emails == nil {
+		decoded.Emails = []string{}
+	}
+	return decoded.URLs, decoded.Emails, nil
+}
+
+func appConfigResponse(config domain.AppConfig) map[string]any {
+	return map[string]any{
+		"app_id": string(config.AppID),
+		"domain_restrictions": map[string]any{
+			"urls":   config.DomainURLs,
+			"emails": config.DomainEmails,
+		},
+		"workflow_auth_strategy": string(config.WorkflowAuthStrategy),
+	}
 }
 
 // admin.functions.permissions.lookup, admin.workflows.permissions.lookup and

@@ -2291,6 +2291,31 @@ type RoleAssignmentPage struct {
 	HasMore     bool
 }
 
+// WorkflowAuthStrategy decides whose credentials a workflow step runs under.
+// Slack names two, and an unrecognised value would silently run a step as the
+// builder when the administrator asked for the end user.
+type WorkflowAuthStrategy string
+
+const (
+	WorkflowAuthBuilderChoice WorkflowAuthStrategy = "builder_choice"
+	WorkflowAuthEndUserOnly   WorkflowAuthStrategy = "end_user_only"
+)
+
+func (strategy WorkflowAuthStrategy) Valid() bool {
+	return strategy == WorkflowAuthBuilderChoice || strategy == WorkflowAuthEndUserOnly
+}
+
+// AppConfig is what an administrator decides about one installed app: which
+// destinations its steps may reach, and whose credentials they run under.
+type AppConfig struct {
+	AppID                AppID
+	WorkspaceID          WorkspaceID
+	DomainURLs           []string
+	DomainEmails         []string
+	WorkflowAuthStrategy WorkflowAuthStrategy
+	UpdatedAt            time.Time
+}
+
 type BarrierID string
 
 // BarrierSubject is what an information barrier stops. Slack declares three and

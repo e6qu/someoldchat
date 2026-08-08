@@ -340,6 +340,15 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// SetAppConfig writes one app's administrative configuration, replacing
+	// what was there.
+	SetAppConfig(context.Context, domain.AppConfig, events.Event) error
+	// ListAppConfigs reports the configuration of the named apps. An app with
+	// none is absent rather than present with empty lists.
+	ListAppConfigs(context.Context, domain.WorkspaceID, []domain.AppID) ([]domain.AppConfig, error)
+	// ClearAppApproval removes an app's approval decision, so the app is
+	// undecided again rather than approved or restricted.
+	ClearAppApproval(context.Context, domain.WorkspaceID, domain.AppID, events.Event) error
 	// CreateBarrier stores a new information barrier.
 	CreateBarrier(context.Context, domain.InformationBarrier, events.Event) error
 	// UpdateBarrier replaces the groups and subjects one barrier holds.

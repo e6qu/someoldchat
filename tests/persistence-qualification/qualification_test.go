@@ -143,6 +143,7 @@ func runQualification(t *testing.T, open opener) {
 		{"authentication policy entities agree on every profile", authPolicyEntitiesAgreeOnEveryProfile},
 		{"session settings are absent rather than zero", sessionSettingsAreAbsentRatherThanZero},
 		{"information barriers keep their groups and subjects", informationBarriersKeepTheirGroupsAndSubjects},
+		{"app configuration and resolution survive on every profile", appConfigurationAndResolutionSurvive},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2136,5 +2137,81 @@ func informationBarriersKeepTheirGroupsAndSubjects(t *testing.T, open opener) {
 	left, err := repository.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: 10})
 	if err != nil || len(left.Barriers) != 0 {
 		t.Fatalf("left=%+v err=%v", left, err)
+	}
+}
+
+// appConfigurationAndResolutionSurvive holds the storage contract for
+// admin.apps.config.* and admin.apps.clearResolution. An app with no stored
+// configuration is absent rather than present with empty lists, because absence
+// is what lets the service answer the default instead of an emptiness the
+// administrator never asked for.
+func appConfigurationAndResolutionSurvive(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-appconfig-" + suffix)
+	userID := domain.UserID("U-appconfig-" + suffix)
+	appID := domain.AppID("A-appconfig-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "App config"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+		t.Fatal(err)
+	}
+	app := domain.App{
+		ID: appID, DevelopmentWorkspaceID: workspaceID, OwnerID: userID, Name: "Config app",
+		ClientID: "client-" + suffix, SigningSecretHash: "hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}
+	revision := domain.AppManifestRevision{AppID: appID, Version: 1, Manifest: `{"display_information":{"name":"Config app"}}`, CreatedBy: userID, CreatedAt: now}
+	if err := repository.CreateApp(ctx, app, revision, domain.OAuthClient{ID: app.ClientID, SecretHash: "secret", AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	if configs, err := repository.ListAppConfigs(ctx, workspaceID, []domain.AppID{appID}); err != nil || len(configs) != 0 {
+		t.Fatalf("unconfigured app configs=%+v err=%v", configs, err)
+	}
+	config := domain.AppConfig{
+		AppID: appID, WorkspaceID: workspaceID,
+		DomainURLs: []string{"https://example.invalid"}, DomainEmails: []string{"ops@example.invalid"},
+		WorkflowAuthStrategy: domain.WorkflowAuthEndUserOnly, UpdatedAt: now,
+	}
+	if err := repository.SetAppConfig(ctx, config, event("config-set", "app.config_set")); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.ListAppConfigs(ctx, workspaceID, []domain.AppID{appID})
+	if err != nil || len(stored) != 1 || len(stored[0].DomainURLs) != 1 || stored[0].DomainURLs[0] != "https://example.invalid" ||
+		len(stored[0].DomainEmails) != 1 || stored[0].WorkflowAuthStrategy != domain.WorkflowAuthEndUserOnly {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	// Writing again replaces the lists rather than appending to them.
+	config.DomainURLs, config.DomainEmails = []string{}, []string{}
+	config.WorkflowAuthStrategy = domain.WorkflowAuthBuilderChoice
+	if err := repository.SetAppConfig(ctx, config, event("config-again", "app.config_set")); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := repository.ListAppConfigs(ctx, workspaceID, []domain.AppID{appID})
+	if err != nil || len(replaced) != 1 || len(replaced[0].DomainURLs) != 0 || replaced[0].WorkflowAuthStrategy != domain.WorkflowAuthBuilderChoice {
+		t.Fatalf("replaced=%+v err=%v", replaced, err)
+	}
+	// Clearing a resolution that was never made is not found, and clearing one
+	// that was made leaves the app undecided.
+	if err := repository.ClearAppApproval(ctx, workspaceID, appID, event("clear-absent", "app.resolution_cleared")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("clear of an undecided app error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.SetAppApproval(ctx, workspaceID, appID, "", domain.AppApprovalApproved, now, event("approve", "app.approved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ClearAppApproval(ctx, workspaceID, appID, event("clear", "app.resolution_cleared")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ClearAppApproval(ctx, workspaceID, appID, event("clear-twice", "app.resolution_cleared")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second clear error=%v, want %v", err, store.ErrNotFound)
 	}
 }
