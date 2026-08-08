@@ -291,6 +291,7 @@ type Service interface {
 	UpdateUserAppConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
 	AssistantSearchAvailability(context.Context, domain.WorkspaceID, domain.UserID) (domain.AssistantSearchAvailability, error)
 	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
+	SendCallSignal(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, domain.UserID, domain.CallSignalKind, string) error
 	AdminRequestExport(context.Context, domain.WorkspaceID, domain.UserID, string, map[string]int64) error
 	RequestWorkflowStepResponsesExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) error
 	WorkflowStepResponses(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) ([]domain.WorkflowStepResponse, error)

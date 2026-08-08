@@ -4649,17 +4649,23 @@ func TestRemoteFilesAreVisibleAndNeverClaimToBeHosted(t *testing.T) {
 }
 
 // HUDDLE-01 and HUDDLE-03: the huddle bar offers a real lifecycle and says, in
-// the same breath, that this deployment carries no audio. A control named
+// the same breath, what pressing a control will do. A control named
 // "Join huddle" that silently connected nothing would be exactly the promise
 // the universal contract forbids.
-func TestTheHuddleBarRunsTheLifecycleAndNeverPromisesAudio(t *testing.T) {
+// TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia used to be named
+// ...NeverPromisesAudio, and it asserted the bar said this deployment carried
+// no voice or video. That assertion was the tripwire protecting an honest
+// claim, and the claim has changed: joining now connects the browser to each
+// other participant. The tripwire is rewritten rather than deleted, so it
+// guards the new claim as it guarded the old one.
+func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	store, mux := browserWorkspace(t, auth.AllScopes())
 	ctx := context.Background()
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second", RealName: "Second Person"})
 	store.SeedConversationMember("Cdev", "U2")
 
 	idle := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireContains(t, "idle huddle bar", idle, "Start a huddle", "carries no voice or video")
+	requireContains(t, "idle huddle bar", idle, "Start a huddle", "your browser connects to each person who joins")
 	requireMissing(t, "idle huddle bar", idle, "Leave huddle", "End for everyone")
 
 	started := postForm(t, mux, "/app/huddle/start?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
@@ -4669,7 +4675,10 @@ func TestTheHuddleBarRunsTheLifecycleAndNeverPromisesAudio(t *testing.T) {
 	active := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "active huddle bar", active,
 		"Huddle in", "Leave huddle", "End for everyone",
-		"No audio here", "Joining puts your name in the huddle and nothing else")
+		// The member who started the huddle is in it, so the media session and
+		// its controls are present rather than a note explaining their absence.
+		"huddle-media-session", "huddle-tiles",
+		"data-huddle-control=\"microphone\"", "data-huddle-control=\"camera\"", "data-huddle-control=\"screen\"")
 	requireMissing(t, "active huddle bar", active, "Start a huddle")
 
 	// A second person joins through the service; the bar is a live fragment,
@@ -4690,7 +4699,9 @@ func TestTheHuddleBarRunsTheLifecycleAndNeverPromisesAudio(t *testing.T) {
 	// is offered the way back in rather than a way to start a second one.
 	afterLeaving := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "after leaving", afterLeaving, "Join huddle")
-	requireMissing(t, "after leaving", afterLeaving, "Start a huddle")
+	// Somebody who is not in the huddle has no media session: the controls
+	// belong to a connection this reader does not have.
+	requireMissing(t, "after leaving", afterLeaving, "Start a huddle", "huddle-media-session")
 
 	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
 		t.Fatal(err)

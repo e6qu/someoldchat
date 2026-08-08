@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	CallsService_SendCallSignal_FullMethodName         = "/sameoldchat.chat.v1.CallsService/SendCallSignal"
 	CallsService_AddCall_FullMethodName                = "/sameoldchat.chat.v1.CallsService/AddCall"
 	CallsService_StartHuddle_FullMethodName            = "/sameoldchat.chat.v1.CallsService/StartHuddle"
 	CallsService_JoinHuddle_FullMethodName             = "/sameoldchat.chat.v1.CallsService/JoinHuddle"
@@ -36,6 +37,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CallsServiceClient interface {
+	SendCallSignal(ctx context.Context, in *CallSignalRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AddCall(ctx context.Context, in *AddCallRequest, opts ...grpc.CallOption) (*Call, error)
 	StartHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error)
 	JoinHuddle(ctx context.Context, in *HuddleRequest, opts ...grpc.CallOption) (*Call, error)
@@ -55,6 +57,16 @@ type callsServiceClient struct {
 
 func NewCallsServiceClient(cc grpc.ClientConnInterface) CallsServiceClient {
 	return &callsServiceClient{cc}
+}
+
+func (c *callsServiceClient) SendCallSignal(ctx context.Context, in *CallSignalRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, CallsService_SendCallSignal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *callsServiceClient) AddCall(ctx context.Context, in *AddCallRequest, opts ...grpc.CallOption) (*Call, error) {
@@ -171,6 +183,7 @@ func (c *callsServiceClient) RemoveCallParticipants(ctx context.Context, in *Cal
 // All implementations should embed UnimplementedCallsServiceServer
 // for forward compatibility.
 type CallsServiceServer interface {
+	SendCallSignal(context.Context, *CallSignalRequest) (*MutationResponse, error)
 	AddCall(context.Context, *AddCallRequest) (*Call, error)
 	StartHuddle(context.Context, *HuddleRequest) (*Call, error)
 	JoinHuddle(context.Context, *HuddleRequest) (*Call, error)
@@ -191,6 +204,9 @@ type CallsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedCallsServiceServer struct{}
 
+func (UnimplementedCallsServiceServer) SendCallSignal(context.Context, *CallSignalRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SendCallSignal not implemented")
+}
 func (UnimplementedCallsServiceServer) AddCall(context.Context, *AddCallRequest) (*Call, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddCall not implemented")
 }
@@ -242,6 +258,24 @@ func RegisterCallsServiceServer(s grpc.ServiceRegistrar, srv CallsServiceServer)
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&CallsService_ServiceDesc, srv)
+}
+
+func _CallsService_SendCallSignal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CallSignalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CallsServiceServer).SendCallSignal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CallsService_SendCallSignal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CallsServiceServer).SendCallSignal(ctx, req.(*CallSignalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _CallsService_AddCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -449,6 +483,10 @@ var CallsService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sameoldchat.chat.v1.CallsService",
 	HandlerType: (*CallsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SendCallSignal",
+			Handler:    _CallsService_SendCallSignal_Handler,
+		},
 		{
 			MethodName: "AddCall",
 			Handler:    _CallsService_AddCall_Handler,

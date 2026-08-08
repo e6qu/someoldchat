@@ -36,7 +36,7 @@ var (
 // server sharing a durable store, REMIND-API-01 restricts itself to SDK
 // evidence, and AUTH-02, AUTH-05, CONNECT-02, HUDDLE-02 and HUDDLE-04 need an
 // identity provider or media transport.
-const browserGapCeiling = 9
+const browserGapCeiling = 8
 
 func main() {
 	if err := verifyCatalog(

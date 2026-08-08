@@ -13,16 +13,14 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-// HUDDLE-01 forbids fabricating a connected state, and this deployment carries
-// no audio or video transport at all. What it does carry is the rest of a
-// huddle, durably: one running huddle per conversation, who is in it, join,
-// leave, and end for everyone. The surface says which of those two it is
-// wherever it offers a control, so nobody presses "Join huddle" expecting
-// sound.
+// HUDDLE-01 forbids fabricating a connected state. The lifecycle is durable —
+// one running huddle per conversation, who is in it, join, leave, and end for
+// everyone — and joining now also opens the member's microphone and connects
+// their browser to each other participant.
 //
-// The alternative — hiding the surface until WebRTC exists — would leave the
-// lifecycle unreachable and untestable, and would not make the missing media
-// any more present.
+// The connection is peer to peer and this deployment hosts no media server, so
+// a huddle is only as large as every participant can upload to every other. The
+// journey document records that ceiling rather than implying Slack's capacity.
 
 type huddleView struct {
 	// Visible is false when the reader cannot be in this conversation's
@@ -40,6 +38,14 @@ type huddleView struct {
 	JoinURL      string
 	LeaveURL     string
 	EndURL       string
+	// CallID, SelfID and PeerIDs are what the media script needs to open a
+	// connection to each other participant. They are identifiers the reader can
+	// already see in this conversation, and the script cannot do anything with
+	// them the member could not do by hand.
+	CallID    string
+	SelfID    string
+	PeerIDs   []string
+	SignalURL string
 }
 
 func huddleActionURL(action, channel string) string {
@@ -71,10 +77,17 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 	}
 	view.Active = true
 	view.CanEnd = call.CreatedBy == principal.UserID
+	view.CallID = string(call.ID)
+	view.SelfID = string(principal.UserID)
+	view.SignalURL = "/app/huddle/signal"
 	for _, participant := range call.Participants {
 		if participant == principal.UserID {
 			view.Joined = true
+			continue
 		}
+		view.PeerIDs = append(view.PeerIDs, string(participant))
+	}
+	for _, participant := range call.Participants {
 		view.Participants = append(view.Participants, names.name(participant))
 	}
 	return view
@@ -130,6 +143,45 @@ func (h Handler) huddleMutation(name string, apply func(context.Context, domain.
 		}
 		h.redirectMutation(w, r, "/app?channel="+url.QueryEscape(string(channel))+"&notice="+url.QueryEscape(notice))
 	}
+}
+
+// huddleSignal relays one browser's half of the WebRTC handshake to another.
+// The server never reads the payload: an SDP description and an ICE candidate
+// mean something to the two browsers and nothing here. It decides only who may
+// send one to whom, which the service enforces against the call's live
+// participants.
+//
+// It answers JSON rather than a redirect because the caller is the media
+// script, not a form: a redirect would navigate the page away mid-call.
+func (h Handler) huddleSignal(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the page and try again.")
+	if !ok {
+		return
+	}
+	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))
+	recipient := domain.UserID(strings.TrimSpace(fields["to"]))
+	kind := domain.CallSignalKind(strings.TrimSpace(fields["signal"]))
+	payload := fields["payload"]
+	if callID == "" || recipient == "" || !kind.Valid() {
+		http.Error(w, `{"ok":false,"error":"invalid_signal"}`, http.StatusBadRequest)
+		return
+	}
+	if err := h.Messages.SendCallSignal(r.Context(), principal.WorkspaceID, principal.UserID, callID, recipient, kind, payload); err != nil {
+		// A signal that is refused is not an error the member can act on: the
+		// peer left, or the call ended. The script stops signalling that peer.
+		http.Error(w, `{"ok":false,"error":"signal_refused"}`, http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// The acknowledgement is one word and the caller retries the whole signal
+	// if it never arrives, so a failed write needs no separate report.
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
 func (h Handler) writeHuddleError(w http.ResponseWriter, r *http.Request, err error, action string) {

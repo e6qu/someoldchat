@@ -341,6 +341,12 @@ var topicRules = []topicRule{
 	{topic: "huddle.joined", note: "not pinned: Slack documents no huddle event"},
 	{topic: "huddle.left", note: "not pinned: Slack documents no huddle event"},
 	{topic: "huddle.ended", note: "not pinned: Slack documents no huddle event"},
+	// A signal carries one peer's SDP or ICE candidate to one other peer. It is
+	// recipient-scoped because the payload describes how to reach that peer's
+	// machine: candidates carry network addresses, and a signal delivered to
+	// the conversation rather than to its addressee would hand them to
+	// everybody in the huddle.
+	{topic: "huddle.signal", recipient: true, note: "not pinned: Slack documents no huddle signalling event"},
 	{topic: "canvas.created", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.commented", note: "first-party: canvases postdate the snapshot and Slack publishes no canvas comment event"},

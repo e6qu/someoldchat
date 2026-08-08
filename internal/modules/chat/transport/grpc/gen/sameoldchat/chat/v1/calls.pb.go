@@ -625,6 +625,90 @@ func (x *CallParticipantsRequest) GetParticipants() []string {
 	return nil
 }
 
+type CallSignalRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CallId        string                 `protobuf:"bytes,3,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	RecipientId   string                 `protobuf:"bytes,4,opt,name=recipient_id,json=recipientId,proto3" json:"recipient_id,omitempty"`
+	Kind          string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	Payload       string                 `protobuf:"bytes,6,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CallSignalRequest) Reset() {
+	*x = CallSignalRequest{}
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CallSignalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CallSignalRequest) ProtoMessage() {}
+
+func (x *CallSignalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CallSignalRequest.ProtoReflect.Descriptor instead.
+func (*CallSignalRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CallSignalRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CallSignalRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CallSignalRequest) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *CallSignalRequest) GetRecipientId() string {
+	if x != nil {
+		return x.RecipientId
+	}
+	return ""
+}
+
+func (x *CallSignalRequest) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *CallSignalRequest) GetPayload() string {
+	if x != nil {
+		return x.Payload
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_calls_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
@@ -684,8 +768,16 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
 	"\acall_id\x18\x03 \x01(\tR\x06callId\x12\"\n" +
-	"\fparticipants\x18\x04 \x03(\tR\fparticipants2\xac\a\n" +
-	"\fCallsService\x12I\n" +
+	"\fparticipants\x18\x04 \x03(\tR\fparticipants\"\xb9\x01\n" +
+	"\x11CallSignalRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
+	"\acall_id\x18\x03 \x01(\tR\x06callId\x12!\n" +
+	"\frecipient_id\x18\x04 \x01(\tR\vrecipientId\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x18\n" +
+	"\apayload\x18\x06 \x01(\tR\apayload2\x8d\b\n" +
+	"\fCallsService\x12_\n" +
+	"\x0eSendCallSignal\x12&.sameoldchat.chat.v1.CallSignalRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12I\n" +
 	"\aAddCall\x12#.sameoldchat.chat.v1.AddCallRequest\x1a\x19.sameoldchat.chat.v1.Call\x12L\n" +
 	"\vStartHuddle\x12\".sameoldchat.chat.v1.HuddleRequest\x1a\x19.sameoldchat.chat.v1.Call\x12K\n" +
 	"\n" +
@@ -712,7 +804,7 @@ func file_sameoldchat_chat_v1_calls_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_calls_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_sameoldchat_chat_v1_calls_proto_goTypes = []any{
 	(*Call)(nil),                    // 0: sameoldchat.chat.v1.Call
 	(*HuddleRequest)(nil),           // 1: sameoldchat.chat.v1.HuddleRequest
@@ -721,33 +813,36 @@ var file_sameoldchat_chat_v1_calls_proto_goTypes = []any{
 	(*EndCallRequest)(nil),          // 4: sameoldchat.chat.v1.EndCallRequest
 	(*UpdateCallRequest)(nil),       // 5: sameoldchat.chat.v1.UpdateCallRequest
 	(*CallParticipantsRequest)(nil), // 6: sameoldchat.chat.v1.CallParticipantsRequest
-	(*MutationResponse)(nil),        // 7: sameoldchat.chat.v1.MutationResponse
+	(*CallSignalRequest)(nil),       // 7: sameoldchat.chat.v1.CallSignalRequest
+	(*MutationResponse)(nil),        // 8: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_calls_proto_depIdxs = []int32{
-	2,  // 0: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
-	1,  // 1: sameoldchat.chat.v1.CallsService.StartHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 2: sameoldchat.chat.v1.CallsService.JoinHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 3: sameoldchat.chat.v1.CallsService.LeaveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 4: sameoldchat.chat.v1.CallsService.EndHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 5: sameoldchat.chat.v1.CallsService.GetActiveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	4,  // 6: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
-	3,  // 7: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
-	5,  // 8: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
-	6,  // 9: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	6,  // 10: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	0,  // 11: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
-	0,  // 12: sameoldchat.chat.v1.CallsService.StartHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 13: sameoldchat.chat.v1.CallsService.JoinHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 14: sameoldchat.chat.v1.CallsService.LeaveHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 15: sameoldchat.chat.v1.CallsService.EndHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 16: sameoldchat.chat.v1.CallsService.GetActiveHuddle:output_type -> sameoldchat.chat.v1.Call
-	7,  // 17: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 18: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
-	0,  // 19: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
-	7,  // 20: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	7,  // 21: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	11, // [11:22] is the sub-list for method output_type
-	0,  // [0:11] is the sub-list for method input_type
+	7,  // 0: sameoldchat.chat.v1.CallsService.SendCallSignal:input_type -> sameoldchat.chat.v1.CallSignalRequest
+	2,  // 1: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
+	1,  // 2: sameoldchat.chat.v1.CallsService.StartHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 3: sameoldchat.chat.v1.CallsService.JoinHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 4: sameoldchat.chat.v1.CallsService.LeaveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 5: sameoldchat.chat.v1.CallsService.EndHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 6: sameoldchat.chat.v1.CallsService.GetActiveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	4,  // 7: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
+	3,  // 8: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
+	5,  // 9: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
+	6,  // 10: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	6,  // 11: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	8,  // 12: sameoldchat.chat.v1.CallsService.SendCallSignal:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 13: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
+	0,  // 14: sameoldchat.chat.v1.CallsService.StartHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 15: sameoldchat.chat.v1.CallsService.JoinHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 16: sameoldchat.chat.v1.CallsService.LeaveHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 17: sameoldchat.chat.v1.CallsService.EndHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 18: sameoldchat.chat.v1.CallsService.GetActiveHuddle:output_type -> sameoldchat.chat.v1.Call
+	8,  // 19: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 20: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
+	0,  // 21: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
+	8,  // 22: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	8,  // 23: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	12, // [12:24] is the sub-list for method output_type
+	0,  // [0:12] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -765,7 +860,7 @@ func file_sameoldchat_chat_v1_calls_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_calls_proto_rawDesc), len(file_sameoldchat_chat_v1_calls_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

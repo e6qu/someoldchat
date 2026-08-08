@@ -1729,7 +1729,7 @@ const messagesPartial = `{{define "messages"}}
 
 var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
 {{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + huddleMediaScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}">
@@ -2207,9 +2207,9 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 var pageTemplate = mustPage(pageMarkup)
 
 // huddlePartial renders the conversation's huddle bar. HUDDLE-01 forbids
-// fabricating a connected state, and this deployment carries no audio
-// transport at all, so the bar says so in the same breath as it says who is
-// in the huddle: the lifecycle is real and durable, the media is not here.
+// fabricating a connected state, so the bar reports what the media session
+// really does: the controls appear only for somebody who is in the huddle, and
+// their pressed state follows the tracks rather than the button.
 //
 // It is a fragment for the same reason the timeline is: presence changes when
 // other people join and leave, and the existing data-fragment/data-live
@@ -2220,17 +2220,25 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
 <div class="huddle-state" role="status">
   <strong>Huddle in {{.ChannelName}}</strong>
   <span class="huddle-people">{{if .Participants}}{{range $index, $name := .Participants}}{{if $index}}, {{end}}{{$name}}{{end}}{{else}}nobody yet{{end}}</span>
-  <span class="huddle-media">No audio here — this deployment carries no voice or video. Joining puts your name in the huddle and nothing else.</span>
+  <span class="huddle-media" data-huddle-status>{{if .Joined}}Connecting your microphone…{{else}}Join to connect your microphone and camera.{{end}}</span>
 </div>
 <div class="huddle-actions">
   {{if .Joined}}<form method="post" action="{{.LeaveURL}}" hx-post="{{.LeaveURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Leave huddle</button></form>
   {{else}}<form method="post" action="{{.JoinURL}}" hx-post="{{.JoinURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Join huddle</button></form>{{end}}
   {{if .CanEnd}}<form method="post" action="{{.EndURL}}" hx-post="{{.EndURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-end" type="submit">End for everyone</button></form>{{end}}
 </div>
+{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-peers="{{range $index, $peer := .PeerIDs}}{{if $index}},{{end}}{{$peer}}{{end}}" data-huddle-signal="{{.SignalURL}}" data-huddle-csrf="{{.CSRFToken}}">
+  <div class="huddle-controls">
+    <button type="button" data-huddle-control="microphone" aria-pressed="false">Mute microphone</button>
+    <button type="button" data-huddle-control="camera" aria-pressed="false">Turn on camera</button>
+    <button type="button" data-huddle-control="screen" aria-pressed="false">Share screen</button>
+  </div>
+  <ul class="huddle-tiles" data-huddle-tiles aria-label="People in this huddle"></ul>
+</div>{{end}}
 {{else}}
 <div class="huddle-actions">
   <form method="post" action="{{.StartURL}}" hx-post="{{.StartURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Start a huddle</button></form>
-  <span class="huddle-media">A huddle here is a shared presence, not a call: this deployment carries no voice or video.</span>
+  <span class="huddle-media">Starting a huddle opens a call: your browser connects to each person who joins.</span>
 </div>
 {{end}}
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
@@ -4102,6 +4110,7 @@ try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cur
 var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
 var deliver=function(event){
 if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
+try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
 if(event.type.indexOf('view.')===0){window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
@@ -4255,6 +4264,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/huddle/join", h.huddleMutation("joined", h.joinHuddle, "You joined the huddle"))
 	mux.HandleFunc("POST /app/huddle/leave", h.huddleMutation("left", h.leaveHuddle, "You left the huddle"))
 	mux.HandleFunc("POST /app/huddle/end", h.huddleMutation("ended", h.endHuddle, "Huddle ended"))
+	mux.HandleFunc("POST /app/huddle/signal", h.huddleSignal)
 	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
 	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)
 	mux.HandleFunc("POST /app/read/unread", h.markUnreadFromHere)
@@ -11486,7 +11496,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

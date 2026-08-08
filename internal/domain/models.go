@@ -281,6 +281,26 @@ func (kind CallKind) Valid() bool {
 	return kind == CallKindExternal || kind == CallKindHuddle
 }
 
+// CallSignalKind is one step of the WebRTC handshake. The three are the whole
+// vocabulary: an offer proposes a session, an answer accepts it, and a
+// candidate names one route between the two machines.
+type CallSignalKind string
+
+const (
+	CallSignalOffer     CallSignalKind = "offer"
+	CallSignalAnswer    CallSignalKind = "answer"
+	CallSignalCandidate CallSignalKind = "candidate"
+)
+
+func (kind CallSignalKind) Valid() bool {
+	return kind == CallSignalOffer || kind == CallSignalAnswer || kind == CallSignalCandidate
+}
+
+// CallSignalCeiling bounds one signal's payload. An SDP description is a few
+// kilobytes and a candidate is a line; the bound is what stops the signalling
+// path being a way to push arbitrary data at another member.
+const CallSignalCeiling = 64 << 10
+
 type Call struct {
 	ID          CallID
 	WorkspaceID WorkspaceID
