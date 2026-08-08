@@ -3752,6 +3752,16 @@ func (s *Store) SetAppApproval(_ context.Context, workspace domain.WorkspaceID, 
 	return nil
 }
 
+func (s *Store) GetAppApproval(_ context.Context, workspace domain.WorkspaceID, app domain.AppID) (domain.AppApproval, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.appApprovals[app]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.AppApproval{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
 func (s *Store) ListAppApprovals(_ context.Context, workspace domain.WorkspaceID, status domain.AppApprovalStatus, request domain.PageRequest) (domain.AppApprovalPage, error) {
 	if !validAppApprovalStatus(status) {
 		return domain.AppApprovalPage{}, store.ErrInvalidAppApproval

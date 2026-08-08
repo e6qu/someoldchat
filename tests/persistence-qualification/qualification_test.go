@@ -149,6 +149,7 @@ func runQualification(t *testing.T, open opener) {
 		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
 		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
 		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
+		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2618,5 +2619,49 @@ func externalCredentialKeepsItsSecret(t *testing.T, open opener) {
 	}
 	if err := repository.DeleteExternalAuthToken(ctx, workspaceID, appID, "", event("revoke-again", "app.external_token_deleted")); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoking nothing error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// oneAppApprovalReadsBackByItself holds the storage contract for
+// GetAppApproval. The cancel rule needs the current state of one request, and
+// asking for it by listing a status answers a page when the question is about a
+// single row - and answers nothing at all when the row is under another status.
+func oneAppApprovalReadsBackByItself(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-approval-" + suffix)
+	appID := domain.AppID("A-approval-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Approvals"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetAppApproval(ctx, workspaceID, appID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an app nobody requested error=%v, want %v", err, store.ErrNotFound)
+	}
+	if err := repository.SetAppApproval(ctx, workspaceID, appID, "R-"+domain.AppRequestID(suffix), domain.AppApprovalRequested, now, event("request", "app.requested")); err != nil {
+		t.Fatal(err)
+	}
+	requested, err := repository.GetAppApproval(ctx, workspaceID, appID)
+	if err != nil || requested.Status != domain.AppApprovalRequested || requested.ID != appID {
+		t.Fatalf("requested=%+v err=%v", requested, err)
+	}
+	// The row carries whichever status it was last set to, so the read answers
+	// the current state rather than the state it was first filed under.
+	if err := repository.SetAppApproval(ctx, workspaceID, appID, "R-"+domain.AppRequestID(suffix), domain.AppApprovalApproved, now, event("approve", "app.approved")); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := repository.GetAppApproval(ctx, workspaceID, appID)
+	if err != nil || approved.Status != domain.AppApprovalApproved {
+		t.Fatalf("approved=%+v err=%v", approved, err)
+	}
+	// Another workspace cannot read this workspace's decision.
+	if _, err := repository.GetAppApproval(ctx, domain.WorkspaceID("T-other-"+suffix), appID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-workspace read error=%v, want %v", err, store.ErrNotFound)
 	}
 }

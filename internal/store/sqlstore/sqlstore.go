@@ -7387,6 +7387,20 @@ func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID
 	return tx.Commit()
 }
 
+func (s *Store) GetAppApproval(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID) (domain.AppApproval, error) {
+	var value domain.AppApproval
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT app_id, request_id, workspace_id, status, created_at, updated_at
+		FROM app_approvals WHERE workspace_id = ? AND app_id = ?`, workspace, app).
+		Scan(&value.ID, &value.RequestID, &value.WorkspaceID, &value.Status, &created, &updated)
+	if err := translateNotFound(err); err != nil {
+		return domain.AppApproval{}, err
+	}
+	value.CreatedAt = timeFromUnixNanoOrZero(created)
+	value.UpdatedAt = timeFromUnixNanoOrZero(updated)
+	return value, nil
+}
+
 func (s *Store) ListAppApprovals(ctx context.Context, workspace domain.WorkspaceID, approvalStatus domain.AppApprovalStatus, request domain.PageRequest) (domain.AppApprovalPage, error) {
 	if !validAppApprovalStatusSQL(approvalStatus) {
 		return domain.AppApprovalPage{}, store.ErrInvalidAppApproval

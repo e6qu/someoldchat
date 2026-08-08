@@ -4860,7 +4860,11 @@ func (h Handler) adminUsersSetExpiration(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	teamID, targetID, rawExpiration := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"])), strings.TrimSpace(fields["expiration_ts"])
-	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" || rawExpiration == "" {
+	// team_id selects a workspace within an organization and is optional for a
+	// token that already names one. admin.users.getExpiration has always read
+	// it that way; requiring it here made the same caller work on the read and
+	// fail on the write.
+	if (teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID) || targetID == "" || rawExpiration == "" {
 		writeError(w, "invalid_arg_name")
 		return
 	}

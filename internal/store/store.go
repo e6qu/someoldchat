@@ -480,6 +480,10 @@ type Store interface {
 	// invitation consumed with no member behind it.
 	AcceptInviteRequest(context.Context, domain.InviteRequestAcceptance, []events.Event) error
 	SetAppApproval(context.Context, domain.WorkspaceID, domain.AppID, domain.AppRequestID, domain.AppApprovalStatus, time.Time, events.Event) error
+	// GetAppApproval reads one app's approval decision. A transition rule needs
+	// the current state, and listing by status to find one app answers a page
+	// when the question is about a single row.
+	GetAppApproval(context.Context, domain.WorkspaceID, domain.AppID) (domain.AppApproval, error)
 	ListAppApprovals(context.Context, domain.WorkspaceID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	CreateAppConfigurationToken(context.Context, string, string, domain.AppConfigurationToken) error
 	LookupAppConfigurationToken(context.Context, string) (domain.AppConfigurationToken, error)

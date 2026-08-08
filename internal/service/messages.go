@@ -2208,7 +2208,21 @@ func (m Messages) AdminRestrictApp(ctx context.Context, workspaceID domain.Works
 
 // AdminCancelAppRequest withdraws an app request. The member who asked or an
 // administrator may cancel it, and cancelling records that nobody decided it.
+// AdminCancelAppRequest withdraws a request nobody has decided. Cancelling is
+// not a decision an administrator may take back: cancelling an approved request
+// used to write cancelled straight over the approval, which reads as "the
+// request went away" while the app stays installed and approved.
 func (m Messages) AdminCancelAppRequest(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	current, err := m.Store.GetAppApproval(ctx, workspaceID, domain.AppID(strings.TrimSpace(string(appID))))
+	if err != nil {
+		return err
+	}
+	if current.Status != domain.AppApprovalRequested {
+		return ErrInvalidAppApproval
+	}
 	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalCancelled)
 }
 

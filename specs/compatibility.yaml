@@ -151,10 +151,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.access.delete/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasAccessAndDeletionTakeEffect
   - method: canvases.access.set
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.access.set/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasAccessAndDeletionTakeEffect
   - method: canvases.create
     status: behavior-compatible
     provenance: slack-reference
@@ -163,6 +167,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.delete/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasAccessAndDeletionTakeEffect
   - method: canvases.edit
     status: behavior-compatible
     provenance: slack-reference
@@ -951,10 +957,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.access.delete/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.access.set
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.access.set/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.create
     status: behavior-compatible
     provenance: slack-reference
@@ -963,6 +973,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.download.get/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.download.start
     status: behavior-compatible
     provenance: slack-reference
@@ -979,10 +991,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.items.deleteMultiple/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.items.info
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.items.info/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.items.list
     status: behavior-compatible
     provenance: slack-reference
@@ -991,10 +1007,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.items.update/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: slackLists.update
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.update/
+    evidence:
+      - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
   - method: entity.acknowledgeCommentAction
     status: behavior-compatible
     provenance: slack-reference
@@ -1083,10 +1103,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.requests.cancel/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppUninstallAndRequestCancelTakeEffect
   - method: admin.apps.uninstall
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.uninstall/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppUninstallAndRequestCancelTakeEffect
   - method: admin.audit.anomaly.allow.getItem
     status: behavior-compatible
     provenance: slack-reference
@@ -1176,10 +1200,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkArchive/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBulkConversationChangesTakeEffect
   - method: admin.conversations.bulkDelete
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkDelete/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBulkConversationChangesTakeEffect
   - method: admin.conversations.bulkMove
     status: behavior-compatible
     provenance: slack-reference
@@ -1200,6 +1228,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.convertToPublic/
+    evidence:
+      - go-test:internal/api/slack:TestAdminBulkConversationChangesTakeEffect
   - method: admin.conversations.createForObjects
     status: behavior-compatible
     provenance: slack-reference
@@ -1275,6 +1305,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminFunctionsListReadsTheManifest
   - method: admin.functions.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
@@ -1317,6 +1349,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.users.getExpiration/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUsersGetExpirationReportsTheGuestHorizon
   - method: admin.users.session.clearSettings
     status: behavior-compatible
     provenance: slack-reference
@@ -1362,10 +1396,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.add/
+    evidence:
+      - go-test:internal/api/slack:TestAdminWorkflowCollaboratorsTakeEffect
   - method: admin.workflows.collaborators.remove
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.remove/
+    evidence:
+      - go-test:internal/api/slack:TestAdminWorkflowCollaboratorsTakeEffect
   - method: admin.workflows.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
@@ -1790,6 +1828,8 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/users.discoverableContacts.lookup/
+    evidence:
+      - go-test:internal/api/slack:TestDiscoverableContactsLookupFollowsTheWorkspaceSetting
   - method: workflows.featured.add
     status: sdk-compatible
     provenance: slack-reference
