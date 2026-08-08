@@ -251,6 +251,20 @@ func seedRequestedAppParity(t *testing.T, target *memory.Store) {
 	}
 }
 
+// seedWebhookParity installs the app's bot into the channel a hook will post
+// to. A hook posts as that bot, so a hook for a bot the channel does not hold
+// would produce a URL that can never succeed.
+func seedWebhookParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedWorkflowParity(t, target)
+	now := time.Unix(1_700_000_600, 0).UTC()
+	requireSeed(t, target.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "hook-bot"}))
+	requireSeed(t, target.SeedConversationMember("C1", "UBOT"))
+	requireSeed(t, target.CreateBot(context.Background(), domain.Bot{
+		ID: "Bhook", WorkspaceID: "T1", AppID: "A1", UserID: "UBOT", Name: "hook-bot", UpdatedAt: now,
+	}))
+}
+
 func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
@@ -848,6 +862,103 @@ func parityCases() []parityCase {
 					availability.Enabled, availability.SearchableSources, len(found.Messages),
 					notAURL != nil, unknownApp != nil, missingToken != nil, unnamedToken != nil,
 					missingRevocation != nil, connection != nil, unknownConnection != nil, emptyQuery != nil,
+				}, nil
+			},
+		},
+		{
+			// A scheduled message belongs to the credential that made it, not
+			// only to the member holding it. Slack scopes listing and deletion
+			// that way, so a second credential must not see or delete what the
+			// first scheduled - and both compositions have to draw that line in
+			// the same place.
+			name: "a scheduled message stays with the credential that made it",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				at := time.Now().UTC().Add(48 * time.Hour)
+				scheduled, err := chat.ScheduleMessage(ctx, "T1", "U1", "C1", "later", at)
+				if err != nil {
+					return nil, err
+				}
+				_, past := chat.ScheduleMessage(ctx, "T1", "U1", "C1", "too late", time.Unix(1_000_000, 0).UTC())
+				listed, err := chat.ScheduledMessages(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				// The credential-scoped read answers the same message when it
+				// names the hash that made it, and nothing when it names another.
+				mine, err := chat.ScheduledMessagesForCredential(ctx, "T1", "U1", domain.ScheduledMessageQuery{
+					CredentialHash: scheduled.CredentialHash, Channel: "C1", Page: domain.PageRequest{Limit: 10},
+				})
+				if err != nil {
+					return nil, err
+				}
+				theirs, err := chat.ScheduledMessagesForCredential(ctx, "T1", "U1", domain.ScheduledMessageQuery{
+					CredentialHash: "another-credential", Channel: "C1", Page: domain.PageRequest{Limit: 10},
+				})
+				if err != nil {
+					return nil, err
+				}
+				// Deleting through another credential is refused; through the
+				// right one it works, and only once.
+				strangerDeletes := chat.DeleteScheduledMessageForCredential(ctx, "T1", "U1", "another-credential", "C1", scheduled.ID)
+				owned := chat.DeleteScheduledMessageForCredential(ctx, "T1", "U1", scheduled.CredentialHash, "C1", scheduled.ID)
+				deletedTwice := chat.DeleteScheduledMessage(ctx, "T1", "U1", "C1", scheduled.ID)
+				after, err := chat.ScheduledMessages(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					len(listed.Items), len(mine.Items), len(theirs.Items), len(after.Items),
+					past != nil, strangerDeletes != nil, owned != nil, deletedTwice != nil,
+				}, nil
+			},
+		},
+		{
+			// An incoming webhook is a secret that posts to one channel. The
+			// secret is returned once and never again, and posting with one
+			// that was not issued has to be refused the same way on both
+			// compositions.
+			name: "an incoming webhook posts only with the secret it was issued",
+			seed: seedWebhookParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// The administrator has to be in the channel the hook posts to:
+				// issuing a secret that posts somewhere they cannot see would
+				// be a way around the channel's own membership.
+				if _, err := chat.AdminInviteConversationMembers(ctx, "T1", "UA", "C1", []domain.UserID{"UA"}); err != nil {
+					return nil, err
+				}
+				hook, secret, err := chat.AdminCreateIncomingWebhook(ctx, "T1", "UA", "A1", "C1", "UBOT")
+				if err != nil {
+					return nil, err
+				}
+				posted, err := chat.PostIncomingWebhook(ctx, "T1", "A1", secret, "from the hook", "", "", "")
+				if err != nil {
+					return nil, err
+				}
+				withAttachments, err := chat.PostIncomingWebhookWithAttachments(ctx, "T1", "A1", secret, "with attachments", "", `[{"text":"detail"}]`, "", "")
+				if err != nil {
+					return nil, err
+				}
+				_, wrongSecret := chat.PostIncomingWebhook(ctx, "T1", "A1", "not-the-secret", "should not post", "", "", "")
+				_, wrongApp := chat.PostIncomingWebhook(ctx, "T1", "A-nobody", secret, "should not post", "", "", "")
+
+				// Disabling it stops the secret working without destroying it,
+				// which is the difference between disabling and revoking.
+				if err := chat.AdminSetIncomingWebhookEnabled(ctx, "T1", "UA", hook.ID, false); err != nil {
+					return nil, err
+				}
+				_, disabled := chat.PostIncomingWebhook(ctx, "T1", "A1", secret, "while disabled", "", "", "")
+				if err := chat.AdminSetIncomingWebhookEnabled(ctx, "T1", "UA", hook.ID, true); err != nil {
+					return nil, err
+				}
+				reenabled, err := chat.PostIncomingWebhook(ctx, "T1", "A1", secret, "after enabling", "", "", "")
+				if err != nil {
+					return nil, err
+				}
+				missingHook := chat.AdminSetIncomingWebhookEnabled(ctx, "T1", "UA", "hook-nobody", false)
+				member := chat.AdminSetIncomingWebhookEnabled(ctx, "T1", "U1", hook.ID, false)
+				return []any{
+					hook.ConversationID, secret != "", posted.Text, withAttachments.Attachments != "", reenabled.Text,
+					wrongSecret != nil, wrongApp != nil, disabled != nil, missingHook != nil, member != nil,
 				}, nil
 			},
 		},
@@ -4743,7 +4854,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 105
+const parityGapCeiling = 98
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -4768,7 +4879,6 @@ var parityGaps = map[string]struct{}{
 	"AdminAssignUser":                   {},
 	"AdminConnectedChannelInfo":         {},
 	"AdminConversationTeams":            {},
-	"AdminCreateIncomingWebhook":        {},
 	"AdminCreateUser":                   {},
 	"AdminCreateWorkspace":              {},
 	"AdminDenyInviteRequest":            {},
@@ -4782,7 +4892,6 @@ var parityGaps = map[string]struct{}{
 	"InvitationPreview":                 {},
 	"AdminRestrictApp":                  {},
 	"AdminSetConversationTeams":         {},
-	"AdminSetIncomingWebhookEnabled":    {},
 	"AdminTeamUsers":                    {},
 	"BotInfo":                           {},
 	"CompleteExternalUploads":           {},
@@ -4792,13 +4901,11 @@ var parityGaps = map[string]struct{}{
 	"CreateRTMConnection":               {},
 	"CreateSession":                     {},
 	"DeleteCanvas":                      {},
-	"DeleteScheduledMessage":            {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
 	// focused transport tests because parityCases seeds both compositions with
 	// fresh independent stores and therefore cannot compare one token's durable
 	// schedule across calls.
-	"DeleteScheduledMessageForCredential":     {},
 	"DeleteUserPhoto":                         {},
 	"DispatchBlockAction":                     {},
 	"DispatchViewBlockAction":                 {},
@@ -4827,8 +4934,6 @@ var parityGaps = map[string]struct{}{
 	"OpenView":                                {},
 	"AppHome":                                 {},
 	"Permalink":                               {},
-	"PostIncomingWebhook":                     {},
-	"PostIncomingWebhookWithAttachments":      {},
 	"PostWithBlocks":                          {},
 	"PostWithBlocksAndAttachments":            {},
 	"PresentEntityComments":                   {},
@@ -4850,7 +4955,6 @@ var parityGaps = map[string]struct{}{
 	"RevokeToken":                             {},
 	"ScheduleMessageWithBlocks":               {},
 	"ScheduleMessageWithBlocksAndAttachments": {},
-	"ScheduledMessagesForCredential":          {},
 	"SetAuthMethod":                           {},
 	"SetConversationRetention":                {},
 	"SetExternalInvitePermissions":            {},
