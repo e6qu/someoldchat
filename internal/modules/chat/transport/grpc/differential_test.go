@@ -208,7 +208,7 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 		ID: "FtParity", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run triage",
 		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, events.Event{
 		ID: "evt_trigger_parity", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
 	}))
 	run := domain.WorkflowRun{
@@ -248,7 +248,7 @@ func seedFormParity(t *testing.T, target *memory.Store) {
 		ID: "FtForm", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run form",
 		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, events.Event{
 		ID: "evt_form_trigger", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
 	}))
 	run := domain.WorkflowRun{
@@ -288,7 +288,7 @@ func seedBranchParity(t *testing.T, target *memory.Store) {
 		ID: "FtBranch", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run branches",
 		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, events.Event{
 		ID: "evt_branch_trigger", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
 	}))
 	seedRun := func(runID domain.WorkflowRunID, inputs string, currentStep int, executing domain.WorkflowStep, completed *domain.WorkflowStep) {

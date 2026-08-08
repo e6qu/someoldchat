@@ -634,7 +634,7 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	if err := m.Store.UpdateWorkflow(ctx, value, expectedVersion, event); err != nil {
+	if err := m.Store.UpdateWorkflow(ctx, value, event); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	return value, nil
@@ -1551,7 +1551,7 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return domain.WorkflowTrigger{}, err
 	}
-	if err := m.Store.SetWorkflowTrigger(ctx, value, expectedVersion, event); err != nil {
+	if err := m.Store.SetWorkflowTrigger(ctx, value, event); err != nil {
 		return domain.WorkflowTrigger{}, err
 	}
 	return value, nil

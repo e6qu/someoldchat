@@ -6924,8 +6924,8 @@ func (s *Store) SetWorkflowStatus(ctx context.Context, workspace domain.Workspac
 	return tx.Commit()
 }
 
-func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinition, expectedVersion uint64, event events.Event) error {
-	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || expectedVersion == 0 {
+func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinition, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || value.Version < 2 {
 		return store.InvalidArgument("invalid workflow update")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -6938,8 +6938,8 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 		status = ?, version = ?, published_version = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND version = ?`,
 		value.AppID, value.OwnerID, value.CallbackID, value.Title, value.Description, value.Icon, value.InputSchema, value.Steps,
-		value.Status, expectedVersion+1, value.PublishedVersion, value.UpdatedAt.UTC().UnixNano(),
-		value.ID, value.WorkspaceID, expectedVersion)
+		value.Status, value.Version, value.PublishedVersion, value.UpdatedAt.UTC().UnixNano(),
+		value.ID, value.WorkspaceID, value.Version-1)
 	if err != nil {
 		return classify(err)
 	}
@@ -6960,7 +6960,7 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
 		workflow_id, workspace_id, version, title, description, icon, callback_id, input_schema, steps, status, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, expectedVersion+1, value.Title, value.Description,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Version, value.Title, value.Description,
 		value.Icon, value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
@@ -7240,7 +7240,13 @@ func scanWorkflowTrigger(row interface{ Scan(...any) error }) (domain.WorkflowTr
 	return value, nil
 }
 
-func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTrigger, expectedVersion uint64, event events.Event) error {
+func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTrigger, event events.Event) error {
+	// Version 0 or 1 creates the trigger. A higher version replaces the row
+	// that holds Version-1.
+	expectedVersion := uint64(0)
+	if value.Version > 1 {
+		expectedVersion = value.Version - 1
+	}
 	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
 		value.Type == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow trigger")
@@ -7271,7 +7277,7 @@ func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTri
 		result, updateErr := tx.ExecContext(ctx, `UPDATE workflow_triggers SET
 			workflow_id = ?, app_id = ?, title = ?, type = ?, config = ?, enabled = ?, next_run_at = ?, version = ?, updated_at = ?
 			WHERE id = ? AND workspace_id = ? AND workflow_id = ? AND app_id = ? AND version = ?`,
-			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, boolInt(value.Enabled), workflowTime(value.NextRunAt), expectedVersion+1,
+			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, boolInt(value.Enabled), workflowTime(value.NextRunAt), value.Version,
 			value.UpdatedAt.UTC().UnixNano(), value.ID, value.WorkspaceID, value.WorkflowID, value.AppID, expectedVersion)
 		if updateErr != nil {
 			return classify(updateErr)

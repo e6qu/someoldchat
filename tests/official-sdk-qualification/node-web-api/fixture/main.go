@@ -240,7 +240,7 @@ func main() {
 		ID: "FtQualification", WorkflowID: qualificationWorkflow.ID, WorkspaceID: "T1", AppID: "A3",
 		Title: "Run qualification", Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := store.SetWorkflowTrigger(context.Background(), qualificationTrigger, 0,
+	if err := store.SetWorkflowTrigger(context.Background(), qualificationTrigger,
 		newQualificationEvent("qualification-trigger", "U1", events.NewPayload("workflow.trigger_created",
 			events.String("workflow_id", string(qualificationWorkflow.ID)), events.String("trigger_id", string(qualificationTrigger.ID))))); err != nil {
 		panic(err)

@@ -433,7 +433,11 @@ type Store interface {
 	// order.
 	ListWorkflowRunSteps(context.Context, domain.WorkspaceID, domain.WorkflowRunID) ([]domain.WorkflowStep, error)
 	CreateWorkflow(context.Context, domain.WorkflowDefinition, events.Event) error
-	UpdateWorkflow(context.Context, domain.WorkflowDefinition, uint64, events.Event) error
+	// UpdateWorkflow writes the definition and expects the stored row to hold
+	// Version-1. The caller sets the new version on the value it passes, so one
+	// field carries the version instead of a field and an argument that can
+	// contradict each other.
+	UpdateWorkflow(context.Context, domain.WorkflowDefinition, events.Event) error
 	// DiscardWorkflowStagedChanges reverts the head row to the published
 	// revision and realigns Version with PublishedVersion. The expectedVersion
 	// is the staged version being discarded.
@@ -462,7 +466,7 @@ type Store interface {
 	// and bumping it would make a stop look like a revision nobody wrote.
 	SetWorkflowStatus(context.Context, domain.WorkspaceID, domain.WorkflowID, domain.WorkflowStatus, time.Time, events.Event) error
 	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)
-	SetWorkflowTrigger(context.Context, domain.WorkflowTrigger, uint64, events.Event) error
+	SetWorkflowTrigger(context.Context, domain.WorkflowTrigger, events.Event) error
 	GetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID) (domain.WorkflowTrigger, error)
 	ListWorkflowTriggers(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowTrigger, error)
 	// The scheduled/event trigger queue methods define an empty workspace as
