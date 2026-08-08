@@ -2614,7 +2614,7 @@ func TestSQLiteExternalUploadBatchCompletionIsAtomicAndDurable(t *testing.T) {
 	}
 	completions := []domain.ExternalUploadCompletion{{ID: uploads[0].ID, Title: files[0].Title}, {ID: uploads[1].ID, Title: files[1].Title}}
 	emitted := []events.Event{{ID: "file-event-1", WorkspaceID: "T1", Topic: "file.created", Payload: "file_1", CreatedAt: created}, {ID: "file-event-2", WorkspaceID: "T1", Topic: "file.created", Payload: "file_2", CreatedAt: created}}
-	if err := s.CompleteExternalUploads(ctx, completions, files, []domain.ConversationID{"C1"}, emitted, nil, nil); err != nil {
+	if err := s.CompleteExternalUploads(ctx, pairUploads(completions, files), []domain.ConversationID{"C1"}, emitted, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -2635,4 +2635,14 @@ func TestSQLiteExternalUploadBatchCompletionIsAtomicAndDurable(t *testing.T) {
 			t.Fatalf("upload %d=%+v err=%v", index, completed, err)
 		}
 	}
+}
+
+// pairUploads carries each completion with the file it became, which is what
+// the port takes now that the two cannot be handed over separately.
+func pairUploads(completions []domain.ExternalUploadCompletion, files []domain.File) []store.UploadedFile {
+	uploaded := make([]store.UploadedFile, 0, len(completions))
+	for index, completion := range completions {
+		uploaded = append(uploaded, store.UploadedFile{Completion: completion, File: files[index]})
+	}
+	return uploaded
 }

@@ -93,6 +93,37 @@ type ListItemCreation struct {
 	Event events.Event
 }
 
+// ListItemUpdate is the same pairing for a write to items that already exist.
+// UpdateListItems used to take two slices and check their lengths at run time,
+// which is a check the caller can fail and the compiler cannot see.
+type ListItemUpdate struct {
+	Item  domain.ListItem
+	Event events.Event
+}
+
+// UploadedFile pairs a completed upload ticket with the file it became, and
+// PostedMessage pairs a message with the event announcing it. Completing an
+// external upload used to take six slices, two of which had to correspond
+// pairwise and were checked for it at run time.
+type UploadedFile struct {
+	Completion domain.ExternalUploadCompletion
+	File       domain.File
+}
+
+type PostedMessage struct {
+	Message domain.Message
+	Event   events.Event
+}
+
+// ReadCursorUpdate pairs a read cursor with the event announcing it, for the
+// same reason: marking several conversations read is one call, and a cursor
+// without its event or an event without its cursor is not a state the caller
+// should be able to describe.
+type ReadCursorUpdate struct {
+	Cursor domain.ReadCursor
+	Event  events.Event
+}
+
 // FileUnshare pairs a file carried by a message with the event to journal if
 // deleting that message retracts the file's last share into the conversation.
 // The event is a candidate: only the store knows whether another live message
@@ -601,7 +632,7 @@ type Store interface {
 	// read" is one action to the member: doing it as N separate transactions
 	// would leave a partially-read workspace behind any failure, and a reader
 	// who retried would see the sidebar clear in pieces.
-	SetReadCursors(context.Context, []domain.ReadCursor, []events.Event) error
+	SetReadCursors(context.Context, []ReadCursorUpdate) error
 	// LatestMessageTimestamps reports the newest undeleted message in each named
 	// conversation. Conversations with no messages are omitted rather than
 	// reported as empty, so a caller cannot mistake "nothing to read" for "read
@@ -848,8 +879,8 @@ type Store interface {
 	PendingUploadReferenceExists(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID) (bool, error)
 	MarkExternalUploadUploaded(context.Context, domain.ExternalUploadID, time.Time) error
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
-	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, []domain.Message, []events.Event) error
-	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, domain.Message, events.Event) error
+	CompleteExternalUploads(context.Context, []UploadedFile, []domain.ConversationID, []events.Event, []PostedMessage) error
+	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []UploadedFile, []domain.ConversationID, []events.Event, PostedMessage) error
 	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
@@ -941,7 +972,7 @@ type Store interface {
 	UpdateListItem(context.Context, domain.ListItem, events.Event) error
 	// UpdateListItems commits every revision and event as one unit and rejects
 	// the whole batch if any submitted revision is stale.
-	UpdateListItems(context.Context, []domain.ListItem, []events.Event) error
+	UpdateListItems(context.Context, []ListItemUpdate) error
 	DeleteListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID, events.Event) error
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.ListID, []domain.ListItemID, events.Event) error
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error

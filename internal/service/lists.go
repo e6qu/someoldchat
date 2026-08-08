@@ -533,7 +533,7 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 	// themselves are still one transaction per row; see the store signature
 	// UpdateListItems reported alongside this change.
 	result := make([]domain.ListItem, 0, len(order))
-	pending := make([]events.Event, 0, len(order))
+	pending := make([]store.ListItemUpdate, 0, len(order))
 	for _, itemID := range order {
 		cellsForItem := grouped[itemID]
 		item, err := m.Store.GetListItem(ctx, workspaceID, listID, itemID)
@@ -593,9 +593,9 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 			return nil, err
 		}
 		result = append(result, item)
-		pending = append(pending, event)
+		pending = append(pending, store.ListItemUpdate{Item: item, Event: event})
 	}
-	if err := m.Store.UpdateListItems(ctx, result, pending); err != nil {
+	if err := m.Store.UpdateListItems(ctx, pending); err != nil {
 		return nil, err
 	}
 	return result, nil

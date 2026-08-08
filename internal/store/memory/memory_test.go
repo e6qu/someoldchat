@@ -545,12 +545,14 @@ func TestExternalUploadBatchPreflightsEveryMessageBeforeMutation(t *testing.T) {
 		ID: "M-taken", WorkspaceID: "T1", Conversation: "C2", AuthorID: "U1",
 		Text: "second", CreatedAt: now.Add(time.Microsecond), Files: append([]domain.File(nil), files...),
 	}
-	err := s.CompleteExternalUploads(ctx, completions, files, []domain.ConversationID{"C1", "C2"}, fileEvents,
-		[]domain.Message{first, second},
-		[]events.Event{
-			{ID: "first-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: first.CreatedAt},
-			{ID: "second-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: second.CreatedAt},
-		})
+	uploaded := make([]store.UploadedFile, 0, len(completions))
+	for index, completion := range completions {
+		uploaded = append(uploaded, store.UploadedFile{Completion: completion, File: files[index]})
+	}
+	err := s.CompleteExternalUploads(ctx, uploaded, []domain.ConversationID{"C1", "C2"}, fileEvents, []store.PostedMessage{
+		{Message: first, Event: events.Event{ID: "first-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: first.CreatedAt}},
+		{Message: second, Event: events.Event{ID: "second-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: second.CreatedAt}},
+	})
 	if !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("batch error=%v, want already exists", err)
 	}

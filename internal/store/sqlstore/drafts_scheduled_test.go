@@ -211,9 +211,11 @@ func TestSQLiteDraftAttachmentOutlivesExternalUploadTicket(t *testing.T) {
 	}
 	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "finished", CreatedAt: now}
 	require(s.CompleteExternalUploads(
-		ctx, []domain.ExternalUploadCompletion{{ID: upload.ID}}, []domain.File{file}, []domain.ConversationID{"C1"},
+		ctx,
+		[]storepkg.UploadedFile{{Completion: domain.ExternalUploadCompletion{ID: upload.ID}, File: file}},
+		[]domain.ConversationID{"C1"},
 		[]events.Event{{ID: "file-event", WorkspaceID: "T1", Topic: "file.created", CreatedAt: now}},
-		[]domain.Message{message}, []events.Event{{ID: "message-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: now}},
+		[]storepkg.PostedMessage{{Message: message, Event: events.Event{ID: "message-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: now}}},
 	))
 	completed, err := s.GetExternalUpload(ctx, upload.ID)
 	if err != nil || completed.Status != domain.ExternalUploadCompleted {
@@ -268,7 +270,10 @@ func TestSQLiteScheduledFileDeliveryRollsBackAndRetriesAsOneTransaction(t *testi
 	completions := []domain.ExternalUploadCompletion{{ID: upload.ID, Title: file.Title}}
 	fileEvents := []events.Event{{ID: "file-event", WorkspaceID: "T1", Topic: "file.created", CreatedAt: now}}
 	messageEvents := []events.Event{{ID: "message-event", WorkspaceID: "T1", Topic: "message.created", CreatedAt: now}}
-	err = s.CompleteScheduledExternalUploads(ctx, scheduled.ID, completions, []domain.File{file}, []domain.ConversationID{"C1"}, fileEvents, message, messageEvents[0])
+	err = s.CompleteScheduledExternalUploads(ctx, scheduled.ID,
+		[]storepkg.UploadedFile{{Completion: completions[0], File: file}},
+		[]domain.ConversationID{"C1"}, fileEvents,
+		storepkg.PostedMessage{Message: message, Event: messageEvents[0]})
 	if !errors.Is(err, storepkg.ErrAlreadyExists) {
 		t.Fatalf("late message failure=%v, want already exists", err)
 	}
@@ -284,12 +289,18 @@ func TestSQLiteScheduledFileDeliveryRollsBackAndRetriesAsOneTransaction(t *testi
 	}
 
 	message.ID = "M-atomic"
-	require(s.CompleteScheduledExternalUploads(ctx, scheduled.ID, completions, []domain.File{file}, []domain.ConversationID{"C1"}, fileEvents, message, messageEvents[0]))
+	require(s.CompleteScheduledExternalUploads(ctx, scheduled.ID,
+		[]storepkg.UploadedFile{{Completion: completions[0], File: file}},
+		[]domain.ConversationID{"C1"}, fileEvents,
+		storepkg.PostedMessage{Message: message, Event: messageEvents[0]}))
 	delivered, err := s.GetIdempotentMessage(ctx, "T1", "U1", string(scheduled.ID))
 	if err != nil || delivered.ID != message.ID || len(delivered.Files) != 1 || delivered.Files[0].ID != file.ID {
 		t.Fatalf("delivered=%+v err=%v", delivered, err)
 	}
-	if err := s.CompleteScheduledExternalUploads(ctx, scheduled.ID, completions, []domain.File{file}, []domain.ConversationID{"C1"}, fileEvents, message, messageEvents[0]); !errors.Is(err, storepkg.ErrIdempotencyConflict) {
+	if err := s.CompleteScheduledExternalUploads(ctx, scheduled.ID,
+		[]storepkg.UploadedFile{{Completion: completions[0], File: file}},
+		[]domain.ConversationID{"C1"}, fileEvents,
+		storepkg.PostedMessage{Message: message, Event: messageEvents[0]}); !errors.Is(err, storepkg.ErrIdempotencyConflict) {
 		t.Fatalf("store retry=%v, want idempotency conflict", err)
 	}
 	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
