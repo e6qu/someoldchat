@@ -1016,17 +1016,35 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/openid.connect.userInfo/
   - method: admin.analytics.getFile
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.analytics.getFile/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAnalytics
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:analyticsCountOneDayAndNotAnother
+    deviations:
+      - Rows carry the counts this deployment records - messages, reactions, membership - and not Slack's full enterprise column set.
   - method: admin.analytics.messages.activity
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.analytics.messages.activity/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAnalytics
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:analyticsCountOneDayAndNotAnother
+    deviations:
+      - Rows carry the counts this deployment records - messages, reactions, membership - and not Slack's full enterprise column set.
   - method: admin.analytics.messages.metadata
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.analytics.messages.metadata/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAnalytics
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:tests/persistence-qualification:analyticsCountOneDayAndNotAnother
+    deviations:
+      - Rows carry the counts this deployment records - messages, reactions, membership - and not Slack's full enterprise column set.
   - method: admin.apps.activities.list
     status: behavior-compatible
     provenance: slack-reference

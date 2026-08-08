@@ -1344,6 +1344,15 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+const analyticsMetadata = await client.apiCall("admin.analytics.getFile", {
+	type: "public_channel",
+	metadata_only: true,
+});
+assert.equal(analyticsMetadata.ok, true);
+assert.ok(analyticsMetadata.fields.length > 0);
+assert.equal((await client.apiCall("admin.analytics.messages.activity", { date: "2023-11-14" })).ok, true);
+assert.equal((await client.apiCall("admin.analytics.messages.metadata")).ok, true);
+
 const adminActivities = await client.apiCall("admin.apps.activities.list", { app_id: "A1", limit: 10 });
 assert.equal(adminActivities.ok, true);
 assert.ok(Array.isArray(adminActivities.activities));

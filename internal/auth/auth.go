@@ -114,6 +114,9 @@ const (
 	// authority from managing the groups it names.
 	ScopeAdminBarriersRead  Scope = "admin.barriers:read"
 	ScopeAdminBarriersWrite Scope = "admin.barriers:write"
+	// Analytics covers every member and channel at once, which is a wider read
+	// than any single administrative surface.
+	ScopeAdminAnalyticsRead Scope = "admin.analytics:read"
 )
 
 type Principal struct {
@@ -574,6 +577,7 @@ var allScopes = []Scope{
 	ScopeAdminRolesWrite,
 	ScopeAdminBarriersRead,
 	ScopeAdminBarriersWrite,
+	ScopeAdminAnalyticsRead,
 }
 
 // AllScopes returns a fresh copy on every call, so a caller that appends to or

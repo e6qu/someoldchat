@@ -285,6 +285,7 @@ type Service interface {
 	AdminAddRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminRemoveRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, []string, []domain.UserID) error
 	AdminListRoleAssignments(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	AdminAnalytics(context.Context, domain.WorkspaceID, domain.UserID, domain.AnalyticsKind, time.Time) ([]domain.AnalyticsRow, error)
 	AppActivities(context.Context, domain.WorkspaceID, domain.AppID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)
 	AdminAppActivities(context.Context, domain.WorkspaceID, domain.UserID, domain.AppActivityFilter, domain.PageRequest) (domain.AppActivityPage, error)
 	AdminLookupConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationLookup, domain.PageRequest) (domain.ConversationPage, error)

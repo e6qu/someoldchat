@@ -3614,6 +3614,20 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminAnalytics reports one day of analytics. The rows are computed from the
+// messages and reactions the day holds rather than read from a nightly
+// aggregate: a stored aggregate is a second copy of the truth, and the two
+// disagree the first time a message is deleted.
+func (m Messages) AdminAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if !kind.Valid() || day.IsZero() {
+		return nil, ErrInvalidWorkspace
+	}
+	return m.Store.AnalyticsRows(ctx, workspaceID, kind, day)
+}
+
 // AppActivities reports one app's activity log to that app. An app reads only
 // its own entries, so the caller's identity decides the filter rather than an
 // argument it could set to somebody else's.

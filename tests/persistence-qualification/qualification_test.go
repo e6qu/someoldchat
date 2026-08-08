@@ -146,6 +146,7 @@ func runQualification(t *testing.T, open opener) {
 		{"app configuration and resolution survive on every profile", appConfigurationAndResolutionSurvive},
 		{"administrative channel batches are all or nothing", administrativeChannelBatchesAreAllOrNothing},
 		{"app activity filters by rank on every profile", appActivityFiltersByRank},
+		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -2389,5 +2390,93 @@ func appActivityFiltersByRank(t *testing.T, open opener) {
 	}, domain.PageRequest{Limit: 10})
 	if err != nil || len(windowed.Activities) != 2 {
 		t.Fatalf("windowed=%+v err=%v", windowed, err)
+	}
+}
+
+// analyticsCountOneDayAndNotAnother holds the storage contract for
+// admin.analytics.*. The rows cover exactly one day, so a message posted a
+// minute after midnight belongs to the next day's file and not to this one.
+func analyticsCountOneDayAndNotAnother(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-analytics-" + suffix)
+	userID := domain.UserID("U-analytics-" + suffix)
+	publicID := domain.ConversationID("C-analytics-public-" + suffix)
+	privateID := domain.ConversationID("C-analytics-private-" + suffix)
+	day := time.Date(2023, 11, 14, 0, 0, 0, 0, time.UTC)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Analytics"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: "analyst"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, conversation := range []domain.Conversation{
+		{ID: publicID, WorkspaceID: workspaceID, Name: "public-" + suffix},
+		{ID: privateID, WorkspaceID: workspaceID, Name: "private-" + suffix, Kind: domain.ConversationTypePrivate},
+	} {
+		if err := repository.SeedConversation(ctx, conversation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, instant := range []time.Time{day.Add(time.Hour), day.Add(2 * time.Hour), day.Add(25 * time.Hour)} {
+		message := domain.Message{
+			ID:          domain.MessageID(fmt.Sprintf("M-analytics-%d-%s", index, suffix)),
+			WorkspaceID: workspaceID, Conversation: publicID, AuthorID: userID,
+			Text: "counted", CreatedAt: instant,
+		}
+		if err := repository.CreateMessage(ctx, message, events.Event{
+			ID: domain.EventID(fmt.Sprintf("evt-analytics-%d-%s", index, suffix)), WorkspaceID: workspaceID,
+			Topic: "message", Payload: string(message.ID), CreatedAt: instant,
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A deleted message is not activity: analytics are computed from what the
+	// day still holds, so deleting a message lowers the count on both profiles.
+	deleted := domain.MessageID(fmt.Sprintf("M-analytics-deleted-%s", suffix))
+	deletedAt := day.Add(3 * time.Hour)
+	if err := repository.CreateMessage(ctx, domain.Message{
+		ID: deleted, WorkspaceID: workspaceID, Conversation: publicID, AuthorID: userID,
+		Text: "retracted", CreatedAt: deletedAt,
+	}, events.Event{
+		ID: domain.EventID("evt-analytics-deleted-" + suffix), WorkspaceID: workspaceID,
+		Topic: "message", Payload: string(deleted), CreatedAt: deletedAt,
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteMessage(ctx, domain.Message{
+		ID: deleted, WorkspaceID: workspaceID, Conversation: publicID, AuthorID: userID, CreatedAt: deletedAt, Deleted: true,
+	}, events.Event{
+		ID: domain.EventID("evt-analytics-undeleted-" + suffix), WorkspaceID: workspaceID,
+		Topic: "message_deleted", Payload: string(deleted), CreatedAt: deletedAt,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	members, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsMember, day)
+	if err != nil || len(members) != 1 {
+		t.Fatalf("members=%+v err=%v", members, err)
+	}
+	// Two of the three messages fall inside the day; the third is the next day.
+	if members[0].EntityID != string(userID) || members[0].MessagesPosted != 2 || members[0].Date != "2023-11-14" {
+		t.Fatalf("member row=%+v", members[0])
+	}
+	next, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsMember, day.AddDate(0, 0, 1))
+	if err != nil || len(next) != 1 || next[0].MessagesPosted != 1 {
+		t.Fatalf("next day=%+v err=%v", next, err)
+	}
+	// public_channel is what its name says; conversations covers both.
+	publicRows, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsPublicChannel, day)
+	if err != nil || len(publicRows) != 1 || publicRows[0].EntityID != string(publicID) || publicRows[0].MessagesPosted != 2 {
+		t.Fatalf("public=%+v err=%v", publicRows, err)
+	}
+	everything, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsConversations, day)
+	if err != nil || len(everything) != 2 {
+		t.Fatalf("conversations=%+v err=%v", everything, err)
+	}
+	if _, err := repository.AnalyticsRows(ctx, workspaceID, domain.AnalyticsKind("hourly"), day); err == nil {
+		t.Fatal("an unknown analytics kind was accepted")
 	}
 }

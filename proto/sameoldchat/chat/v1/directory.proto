@@ -445,6 +445,28 @@ message AppApprovalPage {
   bool has_more = 3;
 }
 
+message AnalyticsRow {
+  string kind = 1;
+  string date = 2;
+  string entity_id = 3;
+  string name = 4;
+  int32 messages_posted = 5;
+  int32 reactions_added = 6;
+  int32 member_count = 7;
+  bool is_active = 8;
+}
+
+message AnalyticsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string kind = 3;
+  int64 day = 4;
+}
+
+message AnalyticsResponse {
+  repeated AnalyticsRow rows = 1;
+}
+
 message RoleAssignment {
   string role_id = 1;
   string entity_id = 2;
@@ -569,6 +591,7 @@ service DirectoryService {
   rpc SetUserExpiration(SetUserExpirationRequest) returns (MutationResponse);
   rpc UserExpiration(SetUserExpirationRequest) returns (UserExpirationResponse);
   rpc DiscoverableContacts(DiscoverableContactsRequest) returns (DiscoverableContactsResponse);
+  rpc AdminAnalytics(AnalyticsRequest) returns (AnalyticsResponse);
   rpc AdminAddRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminRemoveRoleAssignments(RoleAssignmentMutationRequest) returns (MutationResponse);
   rpc AdminListRoleAssignments(RoleAssignmentsRequest) returns (RoleAssignmentPage);

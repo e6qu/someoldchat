@@ -1833,6 +1833,70 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	return user, nil
 }
 
+func (s *Store) AnalyticsRows(_ context.Context, workspace domain.WorkspaceID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
+	if !kind.Valid() {
+		return nil, store.InvalidArgument("unknown analytics kind")
+	}
+	start := day.UTC().Truncate(24 * time.Hour)
+	end := start.Add(24 * time.Hour)
+	date := domain.AnalyticsDate(start)
+	within := func(instant time.Time) bool {
+		return !instant.Before(start) && instant.Before(end)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.AnalyticsRow, 0)
+	if kind == domain.AnalyticsMember {
+		for id, user := range s.users {
+			if user.WorkspaceID != workspace {
+				continue
+			}
+			row := domain.AnalyticsRow{Kind: kind, Date: date, EntityID: string(id), Name: user.Name}
+			for conversationID, messages := range s.messages {
+				if conversation, exists := s.conversations[conversationID]; !exists || conversation.WorkspaceID != workspace {
+					continue
+				}
+				for _, message := range messages {
+					if message.AuthorID == id && !message.Deleted && within(message.CreatedAt) {
+						row.MessagesPosted++
+					}
+				}
+			}
+			for _, reactions := range s.reactions {
+				for _, reaction := range reactions {
+					if reaction.UserID == id && within(reaction.CreatedAt) {
+						row.ReactionsAdded++
+					}
+				}
+			}
+			row.IsActive = s.members[string(workspace)+"\x00"+string(id)].Active
+			values = append(values, row)
+		}
+		sort.Slice(values, func(left, right int) bool { return values[left].EntityID < values[right].EntityID })
+		return values, nil
+	}
+	for id, conversation := range s.conversations {
+		if conversation.WorkspaceID != workspace || conversation.IsDirectOrGroup() {
+			continue
+		}
+		if kind == domain.AnalyticsPublicChannel && conversation.PrivateFlag() {
+			continue
+		}
+		row := domain.AnalyticsRow{
+			Kind: kind, Date: date, EntityID: string(id), Name: conversation.Name,
+			MemberCount: len(s.memberships[id]), IsActive: true,
+		}
+		for _, message := range s.messages[id] {
+			if !message.Deleted && within(message.CreatedAt) {
+				row.MessagesPosted++
+			}
+		}
+		values = append(values, row)
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].EntityID < values[right].EntityID })
+	return values, nil
+}
+
 func (s *Store) RecordAppActivity(_ context.Context, activity domain.AppActivity) error {
 	if activity.AppID == "" || !activity.Level.Valid() {
 		return store.ErrInvalidArgument

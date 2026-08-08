@@ -29,6 +29,7 @@ const (
 	DirectoryService_SetUserExpiration_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
 	DirectoryService_UserExpiration_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserExpiration"
 	DirectoryService_DiscoverableContacts_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/DiscoverableContacts"
+	DirectoryService_AdminAnalytics_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/AdminAnalytics"
 	DirectoryService_AdminAddRoleAssignments_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminAddRoleAssignments"
 	DirectoryService_AdminRemoveRoleAssignments_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveRoleAssignments"
 	DirectoryService_AdminListRoleAssignments_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminListRoleAssignments"
@@ -97,6 +98,7 @@ type DirectoryServiceClient interface {
 	SetUserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*UserExpirationResponse, error)
 	DiscoverableContacts(ctx context.Context, in *DiscoverableContactsRequest, opts ...grpc.CallOption) (*DiscoverableContactsResponse, error)
+	AdminAnalytics(ctx context.Context, in *AnalyticsRequest, opts ...grpc.CallOption) (*AnalyticsResponse, error)
 	AdminAddRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRemoveRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListRoleAssignments(ctx context.Context, in *RoleAssignmentsRequest, opts ...grpc.CallOption) (*RoleAssignmentPage, error)
@@ -253,6 +255,16 @@ func (c *directoryServiceClient) DiscoverableContacts(ctx context.Context, in *D
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DiscoverableContactsResponse)
 	err := c.cc.Invoke(ctx, DirectoryService_DiscoverableContacts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAnalytics(ctx context.Context, in *AnalyticsRequest, opts ...grpc.CallOption) (*AnalyticsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnalyticsResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAnalytics_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -793,6 +805,7 @@ type DirectoryServiceServer interface {
 	SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error)
 	UserExpiration(context.Context, *SetUserExpirationRequest) (*UserExpirationResponse, error)
 	DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error)
+	AdminAnalytics(context.Context, *AnalyticsRequest) (*AnalyticsResponse, error)
 	AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
 	AdminRemoveRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
 	AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error)
@@ -883,6 +896,9 @@ func (UnimplementedDirectoryServiceServer) UserExpiration(context.Context, *SetU
 }
 func (UnimplementedDirectoryServiceServer) DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DiscoverableContacts not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAnalytics(context.Context, *AnalyticsRequest) (*AnalyticsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAnalytics not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminAddRoleAssignments not implemented")
@@ -1236,6 +1252,24 @@ func _DirectoryService_DiscoverableContacts_Handler(srv interface{}, ctx context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).DiscoverableContacts(ctx, req.(*DiscoverableContactsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAnalytics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnalyticsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAnalytics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAnalytics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAnalytics(ctx, req.(*AnalyticsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2222,6 +2256,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DiscoverableContacts",
 			Handler:    _DirectoryService_DiscoverableContacts_Handler,
+		},
+		{
+			MethodName: "AdminAnalytics",
+			Handler:    _DirectoryService_AdminAnalytics_Handler,
 		},
 		{
 			MethodName: "AdminAddRoleAssignments",

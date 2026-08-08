@@ -6964,6 +6964,75 @@ func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.Workspace
 	return value, nil
 }
 
+// AnalyticsRows builds one day of analytics from the messages and reactions the
+// day already holds. Nothing is precomputed: an aggregate stored nightly would
+// be a second copy of the truth, and the two would disagree the first time a
+// message was deleted.
+func (s *Store) AnalyticsRows(ctx context.Context, workspace domain.WorkspaceID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
+	if !kind.Valid() {
+		return nil, store.InvalidArgument("unknown analytics kind")
+	}
+	start := day.UTC().Truncate(24 * time.Hour)
+	from, to := string(domain.NewStoredTime(start)), string(domain.NewStoredTime(start.Add(24*time.Hour)))
+	date := domain.AnalyticsDate(start)
+	if kind == domain.AnalyticsMember {
+		return s.memberAnalyticsRows(ctx, workspace, date, from, to)
+	}
+	return s.channelAnalyticsRows(ctx, workspace, kind, date, from, to)
+}
+
+func (s *Store) memberAnalyticsRows(ctx context.Context, workspace domain.WorkspaceID, date, from, to string) ([]domain.AnalyticsRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT u.id, u.name,
+			(SELECT COUNT(*) FROM messages m WHERE m.author_id = u.id AND m.workspace_id = u.workspace_id AND m.deleted = 0 AND m.created_at >= ? AND m.created_at < ?),
+			(SELECT COUNT(*) FROM reactions r WHERE r.user_id = u.id AND r.created_at >= ? AND r.created_at < ?),
+			COALESCE(wm.active, 0)
+		FROM users u LEFT JOIN workspace_members wm ON wm.workspace_id = u.workspace_id AND wm.user_id = u.id
+		WHERE u.workspace_id = ? ORDER BY u.id`, from, to, from, to, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.AnalyticsRow, 0)
+	for rows.Next() {
+		row := domain.AnalyticsRow{Kind: domain.AnalyticsMember, Date: date}
+		var active int
+		if err := rows.Scan(&row.EntityID, &row.Name, &row.MessagesPosted, &row.ReactionsAdded, &active); err != nil {
+			return nil, err
+		}
+		row.IsActive = active != 0
+		values = append(values, row)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) channelAnalyticsRows(ctx context.Context, workspace domain.WorkspaceID, kind domain.AnalyticsKind, date, from, to string) ([]domain.AnalyticsRow, error) {
+	// public_channel is what its name says; conversations covers the private
+	// ones too, which is the difference Slack draws between the two files.
+	visibility := ` AND c.is_private = 0`
+	if kind == domain.AnalyticsConversations {
+		visibility = ``
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT c.id, c.name,
+			(SELECT COUNT(*) FROM messages m WHERE m.conversation = c.id AND m.deleted = 0 AND m.created_at >= ? AND m.created_at < ?),
+			(SELECT COUNT(*) FROM conversation_members cm WHERE cm.conversation_id = c.id)
+		FROM conversations c
+		WHERE c.workspace_id = ? AND c.is_direct = 0 AND c.is_group_direct = 0`+visibility+`
+		ORDER BY c.id`, from, to, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.AnalyticsRow, 0)
+	for rows.Next() {
+		row := domain.AnalyticsRow{Kind: kind, Date: date, IsActive: true}
+		if err := rows.Scan(&row.EntityID, &row.Name, &row.MessagesPosted, &row.MemberCount); err != nil {
+			return nil, err
+		}
+		values = append(values, row)
+	}
+	return values, rows.Err()
+}
+
 func (s *Store) WorkspaceAnalytics(ctx context.Context, workspace domain.WorkspaceID, since time.Time, busiest int) (domain.WorkspaceAnalytics, error) {
 	if busiest < 0 {
 		return domain.WorkspaceAnalytics{}, store.InvalidArgument("the busiest-channel bound must not be negative")

@@ -1861,6 +1861,37 @@ func decodeProtoAuthPolicyEntity(value *chatv1.AuthPolicyEntity) domain.AuthPoli
 	}
 }
 
+func (r Remote) AdminAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, kind domain.AnalyticsKind, day time.Time) ([]domain.AnalyticsRow, error) {
+	out, err := r.directory.AdminAnalytics(ctx, &chatv1.AnalyticsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Kind: string(kind), Day: optionalUnixNano(day),
+	})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.AnalyticsRow, 0, len(out.GetRows()))
+	for _, encoded := range out.GetRows() {
+		rows = append(rows, decodeProtoAnalyticsRow(encoded))
+	}
+	return rows, nil
+}
+
+func encodeProtoAnalyticsRow(value domain.AnalyticsRow) *chatv1.AnalyticsRow {
+	return &chatv1.AnalyticsRow{
+		Kind: string(value.Kind), Date: value.Date, EntityId: value.EntityID, Name: value.Name,
+		MessagesPosted: int32(value.MessagesPosted), ReactionsAdded: int32(value.ReactionsAdded),
+		MemberCount: int32(value.MemberCount), IsActive: value.IsActive,
+	}
+}
+
+func decodeProtoAnalyticsRow(value *chatv1.AnalyticsRow) domain.AnalyticsRow {
+	return domain.AnalyticsRow{
+		Kind: domain.AnalyticsKind(value.GetKind()), Date: value.GetDate(), EntityID: value.GetEntityId(),
+		Name: value.GetName(), MessagesPosted: int(value.GetMessagesPosted()),
+		ReactionsAdded: int(value.GetReactionsAdded()), MemberCount: int(value.GetMemberCount()),
+		IsActive: value.GetIsActive(),
+	}
+}
+
 func (r Remote) AdminAddRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) error {
 	out, err := r.directory.AdminAddRoleAssignments(ctx, roleAssignmentMutation(workspaceID, userID, roleID, entityIDs, targets))
 	if err != nil {
@@ -5761,6 +5792,19 @@ func (s *Server) AdminAuthPolicyEntities(ctx context.Context, input *chatv1.Auth
 	}
 	return &chatv1.AuthPolicyEntityPage{Entities: entities, NextCursor: string(page.NextCursor),
 		HasMore: page.HasMore, TotalCount: int32(page.TotalCount)}, nil
+}
+
+func (s *Server) AdminAnalytics(ctx context.Context, input *chatv1.AnalyticsRequest) (*chatv1.AnalyticsResponse, error) {
+	rows, err := s.implementation.AdminAnalytics(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AnalyticsKind(input.GetKind()), optionalTimeFromUnixNano(input.GetDay()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.AnalyticsRow, 0, len(rows))
+	for _, row := range rows {
+		encoded = append(encoded, encodeProtoAnalyticsRow(row))
+	}
+	return &chatv1.AnalyticsResponse{Rows: encoded}, nil
 }
 
 func (s *Server) AdminAddRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentMutationRequest) (*chatv1.MutationResponse, error) {

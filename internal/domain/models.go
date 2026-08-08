@@ -3119,6 +3119,51 @@ type WorkspaceAnalytics struct {
 	Since           time.Time
 }
 
+// AnalyticsKind is which analytics file an administrator asked for. Slack names
+// three and refuses anything else, so a report nobody can produce cannot be
+// requested.
+type AnalyticsKind string
+
+const (
+	AnalyticsMember        AnalyticsKind = "member"
+	AnalyticsPublicChannel AnalyticsKind = "public_channel"
+	AnalyticsConversations AnalyticsKind = "conversations"
+)
+
+func (kind AnalyticsKind) Valid() bool {
+	switch kind {
+	case AnalyticsMember, AnalyticsPublicChannel, AnalyticsConversations:
+		return true
+	}
+	return false
+}
+
+// AnalyticsDate renders the day an analytics row covers. Slack writes the day
+// as YYYY-MM-DD, and the layout lives here so the two storage profiles cannot
+// render it differently.
+func AnalyticsDate(day time.Time) string {
+	return day.UTC().Truncate(24 * time.Hour).Format(time.DateOnly)
+}
+
+// ParseAnalyticsDate reads the same rendering back.
+func ParseAnalyticsDate(value string) (time.Time, error) {
+	return time.Parse(time.DateOnly, value)
+}
+
+// AnalyticsRow is one line of an analytics file: what one member or one channel
+// did on one day. A field the row's kind does not describe stays zero, because
+// a member has no member count and a channel posts nothing itself.
+type AnalyticsRow struct {
+	Kind           AnalyticsKind
+	Date           string
+	EntityID       string
+	Name           string
+	MessagesPosted int
+	ReactionsAdded int
+	MemberCount    int
+	IsActive       bool
+}
+
 type ChannelActivity struct {
 	ConversationID ConversationID
 	Name           string

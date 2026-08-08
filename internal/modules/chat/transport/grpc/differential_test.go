@@ -790,6 +790,37 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Analytics are computed from the day's own messages, so both
+			// compositions must count the same rows for the same day and refuse
+			// the same kinds.
+			name: "analytics count the same rows on both compositions",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				day := time.Unix(1_700_000_000, 0).UTC().Truncate(24 * time.Hour)
+				members, err := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsMember, day)
+				if err != nil {
+					return nil, err
+				}
+				channels, err := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsPublicChannel, day)
+				if err != nil {
+					return nil, err
+				}
+				everything, err := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsConversations, day)
+				if err != nil {
+					return nil, err
+				}
+				_, badKind := chat.AdminAnalytics(ctx, "T1", "UA", "hourly", day)
+				_, noDay := chat.AdminAnalytics(ctx, "T1", "UA", domain.AnalyticsMember, time.Time{})
+				described := func(rows []domain.AnalyticsRow) []string {
+					out := make([]string, 0, len(rows))
+					for _, row := range rows {
+						out = append(out, fmt.Sprintf("%s/%s/%s/%d/%d/%d", row.Kind, row.Date, row.EntityID, row.MessagesPosted, row.ReactionsAdded, row.MemberCount))
+					}
+					return out
+				}
+				return []any{described(members), described(channels), len(everything) >= len(channels), badKind != nil, noDay != nil}, nil
+			},
+		},
+		{
 			// An app's activity log is written when the app answers a function,
 			// and a level filter is a rank comparison rather than a name match.
 			// Both compositions must order and filter identically.

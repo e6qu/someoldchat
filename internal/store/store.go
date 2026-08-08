@@ -340,6 +340,8 @@ type Store interface {
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
+	// AnalyticsRows reports one day of analytics, in entity-identifier order.
+	AnalyticsRows(context.Context, domain.WorkspaceID, domain.AnalyticsKind, time.Time) ([]domain.AnalyticsRow, error)
 	// RecordAppActivity appends one entry to an app's activity log.
 	RecordAppActivity(context.Context, domain.AppActivity) error
 	// ListAppActivities reports the entries that match a filter, newest last.

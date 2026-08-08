@@ -3,6 +3,7 @@ package slack
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -200,6 +201,12 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
+	mux.HandleFunc("POST /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
+	mux.HandleFunc("GET /api/admin.analytics.messages.activity", h.adminAnalyticsMessagesActivity)
+	mux.HandleFunc("POST /api/admin.analytics.messages.activity", h.adminAnalyticsMessagesActivity)
+	mux.HandleFunc("GET /api/admin.analytics.messages.metadata", h.adminAnalyticsMessagesMetadata)
+	mux.HandleFunc("POST /api/admin.analytics.messages.metadata", h.adminAnalyticsMessagesMetadata)
 	mux.HandleFunc("GET /api/apps.activities.list", h.appsActivitiesList)
 	mux.HandleFunc("POST /api/apps.activities.list", h.appsActivitiesList)
 	mux.HandleFunc("GET /api/admin.apps.activities.list", h.adminAppsActivitiesList)
@@ -3262,6 +3269,148 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.analytics.getFile answers a gzipped stream of JSON lines, which is what
+// Slack answers: the file is meant to be piped to a store, not parsed out of a
+// JSON envelope. admin.analytics.messages.activity and .metadata answer the
+// same rows as JSON, for a caller reading a day rather than archiving it.
+func (h Handler) adminAnalyticsGetFile(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.analyticsRequest(w, r)
+	if !ok {
+		return
+	}
+	kind := domain.AnalyticsKind(strings.TrimSpace(fields["type"]))
+	day, dayErr := analyticsDay(fields["date"])
+	if !kind.Valid() || dayErr != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	// metadata_only describes the fields without reading anybody's day, so it
+	// answers JSON rather than a stream that would hold one line of schema.
+	if metadataOnly, err := parseBoolField(fields["metadata_only"]); err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	} else if metadataOnly {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "fields": analyticsFieldDescriptions(kind)})
+		return
+	}
+	rows, err := h.Messages.AdminAnalytics(r.Context(), principal.WorkspaceID, principal.UserID, kind, day)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", string(kind)+"-"+domain.AnalyticsDate(day)+".json.gz"))
+	w.WriteHeader(http.StatusOK)
+	compressor := gzip.NewWriter(w)
+	encoder := json.NewEncoder(compressor)
+	for _, row := range rows {
+		if err := encoder.Encode(analyticsRowResponse(row)); err != nil {
+			// The status line is already out, so the only honest signal left is
+			// to stop writing: a truncated gzip stream fails the reader's
+			// checksum rather than passing off a short day as a whole one.
+			return
+		}
+	}
+	compressor.Close()
+}
+
+func (h Handler) adminAnalyticsMessagesActivity(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.analyticsRequest(w, r)
+	if !ok {
+		return
+	}
+	day, err := analyticsDay(fields["date"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	rows, err := h.Messages.AdminAnalytics(r.Context(), principal.WorkspaceID, principal.UserID, domain.AnalyticsConversations, day)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	values := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, analyticsRowResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "activity": values})
+}
+
+func (h Handler) adminAnalyticsMessagesMetadata(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.analyticsRequest(w, r); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "fields": analyticsFieldDescriptions(domain.AnalyticsConversations)})
+}
+
+func (h Handler) analyticsRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, map[string]string, bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAnalyticsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	return principal, fields, true
+}
+
+// analyticsDay reads Slack's YYYY-MM-DD argument. An absent date means
+// yesterday, which is the most recent whole day there is.
+func analyticsDay(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Now().UTC().AddDate(0, 0, -1).Truncate(24 * time.Hour), nil
+	}
+	day, err := domain.ParseAnalyticsDate(trimmed)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return day.UTC(), nil
+}
+
+func analyticsRowResponse(row domain.AnalyticsRow) map[string]any {
+	value := map[string]any{
+		"date":            row.Date,
+		"messages_posted": row.MessagesPosted,
+	}
+	if row.Kind == domain.AnalyticsMember {
+		value["user_id"] = row.EntityID
+		value["user_name"] = row.Name
+		value["reactions_added"] = row.ReactionsAdded
+		value["is_active"] = row.IsActive
+		return value
+	}
+	value["channel_id"] = row.EntityID
+	value["channel_name"] = row.Name
+	value["member_count"] = row.MemberCount
+	return value
+}
+
+// analyticsFieldDescriptions names what each column of a file holds. Slack
+// answers this so a reader can build a table before it downloads a day.
+func analyticsFieldDescriptions(kind domain.AnalyticsKind) []map[string]any {
+	shared := []map[string]any{
+		{"name": "date", "type": "string", "description": "The day these counts cover, as YYYY-MM-DD."},
+		{"name": "messages_posted", "type": "integer", "description": "Messages posted on that day."},
+	}
+	if kind == domain.AnalyticsMember {
+		return append(shared,
+			map[string]any{"name": "user_id", "type": "string", "description": "The member these counts describe."},
+			map[string]any{"name": "user_name", "type": "string", "description": "That member's name."},
+			map[string]any{"name": "reactions_added", "type": "integer", "description": "Reactions the member added on that day."},
+			map[string]any{"name": "is_active", "type": "boolean", "description": "Whether the membership was active."},
+		)
+	}
+	return append(shared,
+		map[string]any{"name": "channel_id", "type": "string", "description": "The channel these counts describe."},
+		map[string]any{"name": "channel_name", "type": "string", "description": "That channel's name."},
+		map[string]any{"name": "member_count", "type": "integer", "description": "Members the channel held when the file was built."},
+	)
 }
 
 // apps.activities.list reports one app's own activity log, and
