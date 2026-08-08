@@ -29,11 +29,16 @@ import (
 )
 
 var (
-	ErrInvalidMessage           = errors.New("message text and conversation are required")
-	ErrInvalidTimestamp         = errors.New("message timestamp is invalid")
-	ErrMessageNotOwned          = errors.New("message is not owned by user")
-	ErrMessageAlreadyDeleted    = errors.New("message is already deleted")
-	ErrInvalidConversation      = errors.New("conversation name is invalid")
+	ErrInvalidMessage        = errors.New("message text and conversation are required")
+	ErrInvalidTimestamp      = errors.New("message timestamp is invalid")
+	ErrMessageNotOwned       = errors.New("message is not owned by user")
+	ErrMessageAlreadyDeleted = errors.New("message is already deleted")
+	ErrInvalidConversation   = errors.New("conversation name is invalid")
+	// ErrBarrieredFromMember is refusal by an information barrier. It is its
+	// own error because "you may not reach this person" is a different fact
+	// from a malformed request or a member who is not here, and an
+	// administrator reading a support question needs to tell them apart.
+	ErrBarrieredFromMember      = errors.New("an information barrier separates these members")
 	ErrInvalidWorkspace         = errors.New("workspace settings are invalid")
 	ErrInvalidConversationPrefs = errors.New("conversation preferences are invalid")
 	ErrInvalidReaction          = errors.New("reaction name is invalid")
@@ -4585,6 +4590,74 @@ func (m Messages) Conversations(ctx context.Context, workspaceID domain.Workspac
 	return m.Store.ListConversations(ctx, workspaceID, userID, request)
 }
 
+// barrierSeparates reports whether an information barrier stops any two of the
+// named members from reaching each other. A barrier that is stored and never
+// consulted is a setting an administrator believes in and the product ignores,
+// which is worse than not offering it.
+//
+// The read is deliberately direct rather than cached: a workspace holds a
+// handful of barriers, the groups are small, and a stale cache here would let
+// through exactly the contact the barrier exists to stop.
+func (m Messages) barrierSeparates(ctx context.Context, workspaceID domain.WorkspaceID, members []domain.UserID, subject domain.BarrierSubject) (bool, error) {
+	if len(members) < 2 {
+		return false, nil
+	}
+	page, err := m.Store.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: barrierReadCeiling})
+	if err != nil {
+		return false, err
+	}
+	present := make(map[domain.UserID]struct{}, len(members))
+	for _, member := range members {
+		present[member] = struct{}{}
+	}
+	for _, barrier := range page.Barriers {
+		if !slices.Contains(barrier.Subjects, subject) {
+			continue
+		}
+		primary, err := m.groupHolds(ctx, workspaceID, barrier.PrimaryGroupID, present)
+		if err != nil {
+			return false, err
+		}
+		if !primary {
+			continue
+		}
+		for _, group := range barrier.BarrieredFromIDs {
+			barriered, err := m.groupHolds(ctx, workspaceID, group, present)
+			if err != nil {
+				return false, err
+			}
+			if barriered {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// barrierReadCeiling bounds the barriers one check reads. A workspace with more
+// than this many is beyond what this check was designed for, and answering from
+// a partial list would silently let contact through.
+const barrierReadCeiling = 200
+
+func (m Messages) groupHolds(ctx context.Context, workspaceID domain.WorkspaceID, groupID domain.UserGroupID, members map[domain.UserID]struct{}) (bool, error) {
+	group, err := m.Store.GetUserGroup(ctx, workspaceID, groupID)
+	if err != nil {
+		// A barrier naming a group that has gone is not a reason to allow
+		// contact the barrier was built to stop, but it is also not this
+		// caller's failure to report. It holds nobody, so it separates nobody.
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, member := range group.Users {
+		if _, present := members[member]; present {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, users []domain.UserID) (domain.Conversation, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
@@ -4613,6 +4686,19 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 	// people total, including the caller.
 	if len(members) < 2 || len(members) > 9 {
 		return domain.Conversation{}, ErrInvalidConversation
+	}
+	// Two people or nine, the barrier subject is the kind of conversation this
+	// would be.
+	subject := domain.BarrierSubjectDirect
+	if len(members) > 2 {
+		subject = domain.BarrierSubjectGroupDirect
+	}
+	separated, err := m.barrierSeparates(ctx, workspaceID, members, subject)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if separated {
+		return domain.Conversation{}, ErrBarrieredFromMember
 	}
 	if existing, err := m.Store.FindDirectConversation(ctx, workspaceID, members); err == nil {
 		event, eventErr := newEvent(workspaceID, userID, events.NewPayload("conversation.direct_opened", events.String("channel_id", string(existing.ID))), time.Now().UTC())
@@ -7439,6 +7525,15 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if err != nil {
 		return domain.Call{}, err
 	}
+	// The people a call would put together must not include two the barrier
+	// separates. The caller is one of them: starting a call is joining it.
+	separated, err := m.barrierSeparates(ctx, workspaceID, append([]domain.UserID{actor}, normalized...), domain.BarrierSubjectCall)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if separated {
+		return domain.Call{}, ErrBarrieredFromMember
+	}
 	if err := m.validateCallUsers(ctx, workspaceID, normalized); err != nil {
 		return domain.Call{}, err
 	}
@@ -7514,6 +7609,19 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 	}
 	if err := m.validateCallUsers(ctx, workspaceID, changed); err != nil {
 		return err
+	}
+	if add {
+		// A barrier stops a call as surely as it stops a direct message, and
+		// the people who must not meet are everybody who would be on the call
+		// together - the ones already there as well as the ones joining.
+		together := append(append([]domain.UserID{}, value.Participants...), changed...)
+		separated, err := m.barrierSeparates(ctx, workspaceID, together, domain.BarrierSubjectCall)
+		if err != nil {
+			return err
+		}
+		if separated {
+			return ErrBarrieredFromMember
+		}
 	}
 	set := make(map[domain.UserID]struct{}, len(value.Participants)+len(changed))
 	if add {

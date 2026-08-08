@@ -270,3 +270,68 @@ func itoa(value int64) string {
 }
 
 var _ = memory.New
+
+// TestInformationBarrierStopsContact holds what a barrier is for. It was stored
+// and reported and consulted by nothing, so an administrator could build one,
+// see it listed, and watch the two groups carry on talking.
+func TestInformationBarrierStopsContact(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	now := time.Now().UTC()
+	store.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
+	for _, group := range []domain.UserGroup{
+		{ID: "S1", WorkspaceID: "T1", Name: "Traders", Handle: "traders", Creator: "U1", UpdatedBy: "U1", Users: []domain.UserID{"U1"}, CreatedAt: now, UpdatedAt: now},
+		{ID: "S2", WorkspaceID: "T1", Name: "Analysts", Handle: "analysts", Creator: "U1", UpdatedBy: "U1", Users: []domain.UserID{"U2"}, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.CreateUserGroup(context.Background(), group, events.Event{
+			ID: domain.EventID("evt-barrier-" + string(group.ID)), WorkspaceID: "T1", ActorID: "U1",
+			Topic: "subteam.created", Payload: string(group.ID), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Before the barrier the two can open a direct conversation.
+	opened := adminCall(t, handler, http.MethodPost, "conversations.open", "users=U2")
+	if opened["ok"] != true {
+		t.Fatalf("conversations.open before the barrier=%v", opened)
+	}
+
+	created := adminCall(t, handler, http.MethodPost, "admin.barriers.create",
+		"primary_usergroup_id=S1&barriered_from_usergroup_ids=S2&restricted_subjects=im,mpim,call")
+	if created["ok"] != true {
+		t.Fatalf("barriers.create=%v", created)
+	}
+
+	// A direct conversation between the separated groups is refused, and the
+	// refusal says why rather than reporting a missing member.
+	blocked := adminCall(t, handler, http.MethodPost, "conversations.open", "users=U2")
+	if blocked["error"] != "barriered_from_member" {
+		t.Fatalf("the barrier did not stop a direct conversation: %v", blocked)
+	}
+	// A group direct message carrying one of them is stopped too.
+	blockedGroup := adminCall(t, handler, http.MethodPost, "conversations.open", "users=U2,U3")
+	if blockedGroup["error"] != "barriered_from_member" {
+		t.Fatalf("the barrier did not stop a group conversation: %v", blockedGroup)
+	}
+	// Somebody in neither group is unaffected.
+	unaffected := adminCall(t, handler, http.MethodPost, "conversations.open", "users=U3")
+	if unaffected["ok"] != true {
+		t.Fatalf("the barrier stopped an unrelated conversation: %v", unaffected)
+	}
+
+	// A call between them is stopped by the same barrier.
+	call := adminCall(t, handler, http.MethodPost, "calls.add", "external_unique_id=call-barrier&join_url=https://example.invalid/call&users=U2")
+	if call["error"] != "barriered_from_member" {
+		t.Fatalf("the barrier did not stop a call: %v", call)
+	}
+
+	// Removing the barrier restores contact, which is what makes the refusal
+	// the barrier's doing rather than something else.
+	id := created["barrier"].(map[string]any)["id"].(string)
+	if deleted := adminCall(t, handler, http.MethodPost, "admin.barriers.delete", "barrier_id="+id); deleted["ok"] != true {
+		t.Fatalf("barriers.delete=%v", deleted)
+	}
+	if restored := adminCall(t, handler, http.MethodPost, "conversations.open", "users=U2"); restored["ok"] != true {
+		t.Fatalf("contact was not restored after the barrier was removed: %v", restored)
+	}
+}

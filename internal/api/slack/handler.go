@@ -10781,6 +10781,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {
 		return "fatal_error"
 	}
+	// An information barrier is a refusal about who may reach whom, which is
+	// neither a malformed request nor a member who is not here. Reporting it as
+	// either would send the caller looking for the wrong thing.
+	if errors.Is(err, service.ErrBarrieredFromMember) {
+		return "barriered_from_member"
+	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) {
 		return "emoji_already_exists"
 	}

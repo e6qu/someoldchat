@@ -195,6 +195,10 @@ var errorClasses = []errorClass{
 	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: service.ErrNotWorkspaceAdmin},
 	{key: "service.workflow_permission_denied", code: codes.PermissionDenied, sentinel: service.ErrWorkflowPermissionDenied},
 	{key: "service.function_access_denied", code: codes.PermissionDenied, sentinel: service.ErrFunctionAccessDenied},
+	// An information barrier is a standing rule, not a transient conflict: the
+	// caller cannot retry their way past it. It sits with the other specific
+	// permission denials, before the general one closes the group.
+	{key: "service.barriered_from_member", code: codes.PermissionDenied, sentinel: service.ErrBarrieredFromMember},
 	{key: "service.message_not_owned_by_app", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwnedByApp},
 	{key: "service.message_not_owned", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwned, restoresCode: true},
 	// Refusing to remove a workspace's last owner is a precondition failure, not

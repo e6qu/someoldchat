@@ -1533,7 +1533,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
+      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
   - method: admin.barriers.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -1543,7 +1543,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
+      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
   - method: admin.barriers.list
     status: behavior-compatible
     provenance: slack-reference
@@ -1553,7 +1553,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
+      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
   - method: admin.barriers.update
     status: behavior-compatible
     provenance: slack-reference
@@ -1563,7 +1563,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier is stored and reported; it does not yet filter direct messages, group direct messages or calls on the read path.
+      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
   - method: admin.conversations.bulkArchive
     status: behavior-compatible
     provenance: slack-reference

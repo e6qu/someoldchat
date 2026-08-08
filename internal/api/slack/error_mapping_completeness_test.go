@@ -222,6 +222,7 @@ func recordedNonPinnedCodes() map[string]string {
 		"too_many_teams":                 "conversations.acceptSharedInvite declares no error enum; the 250-organization capacity is a documented hard limit rather than a temporary failure",
 		"invitation_expired":             "admin.inviteRequests.* declares no error enum; an invitation that has aged out is a distinct outcome from a malformed one and the remedy differs",
 		"barrier_not_found":              "admin.barriers.* is absent from the pinned snapshot; a barrier that does not exist is neither a channel nor a user group",
+		"barriered_from_member":          "the refusal an information barrier makes; admin.barriers.* is absent from the pinned snapshot and no enum declares a code for being separated from somebody",
 		"token_not_found":                "apps.auth.external.* is absent from the pinned snapshot; an external credential that does not exist is neither an app nor a user",
 		"app_not_found":                  "admin.apps.* declares no error enum",
 		"usergroup_not_found":            "no pinned enum declares a subteam-not-found code, not even no_such_subteam",
