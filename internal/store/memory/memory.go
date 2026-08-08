@@ -1361,7 +1361,7 @@ func (s *Store) SetWorkspaceDefaultChannels(_ context.Context, id domain.Workspa
 	}
 	for _, channel := range channels {
 		conversation, exists := s.conversations[channel]
-		if !exists || conversation.WorkspaceID != id || conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
+		if !exists || conversation.WorkspaceID != id || conversation.IsPrivate || conversation.IsDirectOrGroup() {
 			return domain.Workspace{}, store.ErrNotFound
 		}
 	}
@@ -2029,7 +2029,7 @@ func (s *Store) FindDirectConversation(_ context.Context, workspaceID domain.Wor
 		wanted[member] = struct{}{}
 	}
 	for id, conversation := range s.conversations {
-		if conversation.WorkspaceID != workspaceID || (!conversation.IsDirect && !conversation.IsGroupDirect) {
+		if conversation.WorkspaceID != workspaceID || (!conversation.IsDirectOrGroup()) {
 			continue
 		}
 		current := s.memberships[id]
@@ -2056,12 +2056,12 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.IsPrivate || (!conversation.IsDirect && !conversation.IsGroupDirect) || len(members) < 2 {
+	if !conversation.IsPrivate || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
 	for id, existing := range s.conversations {
-		if existing.WorkspaceID != conversation.WorkspaceID || (!existing.IsDirect && !existing.IsGroupDirect) {
+		if existing.WorkspaceID != conversation.WorkspaceID || (!existing.IsDirectOrGroup()) {
 			continue
 		}
 		currentMembers := make([]domain.UserID, 0, len(s.memberships[id]))
@@ -2108,7 +2108,7 @@ func (s *Store) ExpandDirectConversation(_ context.Context, expansion domain.Dir
 	defer s.mu.Unlock()
 
 	source, exists := s.conversations[expansion.Source]
-	if !exists || source.WorkspaceID != expansion.Target.WorkspaceID || (!source.IsDirect && !source.IsGroupDirect) {
+	if !exists || source.WorkspaceID != expansion.Target.WorkspaceID || (!source.IsDirectOrGroup()) {
 		return store.ErrNotFound
 	}
 	if !expansion.Target.IsPrivate || expansion.Target.IsDirect || !expansion.Target.IsGroupDirect || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
@@ -2138,7 +2138,7 @@ func (s *Store) ExpandDirectConversation(_ context.Context, expansion domain.Dir
 	}
 	wantedKey := domain.DirectConversationKey(expansion.Target.WorkspaceID, expansion.Members)
 	for id, existing := range s.conversations {
-		if existing.WorkspaceID != expansion.Target.WorkspaceID || (!existing.IsDirect && !existing.IsGroupDirect) {
+		if existing.WorkspaceID != expansion.Target.WorkspaceID || (!existing.IsDirectOrGroup()) {
 			continue
 		}
 		current := make([]domain.UserID, 0, len(s.memberships[id]))
@@ -2222,7 +2222,7 @@ func (s *Store) ConvertGroupDirectToPrivate(_ context.Context, conversion domain
 		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
 	for id, existing := range s.conversations {
-		if id != value.ID && existing.WorkspaceID == value.WorkspaceID && !existing.IsDirect && !existing.IsGroupDirect && existing.Name == conversion.Name {
+		if id != value.ID && existing.WorkspaceID == value.WorkspaceID && !existing.IsDirectOrGroup() && existing.Name == conversion.Name {
 			return domain.Conversation{}, store.ErrAlreadyExists
 		}
 	}
@@ -2279,7 +2279,7 @@ func (s *Store) insertCommittedMessageLocked(message domain.Message) {
 	values[index] = message
 	s.messages[message.Conversation] = values
 	conversation := s.conversations[message.Conversation]
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		for member := range s.memberships[message.Conversation] {
 			delete(s.closedDirects, directOpenKey(message.WorkspaceID, member, message.Conversation))
 		}
@@ -2295,7 +2295,7 @@ func (s *Store) SetDirectConversationOpen(_ context.Context, workspace domain.Wo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	conversation, exists := s.conversations[conversationID]
-	if !exists || conversation.WorkspaceID != workspace || (!conversation.IsDirect && !conversation.IsGroupDirect) {
+	if !exists || conversation.WorkspaceID != workspace || (!conversation.IsDirectOrGroup()) {
 		return false, store.ErrNotFound
 	}
 	if _, member := s.memberships[conversationID][user]; !member {
@@ -2324,9 +2324,9 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.IsDirect && !conversation.IsGroupDirect {
+	if !conversation.IsDirectOrGroup() {
 		for _, existing := range s.conversations {
-			if existing.WorkspaceID == conversation.WorkspaceID && !existing.IsDirect && !existing.IsGroupDirect && existing.Name == conversation.Name {
+			if existing.WorkspaceID == conversation.WorkspaceID && !existing.IsDirectOrGroup() && existing.Name == conversation.Name {
 				return store.ErrAlreadyExists
 			}
 		}
@@ -2354,9 +2354,9 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !value.IsDirect && !value.IsGroupDirect {
+	if !value.IsDirectOrGroup() {
 		for id, existing := range s.conversations {
-			if id != conversation && existing.WorkspaceID == value.WorkspaceID && !existing.IsDirect && !existing.IsGroupDirect && existing.Name == name {
+			if id != conversation && existing.WorkspaceID == value.WorkspaceID && !existing.IsDirectOrGroup() && existing.Name == name {
 				return domain.Conversation{}, store.ErrAlreadyExists
 			}
 		}
@@ -2416,7 +2416,7 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	if !ok || value.WorkspaceID != workspace {
 		return store.ErrNotFound
 	}
-	if value.IsDirect || value.IsGroupDirect {
+	if value.IsDirectOrGroup() {
 		return store.ErrInvalidConversationType
 	}
 	for _, message := range s.messages[conversation] {
@@ -2654,7 +2654,7 @@ func (s *Store) WorkspaceAnalytics(_ context.Context, workspace domain.Workspace
 		if conversation.WorkspaceID != workspace {
 			continue
 		}
-		if !conversation.IsDirect && !conversation.IsGroupDirect {
+		if !conversation.IsDirectOrGroup() {
 			switch {
 			case conversation.Archived:
 				result.ArchivedChannels++
@@ -2676,7 +2676,7 @@ func (s *Store) WorkspaceAnalytics(_ context.Context, workspace domain.Workspace
 			result.RecentMessages++
 			recent++
 		}
-		if recent > 0 && !conversation.IsDirect && !conversation.IsGroupDirect {
+		if recent > 0 && !conversation.IsDirectOrGroup() {
 			activity = append(activity, domain.ChannelActivity{ConversationID: id, Name: conversation.Name, Messages: recent})
 		}
 	}
@@ -5006,7 +5006,7 @@ func (s *Store) setConversationVisibility(conversation domain.ConversationID, pr
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if value.IsDirect || value.IsGroupDirect || value.IsPrivate == private {
+	if value.IsDirectOrGroup() || value.IsPrivate == private {
 		return domain.Conversation{}, store.ErrInvalidConversationType
 	}
 	value.IsPrivate = private
@@ -5353,7 +5353,7 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 	if !ok {
 		return store.ErrNotFound
 	}
-	if value.IsDirect || value.IsGroupDirect || value.Archived {
+	if value.IsDirectOrGroup() || value.Archived {
 		return store.ErrInvalidConversationType
 	}
 	for _, user := range users {
@@ -6123,13 +6123,13 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				continue
 			}
 		}
-		if conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
+		if conversation.IsPrivate || conversation.IsDirectOrGroup() {
 			_, viewerMember := s.memberships[conversation.ID][user]
 			_, subjectMember := s.memberships[conversation.ID][memberUser]
 			if !viewerMember || !subjectMember {
 				continue
 			}
-			if !request.IncludeClosedDirects && (conversation.IsDirect || conversation.IsGroupDirect) {
+			if !request.IncludeClosedDirects && (conversation.IsDirectOrGroup()) {
 				if _, closed := s.closedDirects[directOpenKey(workspace, user, conversation.ID)]; closed {
 					continue
 				}
@@ -6338,7 +6338,7 @@ func (s *Store) commitMessageLocked(message domain.Message, event events.Event, 
 	values[index] = message
 	s.messages[message.Conversation] = values
 	conversation := s.conversations[message.Conversation]
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		for member := range s.memberships[message.Conversation] {
 			delete(s.closedDirects, directOpenKey(message.WorkspaceID, member, message.Conversation))
 		}
@@ -6397,7 +6397,7 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 		}
 	}
 	for user := range s.memberships[message.Conversation] {
-		if conversation.IsDirect || conversation.IsGroupDirect {
+		if conversation.IsDirectOrGroup() {
 			add(user, domain.ActivityDM)
 		}
 		workspacePreferences := domain.DefaultWorkspaceNotificationPreferences(message.WorkspaceID, user)
@@ -6409,7 +6409,7 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 			conversationPreferences = stored
 		}
 		effective := conversationPreferences.EffectiveLevel(workspacePreferences)
-		if message.ThreadTimestamp == "" && !conversation.IsDirect && !conversation.IsGroupDirect {
+		if message.ThreadTimestamp == "" && !conversation.IsDirectOrGroup() {
 			if effective == domain.NotificationAll && workspacePreferences.ActivityChannels {
 				add(user, domain.ActivityChannel)
 			}
@@ -6464,7 +6464,7 @@ func (s *Store) canViewActivitySourceLocked(workspace domain.WorkspaceID, user d
 	if !ok || !membership.Active {
 		return false
 	}
-	private := conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect
+	private := conversation.IsPrivate || conversation.IsDirectOrGroup()
 	if !private {
 		return conversation.WorkspaceID == workspace
 	}
@@ -8840,7 +8840,7 @@ func (s *Store) SetRemoteFileShares(_ context.Context, workspace domain.Workspac
 		}
 		for _, channel := range channels {
 			conversation, exists := s.conversations[channel]
-			if !exists || conversation.WorkspaceID != workspace || conversation.IsDirect || conversation.IsGroupDirect {
+			if !exists || conversation.WorkspaceID != workspace || conversation.IsDirectOrGroup() {
 				return domain.RemoteFile{}, store.ErrNotFound
 			}
 		}

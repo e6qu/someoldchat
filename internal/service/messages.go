@@ -1473,7 +1473,7 @@ func (m Messages) ConversationInfo(ctx context.Context, workspaceID domain.Works
 // conversation: a channel that will not render because its sharing state could
 // not be read is a worse outcome than one whose Connect badge is missing.
 func (m Messages) withSharedIdentity(ctx context.Context, conversation domain.Conversation) domain.Conversation {
-	if conversation.ID == "" || conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.ID == "" || conversation.IsDirectOrGroup() {
 		return conversation
 	}
 	if teams, _, err := m.Store.ListConversationTeams(ctx, conversation.WorkspaceID, conversation.ID); err == nil {
@@ -1689,7 +1689,7 @@ func (m Messages) AdminSetConversationArchived(ctx context.Context, workspaceID 
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	if archived == conversation.Archived {
@@ -1722,7 +1722,7 @@ func (m Messages) AdminDeleteConversation(ctx context.Context, workspaceID domai
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		return ErrInvalidConversation
 	}
 	event, err := conversationLifecycleEvent(workspaceID, "conversation.deleted", conversation, actorID)
@@ -1748,7 +1748,7 @@ func (m Messages) changeConversationAccessGroup(ctx context.Context, workspaceID
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	if !conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect || groupID == "" {
+	if !conversation.IsPrivate || conversation.IsDirectOrGroup() || groupID == "" {
 		return ErrInvalidConversation
 	}
 	if _, err := m.Store.GetUserGroup(ctx, workspaceID, groupID); err != nil {
@@ -1797,7 +1797,7 @@ func (m Messages) AdminListConversationAccessGroups(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return nil, store.ErrNotFound
 	}
-	if !conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
+	if !conversation.IsPrivate || conversation.IsDirectOrGroup() {
 		return nil, ErrInvalidConversation
 	}
 	return m.Store.ListConversationAccessGroups(ctx, workspaceID, conversationID)
@@ -3705,7 +3705,7 @@ func (m Messages) AddPeopleToDirectConversation(ctx context.Context, workspaceID
 	if err != nil || source.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !source.IsDirect && !source.IsGroupDirect {
+	if !source.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	page, err := m.Store.ListConversationMembers(ctx, sourceID, domain.PageRequest{Limit: 20})
@@ -3821,7 +3821,7 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !conversation.IsGroupDirect || conversation.IsDirect {
+	if !conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
@@ -3966,7 +3966,7 @@ func (m Messages) SetConversationArchived(ctx context.Context, workspaceID domai
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	if archived == conversation.Archived {
@@ -4012,7 +4012,7 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	// refuses this too, inside the write transaction, which is where the race-free
 	// enforcement belongs — but every neighbouring method states its own
 	// precondition, and this one silently depended on a backend detail.
-	if conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsPrivate || conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, store.ErrNotFound
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload(
@@ -4064,7 +4064,7 @@ func (m Messages) inviteConversationMembersWithOptions(ctx context.Context, work
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return conversationInviteResult{}, store.ErrNotFound
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect || conversation.Archived {
+	if conversation.IsDirectOrGroup() || conversation.Archived {
 		return conversationInviteResult{}, ErrInvalidConversation
 	}
 
@@ -4127,7 +4127,7 @@ func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspa
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsPrivate || conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	event, err := newEvent(workspaceID, userID, conversationPayload("conversation.converted_to_private", conversationID), time.Now().UTC())
@@ -4157,7 +4157,7 @@ func (m Messages) AdminConvertConversationToPublic(ctx context.Context, workspac
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
+	if !conversation.IsPrivate || conversation.IsDirectOrGroup() {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	teams, _, err := m.Store.ListConversationTeams(ctx, workspaceID, conversationID)
@@ -4181,7 +4181,7 @@ func (m Messages) AdminGetConversationPrefs(ctx context.Context, workspaceID dom
 		return domain.ConversationPrefs{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirect || conversation.IsGroupDirect {
+	if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirectOrGroup() {
 		return domain.ConversationPrefs{}, store.ErrNotFound
 	}
 	return m.Store.GetConversationPrefs(ctx, conversationID)
@@ -4192,7 +4192,7 @@ func (m Messages) AdminSetConversationPrefs(ctx context.Context, workspaceID dom
 		return domain.ConversationPrefs{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirect || conversation.IsGroupDirect {
+	if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirectOrGroup() {
 		return domain.ConversationPrefs{}, store.ErrNotFound
 	}
 	value, err = normalizeConversationPrefs(value)
@@ -4781,7 +4781,7 @@ func (m Messages) adminInviteConversationMembers(ctx context.Context, workspaceI
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect || conversation.Archived {
+	if conversation.IsDirectOrGroup() || conversation.Archived {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	seen := make(map[domain.UserID]struct{}, len(users))
@@ -4831,7 +4831,7 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 	if conversation.Archived {
 		return ErrInvalidConversation
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.direct_closed", events.String("channel_id", string(conversationID))), time.Now().UTC())
 		if err != nil {
 			return err
@@ -4845,7 +4845,7 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 		}
 		return nil
 	}
-	if !conversation.IsDirect && !conversation.IsGroupDirect {
+	if !conversation.IsDirectOrGroup() {
 		required, err := m.isDefaultConversation(ctx, workspaceID, conversationID)
 		if err != nil {
 			return err

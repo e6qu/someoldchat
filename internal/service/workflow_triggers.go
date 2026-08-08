@@ -298,7 +298,7 @@ func (m Messages) normalizeWorkflowTriggerConfig(ctx context.Context, value *dom
 			return ErrInvalidTriggerConfig
 		}
 		channel, err := m.Store.GetConversation(ctx, domain.ConversationID(strings.TrimSpace(event.ChannelIDs[0])))
-		if err != nil || channel.WorkspaceID != value.WorkspaceID || channel.IsDirect || channel.IsGroupDirect {
+		if err != nil || channel.WorkspaceID != value.WorkspaceID || channel.IsDirectOrGroup() {
 			return ErrInvalidTriggerConfig
 		}
 		normalized := workflowEventConfig{ChannelIDs: []string{string(channel.ID)}}

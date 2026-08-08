@@ -5425,7 +5425,7 @@ func (s *Store) FindDirectConversation(ctx context.Context, workspaceID domain.W
 }
 
 func (s *Store) CreateDirectConversation(ctx context.Context, conversation domain.Conversation, members []domain.UserID, event events.Event) error {
-	if !conversation.IsPrivate || (!conversation.IsDirect && !conversation.IsGroupDirect) || len(members) < 2 {
+	if !conversation.IsPrivate || (!conversation.IsDirectOrGroup()) || len(members) < 2 {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

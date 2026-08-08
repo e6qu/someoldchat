@@ -766,7 +766,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatalf("delete scheduled message: %v", err)
 	}
 	direct, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
-	if err != nil || !direct.IsDirect || direct.IsGroupDirect {
+	if err != nil || !direct.IsDirectOrGroup() {
 		t.Fatalf("direct=%+v err=%v", direct, err)
 	}
 	reused, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})

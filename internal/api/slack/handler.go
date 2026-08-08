@@ -4800,7 +4800,7 @@ func profileResponse(user domain.User) map[string]any {
 }
 
 func conversationResponse(conversation domain.Conversation) map[string]any {
-	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.IsPrivate, "is_channel": !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect, "is_im": conversation.IsDirect, "is_mpim": conversation.IsGroupDirect, "is_member": true, "team_id": conversation.WorkspaceID,
+	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.IsPrivate, "is_channel": conversation.Kind() == domain.ConversationTypePublic, "is_im": conversation.IsDirect, "is_mpim": conversation.IsGroupDirect, "is_member": true, "team_id": conversation.WorkspaceID,
 		// The Slack Connect identity. Pending and shared are different facts —
 		// an outstanding invitation is not a connection — and a client renders
 		// each differently, so neither is derived from the other.
@@ -5004,7 +5004,7 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "is_archived")
 		return
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		writeError(w, "method_not_supported_for_channel_type")
 		return
 	}
@@ -5140,7 +5140,7 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	if info.IsDirect || info.IsGroupDirect {
+	if info.IsDirectOrGroup() {
 		writeError(w, "method_not_supported_for_channel_type")
 		return
 	}
@@ -5213,7 +5213,7 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	if info.IsDirect || info.IsGroupDirect {
+	if info.IsDirectOrGroup() {
 		writeError(w, "method_not_supported_for_channel_type")
 		return
 	}
@@ -5338,7 +5338,7 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	if !conversation.IsDirect && !conversation.IsGroupDirect {
+	if !conversation.IsDirectOrGroup() {
 		writeError(w, "method_not_supported_for_channel_type")
 		return
 	}

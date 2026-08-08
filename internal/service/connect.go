@@ -64,7 +64,7 @@ func (m Messages) InviteShared(ctx context.Context, workspaceID domain.Workspace
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.SharedInvite{}, store.ErrNotFound
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		return domain.SharedInvite{}, ErrInvalidSharedInvite
 	}
 	if conversation.Archived {

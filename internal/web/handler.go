@@ -5043,13 +5043,13 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	channelPrefix := "#"
 	channelName := conversationName(conversation)
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		channelPrefix = ""
 		if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
 			channelName = participants
 		}
 	}
-	canJoin := !isMember && !conversation.Archived && !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect && principal.HasScope(auth.ScopeChannelsManage)
+	canJoin := !isMember && !conversation.Archived && conversation.Kind() == domain.ConversationTypePublic && principal.HasScope(auth.ScopeChannelsManage)
 	canPost := isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite)
 	var composerMembers []memberView
 	var composerGroups []userGroupView
@@ -5921,12 +5921,12 @@ func (c *appActionOptionCatalog) loadConversations(ctx context.Context, h Handle
 		}
 		for _, conversation := range page.Conversations {
 			label := conversationName(conversation)
-			if !conversation.IsDirect && !conversation.IsGroupDirect {
+			if !conversation.IsDirectOrGroup() {
 				label = "#" + label
 			}
 			option := messageActionOptionView{Text: label, Value: string(conversation.ID)}
 			c.conversations = append(c.conversations, option)
-			if !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect {
+			if conversation.Kind() == domain.ConversationTypePublic {
 				c.channels = append(c.channels, option)
 			}
 		}
@@ -6013,7 +6013,7 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 			// its own unread badge tells the reader to read what they are reading.
 			item.UnreadCount = 0
 		}
-		if !conversation.IsDirect && !conversation.IsGroupDirect {
+		if !conversation.IsDirectOrGroup() {
 			view.Channels = append(view.Channels, item)
 			continue
 		}
@@ -6109,7 +6109,7 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 	}
 
 	canManage := isMember && principal.HasScope(auth.ScopeChannelsManage)
-	isChannel := !conversation.IsDirect && !conversation.IsGroupDirect
+	isChannel := !conversation.IsDirectOrGroup()
 	invitees := make([]memberView, 0)
 	if canManage && !conversation.Archived && (isChannel || len(members) < 9) {
 		cursor = ""
@@ -6477,7 +6477,7 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 			if conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation); conversationErr == nil {
 				view.ChannelName = conversationName(conversation)
 				view.ChannelPrefix = "#"
-				if conversation.IsDirect || conversation.IsGroupDirect {
+				if conversation.IsDirectOrGroup() {
 					view.ChannelPrefix = ""
 					if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
 						view.ChannelName = participants
@@ -6554,7 +6554,7 @@ func (h Handler) draftsAndSent(w http.ResponseWriter, r *http.Request) {
 		if conversationErr == nil {
 			name = conversationName(conversation)
 			prefix = "#"
-			if conversation.IsDirect || conversation.IsGroupDirect {
+			if conversation.IsDirectOrGroup() {
 				prefix = ""
 				if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
 					name = participants
@@ -7086,7 +7086,7 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 			// DMs always belong in Activity. The channel override controls are
 			// intentionally limited to channels until banner delivery itself is
 			// represented by this client.
-			if conversation.IsDirect || conversation.IsGroupDirect {
+			if conversation.IsDirectOrGroup() {
 				continue
 			}
 			override, preferenceErr := h.Messages.ConversationNotificationPreferences(
@@ -7936,7 +7936,7 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 		channelPrefix := "#"
 		if conversation, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation); err == nil {
 			channelName = conversationName(conversation)
-			if conversation.IsDirect || conversation.IsGroupDirect {
+			if conversation.IsDirectOrGroup() {
 				channelPrefix = ""
 				if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
 					channelName = participants
@@ -11021,7 +11021,7 @@ func (h Handler) addPeopleToDirectConversation(w http.ResponseWriter, r *http.Re
 	}
 	if fields["confirm"] != "true" {
 		conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
-		if err != nil || (!conversation.IsDirect && !conversation.IsGroupDirect) {
+		if err != nil || (!conversation.IsDirectOrGroup()) {
 			h.writeMutationError(w, r, http.StatusNotFound, "That direct message is no longer available", "Nothing was changed.")
 			return
 		}
@@ -11391,7 +11391,7 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
 		switch {
-		case errors.Is(err, store.ErrAlreadyExists) && (conversation.IsDirect || conversation.IsGroupDirect):
+		case errors.Is(err, store.ErrAlreadyExists) && (conversation.IsDirectOrGroup()):
 			h.redirectMutation(w, r, "/app/dms")
 		case errors.Is(err, service.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusConflict, "You have already left this conversation", "No membership was changed.")
@@ -11404,7 +11404,7 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		h.redirectMutation(w, r, "/app/dms")
 		return
 	}
@@ -11955,7 +11955,7 @@ func conversationMeta(conversation domain.Conversation) string {
 	if purpose := strings.TrimSpace(conversation.Purpose); purpose != "" {
 		return purpose
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirectOrGroup() {
 		return "Direct message"
 	}
 	if conversation.IsPrivate {
