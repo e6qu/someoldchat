@@ -3614,6 +3614,74 @@ func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domai
 	return page, nil
 }
 
+// AdminAssignAuthPolicy puts members under an authentication policy. Every
+// named member is checked before one row is written, so a request that names
+// somebody outside the workspace leaves nothing behind.
+func (m Messages) AdminAssignAuthPolicy(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	entities, err := m.authPolicyEntities(ctx, workspaceID, actorID, policy, kind, entityIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("auth.policy_entities_assigned",
+		events.String("policy_name", string(policy)), events.Int("entities", int64(len(entities)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetAuthPolicyEntities(ctx, entities, event)
+}
+
+// AdminRemoveAuthPolicyEntities takes members back out of the policy.
+func (m Messages) AdminRemoveAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	entities, err := m.authPolicyEntities(ctx, workspaceID, actorID, policy, kind, entityIDs)
+	if err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("auth.policy_entities_removed",
+		events.String("policy_name", string(policy)), events.Int("entities", int64(len(entities)))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteAuthPolicyEntities(ctx, entities, event)
+}
+
+// AdminAuthPolicyEntities reports who is under one policy.
+func (m Messages) AdminAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, request domain.PageRequest) (domain.AuthPolicyEntityPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	if !policy.Valid() || !kind.Valid() {
+		return domain.AuthPolicyEntityPage{}, ErrInvalidWorkspace
+	}
+	return m.Store.ListAuthPolicyEntities(ctx, workspaceID, policy, kind, request)
+}
+
+func (m Messages) authPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) ([]domain.AuthPolicyEntity, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+	if !policy.Valid() || !kind.Valid() || len(entityIDs) == 0 {
+		return nil, ErrInvalidWorkspace
+	}
+	now := time.Now().UTC()
+	entities := make([]domain.AuthPolicyEntity, 0, len(entityIDs))
+	for _, entityID := range entityIDs {
+		entityID = strings.TrimSpace(entityID)
+		if entityID == "" {
+			return nil, ErrInvalidWorkspace
+		}
+		// The only entity type Slack defines is the member, and the storage
+		// carries a foreign key to users, so an unknown identifier is refused
+		// here rather than becoming a constraint violation at commit.
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, domain.UserID(entityID)); err != nil {
+			return nil, store.ErrNotFound
+		}
+		entities = append(entities, domain.AuthPolicyEntity{
+			Policy: policy, EntityType: kind, EntityID: entityID, WorkspaceID: workspaceID, CreatedAt: now,
+		})
+	}
+	return entities, nil
+}
+
 // AdminAddRoleAssignments gives members a system role over entities. The
 // service checks every member before it writes one row, so an administrator who
 // names somebody outside the workspace learns it before the request lands.

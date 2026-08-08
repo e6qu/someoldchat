@@ -201,6 +201,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("POST /api/admin.auth.policy.assignEntities", h.adminAuthPolicyAssignEntities)
+	mux.HandleFunc("POST /api/admin.auth.policy.removeEntities", h.adminAuthPolicyRemoveEntities)
+	mux.HandleFunc("GET /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
+	mux.HandleFunc("POST /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
 	mux.HandleFunc("POST /api/admin.roles.addAssignments", h.adminRolesAddAssignments)
 	mux.HandleFunc("POST /api/admin.roles.removeAssignments", h.adminRolesRemoveAssignments)
 	mux.HandleFunc("GET /api/admin.roles.listAssignments", h.adminRolesListAssignments)
@@ -3227,6 +3231,101 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.auth.policy.assignEntities and admin.auth.policy.removeEntities put
+// members under an authentication policy and take them back out. Slack names
+// one policy and one entity type, and this deployment refuses any other, so a
+// caller learns at once rather than storing a policy nothing enforces.
+func (h Handler) adminAuthPolicyAssignEntities(w http.ResponseWriter, r *http.Request) {
+	h.changeAuthPolicyEntities(w, r, true)
+}
+
+func (h Handler) adminAuthPolicyRemoveEntities(w http.ResponseWriter, r *http.Request) {
+	h.changeAuthPolicyEntities(w, r, false)
+}
+
+func (h Handler) changeAuthPolicyEntities(w http.ResponseWriter, r *http.Request, adding bool) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	policy, kind, entityIDs, ok := authPolicyArguments(fields)
+	if !ok {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	change := h.Messages.AdminRemoveAuthPolicyEntities
+	if adding {
+		change = h.Messages.AdminAssignAuthPolicy
+	}
+	if err := change(r.Context(), principal.WorkspaceID, principal.UserID, policy, kind, entityIDs); err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// admin.auth.policy.getEntities reports who one policy applies to. Slack
+// answers the running total alongside the page, so a caller reading the first
+// page learns how many there are without walking every one of them.
+func (h Handler) adminAuthPolicyGetEntities(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminUsersRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	policy := domain.AuthPolicyName(strings.TrimSpace(fields["policy_name"]))
+	kind := authPolicyEntityType(fields["entity_type"])
+	if !policy.Valid() || !kind.Valid() {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	page, err := h.Messages.AdminAuthPolicyEntities(r.Context(), principal.WorkspaceID, principal.UserID, policy, kind, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	entities := make([]map[string]any, 0, len(page.Entities))
+	for _, entity := range page.Entities {
+		entities = append(entities, map[string]any{
+			"entity_id":   entity.EntityID,
+			"entity_type": string(entity.EntityType),
+			"date_add":    entity.CreatedAt.UTC().Unix(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "entities": entities,
+		"entity_total_count": page.TotalCount,
+		"response_metadata":  map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+func authPolicyArguments(fields map[string]string) (domain.AuthPolicyName, domain.PolicyEntityType, []string, bool) {
+	policy := domain.AuthPolicyName(strings.TrimSpace(fields["policy_name"]))
+	kind := authPolicyEntityType(fields["entity_type"])
+	entityIDs := parseIDList[string](fields["entity_ids"])
+	return policy, kind, entityIDs, policy.Valid() && kind.Valid() && len(entityIDs) > 0
+}
+
+// authPolicyEntityType folds the case Slack documents in upper case, because a
+// caller sending "user" means the member and nothing else.
+func authPolicyEntityType(value string) domain.PolicyEntityType {
+	return domain.PolicyEntityType(strings.ToUpper(strings.TrimSpace(value)))
 }
 
 // admin.roles.addAssignments and admin.roles.removeAssignments give and take a

@@ -140,6 +140,7 @@ func runQualification(t *testing.T, open opener) {
 		{"list grants are listed in one stable order", listGrantsAreListedInOneStableOrder},
 		{"a Slack Connect decision reaches its requester", connectDecisionReachesItsRequester},
 		{"role assignments agree on every profile", roleAssignmentsAgreeOnEveryProfile},
+		{"authentication policy entities agree on every profile", authPolicyEntitiesAgreeOnEveryProfile},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -1936,5 +1937,69 @@ func roleAssignmentsAgreeOnEveryProfile(t *testing.T, open opener) {
 	// Removing a triple that is not there is not an error.
 	if err := repository.DeleteRoleAssignments(ctx, assignments[:1], event("roles-remove-again", "role.assignments_removed")); err != nil {
 		t.Fatal(err)
+	}
+	// A member the workspace does not hold cannot hold a role: user_id carries
+	// a foreign key to users, so the write is refused on every profile.
+	absent := []domain.RoleAssignment{{RoleID: "Rl0A", EntityID: "C1", UserID: domain.UserID("U-absent-" + suffix), WorkspaceID: workspaceID, CreatedAt: now}}
+	if err := repository.SetRoleAssignments(ctx, absent, event("roles-absent", "role.assignments_added")); err == nil {
+		t.Fatal("a role assignment for a member outside the workspace was stored")
+	}
+}
+
+// authPolicyEntitiesAgreeOnEveryProfile holds the storage contract for
+// admin.auth.policy.*. The total count reports every entity under the policy
+// and not merely the page, so a caller reading one page still learns the size.
+func authPolicyEntitiesAgreeOnEveryProfile(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-policy-" + suffix)
+	first := domain.UserID("U-policy-a-" + suffix)
+	second := domain.UserID("U-policy-b-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: "{}", CreatedAt: now}
+	}
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Policy"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.UserID{first, second} {
+		if err := repository.SeedUser(ctx, domain.User{ID: id, WorkspaceID: workspaceID, Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entities := []domain.AuthPolicyEntity{
+		{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: string(second), WorkspaceID: workspaceID, CreatedAt: now},
+		{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: string(first), WorkspaceID: workspaceID, CreatedAt: now},
+	}
+	if err := repository.SetAuthPolicyEntities(ctx, entities, event("policy-add", "auth.policy_entities_assigned")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetAuthPolicyEntities(ctx, entities, event("policy-again", "auth.policy_entities_assigned")); err != nil {
+		t.Fatal(err)
+	}
+	page, err := repository.ListAuthPolicyEntities(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 1})
+	if err != nil || len(page.Entities) != 1 || page.Entities[0].EntityID != string(first) || !page.HasMore || page.TotalCount != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	tail, err := repository.ListAuthPolicyEntities(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+	if err != nil || len(tail.Entities) != 1 || tail.Entities[0].EntityID != string(second) || tail.HasMore || tail.TotalCount != 2 {
+		t.Fatalf("tail=%+v err=%v", tail, err)
+	}
+	if err := repository.DeleteAuthPolicyEntities(ctx, entities[:1], event("policy-remove", "auth.policy_entities_removed")); err != nil {
+		t.Fatal(err)
+	}
+	left, err := repository.ListAuthPolicyEntities(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10})
+	if err != nil || len(left.Entities) != 1 || left.Entities[0].EntityID != string(first) || left.TotalCount != 1 {
+		t.Fatalf("left=%+v err=%v", left, err)
+	}
+	// An entity the workspace does not hold cannot be stored: the column
+	// carries a foreign key to users, so the write is refused rather than
+	// leaving a policy that names nobody.
+	unknown := []domain.AuthPolicyEntity{{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: "U-absent-" + suffix, WorkspaceID: workspaceID, CreatedAt: now}}
+	if err := repository.SetAuthPolicyEntities(ctx, unknown, event("policy-unknown", "auth.policy_entities_assigned")); err == nil {
+		t.Fatal("an entity outside the workspace was stored")
 	}
 }

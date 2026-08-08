@@ -19,58 +19,61 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DirectoryService_Users_FullMethodName                       = "/sameoldchat.chat.v1.DirectoryService/Users"
-	DirectoryService_ConversationMembers_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/ConversationMembers"
-	DirectoryService_WorkspaceInfo_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/WorkspaceInfo"
-	DirectoryService_AuthorizedAppWorkspaces_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AuthorizedAppWorkspaces"
-	DirectoryService_TeamBillableInfo_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/TeamBillableInfo"
-	DirectoryService_RemoveUser_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/RemoveUser"
-	DirectoryService_SetUserRole_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
-	DirectoryService_SetUserExpiration_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
-	DirectoryService_UserExpiration_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/UserExpiration"
-	DirectoryService_DiscoverableContacts_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/DiscoverableContacts"
-	DirectoryService_AdminAddRoleAssignments_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AdminAddRoleAssignments"
-	DirectoryService_AdminRemoveRoleAssignments_FullMethodName  = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveRoleAssignments"
-	DirectoryService_AdminListRoleAssignments_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AdminListRoleAssignments"
-	DirectoryService_ResetUserSessions_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
-	DirectoryService_UserSessions_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
-	DirectoryService_ResetUserSessionsBulk_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
-	DirectoryService_Emojis_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/Emojis"
-	DirectoryService_AddEmoji_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AddEmoji"
-	DirectoryService_AddEmojiAlias_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AddEmojiAlias"
-	DirectoryService_RemoveEmoji_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/RemoveEmoji"
-	DirectoryService_RenameEmoji_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/RenameEmoji"
-	DirectoryService_SearchConversations_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/SearchConversations"
-	DirectoryService_SearchPeople_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/SearchPeople"
-	DirectoryService_SearchChannels_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/SearchChannels"
-	DirectoryService_SetWorkspaceName_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceName"
-	DirectoryService_AdminCreateWorkspace_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/AdminCreateWorkspace"
-	DirectoryService_RequestAppPermissions_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/RequestAppPermissions"
-	DirectoryService_SetWorkspaceDescription_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDescription"
-	DirectoryService_SetWorkspaceDiscoverability_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDiscoverability"
-	DirectoryService_SetWorkspaceIcon_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceIcon"
-	DirectoryService_SetWorkspaceDefaultChannels_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDefaultChannels"
-	DirectoryService_GetConversationPrefs_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/GetConversationPrefs"
-	DirectoryService_SetConversationPrefs_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetConversationPrefs"
-	DirectoryService_AdminTeamUsers_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminTeamUsers"
-	DirectoryService_AdminInviteUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminInviteUser"
-	DirectoryService_AdminCreateUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminCreateUser"
-	DirectoryService_AdminListUsers_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminListUsers"
-	DirectoryService_AdminAssignUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminAssignUser"
-	DirectoryService_AdminApproveInviteRequest_FullMethodName   = "/sameoldchat.chat.v1.DirectoryService/AdminApproveInviteRequest"
-	DirectoryService_AdminDenyInviteRequest_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminDenyInviteRequest"
-	DirectoryService_AdminListInviteRequests_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AdminListInviteRequests"
-	DirectoryService_UserWorkspaces_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/UserWorkspaces"
-	DirectoryService_InvitationPreview_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/InvitationPreview"
-	DirectoryService_AcceptInvitationForEmail_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AcceptInvitationForEmail"
-	DirectoryService_AdminApproveApp_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminApproveApp"
-	DirectoryService_AdminCancelAppRequest_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminCancelAppRequest"
-	DirectoryService_AdminUninstallApps_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminUninstallApps"
-	DirectoryService_AdminRestrictApp_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminRestrictApp"
-	DirectoryService_AdminListApps_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminListApps"
-	DirectoryService_GetWorkspaceMembership_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/GetWorkspaceMembership"
-	DirectoryService_ProvisionExternalUser_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ProvisionExternalUser"
-	DirectoryService_SynchronizeExternalUserRole_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/SynchronizeExternalUserRole"
+	DirectoryService_Users_FullMethodName                         = "/sameoldchat.chat.v1.DirectoryService/Users"
+	DirectoryService_ConversationMembers_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/ConversationMembers"
+	DirectoryService_WorkspaceInfo_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/WorkspaceInfo"
+	DirectoryService_AuthorizedAppWorkspaces_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AuthorizedAppWorkspaces"
+	DirectoryService_TeamBillableInfo_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/TeamBillableInfo"
+	DirectoryService_RemoveUser_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/RemoveUser"
+	DirectoryService_SetUserRole_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
+	DirectoryService_SetUserExpiration_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
+	DirectoryService_UserExpiration_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserExpiration"
+	DirectoryService_DiscoverableContacts_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/DiscoverableContacts"
+	DirectoryService_AdminAddRoleAssignments_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminAddRoleAssignments"
+	DirectoryService_AdminRemoveRoleAssignments_FullMethodName    = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveRoleAssignments"
+	DirectoryService_AdminListRoleAssignments_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminListRoleAssignments"
+	DirectoryService_AdminAssignAuthPolicy_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/AdminAssignAuthPolicy"
+	DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveAuthPolicyEntities"
+	DirectoryService_AdminAuthPolicyEntities_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminAuthPolicyEntities"
+	DirectoryService_ResetUserSessions_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
+	DirectoryService_UserSessions_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
+	DirectoryService_ResetUserSessionsBulk_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
+	DirectoryService_Emojis_FullMethodName                        = "/sameoldchat.chat.v1.DirectoryService/Emojis"
+	DirectoryService_AddEmoji_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/AddEmoji"
+	DirectoryService_AddEmojiAlias_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/AddEmojiAlias"
+	DirectoryService_RemoveEmoji_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/RemoveEmoji"
+	DirectoryService_RenameEmoji_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/RenameEmoji"
+	DirectoryService_SearchConversations_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/SearchConversations"
+	DirectoryService_SearchPeople_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/SearchPeople"
+	DirectoryService_SearchChannels_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/SearchChannels"
+	DirectoryService_SetWorkspaceName_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceName"
+	DirectoryService_AdminCreateWorkspace_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminCreateWorkspace"
+	DirectoryService_RequestAppPermissions_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/RequestAppPermissions"
+	DirectoryService_SetWorkspaceDescription_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDescription"
+	DirectoryService_SetWorkspaceDiscoverability_FullMethodName   = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDiscoverability"
+	DirectoryService_SetWorkspaceIcon_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceIcon"
+	DirectoryService_SetWorkspaceDefaultChannels_FullMethodName   = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDefaultChannels"
+	DirectoryService_GetConversationPrefs_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/GetConversationPrefs"
+	DirectoryService_SetConversationPrefs_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/SetConversationPrefs"
+	DirectoryService_AdminTeamUsers_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/AdminTeamUsers"
+	DirectoryService_AdminInviteUser_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminInviteUser"
+	DirectoryService_AdminCreateUser_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminCreateUser"
+	DirectoryService_AdminListUsers_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/AdminListUsers"
+	DirectoryService_AdminAssignUser_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminAssignUser"
+	DirectoryService_AdminApproveInviteRequest_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AdminApproveInviteRequest"
+	DirectoryService_AdminDenyInviteRequest_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/AdminDenyInviteRequest"
+	DirectoryService_AdminListInviteRequests_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/AdminListInviteRequests"
+	DirectoryService_UserWorkspaces_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/UserWorkspaces"
+	DirectoryService_InvitationPreview_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/InvitationPreview"
+	DirectoryService_AcceptInvitationForEmail_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AcceptInvitationForEmail"
+	DirectoryService_AdminApproveApp_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminApproveApp"
+	DirectoryService_AdminCancelAppRequest_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/AdminCancelAppRequest"
+	DirectoryService_AdminUninstallApps_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminUninstallApps"
+	DirectoryService_AdminRestrictApp_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminRestrictApp"
+	DirectoryService_AdminListApps_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/AdminListApps"
+	DirectoryService_GetWorkspaceMembership_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/GetWorkspaceMembership"
+	DirectoryService_ProvisionExternalUser_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/ProvisionExternalUser"
+	DirectoryService_SynchronizeExternalUserRole_FullMethodName   = "/sameoldchat.chat.v1.DirectoryService/SynchronizeExternalUserRole"
 )
 
 // DirectoryServiceClient is the client API for DirectoryService service.
@@ -90,6 +93,9 @@ type DirectoryServiceClient interface {
 	AdminAddRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRemoveRoleAssignments(ctx context.Context, in *RoleAssignmentMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListRoleAssignments(ctx context.Context, in *RoleAssignmentsRequest, opts ...grpc.CallOption) (*RoleAssignmentPage, error)
+	AdminAssignAuthPolicy(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminRemoveAuthPolicyEntities(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminAuthPolicyEntities(ctx context.Context, in *AuthPolicyEntitiesRequest, opts ...grpc.CallOption) (*AuthPolicyEntityPage, error)
 	ResetUserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -263,6 +269,36 @@ func (c *directoryServiceClient) AdminListRoleAssignments(ctx context.Context, i
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RoleAssignmentPage)
 	err := c.cc.Invoke(ctx, DirectoryService_AdminListRoleAssignments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAssignAuthPolicy(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAssignAuthPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminRemoveAuthPolicyEntities(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AdminAuthPolicyEntities(ctx context.Context, in *AuthPolicyEntitiesRequest, opts ...grpc.CallOption) (*AuthPolicyEntityPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthPolicyEntityPage)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminAuthPolicyEntities_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -676,6 +712,9 @@ type DirectoryServiceServer interface {
 	AdminAddRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
 	AdminRemoveRoleAssignments(context.Context, *RoleAssignmentMutationRequest) (*MutationResponse, error)
 	AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error)
+	AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
+	AdminRemoveAuthPolicyEntities(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
+	AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error)
 	ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error)
 	UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error)
@@ -762,6 +801,15 @@ func (UnimplementedDirectoryServiceServer) AdminRemoveRoleAssignments(context.Co
 }
 func (UnimplementedDirectoryServiceServer) AdminListRoleAssignments(context.Context, *RoleAssignmentsRequest) (*RoleAssignmentPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminListRoleAssignments not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAssignAuthPolicy not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminRemoveAuthPolicyEntities(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRemoveAuthPolicyEntities not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAuthPolicyEntities not implemented")
 }
 func (UnimplementedDirectoryServiceServer) ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetUserSessions not implemented")
@@ -1130,6 +1178,60 @@ func _DirectoryService_AdminListRoleAssignments_Handler(srv interface{}, ctx con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).AdminListRoleAssignments(ctx, req.(*RoleAssignmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAssignAuthPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthPolicyMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAssignAuthPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAssignAuthPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAssignAuthPolicy(ctx, req.(*AuthPolicyMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminRemoveAuthPolicyEntities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthPolicyMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminRemoveAuthPolicyEntities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminRemoveAuthPolicyEntities(ctx, req.(*AuthPolicyMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AdminAuthPolicyEntities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthPolicyEntitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminAuthPolicyEntities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminAuthPolicyEntities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminAuthPolicyEntities(ctx, req.(*AuthPolicyEntitiesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1894,6 +1996,18 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminListRoleAssignments",
 			Handler:    _DirectoryService_AdminListRoleAssignments_Handler,
+		},
+		{
+			MethodName: "AdminAssignAuthPolicy",
+			Handler:    _DirectoryService_AdminAssignAuthPolicy_Handler,
+		},
+		{
+			MethodName: "AdminRemoveAuthPolicyEntities",
+			Handler:    _DirectoryService_AdminRemoveAuthPolicyEntities_Handler,
+		},
+		{
+			MethodName: "AdminAuthPolicyEntities",
+			Handler:    _DirectoryService_AdminAuthPolicyEntities_Handler,
 		},
 		{
 			MethodName: "ResetUserSessions",

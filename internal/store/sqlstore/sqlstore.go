@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 150
+const schemaVersion = 151
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3150,6 +3150,20 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 151 {
+		// Which entities one authentication policy applies to. Slack names only
+		// the member, so entity_id carries the foreign key to users.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS auth_policy_entities (
+			policy_name TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL REFERENCES users(id),
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), created_at INTEGER NOT NULL,
+			PRIMARY KEY (policy_name, entity_type, entity_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate auth policy entities: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS auth_policy_entities_policy ON auth_policy_entities(workspace_id, policy_name, entity_type, entity_id)`); err != nil {
+			return fmt.Errorf("index auth policy entities: %w", err)
+		}
+	}
 	if version < 150 {
 		// System role assignments. Slack scopes a role to a channel or to the
 		// workspace, so entity_id carries which one.
@@ -4642,6 +4656,87 @@ func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.Worksp
 	if hasMore && len(assignments) > 0 {
 		last := assignments[len(assignments)-1]
 		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
+	}
+	return page, err
+}
+
+func (s *Store) SetAuthPolicyEntities(ctx context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {
+	return s.changeAuthPolicyEntities(ctx, entities, event, true)
+}
+
+func (s *Store) DeleteAuthPolicyEntities(ctx context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {
+	return s.changeAuthPolicyEntities(ctx, entities, event, false)
+}
+
+func (s *Store) changeAuthPolicyEntities(ctx context.Context, entities []domain.AuthPolicyEntity, event events.Event, adding bool) error {
+	if len(entities) == 0 {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, entity := range entities {
+		if adding {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO auth_policy_entities(policy_name, entity_type, entity_id, workspace_id, created_at)
+				VALUES (?, ?, ?, ?, ?) ON CONFLICT(policy_name, entity_type, entity_id) DO NOTHING`,
+				entity.Policy, entity.EntityType, entity.EntityID, entity.WorkspaceID, entity.CreatedAt.UTC().UnixNano()); err != nil {
+				return classify(err)
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM auth_policy_entities WHERE policy_name = ? AND entity_type = ? AND entity_id = ? AND workspace_id = ?`,
+			entity.Policy, entity.EntityType, entity.EntityID, entity.WorkspaceID); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListAuthPolicyEntities(ctx context.Context, workspace domain.WorkspaceID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, request domain.PageRequest) (domain.AuthPolicyEntityPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM auth_policy_entities WHERE workspace_id = ? AND policy_name = ? AND entity_type = ?`,
+		workspace, policy, kind).Scan(&total); err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT policy_name, entity_type, entity_id, workspace_id, created_at FROM auth_policy_entities
+		WHERE workspace_id = ? AND policy_name = ? AND entity_type = ? AND entity_id > ?
+		ORDER BY entity_id LIMIT ?`, workspace, policy, kind, after, request.Limit+1)
+	if err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	defer rows.Close()
+	entities := make([]domain.AuthPolicyEntity, 0, request.Limit+1)
+	for rows.Next() {
+		var entity domain.AuthPolicyEntity
+		var created int64
+		if err := rows.Scan(&entity.Policy, &entity.EntityType, &entity.EntityID, &entity.WorkspaceID, &created); err != nil {
+			return domain.AuthPolicyEntityPage{}, err
+		}
+		entity.CreatedAt = timeFromUnixNanoOrZero(created)
+		entities = append(entities, entity)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	hasMore := len(entities) > request.Limit
+	if hasMore {
+		entities = entities[:request.Limit]
+	}
+	page := domain.AuthPolicyEntityPage{Entities: entities, TotalCount: total, HasMore: hasMore}
+	if hasMore && len(entities) > 0 {
+		page.NextCursor, err = domain.NewListCursor(entities[len(entities)-1].EntityID)
 	}
 	return page, err
 }

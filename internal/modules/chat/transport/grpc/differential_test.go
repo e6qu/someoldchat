@@ -774,6 +774,44 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An authentication policy this deployment does not hold cannot be
+			// assigned, and both compositions must refuse the same names.
+			name: "authentication policy entities are assigned, paged, and refused identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, []string{"U2", "U1"}); err != nil {
+					return nil, err
+				}
+				unknownPolicy := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", "sso_only", domain.PolicyEntityUser, []string{"U1"})
+				unknownKind := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, "CHANNEL", []string{"U1"})
+				stranger := chat.AdminAssignAuthPolicy(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, []string{"U-nobody"})
+				page, err := chat.AdminAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				first := make([]string, 0, len(page.Entities))
+				for _, entity := range page.Entities {
+					first = append(first, entity.EntityID)
+				}
+				rest, err := chat.AdminAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+				if err != nil {
+					return nil, err
+				}
+				second := make([]string, 0, len(rest.Entities))
+				for _, entity := range rest.Entities {
+					second = append(second, entity.EntityID)
+				}
+				if err := chat.AdminRemoveAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, []string{"U1"}); err != nil {
+					return nil, err
+				}
+				left, err := chat.AdminAuthPolicyEntities(ctx, "T1", "UA", domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{first, page.TotalCount, page.HasMore, second, len(left.Entities), left.TotalCount,
+					unknownPolicy != nil, unknownKind != nil, stranger != nil}, nil
+			},
+		},
+		{
 			// A role assignment is a triple, so the two compositions must agree
 			// on the order it pages in and on what a repeat write does.
 			name: "role assignments are written, paged, and removed identically",

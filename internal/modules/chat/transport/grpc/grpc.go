@@ -1631,6 +1631,71 @@ func (r Remote) DiscoverableContacts(ctx context.Context, workspaceID domain.Wor
 	return users, nil
 }
 
+func (r Remote) AdminAssignAuthPolicy(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	out, err := r.directory.AdminAssignAuthPolicy(ctx, authPolicyMutation(workspaceID, userID, policy, kind, entityIDs))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed authentication policy assignment was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminRemoveAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) error {
+	out, err := r.directory.AdminRemoveAuthPolicyEntities(ctx, authPolicyMutation(workspaceID, userID, policy, kind, entityIDs))
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed authentication policy removal was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminAuthPolicyEntities(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, request domain.PageRequest) (domain.AuthPolicyEntityPage, error) {
+	out, err := r.directory.AdminAuthPolicyEntities(ctx, &chatv1.AuthPolicyEntitiesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), PolicyName: string(policy),
+		EntityType: string(kind), Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	entities := make([]domain.AuthPolicyEntity, 0, len(out.GetEntities()))
+	for _, encoded := range out.GetEntities() {
+		entities = append(entities, decodeProtoAuthPolicyEntity(encoded))
+	}
+	return domain.AuthPolicyEntityPage{Entities: entities, TotalCount: int(out.GetTotalCount()),
+		NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func authPolicyMutation(workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityIDs []string) *chatv1.AuthPolicyMutationRequest {
+	entities := make([]string, 0, len(entityIDs))
+	entities = append(entities, entityIDs...)
+	return &chatv1.AuthPolicyMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID),
+		PolicyName: string(policy), EntityType: string(kind), EntityIds: entities}
+}
+
+func encodeProtoAuthPolicyEntity(value domain.AuthPolicyEntity) *chatv1.AuthPolicyEntity {
+	return &chatv1.AuthPolicyEntity{
+		PolicyName:  string(value.Policy),
+		EntityType:  string(value.EntityType),
+		EntityId:    value.EntityID,
+		WorkspaceId: string(value.WorkspaceID),
+		CreatedAt:   optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoAuthPolicyEntity(value *chatv1.AuthPolicyEntity) domain.AuthPolicyEntity {
+	return domain.AuthPolicyEntity{
+		Policy:      domain.AuthPolicyName(value.GetPolicyName()),
+		EntityType:  domain.PolicyEntityType(value.GetEntityType()),
+		EntityID:    value.GetEntityId(),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		CreatedAt:   optionalTimeFromUnixNano(value.GetCreatedAt()),
+	}
+}
+
 func (r Remote) AdminAddRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, entityIDs []string, targets []domain.UserID) error {
 	out, err := r.directory.AdminAddRoleAssignments(ctx, roleAssignmentMutation(workspaceID, userID, roleID, entityIDs, targets))
 	if err != nil {
@@ -5369,6 +5434,36 @@ func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleReque
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminAssignAuthPolicy(ctx context.Context, input *chatv1.AuthPolicyMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminAssignAuthPolicy(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AuthPolicyName(input.GetPolicyName()), domain.PolicyEntityType(input.GetEntityType()), input.GetEntityIds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminRemoveAuthPolicyEntities(ctx context.Context, input *chatv1.AuthPolicyMutationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminRemoveAuthPolicyEntities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AuthPolicyName(input.GetPolicyName()), domain.PolicyEntityType(input.GetEntityType()), input.GetEntityIds()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminAuthPolicyEntities(ctx context.Context, input *chatv1.AuthPolicyEntitiesRequest) (*chatv1.AuthPolicyEntityPage, error) {
+	page, err := s.implementation.AdminAuthPolicyEntities(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AuthPolicyName(input.GetPolicyName()), domain.PolicyEntityType(input.GetEntityType()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	entities := make([]*chatv1.AuthPolicyEntity, 0, len(page.Entities))
+	for _, value := range page.Entities {
+		entities = append(entities, encodeProtoAuthPolicyEntity(value))
+	}
+	return &chatv1.AuthPolicyEntityPage{Entities: entities, NextCursor: string(page.NextCursor),
+		HasMore: page.HasMore, TotalCount: int32(page.TotalCount)}, nil
 }
 
 func (s *Server) AdminAddRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentMutationRequest) (*chatv1.MutationResponse, error) {

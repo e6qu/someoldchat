@@ -2052,6 +2052,66 @@ func TestAdminRoleAssignments(t *testing.T) {
 	}
 }
 
+// TestAdminAuthPolicyEntities holds the admin.auth.policy.* contract. Slack
+// names one policy and one entity type; anything else is refused rather than
+// stored as a policy nothing enforces.
+func TestAdminAuthPolicyEntities(t *testing.T) {
+	handler := testHandler()
+	call := func(t *testing.T, method, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if assigned := call(t, http.MethodPost, "admin.auth.policy.assignEntities", "policy_name=email_password&entity_type=USER&entity_ids=U2,U1"); assigned["ok"] != true {
+		t.Fatalf("assigned=%v", assigned)
+	}
+	listed := call(t, http.MethodPost, "admin.auth.policy.getEntities", "policy_name=email_password&entity_type=USER")
+	entities, ok := listed["entities"].([]any)
+	if !ok || len(entities) != 2 || listed["entity_total_count"].(float64) != 2 {
+		t.Fatalf("listed=%v", listed)
+	}
+	if first := entities[0].(map[string]any); first["entity_id"] != "U1" || first["entity_type"] != "USER" {
+		t.Fatalf("first=%v", first)
+	}
+	// A lower-case entity type means the member too: Slack documents the upper
+	// case, and refusing the other spelling would be a difference nobody asked
+	// for.
+	if folded := call(t, http.MethodPost, "admin.auth.policy.getEntities", "policy_name=email_password&entity_type=user"); len(folded["entities"].([]any)) != 2 {
+		t.Fatalf("folded=%v", folded)
+	}
+	for _, body := range []string{
+		"policy_name=sso_only&entity_type=USER&entity_ids=U1",
+		"policy_name=email_password&entity_type=CHANNEL&entity_ids=U1",
+		"policy_name=email_password&entity_type=USER",
+		"entity_type=USER&entity_ids=U1",
+	} {
+		if refused := call(t, http.MethodPost, "admin.auth.policy.assignEntities", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if stranger := call(t, http.MethodPost, "admin.auth.policy.assignEntities", "policy_name=email_password&entity_type=USER&entity_ids=U-nobody"); stranger["error"] != "user_not_found" {
+		t.Fatalf("stranger=%v", stranger)
+	}
+	if removed := call(t, http.MethodPost, "admin.auth.policy.removeEntities", "policy_name=email_password&entity_type=USER&entity_ids=U1"); removed["ok"] != true {
+		t.Fatalf("removed=%v", removed)
+	}
+	left := call(t, http.MethodGet, "admin.auth.policy.getEntities?policy_name=email_password&entity_type=USER", "")
+	if len(left["entities"].([]any)) != 1 || left["entity_total_count"].(float64) != 1 {
+		t.Fatalf("left=%v", left)
+	}
+}
+
 func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))

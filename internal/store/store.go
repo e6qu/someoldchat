@@ -338,6 +338,14 @@ type Store interface {
 	// ListRoleAssignments reports the members who hold one role, in a stable
 	// order so two reads agree.
 	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	// SetAuthPolicyEntities puts entities under one authentication policy. The
+	// same entity twice adds no row.
+	SetAuthPolicyEntities(context.Context, []domain.AuthPolicyEntity, events.Event) error
+	// DeleteAuthPolicyEntities takes them back out.
+	DeleteAuthPolicyEntities(context.Context, []domain.AuthPolicyEntity, events.Event) error
+	// ListAuthPolicyEntities reports the entities one policy holds, in a stable
+	// order, and how many there are in total.
+	ListAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)
 	// GetUserExpiration reports when a guest account lapses. A zero time means
 	// the account does not lapse.
 	GetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)

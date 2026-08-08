@@ -1344,6 +1344,24 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 	session_id: "qualification-session",
 })).ok, true);
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+assert.equal((await client.apiCall("admin.auth.policy.assignEntities", {
+	policy_name: "email_password",
+	entity_type: "USER",
+	entity_ids: "U2",
+})).ok, true);
+const policyEntities = await client.apiCall("admin.auth.policy.getEntities", {
+	policy_name: "email_password",
+	entity_type: "USER",
+});
+assert.equal(policyEntities.ok, true);
+assert.equal(policyEntities.entity_total_count, 1);
+assert.equal(policyEntities.entities[0].entity_id, "U2");
+assert.equal((await client.apiCall("admin.auth.policy.removeEntities", {
+	policy_name: "email_password",
+	entity_type: "USER",
+	entity_ids: "U2",
+})).ok, true);
+
 // admin.roles.* runs before the member leaves: a role assignment names a
 // member, so removing U2 first would make the walk unreachable.
 assert.equal((await client.apiCall("admin.roles.addAssignments", {

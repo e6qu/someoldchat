@@ -2291,6 +2291,38 @@ type RoleAssignmentPage struct {
 	HasMore     bool
 }
 
+// AuthPolicyName names one authentication policy. Slack defines exactly one,
+// and a name this deployment does not hold cannot be assigned to anybody.
+type AuthPolicyName string
+
+const AuthPolicyEmailPassword AuthPolicyName = "email_password"
+
+func (name AuthPolicyName) Valid() bool { return name == AuthPolicyEmailPassword }
+
+// PolicyEntityType names what an authentication policy applies to. Slack
+// defines the member and nothing else, and the storage carries a foreign key to
+// users, so widening this type means widening that key in the same change.
+type PolicyEntityType string
+
+const PolicyEntityUser PolicyEntityType = "USER"
+
+func (kind PolicyEntityType) Valid() bool { return kind == PolicyEntityUser }
+
+type AuthPolicyEntity struct {
+	Policy      AuthPolicyName
+	EntityType  PolicyEntityType
+	EntityID    string
+	WorkspaceID WorkspaceID
+	CreatedAt   time.Time
+}
+
+type AuthPolicyEntityPage struct {
+	Entities   []AuthPolicyEntity
+	TotalCount int
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type AppFunction struct {
 	AppID       AppID
 	AppName     string

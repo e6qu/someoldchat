@@ -120,6 +120,7 @@ type Store struct {
 	canvasRevisions               map[domain.CanvasID][]domain.CanvasRevision
 	canvasComments                map[domain.CanvasCommentID]domain.CanvasComment
 	roleAssignments               map[string]domain.RoleAssignment
+	authPolicyEntities            map[string]domain.AuthPolicyEntity
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -197,7 +198,117 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), sharedInvites: make(map[domain.SharedInviteID]domain.SharedInvite), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), retentionPolicies: make(map[domain.WorkspaceID]domain.RetentionPolicy), conversationRetention: make(map[domain.ConversationID]domain.ConversationRetention), retentionSweptAt: make(map[domain.ConversationID]time.Time), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), assistantThreads: make(map[string]domain.AssistantThread), typing: make(map[string]domain.TypingSignal), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess), canvasRevisions: make(map[domain.CanvasID][]domain.CanvasRevision), canvasComments: make(map[domain.CanvasCommentID]domain.CanvasComment), roleAssignments: make(map[string]domain.RoleAssignment)}
+	// One field per line, and TestNewInitialisesEveryMap holds it: this used to
+	// be a single 103-field literal, and a map field added to Store but not
+	// here compiles and panics on the first write to it.
+	return &Store{
+		lists:                         make(map[domain.ListID]domain.List),
+		listItems:                     make(map[domain.ListID]map[domain.ListItemID]domain.ListItem),
+		listAccess:                    make(map[string]domain.ListAccess),
+		listDownloads:                 make(map[domain.ListDownloadID]domain.ListDownload),
+		fileShares:                    make(map[domain.FileID][]domain.ConversationID),
+		externalUploads:               make(map[domain.ExternalUploadID]domain.ExternalUpload),
+		incomingWebhooks:              make(map[domain.IncomingWebhookID]domain.IncomingWebhook),
+		appDatastoreItems:             make(map[string]domain.AppDatastoreItem),
+		appInstallations:              make(map[string]domain.AppInstallation),
+		apps:                          make(map[domain.AppID]domain.App),
+		appManifestRevisions:          make(map[domain.AppID][]domain.AppManifestRevision),
+		appTriggers:                   make(map[string]domain.AppTrigger),
+		appResponseURLs:               make(map[string]domain.AppResponseURL),
+		appConfigurationTokens:        make(map[string]domain.AppConfigurationToken),
+		appConfigurationRefreshTokens: make(map[string]string),
+		openidRefreshTokens:           make(map[string]domain.OpenIDRefreshToken),
+		workspaces:                    make(map[domain.WorkspaceID]domain.Workspace),
+		members:                       make(map[string]domain.WorkspaceMembership),
+		users:                         make(map[domain.UserID]domain.User),
+		userExpirations:               make(map[domain.UserID]time.Time),
+		conversations:                 make(map[domain.ConversationID]domain.Conversation),
+		conversationPrefs:             make(map[domain.ConversationID]domain.ConversationPrefs),
+		conversationAccess:            make(map[domain.ConversationID][]domain.UserGroupID),
+		conversationTeams:             make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}),
+		sharedInvites:                 make(map[domain.SharedInviteID]domain.SharedInvite),
+		conversationOrg:               make(map[domain.ConversationID]bool),
+		closedDirects:                 make(map[string]struct{}),
+		inviteRequests:                make(map[domain.InviteRequestID]domain.InviteRequest),
+		appApprovals:                  make(map[domain.AppID]domain.AppApproval),
+		permissionRequests:            make(map[domain.AppRequestID]domain.AppPermissionRequest),
+		views:                         make(map[domain.ViewID]domain.View),
+		workflowSteps:                 make(map[domain.WorkflowStepID]domain.WorkflowStep),
+		workflows:                     make(map[domain.WorkflowID]domain.WorkflowDefinition),
+		workflowRevisions:             make(map[domain.WorkflowID][]domain.WorkflowRevision),
+		workflowTriggers:              make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger),
+		workflowEventCursor:           make(map[domain.WorkspaceID]uint64),
+		workflowRuns:                  make(map[domain.WorkflowRunID]domain.WorkflowRun),
+		automationPermissions:         make(map[string]domain.AutomationPermission),
+		featuredWorkflows:             make(map[domain.ConversationID][]domain.FeaturedWorkflow),
+		dialogs:                       make(map[domain.DialogID]domain.Dialog),
+		bots:                          make(map[domain.BotID]domain.Bot),
+		migrations:                    make(map[string]domain.UserMigration),
+		oauthClients:                  make(map[string]domain.OAuthClient),
+		oauthCodes:                    make(map[string]memoryOAuthCode),
+		oauthRefreshGrants:            make(map[string]domain.OAuthRefreshGrant),
+		rtmConnections:                make(map[string]domain.RTMConnection),
+		socketConnections:             make(map[string]domain.SocketModeConnection),
+		socketConnectionActive:        make(map[string]bool),
+		socketResponses:               make(map[string]domain.SocketModeResponse),
+		socketInteractions:            make(map[string]domain.SocketModeInteraction),
+		socketCursors:                 make(map[domain.AppID]uint64),
+		appEventCursors:               make(map[string]memoryAppEventCursor),
+		memberships:                   make(map[domain.ConversationID]map[domain.UserID]struct{}),
+		tokens:                        make(map[string]domain.TokenRecord),
+		appTokens:                     make(map[string]domain.AppTokenRecord),
+		sessions:                      make(map[string]domain.SessionRecord),
+		oidcLogoutTokens:              make(map[string]time.Time),
+		authMethods:                   make(map[string]domain.AuthMethod),
+		externalIdentities:            make(map[string]domain.ExternalIdentity),
+		messages:                      make(map[domain.ConversationID][]domain.Message),
+		outboxLeases:                  make(map[uint64]memoryLease),
+		delivered:                     make(map[uint64]bool),
+		idempotency:                   make(map[string]domain.MessageID),
+		retentionPolicies:             make(map[domain.WorkspaceID]domain.RetentionPolicy),
+		conversationRetention:         make(map[domain.ConversationID]domain.ConversationRetention),
+		retentionSweptAt:              make(map[domain.ConversationID]time.Time),
+		nextAttempt:                   make(map[uint64]time.Time),
+		readCursors:                   make(map[string]domain.ReadCursor),
+		workspaceNotificationPrefs:    make(map[string]domain.WorkspaceNotificationPreferences),
+		conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences),
+		threadFollows:                 make(map[string]bool),
+		assistantThreads:              make(map[string]domain.AssistantThread),
+		typing:                        make(map[string]domain.TypingSignal),
+		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
+		activityPreferences:           make(map[string]domain.ActivityPreferences),
+		reactions:                     make(map[domain.MessageID]map[string]domain.Reaction),
+		pins:                          make(map[domain.MessageID]map[domain.UserID]domain.Pin),
+		files:                         make(map[domain.FileID]domain.File),
+		fileComments:                  make(map[domain.FileCommentID]domain.FileComment),
+		remoteFiles:                   make(map[domain.FileID]domain.RemoteFile),
+		remoteFileShares:              make(map[domain.FileID][]domain.ConversationID),
+		dnd:                           make(map[domain.UserID]domain.DoNotDisturb),
+		stars:                         make(map[domain.UserID]map[domain.MessageID]domain.Star),
+		savedItems:                    make(map[domain.SavedItemID]domain.SavedItem),
+		reminders:                     make(map[domain.ReminderID]domain.Reminder),
+		laterReminders:                make(map[domain.LaterReminderID]domain.LaterReminder),
+		laterReminderLeases:           make(map[domain.LaterReminderID]memoryLease),
+		laterReminderNextAttempt:      make(map[domain.LaterReminderID]time.Time),
+		scheduled:                     make(map[domain.ScheduledMessageID]domain.ScheduledMessage),
+		scheduledLeases:               make(map[domain.ScheduledMessageID]memoryLease),
+		scheduledDelivered:            make(map[domain.ScheduledMessageID]bool),
+		scheduledNextAttempt:          make(map[domain.ScheduledMessageID]time.Time),
+		drafts:                        make(map[string]domain.Draft),
+		userGroups:                    make(map[domain.UserGroupID]domain.UserGroup),
+		calls:                         make(map[domain.CallID]domain.Call),
+		emojis:                        make(map[string]domain.CustomEmoji),
+		bookmarks:                     make(map[domain.BookmarkID]domain.Bookmark),
+		canvases:                      make(map[domain.CanvasID]domain.Canvas),
+		canvasAccess:                  make(map[string]domain.CanvasAccess),
+		canvasRevisions:               make(map[domain.CanvasID][]domain.CanvasRevision),
+		canvasComments:                make(map[domain.CanvasCommentID]domain.CanvasComment),
+		roleAssignments:               make(map[string]domain.RoleAssignment),
+		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
+		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
+		appBotTokens:                  make(map[string]string),
+		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
+	}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -1549,9 +1660,6 @@ func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.Workspace
 func (s *Store) CreateScheduledStatus(_ context.Context, value domain.ScheduledStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.scheduledStatuses == nil {
-		s.scheduledStatuses = make(map[domain.ScheduledStatusID]domain.ScheduledStatus)
-	}
 	if _, exists := s.scheduledStatuses[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
@@ -1714,6 +1822,78 @@ func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceI
 	return user, nil
 }
 
+func (s *Store) SetAuthPolicyEntities(_ context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {
+	return s.changeAuthPolicyEntities(entities, event, true)
+}
+
+func (s *Store) DeleteAuthPolicyEntities(_ context.Context, entities []domain.AuthPolicyEntity, event events.Event) error {
+	return s.changeAuthPolicyEntities(entities, event, false)
+}
+
+func (s *Store) changeAuthPolicyEntities(entities []domain.AuthPolicyEntity, event events.Event, adding bool) error {
+	if len(entities) == 0 {
+		return store.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entity := range entities {
+		key := authPolicyEntityKey(entity)
+		if !adding {
+			delete(s.authPolicyEntities, key)
+			continue
+		}
+		// The SQL profile carries a foreign key from entity_id to users, so an
+		// entity the workspace does not hold is refused there. Refusing it here
+		// too keeps the two profiles answering the same thing.
+		if _, exists := s.users[domain.UserID(entity.EntityID)]; !exists {
+			return store.ErrNotFound
+		}
+		if _, exists := s.authPolicyEntities[key]; !exists {
+			s.authPolicyEntities[key] = entity
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListAuthPolicyEntities(_ context.Context, workspace domain.WorkspaceID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, request domain.PageRequest) (domain.AuthPolicyEntityPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AuthPolicyEntityPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entities := make([]domain.AuthPolicyEntity, 0, len(s.authPolicyEntities))
+	total := 0
+	for _, entity := range s.authPolicyEntities {
+		if entity.WorkspaceID != workspace || entity.Policy != policy || entity.EntityType != kind {
+			continue
+		}
+		total++
+		if entity.EntityID <= after {
+			continue
+		}
+		entities = append(entities, entity)
+	}
+	sort.Slice(entities, func(left, right int) bool { return entities[left].EntityID < entities[right].EntityID })
+	hasMore := len(entities) > request.Limit
+	if hasMore {
+		entities = entities[:request.Limit]
+	}
+	page := domain.AuthPolicyEntityPage{Entities: entities, TotalCount: total, HasMore: hasMore}
+	if hasMore && len(entities) > 0 {
+		page.NextCursor, err = domain.NewListCursor(entities[len(entities)-1].EntityID)
+	}
+	return page, err
+}
+
+func authPolicyEntityKey(entity domain.AuthPolicyEntity) string {
+	return string(entity.Policy) + "\x00" + string(entity.EntityType) + "\x00" + entity.EntityID
+}
+
 func (s *Store) SetRoleAssignments(_ context.Context, assignments []domain.RoleAssignment, event events.Event) error {
 	if len(assignments) == 0 {
 		return store.ErrInvalidArgument
@@ -1721,6 +1901,11 @@ func (s *Store) SetRoleAssignments(_ context.Context, assignments []domain.RoleA
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, assignment := range assignments {
+		// role_assignments.user_id carries a foreign key to users on the SQL
+		// profile; the same refusal belongs here.
+		if _, exists := s.users[assignment.UserID]; !exists {
+			return store.ErrNotFound
+		}
 		key := roleAssignmentKey(assignment)
 		if _, exists := s.roleAssignments[key]; exists {
 			continue
@@ -2884,9 +3069,6 @@ func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.appBotTokens == nil {
-		s.appBotTokens = make(map[string]string)
-	}
 	s.appBotTokens[string(appID)+"\x00"+string(workspace)] = tokenCiphertext
 	s.outbox = append(s.outbox, written...)
 	return nil
@@ -8701,9 +8883,6 @@ func (s *Store) RecordSearchHistory(_ context.Context, value domain.SearchHistor
 	value.SearchedAt = value.SearchedAt.UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.searchHistory == nil {
-		s.searchHistory = make(map[string]domain.SearchHistoryEntry)
-	}
 	s.searchHistory[searchHistoryKey(value.WorkspaceID, value.UserID, value.Query)] = value
 	owned := make([]domain.SearchHistoryEntry, 0)
 	for _, candidate := range s.searchHistory {
