@@ -1231,7 +1231,13 @@ test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer
   }).filter((size) => (size.width > 0 || size.height > 0) && (size.width < 24 || size.height < 24)));
 
   expect(await measure(), 'every message action must meet the 24px minimum target size').toEqual([]);
-  const menuOwner = page.locator('.message').filter({ has: page.locator('[aria-label="More actions"]') }).first();
+  // Scoped to the thread pane, which is the narrow container this check exists
+  // for. Reaching for the first such message anywhere on the page picked one in
+  // the main timeline that had to be scrolled to, and a hover-revealed toolbar
+  // cannot survive that: the scroll moves the pointer off the message, the
+  // toolbar goes away, and every retry waits for something that is no longer
+  // shown.
+  const menuOwner = thread.locator('.message').filter({ has: page.locator('[aria-label="More actions"]') }).first();
   await openMessageMenu(menuOwner);
   expect(await measure(), 'every action inside More actions must meet the 24px minimum target size').toEqual([]);
 });
