@@ -33,7 +33,12 @@ var (
 	ErrInvalidTimestamp      = errors.New("message timestamp is invalid")
 	ErrMessageNotOwned       = errors.New("message is not owned by user")
 	ErrMessageAlreadyDeleted = errors.New("message is already deleted")
-	ErrInvalidConversation   = errors.New("conversation name is invalid")
+	// The message describes the class rather than one member of it. It used to
+	// read "conversation name is invalid", which is right for a rejected name
+	// and wrong for the other forty-odd sites that raise it — a foreign team
+	// id, a kind that cannot carry the operation, a conversation that is not a
+	// channel — each of which told the caller to go and look at a name.
+	ErrInvalidConversation = errors.New("conversation is invalid for this operation")
 	// ErrBarrieredFromMember is refusal by an information barrier. It is its
 	// own error because "you may not reach this person" is a different fact
 	// from a malformed request or a member who is not here, and an

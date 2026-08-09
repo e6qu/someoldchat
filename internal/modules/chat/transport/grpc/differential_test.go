@@ -276,6 +276,9 @@ func seedWebhookParity(t *testing.T, target *memory.Store) {
 func seedViewParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
+	// Approving and restricting an app are administrative decisions, so the
+	// actor holds the authority for them as well as ordinary membership.
+	requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleAdmin))
 	now := time.Unix(1_700_000_700, 0).UTC()
 	manifest := `{"display_information":{"name":"View parity"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}},"oauth_config":{"scopes":{"bot":["chat:write"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"https://apps.example.test/interactions"}}}`
 	requireSeed(t, target.CreateApp(context.Background(), domain.App{
@@ -333,9 +336,12 @@ func seedConnectParity(t *testing.T, target *memory.Store) {
 	// Three channels, because an invitation is settled per channel and the case
 	// needs one it can approve, one it can deny and one it can revoke without
 	// the outcomes interfering.
-	for _, id := range []domain.ConversationID{"C-accept", "C-deny", "C-revoke"} {
-		requireSeed(t, target.SeedConversation(domain.Conversation{ID: id, WorkspaceID: "T1", Name: string(id)}))
-		requireSeed(t, target.SeedConversationMember(id, "U1"))
+	for _, channel := range []struct {
+		id   domain.ConversationID
+		name string
+	}{{"C-accept", "connect-accept"}, {"C-deny", "connect-deny"}, {"C-revoke", "connect-revoke"}} {
+		requireSeed(t, target.SeedConversation(domain.Conversation{ID: channel.id, WorkspaceID: "T1", Name: channel.name}))
+		requireSeed(t, target.SeedConversationMember(channel.id, "U1"))
 	}
 }
 
@@ -3851,6 +3857,156 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Connecting organizations to a channel and taking them off it are
+			// the administrative half of Slack Connect, separate from the
+			// invitation lifecycle: an administrator can attach a team without
+			// an invitation ever existing, and disconnecting is not the same as
+			// revoking one.
+			name: "connected channel administration agrees across the seam",
+			seed: seedConnectParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// A conversation may only be associated with the acting
+				// workspace: this deployment holds no organization edge, so a
+				// foreign team is refused rather than written.
+				foreignErr := chat.AdminSetConversationTeams(ctx, "T1", "U1", "C-accept", []domain.WorkspaceID{"T1", "T2"}, false)
+				if err := chat.AdminSetConversationTeams(ctx, "T1", "U1", "C-accept", []domain.WorkspaceID{"T1"}, false); err != nil {
+					return nil, err
+				}
+				// The second organization arrives the way Slack Connect puts it
+				// there, by accepting an invitation, which is the only route
+				// that attaches one.
+				invite, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", "T2", "")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", invite.ID); err != nil {
+					return nil, err
+				}
+				if _, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", invite.ID); err != nil {
+					return nil, err
+				}
+				teams, hasMore, _, err := chat.AdminConversationTeams(ctx, "T1", "U1", "C-accept", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				attached := make([]string, 0, len(teams))
+				for _, team := range teams {
+					attached = append(attached, string(team))
+				}
+				sort.Strings(attached)
+				infos, infoMore, _, err := chat.AdminConnectedChannelInfo(ctx, "T1", "U1", []domain.ConversationID{"C-accept"}, nil, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				connected := make([]string, 0, len(infos))
+				for _, info := range infos {
+					internal := make([]string, 0, len(info.InternalTeamIDs))
+					for _, team := range info.InternalTeamIDs {
+						internal = append(internal, string(team))
+					}
+					sort.Strings(internal)
+					connected = append(connected, string(info.ChannelID)+"="+strings.Join(internal, ","))
+				}
+				sort.Strings(connected)
+				if err := chat.AdminDisconnectSharedConversation(ctx, "T1", "U1", "C-accept", []domain.WorkspaceID{"T2"}); err != nil {
+					return nil, err
+				}
+				remaining, _, _, err := chat.AdminConversationTeams(ctx, "T1", "U1", "C-accept", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				left := make([]string, 0, len(remaining))
+				for _, team := range remaining {
+					left = append(left, string(team))
+				}
+				sort.Strings(left)
+				return []any{
+					foreignErr != nil, errors.Is(foreignErr, service.ErrInvalidConversation),
+					attached, hasMore, connected, infoMore, left,
+				}, nil
+			},
+		},
+		{
+			// An app's presence in a workspace is three separate facts —
+			// installed, approved, and holding a credential — and the methods
+			// that report them are different. The case walks the whole arc so a
+			// composition that lost one of the three is caught rather than one
+			// that merely answered each call.
+			name: "app installation and approval agree across the seam",
+			seed: seedViewParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				installed, err := chat.ListWorkspaceApps(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				names := make([]string, 0, len(installed))
+				for _, app := range installed {
+					names = append(names, string(app.ID)+":"+app.Name+":"+strconv.FormatBool(app.HomeTabEnabled))
+				}
+				sort.Strings(names)
+				// A second installation is a different workspace's decision,
+				// so it must not appear in this one's listing.
+				if err := chat.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T2-absent", Enabled: true, CreatedAt: time.Unix(1_700_000_800, 0).UTC()}); err != nil {
+					return nil, err
+				}
+				installations, err := chat.ListAppInstallations(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				workspaces := make([]string, 0, len(installations))
+				for _, installation := range installations {
+					workspaces = append(workspaces, string(installation.WorkspaceID)+":"+strconv.FormatBool(installation.Enabled))
+				}
+				sort.Strings(workspaces)
+				if err := chat.AdminApproveApp(ctx, "T1", "U1", "A1", "R-1"); err != nil {
+					return nil, err
+				}
+				approved, err := chat.AdminListApps(ctx, "T1", "U1", domain.AppApprovalApproved, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				// The approval is named, not just counted: a request that lost
+				// its app id is stored under a synthesised key, which a count
+				// alone cannot tell from the real thing.
+				approvedIDs := make([]string, 0, len(approved.Apps))
+				for _, approval := range approved.Apps {
+					approvedIDs = append(approvedIDs, string(approval.ID)+"/"+string(approval.RequestID))
+				}
+				sort.Strings(approvedIDs)
+				// Requesting scopes is a member asking an administrator for
+				// something, which is recorded rather than granted.
+				permissionErr := chat.RequestAppPermissions(ctx, "T1", "U1", "U2", []string{"channels:read"}, "trigger_replay")
+				// Restricting uninstalls the app, so what it did is read back
+				// from the installation rather than from the approval alone.
+				if err := chat.AdminRestrictApp(ctx, "T1", "U1", "A1", "R-1"); err != nil {
+					return nil, err
+				}
+				afterRestriction, err := chat.ListWorkspaceApps(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				restricted, err := chat.AdminListApps(ctx, "T1", "U1", domain.AppApprovalRestricted, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				restrictedIDs := make([]string, 0, len(restricted.Apps))
+				for _, approval := range restricted.Apps {
+					restrictedIDs = append(restrictedIDs, string(approval.ID)+":"+string(approval.Status))
+				}
+				sort.Strings(restrictedIDs)
+				// Uninstalling an app that restriction already removed is
+				// refused, and both compositions must refuse it alike.
+				uninstallErr := chat.UninstallApp(ctx, "view-client", "client-hash", "T1", "A1")
+				_, tokenErr := chat.LookupAppToken(ctx, "xapp-absent")
+				return []any{
+					names, workspaces, approvedIDs, restrictedIDs,
+					len(afterRestriction), permissionErr == nil,
+					uninstallErr != nil, tokenErr != nil,
+					errors.Is(tokenErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -5664,7 +5820,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 38
+const parityGapCeiling = 27
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5680,19 +5836,12 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 }
 
 var parityGaps = map[string]struct{}{
-	"AcknowledgeEntityCommentAction":    {},
-	"AdminApproveApp":                   {},
-	"AdminConnectedChannelInfo":         {},
-	"AdminConversationTeams":            {},
-	"AdminDisconnectSharedConversation": {},
-	"AdminRestrictApp":                  {},
-	"AdminSetConversationTeams":         {},
-	"BotInfo":                           {},
-	"CompleteExternalUploads":           {},
-	"CreateAppInstallation":             {},
-	"CreateExternalIdentity":            {},
-	"CreateSession":                     {},
-	"DeleteCanvas":                      {},
+	"AcknowledgeEntityCommentAction": {},
+	"BotInfo":                        {},
+	"CompleteExternalUploads":        {},
+	"CreateExternalIdentity":         {},
+	"CreateSession":                  {},
+	"DeleteCanvas":                   {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
 	// focused transport tests because parityCases seeds both compositions with
@@ -5703,8 +5852,6 @@ var parityGaps = map[string]struct{}{
 	"DispatchSlashCommand":    {},
 	"GetAuthMethod":           {},
 	"HandleAppResponse":       {},
-	"ListWorkspaceApps":       {},
-	"LookupAppToken":          {},
 	"LookupCanvasSections":    {},
 	"LoadAppOptions":          {},
 	"MigrationExchange":       {},
@@ -5714,12 +5861,10 @@ var parityGaps = map[string]struct{}{
 	"OpenPublicFile":          {},
 	"PresentEntityComments":   {},
 	"PresentEntityDetails":    {},
-	"RequestAppPermissions":   {},
 	"RevokeSession":           {},
 	"RevokeToken":             {},
 	"SetAuthMethod":           {},
 	"Unfurl":                  {},
-	"UninstallApp":            {},
 	"WorkflowStepCompleted":   {},
 	"WorkflowStepFailed":      {},
 	"WorkflowUpdateStep":      {},
