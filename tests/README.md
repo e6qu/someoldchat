@@ -47,11 +47,6 @@ against browser behavior, official Slack SDKs, and native dqlite behavior.
   suite cannot ask about itself, and it is the only suite here skipped by
   default — each operation is a separate compile and suite run, so it needs
   `SAMEOLDCHAT_MUTATION=1` or `make test-mutation`.
-- The guard-mutation gate in `mutation` deletes each authorization guard in
-  `internal/service` in turn and requires a suite to notice. It is the answer to
-  a question a green suite cannot ask about itself, and it is the only suite
-  here that is skipped by default: each guard is a separate compile and suite
-  run, so it needs `SAMEOLDCHAT_MUTATION=1` or `make test-mutation`.
 - The fuzz-coverage gate in `fuzzcoverage` requires every `Fuzz` target in the
   tree to be run by `make test-fuzz`, and requires the gate to name no target
   that has been deleted. A target nothing runs is not a weak test, it is not a
