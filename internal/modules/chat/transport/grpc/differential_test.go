@@ -12,6 +12,9 @@ import (
 	"go/token"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path"
 	"reflect"
 	"regexp"
@@ -101,6 +104,14 @@ type parityCase struct {
 	// seed prepares a store. It runs once per composition with an empty store, so
 	// both compositions start from the same state.
 	seed func(t *testing.T, target *memory.Store)
+
+	// seedWithApp is seed for a case whose methods call an app over HTTP. The
+	// harness starts one receiver per composition and hands its URL to the
+	// seed, because the manifest has to name the endpoint and the manifest is
+	// written by the seed. The two receivers are distinct servers answering
+	// identically, so what the compositions compare is what each stored, not
+	// which port it dialled.
+	seedWithApp func(t *testing.T, target *memory.Store, appURL string)
 
 	// operate runs the case against one composition and returns the value to
 	// compare. A failure case returns a nil value; a success case must project
@@ -345,6 +356,93 @@ func seedConnectParity(t *testing.T, target *memory.Store) {
 	}
 }
 
+// parityAppEndpoint is the app both compositions dial. It answers the shapes
+// the interaction contract defines and nothing else, so a difference between
+// the compositions cannot come from the app: each has its own server running
+// this same handler.
+// seedDispatchParity installs an app that answers over HTTP: a slash command,
+// an interactivity endpoint and a message-menu options endpoint, all pointing
+// at the receiver the harness started for this composition.
+func seedDispatchParity(t *testing.T, target *memory.Store, appURL string) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_900, 0).UTC()
+	manifest := `{"display_information":{"name":"Dispatch parity"},"features":{"slash_commands":[{"command":"/deploy","url":"` + appURL + `","description":"Deploy","usage_hint":"environment","should_escape":true}]},"oauth_config":{"scopes":{"bot":["commands","chat:write"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"` + appURL + `","message_menu_options_url":"` + appURL + `"}}}`
+	// The app's credentials are sealed for real, because a dispatch opens the
+	// verification token to sign the request it sends. The associated data
+	// mirrors the service's own private helpers; if that format ever changes,
+	// every dispatch in this case stops working, which is the tripwire.
+	key := bytes.Repeat([]byte("k"), 32)
+	const signingSecret, verificationToken = "dispatch-signing-secret", "dispatch-verification-token"
+	signingCiphertext, err := secretbox.Seal(key, "app:A1:signing-secret", signingSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationCiphertext, err := secretbox.Seal(key, "app:A1:verification-token", verificationToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireSeed(t, target.CreateApp(context.Background(), domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Dispatch parity", ClientID: "dispatch-client",
+		SigningSecretHash: domain.HashToken(signingSecret), SigningSecretCiphertext: signingCiphertext,
+		VerificationTokenHash: domain.HashToken(verificationToken), VerificationTokenCiphertext: verificationCiphertext,
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "dispatch-client", SecretHash: "client-hash", AppID: "A1"}))
+	requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+		AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+	}))
+	requireSeed(t, target.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "dispatch-bot"}))
+	requireSeed(t, target.SeedConversationMember("C1", "UBOT"))
+	requireSeed(t, target.CreateBot(context.Background(), domain.Bot{
+		ID: "Bdispatch", WorkspaceID: "T1", AppID: "A1", UserID: "UBOT", Name: "dispatch-bot", UpdatedAt: now,
+	}))
+	// A response URL is normally minted by a dispatch and handed to the app
+	// over HTTP, where this case cannot reach it. Seeding one with a known
+	// token is what lets the response path be exercised at all.
+	minted := time.Now().UTC()
+	requireSeed(t, target.CreateAppInteractionCapabilities(context.Background(),
+		domain.AppTrigger{
+			TokenHash: domain.HashToken("trigger_dispatch"), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			CreatedAt: minted, ExpiresAt: minted.Add(time.Hour),
+		},
+		domain.AppResponseURL{
+			TokenHash: domain.HashToken("response_dispatch"), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			ConversationID: "C1", CreatedAt: minted, ExpiresAt: minted.Add(time.Hour), UsesRemaining: 5,
+		}))
+}
+
+func parityAppEndpoint(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// A slash command arrives form-encoded and an interaction arrives as a
+	// JSON body, so the payload is whichever of the two this request carries.
+	payload := string(body)
+	if values, parseErr := url.ParseQuery(payload); parseErr == nil && values.Get("payload") != "" {
+		payload = values.Get("payload")
+	}
+	switch {
+	case strings.Contains(payload, `"type":"block_suggestion"`):
+		// The typed value is echoed into the answer. An app that ignored it
+		// would make a dropped value invisible, and this endpoint exists to
+		// make the seam's fields observable, not to be realistic.
+		var suggestion struct {
+			Value string `json:"value"`
+		}
+		_ = json.Unmarshal([]byte(payload), &suggestion)
+		_, _ = io.WriteString(w, `{"options":[{"text":{"type":"plain_text","text":"Production `+suggestion.Value+`"},"value":"prod"}]}`)
+	case strings.Contains(payload, `"type":"view_submission"`):
+		_, _ = io.WriteString(w, `{}`)
+	default:
+		_, _ = io.WriteString(w, `{"text":"acknowledged"}`)
+	}
+}
+
 func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
@@ -468,13 +566,25 @@ func seedBranchParity(t *testing.T, target *memory.Store) {
 func newParity(t *testing.T, testCase parityCase) parity {
 	t.Helper()
 	seed := testCase.seed
-	if seed == nil {
+	if seed == nil && testCase.seedWithApp == nil {
 		seed = seedBaseline
 	}
 	build := func(name string) chatWorld {
 		target := memory.New()
-		seed(t, target)
 		implementation := service.Messages{Store: target, AppCredentialKey: bytes.Repeat([]byte("k"), 32)}
+		if testCase.seedWithApp != nil {
+			// TLS, because the manifest validator requires HTTPS endpoints: a
+			// plain-HTTP receiver makes every manifest invalid and every
+			// dispatch fail identically, which a differential case would report
+			// as agreement.
+			receiver := httptest.NewTLSServer(http.HandlerFunc(parityAppEndpoint))
+			t.Cleanup(receiver.Close)
+			implementation.AppHTTPClient = receiver.Client()
+			testCase.seedWithApp(t, target, receiver.URL)
+		}
+		if seed != nil {
+			seed(t, target)
+		}
 		if testCase.blobs {
 			blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
 			if err != nil {
@@ -4283,6 +4393,72 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The dispatch family is the only one that leaves this process: each
+			// method posts to the app and turns what comes back into durable
+			// state. Both compositions dial their own receiver running the same
+			// handler, so what they compare is what each stored — a difference
+			// cannot come from the app.
+			name:        "app dispatch agrees across the seam",
+			seedWithApp: seedDispatchParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				slashErr := chat.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/deploy", "production", "https://chat.example.test")
+				// A slash command in a thread is refused before the app is
+				// reached, which both compositions must decide alike.
+				threadErr := chat.DispatchSlashCommand(ctx, "T1", "U1", "C1", "1700000000.000100", "/deploy", "production", "https://chat.example.test")
+				unknownErr := chat.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/nothing", "", "https://chat.example.test")
+
+				posted, err := chat.PostWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "Deployment",
+					`[{"type":"actions","block_id":"deployment","elements":[{"type":"button","action_id":"go","text":{"type":"plain_text","text":"Go"},"value":"prod"}]}]`,
+					"", "", "", "A1")
+				if err != nil {
+					return nil, err
+				}
+				actionErr := chat.DispatchBlockAction(ctx, "T1", "U1", domain.AppBlockAction{
+					MessageID: posted.ID, BlockID: "deployment", ActionID: "go", Type: "button", Value: "prod",
+				}, "https://chat.example.test")
+
+				view, err := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_dispatch",
+					`{"type":"modal","callback_id":"deploy","title":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"actions","block_id":"env","elements":[{"type":"external_select","action_id":"pick","placeholder":{"type":"plain_text","text":"Environment"}}]},{"type":"actions","block_id":"go","elements":[{"type":"button","action_id":"confirm","text":{"type":"plain_text","text":"Confirm"},"value":"x"}]}]}`)
+				if err != nil {
+					return nil, err
+				}
+				viewActionErr := chat.DispatchViewBlockAction(ctx, "T1", "U1", "C1", domain.AppViewBlockAction{
+					ViewID: view.ID, BlockID: "go", ActionID: "confirm", Type: "button", Value: "x", State: `{}`,
+				}, "https://chat.example.test")
+
+				options, optionsErr := chat.LoadAppOptions(ctx, "T1", "U1", "C1", domain.AppOptionQuery{
+					AppID: "A1", ViewID: view.ID, BlockID: "env", ActionID: "pick", Value: "pro",
+				}, "https://chat.example.test")
+				loaded := make([]string, 0, len(options))
+				for _, option := range options {
+					loaded = append(loaded, option.Text+"="+option.Value)
+				}
+				sort.Strings(loaded)
+
+				// The response URL was seeded, because a real one is handed to
+				// the app over HTTP where this case cannot read it.
+				responseErr := chat.HandleAppResponse(ctx, "response_dispatch", `{"text":"from the app"}`)
+				spentErr := chat.HandleAppResponse(ctx, "response-absent", `{"text":"nobody"}`)
+				page, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 20})
+				if err != nil {
+					return nil, err
+				}
+				texts := make([]string, 0, len(page.Messages))
+				for _, message := range page.Messages {
+					texts = append(texts, message.Text)
+				}
+				sort.Strings(texts)
+				return []any{
+					slashErr == nil, threadErr != nil, errors.Is(threadErr, service.ErrSlashCommandInThread),
+					unknownErr != nil, errors.Is(unknownErr, service.ErrSlashCommandNotFound),
+					actionErr == nil, viewActionErr == nil,
+					optionsErr == nil, loaded,
+					responseErr == nil, spentErr != nil,
+					errors.Is(spentErr, service.ErrInvalidAppResponse), texts,
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -6135,7 +6311,21 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 5
+//
+// It is zero. Every method chatapi.Service declares is exercised by a case, so
+// there is no backlog left to shrink and a new method has nowhere to hide: it
+// either gets a case or this constant has to be raised, which is a decision
+// somebody has to argue for rather than a list somebody can quietly append to.
+//
+// Two limits are worth knowing rather than discovering. The workflow step
+// methods can be checked for a dropped identifier but not for a dropped
+// payload, because nothing on this seam reads a stored step back; the case says
+// so and the product gap audit records the underlying gap. And a case whose
+// methods call an app over HTTP must use seedWithApp: the receiver has to be
+// TLS and the app's credentials sealed for real, or every dispatch fails
+// identically in both compositions and the case reports an agreement it has
+// not established.
+const parityGapCeiling = 0
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -6156,9 +6346,4 @@ var parityGaps = map[string]struct{}{
 	// focused transport tests because parityCases seeds both compositions with
 	// fresh independent stores and therefore cannot compare one token's durable
 	// schedule across calls.
-	"DispatchBlockAction":     {},
-	"DispatchViewBlockAction": {},
-	"DispatchSlashCommand":    {},
-	"HandleAppResponse":       {},
-	"LoadAppOptions":          {},
 }
