@@ -4007,6 +4007,84 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A workflow step is finished by the app that ran it, and the three
+			// ways it can end — configured, completed, failed — are separate
+			// methods writing separate durable states. seedWorkflowParity
+			// leaves one step executing, which is the state all three act on.
+			name: "workflow step completion agrees across the seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// Configuring is keyed by the edit identifier the builder holds,
+				// not by the execution identifier the runtime holds; they are
+				// different names for different moments and a case that used one
+				// for both would pass while the seam confused them.
+				if err := chat.WorkflowUpdateStep(ctx, "T1", "U1", "triage", `{"item":{"value":"request"}}`, `[{"name":"result","type":"text"}]`, "Triage request", "https://example.test/icon.png"); err != nil {
+					return nil, err
+				}
+				// No seam method returns a stored workflow step, so what these
+				// three write is observable only through the run they move and
+				// through whether they were accepted at all. That bounds this
+				// case honestly: dropping an identifier is caught, dropping a
+				// payload field is not, because nothing can read the payload
+				// back. The product gap audit records that separately — an app
+				// completes a step with outputs and no method reports them.
+				configured, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity")
+				if err != nil {
+					return nil, err
+				}
+				completeErr := chat.WorkflowStepCompleted(ctx, "T1", "U1", "FxParity", `{"result":"done"}`)
+				completed, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity")
+				if err != nil {
+					return nil, err
+				}
+				// A step that has already ended cannot end again, and a failure
+				// payload that is not an object is refused rather than stored.
+				repeatErr := chat.WorkflowStepCompleted(ctx, "T1", "U1", "FxParity", `{"result":"again"}`)
+				malformedErr := chat.WorkflowStepFailed(ctx, "T1", "U1", "FxParity", `not-json`)
+				return []any{
+					string(configured.Status), configured.Inputs,
+					completeErr == nil, string(completed.Status), completed.Outputs,
+					repeatErr != nil, malformedErr != nil,
+					errors.Is(malformedErr, service.ErrInvalidWorkflowStep),
+				}, nil
+			},
+		},
+		{
+			// The three entity surfaces store nothing: they validate what an app
+			// hands back and answer yes or no. What the seam has to agree on is
+			// therefore the decision itself, so the case drives one accepted
+			// shape and every rejected one each method declares.
+			name: "entity presentation validates identically across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				detailsOK := chat.PresentEntityDetails(ctx, "T1", "U1", "trigger", `{"title":"Item"}`, false, "", "")
+				detailsNoTrigger := chat.PresentEntityDetails(ctx, "T1", "U1", "  ", `{"title":"Item"}`, false, "", "")
+				detailsBadMetadata := chat.PresentEntityDetails(ctx, "T1", "U1", "trigger", `["not","an","object"]`, false, "", "")
+				// Declaring that the member must authenticate without saying
+				// where is a promise with nowhere to send them.
+				detailsNoAuthURL := chat.PresentEntityDetails(ctx, "T1", "U1", "trigger", `{"title":"Item"}`, true, "", "")
+				commentsOK := chat.PresentEntityComments(ctx, "T1", "U1", "trigger", `[{"id":"c1","text":"hello"}]`, "", true, "delete", false, "", "")
+				commentsEmpty := chat.PresentEntityComments(ctx, "T1", "U1", "trigger", "", "", true, "delete", false, "", "")
+				commentsNotArray := chat.PresentEntityComments(ctx, "T1", "U1", "trigger", `{"id":"c1"}`, "", true, "delete", false, "", "")
+				acknowledgeOK := chat.AcknowledgeEntityCommentAction(ctx, "T1", "U1", "trigger", `{"id":"c1"}`, "")
+				acknowledgeBad := chat.AcknowledgeEntityCommentAction(ctx, "T1", "U1", "trigger", `[1,2,3]`, "")
+				classify := func(err error) string {
+					switch {
+					case err == nil:
+						return "ok"
+					case errors.Is(err, service.ErrInvalidEntity):
+						return "invalid_entity"
+					default:
+						return "other:" + err.Error()
+					}
+				}
+				return []any{
+					classify(detailsOK), classify(detailsNoTrigger), classify(detailsBadMetadata), classify(detailsNoAuthURL),
+					classify(commentsOK), classify(commentsEmpty), classify(commentsNotArray),
+					classify(acknowledgeOK), classify(acknowledgeBad),
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -5820,7 +5898,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 27
+const parityGapCeiling = 21
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5836,12 +5914,11 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 }
 
 var parityGaps = map[string]struct{}{
-	"AcknowledgeEntityCommentAction": {},
-	"BotInfo":                        {},
-	"CompleteExternalUploads":        {},
-	"CreateExternalIdentity":         {},
-	"CreateSession":                  {},
-	"DeleteCanvas":                   {},
+	"BotInfo":                 {},
+	"CompleteExternalUploads": {},
+	"CreateExternalIdentity":  {},
+	"CreateSession":           {},
+	"DeleteCanvas":            {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
 	// focused transport tests because parityCases seeds both compositions with
@@ -5859,13 +5936,8 @@ var parityGaps = map[string]struct{}{
 	"OpenIDConnectToken":      {},
 	"OpenIDConnectUserInfo":   {},
 	"OpenPublicFile":          {},
-	"PresentEntityComments":   {},
-	"PresentEntityDetails":    {},
 	"RevokeSession":           {},
 	"RevokeToken":             {},
 	"SetAuthMethod":           {},
 	"Unfurl":                  {},
-	"WorkflowStepCompleted":   {},
-	"WorkflowStepFailed":      {},
-	"WorkflowUpdateStep":      {},
 }
