@@ -721,6 +721,18 @@ test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA aut
   await page.goto('/app');
   await expectNoSeriousAccessibilityViolations(page);
 
+  // A blanket opacity on a message is not a style choice, it is a contrast
+  // reduction applied to every colour inside it. One on .system-message went
+  // unnoticed for as long as it was stranded in a media query and never
+  // applied; the moment it did apply, a muted system line on a highlighted row
+  // fell to 4.35:1 against the 4.5:1 AA needs. axe only sees that when the
+  // accumulated state happens to put a system message on that background, so
+  // the cause is asserted directly rather than left to chance.
+  const faded = await page.evaluate(() => Array.from(document.querySelectorAll('.message'))
+    .map((node) => ({ cls: node.className, opacity: getComputedStyle(node).opacity }))
+    .filter((entry) => Number(entry.opacity) < 1));
+  expect(faded, 'a message must not be faded: opacity multiplies against every contrast inside it').toEqual([]);
+
   const { primary } = await slackModifiers(page);
   await page.locator('form.composer textarea[name="text"]').press(`${primary}+k`);
   await expect(page.getByRole('dialog', { name: 'Jump to a conversation' })).toBeVisible();

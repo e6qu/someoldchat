@@ -1539,7 +1539,13 @@ const workspaceRefinements = `<style>
 .day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
 .unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
 .unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
-.system-message{opacity:.85}
+/* No blanket opacity. The rule that used to be here faded the whole message to
+   85%, which was harmless only because it had been stranded in a media query
+   and never applied; switched on, it blends the muted text toward whatever is
+   behind it and drops a system line to 4.35:1 against a highlighted row — under
+   the 4.5:1 AA needs. A system message is secondary because .system-text is
+   muted, which is a colour decision that survives being read on any background,
+   not a transparency that quietly degrades every one of them. */
 .system-text{margin:0;color:var(--muted);font-size:13px}
 .edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
 .thread-summary{margin:2px 0 0;font-size:12px}
