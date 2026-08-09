@@ -558,6 +558,13 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	// An identity provider's own expiry still caps it. The policy says how long
 	// this deployment is willing to trust the sign-in; the provider says how
 	// long its assertion holds, and neither may extend the other.
+	//
+	// The zero check is what keeps a provider-less sign-in from being capped at
+	// the zero time, which is how the cap used to be skipped — by not existing
+	// yet when the provider branch was the only thing that set it. It cannot
+	// loosen the provider case: SkipExpiryCheck is never set, so go-oidc
+	// refuses an ID token whose exp is absent before this is reached, and a
+	// verified token therefore always carries one.
 	if !providerExpiresAt.IsZero() && providerExpiresAt.Before(sessionExpiresAt) {
 		sessionExpiresAt = providerExpiresAt
 	}
