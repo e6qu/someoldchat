@@ -767,6 +767,12 @@ func TestAnExpiredInvitationIsRefusedDistinctly(t *testing.T) {
 	ctx := context.Background()
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	store.SeedConversationMember("C1", "U1")
+	// The invitation is seeded already approved rather than approved here,
+	// because this is the state the test is about: a request approved while it
+	// was fresh, whose deadline passed afterwards. Reaching it by approving a
+	// lapsed request is no longer possible, and was never the real sequence —
+	// approval of a lapsed request now answers ErrInvitationExpired, which
+	// TestALapsedInviteRequestCannotBeApprovedButCanBeDenied covers.
 	stale := domain.InviteRequest{
 		ID: "IR_stale", WorkspaceID: "T1", Email: "late@example.test", RequestedBy: "U1",
 		ChannelIDs: []domain.ConversationID{"C1"}, RealName: "Late", Status: domain.InviteRequestPending,
@@ -775,10 +781,15 @@ func TestAnExpiredInvitationIsRefusedDistinctly(t *testing.T) {
 	if err := store.CreateInviteRequest(ctx, stale, events.Event{ID: "Estale", WorkspaceID: "T1", Topic: "invite_request.created", Payload: `{"type":"invite_request.created"}`, CreatedAt: stale.CreatedAt}); err != nil {
 		t.Fatal(err)
 	}
-	messages := service.Messages{Store: store}
-	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", stale.ID); err != nil {
+	// The approval is written at the store, which is where an approval taken
+	// while the request was still fresh would have left it. A request is always
+	// created pending, so this is the only way to reach the state.
+	reviewed := time.Now().UTC().Add(-29 * 24 * time.Hour)
+	if err := store.SetInviteRequestStatus(ctx, "T1", stale.ID, domain.InviteRequestPending, domain.InviteRequestApproved, reviewed,
+		events.Event{ID: "Estale-approved", WorkspaceID: "T1", Topic: "invite_request.approved", Payload: `{"type":"invite_request.approved"}`, CreatedAt: reviewed}); err != nil {
 		t.Fatal(err)
 	}
+	messages := service.Messages{Store: store}
 	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "late@example.test", "Late"); !errors.Is(err, service.ErrInvitationExpired) {
 		t.Fatalf("an expired invitation was not refused as expired: %v", err)
 	}

@@ -2259,10 +2259,20 @@ func InviteRequestReviewable(from, to InviteRequestStatus) bool {
 // invitation and issuing it are deliberately distinct transitions, so an
 // invitation nobody has approved confers nothing.
 func (request InviteRequest) Acceptable(at time.Time) bool {
-	if request.Status != InviteRequestApproved {
-		return false
-	}
-	return request.ExpiresAt.IsZero() || !at.After(request.ExpiresAt)
+	return request.Status == InviteRequestApproved && !request.Expired(at)
+}
+
+// Expired is the single definition of a lapsed request, for the same reason
+// SharedInvite.Expired is: the deadline used to be spelled out inside
+// Acceptable, so acceptance was the only operation that knew about it and a
+// request could be approved long after the promise it carries had aged out.
+// The comment on ExpiresAt above describes exactly that case — a request that
+// sat in the queue for a month — and nothing enforced it.
+//
+// A request with no deadline never expires, which is what a zero ExpiresAt
+// means on a row written before the lifetime existed.
+func (request InviteRequest) Expired(at time.Time) bool {
+	return !request.ExpiresAt.IsZero() && at.After(request.ExpiresAt)
 }
 
 type InviteRequestPage struct {

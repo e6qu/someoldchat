@@ -1916,6 +1916,12 @@ func (m Messages) changeInviteRequestStatus(ctx context.Context, workspaceID dom
 	if request.Status != domain.InviteRequestPending {
 		return ErrInvalidInviteRequest
 	}
+	// Approving a lapsed request issues an invitation acceptance will refuse on
+	// the same deadline. Denying one stays available, because clearing a queue
+	// of lapsed requests is the remaining useful action.
+	if status == domain.InviteRequestApproved && request.Expired(time.Now().UTC()) {
+		return ErrInvitationExpired
+	}
 	return m.reviewInviteRequest(ctx, workspaceID, actorID, id, domain.InviteRequestPending, status)
 }
 

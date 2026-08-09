@@ -2845,3 +2845,57 @@ func TestMessageSubtypeIsRefusedUnlessItIsVocabulary(t *testing.T) {
 		t.Fatalf("invented subtype error=%v, want %v", err, ErrInvalidMessage)
 	}
 }
+
+// The comment on InviteRequest.ExpiresAt says the deadline is set when the
+// request is recorded rather than when it is approved, "because it is the
+// promise made to the invited person that ages — an invitation that sat in the
+// queue for a month is not fresh because someone finally clicked approve".
+// Nothing enforced that. Approval succeeded and issued an invitation that
+// AcceptInvitationForEmail refuses on the same deadline, so the address was
+// invited to nothing and the queue said otherwise.
+func TestALapsedInviteRequestCannotBeApprovedButCanBeDenied(t *testing.T) {
+	ctx := context.Background()
+	newFixture := func(t *testing.T, id domain.InviteRequestID) (*memory.Store, Messages) {
+		t.Helper()
+		s := memory.New()
+		s.SeedWorkspace(domain.Workspace{ID: "T1"})
+		s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+		seedWorkspaceAdmin(t, s, "T1", "U1")
+		// The deadline is written directly: a request recorded through the
+		// service is always dated fourteen days out, and waiting is not a test.
+		past := time.Now().UTC().Add(-time.Hour)
+		request := domain.InviteRequest{
+			ID: id, WorkspaceID: "T1", Email: "late@example.com", RequestedBy: "U1",
+			Status: domain.InviteRequestPending, CreatedAt: past.Add(-InvitationLifetime), ExpiresAt: past,
+		}
+		event := events.Event{ID: domain.EventID("E" + id), WorkspaceID: "T1", Topic: "invite_request.created", Payload: string(id), CreatedAt: past}
+		if err := s.CreateInviteRequest(ctx, request, event); err != nil {
+			t.Fatal(err)
+		}
+		return s, Messages{Store: s}
+	}
+
+	t.Run("approval is refused", func(t *testing.T) {
+		s, messages := newFixture(t, "IR-lapsed")
+		if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", "IR-lapsed"); !errors.Is(err, ErrInvitationExpired) {
+			t.Fatalf("approving a lapsed request err=%v, want ErrInvitationExpired", err)
+		}
+		// The refusal changed nothing: the request is still pending.
+		page, err := messages.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestPending, domain.PageRequest{Limit: 5})
+		if err != nil || len(page.Requests) != 1 {
+			t.Fatalf("pending page=%+v err=%v, want the request untouched", page, err)
+		}
+		_ = s
+	})
+
+	t.Run("denial is allowed", func(t *testing.T) {
+		_, messages := newFixture(t, "IR-denied")
+		if err := messages.AdminDenyInviteRequest(ctx, "T1", "U1", "IR-denied"); err != nil {
+			t.Fatalf("denying a lapsed request: %v", err)
+		}
+		page, err := messages.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestDenied, domain.PageRequest{Limit: 5})
+		if err != nil || len(page.Requests) != 1 {
+			t.Fatalf("denied page=%+v err=%v", page, err)
+		}
+	})
+}

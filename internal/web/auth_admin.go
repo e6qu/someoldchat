@@ -772,6 +772,12 @@ func authAdminInvitationProblem(err error) authAdminProblem {
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return authAdminProblem{Status: http.StatusConflict, Code: "invitation_already_exists", Title: "Already invited", Message: "That address already has an invitation."}
 	}
+	// A lapsed request is not a transient failure: nothing the administrator
+	// waits for will make approving it work, and the default below would tell
+	// them to try again in a moment for ever.
+	if errors.Is(err, service.ErrInvitationExpired) {
+		return authAdminProblem{Status: http.StatusConflict, Code: "invitation_expired", Title: "Invitation expired", Message: "This request is older than the invitation it would issue, so approving it would invite nobody. Deny it and ask for a new one."}
+	}
 	return authAdminProblem{Status: http.StatusServiceUnavailable, Code: "user_invitation_unavailable", Title: "Temporarily unavailable", Message: "The invitation could not be recorded. Nothing was changed."}
 }
 
