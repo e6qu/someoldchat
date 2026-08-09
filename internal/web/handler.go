@@ -1353,15 +1353,27 @@ const workspaceRefinements = `<style>
 .side-link{min-height:28px}
 .side-link[aria-current=page]{background:#1264a3;color:#fff}
 .content{background:var(--panel-strong)}
-.channel-header{min-height:64px;padding:9px 20px;background:var(--panel-strong)}
+.channel-header{min-height:52px;padding:8px 20px;background:var(--panel-strong)}
 .channel-identity{display:flex;align-items:center;gap:10px;min-width:0}
 .channel-title{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .channel-copy{min-width:0}
 .channel-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:680px}
 .membership-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
-.channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
-.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+/* Quiet controls. Slack's channel header carries the conversation — its name,
+   its topic, who is in it — and keeps its controls light so they do not compete
+   with it. These were bordered, bold and filled, which made five of them read
+   as the most important thing on the row. */
+.channel-actions button{border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);padding:4px 8px;font-weight:600;font-size:13px}
+.channel-actions button:hover{border-color:var(--line);color:var(--text)}
+/* A quiet line under the channel header rather than a banner across the top of
+   the conversation. The sentence stays: HUDDLE-01 requires the control to say
+   what pressing it does, and a control that silently connected nothing is the
+   promise the universal contract forbids. What changes is its weight — it is
+   secondary information, not a panel competing with the first message. */
+.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:5px 26px;border-bottom:1px solid var(--line);background:transparent;color:var(--muted);font-size:12px}
+.huddle-bar .huddle-media{color:var(--muted)}
+.huddle-bar button{min-height:26px;padding:3px 10px;font-size:12px}
 .add-column{margin:0 0 14px}
 .add-column form{display:flex;flex-direction:column;gap:6px;max-width:420px;margin-top:8px}
 .list-columns{margin:0 0 10px;font-size:12px}
@@ -1406,6 +1418,8 @@ const workspaceRefinements = `<style>
 .huddle-actions button:hover{background:var(--hover)}
 .huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
 .channel-actions button:hover{background:var(--hover)}
+.channel-actions a{color:var(--muted);text-decoration:none;font-weight:600;font-size:13px}
+.channel-actions a:hover{color:var(--text);text-decoration:underline}
 .timeline{padding-top:12px}
 .message{border-radius:6px;padding-top:5px;padding-bottom:5px}
 .message-actions{position:absolute;z-index:3;top:2px;right:10px;display:none;flex-wrap:nowrap;align-items:center;min-height:0;gap:2px;padding:3px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow)}
