@@ -10788,6 +10788,16 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, service.ErrBarrieredFromMember) {
 		return "barriered_from_member"
 	}
+	// The two guest tiers are reported separately because the pinned enums for
+	// conversations.join and conversations.invite declare both codes, and they
+	// say different things: user_is_ultra_restricted tells the caller the
+	// person is confined to a single channel, which no other code does.
+	if errors.Is(err, service.ErrUserIsUltraRestricted) {
+		return "user_is_ultra_restricted"
+	}
+	if errors.Is(err, service.ErrUserIsRestricted) {
+		return "user_is_restricted"
+	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) {
 		return "emoji_already_exists"
 	}

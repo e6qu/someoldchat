@@ -12,11 +12,18 @@ Empty search results MUST not look like an empty workspace. A channel that
 becomes unavailable between discovery and join produces a handled result and
 does not leave a phantom sidebar item.
 
+A guest reaches a channel by being added to it, never by naming one. A
+single-channel guest belongs to the one channel they were invited to and a
+multi-channel guest to the ones members put them in; neither browses the
+workspace, so neither joins by identifier. The refusal names the tier, because
+`user_is_ultra_restricted` tells a caller the person is confined to one channel
+and `user_is_restricted` does not.
+
 ## CONV-02 — Create a channel
 
 **Target sequence:** Open create-channel, enter a valid name, optionally set a
 description and privacy, review the consequence of private visibility, create,
-then invite members. Validation is inline and preserves input. Slack-compatible
+then invite members. Guests do not create channels. Validation is inline and preserves input. Slack-compatible
 normalization, reserved names, duplicate names, length limits, permissions,
 default-channel policy, and concurrent creation are enforced by the backend.
 

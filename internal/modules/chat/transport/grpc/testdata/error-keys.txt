@@ -100,6 +100,8 @@ service.shared_invite_settled
 service.slack_connect_full
 service.slash_command_in_thread
 service.slash_command_not_found
+service.user_is_restricted
+service.user_is_ultra_restricted
 service.webhook_trigger_secret
 service.workflow_function_not_found
 service.workflow_permission_denied
