@@ -366,6 +366,13 @@ func (m Messages) DeleteDeveloperApp(ctx context.Context, configurationToken str
 }
 
 func (m Messages) ListDeveloperApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.App, error) {
+	// The store scopes the listing to the apps this person owns, which is what
+	// a developer is shown. Whether they are a member of the workspace at all
+	// was nobody's decision until this line: a deactivated account and an
+	// identifier belonging to nobody were both answered.
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
 	return m.Store.ListDeveloperApps(ctx, workspaceID, userID)
 }
 
