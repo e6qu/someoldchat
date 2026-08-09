@@ -179,8 +179,15 @@ Absent, and named on the page rather than rendered as an inert control:
 
 - Multi-workspace browser and API fixtures use different administrators and
   external members; a single-workspace mock cannot qualify Slack Connect.
-- Authorization tests attempt every action as owner, admin, member, guest,
-  external member, bot, disabled user, and wrong workspace.
+- Authorization tests attempt every action as owner, admin, member,
+  multi-channel guest, single-channel guest, deactivated account, and an
+  identifier belonging to nobody. The matrix in `tests/authorization` derives
+  the operation set by reflection over the chat seam, so an operation that
+  arrives without a declared authority fails rather than defaulting to
+  "anybody may". This line described a test that did not exist until then: scope
+  enforcement was exhaustive and role enforcement was not tested at all, which
+  is how a single-channel guest could reach every public channel in the
+  workspace and how three operations answered a deactivated account.
 - Current official SDKs exercise applicable `admin.*`, `team.*`, `users.*`,
   `apps.*`, and Slack Connect `conversations.*` methods.
 - The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey creates and

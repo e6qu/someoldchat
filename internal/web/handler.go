@@ -1110,9 +1110,9 @@ type oauthConsentData struct {
 //     --line is a decorative separator at 1.35:1 and cannot serve both.
 //   - --focus-chrome is the focus ring over the purple topbar and sidebar,
 //     where --focus measures 1.65:1 — and where every primary control lives.
-const lightTokens = `color-scheme:light;--bg:#fff;--panel:#f7f5f8;--panel-strong:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--field-line:#6b6570;--accent:#611f69;--on-accent:#fff;--on-strong:#fff;--action:#5c1a64;--hover:#f1edf2;--focus:#0b5cad;--focus-chrome:#fff;--danger:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--mark-bg:#fbe9a8;--shadow:0 8px 24px #1d1c1d1f`
+const lightTokens = `color-scheme:light;--bg:#fff;--panel:#f7f5f8;--panel-strong:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--field-line:#6b6570;--accent:#611f69;--chrome:#3f0e40;--chrome-top:#350d36;--chrome-line:#ffffff1f;--chrome-muted:#cfc3d0;--on-accent:#fff;--on-strong:#fff;--action:#5c1a64;--hover:#f1edf2;--focus:#0b5cad;--focus-chrome:#fff;--danger:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--mark-bg:#fbe9a8;--shadow:0 8px 24px #1d1c1d1f`
 
-const darkTokens = `color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--field-line:#8a8f96;--accent:#4a1750;--on-accent:#fff;--on-strong:#141719;--action:#8fd7f4;--hover:#2c3035;--focus:#7cc4ff;--focus-chrome:#fff;--danger:#ff9db4;--danger-bg:#3a1622;--ok:#3fbf95;--mark-bg:#5a4a12;--shadow:0 8px 24px #0006`
+const darkTokens = `color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--field-line:#8a8f96;--accent:#4a1750;--chrome:#231e26;--chrome-top:#1b171d;--chrome-line:#ffffff17;--chrome-muted:#b9b2bb;--on-accent:#fff;--on-strong:#141719;--action:#8fd7f4;--hover:#2c3035;--focus:#7cc4ff;--focus-chrome:#fff;--danger:#ff9db4;--danger-bg:#3a1622;--ok:#3fbf95;--mark-bg:#5a4a12;--shadow:0 8px 24px #0006`
 
 const sharedStyle = `*{box-sizing:border-box}
 :root{` + lightTokens + `}
@@ -1159,7 +1159,7 @@ func mustPage(markup string) *template.Template {
 
 const pageStyle = `<style>
 .shell{height:100vh;display:grid;grid-template-rows:52px minmax(0,1fr)}
-.topbar{background:var(--accent);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:var(--shadow)}
+.topbar{background:var(--chrome-top);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:none}
 .brand{font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .search{position:relative;flex:1 1 auto;min-width:0;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #ffffff8a;border-radius:7px;padding:4px 10px}
 .search input[name=q]{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;color:var(--on-accent)}
@@ -1171,7 +1171,7 @@ const pageStyle = `<style>
 .icon-button{border:0;background:transparent;color:var(--on-accent);border-radius:6px;padding:7px 9px;text-decoration:none}
 .icon-button:hover{background:#ffffff2b}
 .workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}
-.sidebar{background:var(--accent);color:var(--on-accent);padding:16px 10px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+.sidebar{background:var(--chrome);color:var(--on-accent);padding:8px 0 16px;display:flex;flex-direction:column;gap:2px;overflow:auto}
 .workspace-name{font-weight:800;padding:0 10px}
 .connect-invites{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
 .connect-invites li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--line);border-radius:8px}
@@ -1189,9 +1189,10 @@ const pageStyle = `<style>
 .workspace-current small{display:block;color:#e8cbe9;font-weight:400}
 .workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}
 .side-section{display:grid;gap:2px}
-.side-label{color:#e8cbe9;font-size:12px;font-weight:700;padding:6px 10px;text-transform:uppercase;letter-spacing:.06em}
-.side-link{display:flex;align-items:center;gap:9px;width:100%;padding:7px 10px;border:0;border-radius:5px;background:transparent;color:var(--on-accent);font:inherit;text-align:left;text-decoration:none}
-.side-link:hover,.side-link[aria-current=page]{background:#ffffff2b}
+.side-label{color:var(--chrome-muted);font-size:13px;font-weight:700;padding:14px 16px 4px;text-transform:none;letter-spacing:0}
+.side-link{display:flex;align-items:center;gap:9px;width:100%;min-height:28px;padding:2px 16px;border:0;border-radius:0;background:transparent;color:var(--chrome-muted);font:inherit;line-height:1.3;text-align:left;text-decoration:none}
+.side-link:hover{background:#ffffff14;color:var(--on-accent)}
+.side-link[aria-current=page]{background:#1164a3;color:#fff}
 .side-link[aria-current=page]{font-weight:700}
 .side-icon{flex:0 0 auto;display:inline-block;min-width:1em;text-align:center}
 .side-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1213,7 +1214,7 @@ const pageStyle = `<style>
 .pager-older{grid-row:1}
 .timeline{grid-row:2;overflow:auto;padding:18px 26px 12px;scroll-behavior:smooth}
 .pager-newer{grid-row:3}
-.message{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:10px 8px;border-radius:7px}
+.message{position:relative;display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:6px 8px;border-radius:7px}
 .message:hover{background:var(--hover)}
 .message:focus{background:var(--hover);outline:3px solid var(--focus);outline-offset:-1px}
 .message:target{background:var(--hover);outline:2px solid var(--focus)}
@@ -1277,7 +1278,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .composer{border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:10px}
 .composer.is-error{border-color:var(--danger)}
 .composer textarea{width:100%;min-height:44px;resize:vertical;border:0;outline:0;background:transparent;color:var(--text)}
-.composer-toolbar{display:flex;align-items:center;gap:3px;border-bottom:1px solid var(--line);padding:0 0 7px;margin-bottom:6px;position:relative}
+.composer-toolbar{display:flex;align-items:center;flex:1 1 auto;flex-wrap:wrap;gap:2px;border:0;padding:0;margin:0;position:relative}
 .composer-tool,.composer-menu>summary{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;border:0;border-radius:5px;background:transparent;color:var(--muted);font-weight:700;cursor:pointer;padding:0 7px}
 .composer-tool:hover,.composer-tool:focus-visible,.composer-menu>summary:hover,.composer-menu>summary:focus-visible{background:var(--panel);color:var(--text)}
 .composer-menu{position:relative}
@@ -1300,7 +1301,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .conversation-switcher{width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
 .conversation-switcher::backdrop{background:#0008}.switcher-head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.switcher-head label{flex:1}.switcher-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.switcher-close{border:0;background:transparent;color:var(--muted);font-size:20px}.switcher-results{list-style:none;margin:0;padding:8px;overflow:auto}.switcher-results a{display:flex;gap:8px;border-radius:6px;color:var(--text);padding:8px 10px;text-decoration:none}.switcher-results a:hover,.switcher-results a:focus-visible{background:var(--hover)}
 .upload-preview{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:5px 0 0;color:var(--muted);font-size:13px}.staged-file{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}.staged-file button{padding:1px 4px}
-.composer-footer{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.composer-footer{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap}
 .composer-tools{margin:0;color:var(--muted);font-size:13px}
 .send{border:0;border-radius:5px;background:var(--ok);color:var(--on-strong);font-weight:700;padding:7px 14px}
 .send-actions{display:flex;align-items:stretch;gap:2px}.schedule-menu{position:relative}.schedule-menu>summary{display:grid;place-items:center;height:100%;min-width:34px;border-radius:5px;background:var(--ok);color:var(--on-strong);cursor:pointer;list-style:none;font-weight:800}.schedule-menu>summary::-webkit-details-marker{display:none}.schedule-popover{position:absolute;z-index:10;right:0;bottom:38px;display:grid;gap:8px;width:min(310px,calc(100vw - 32px));padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}.schedule-popover label{display:grid;gap:5px;font-size:12px;font-weight:800}.schedule-popover input{width:100%;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 9px;font:inherit}.schedule-popover p{margin:0;color:var(--muted);font-size:12px}.schedule-popover button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);padding:8px 11px;font-weight:800}.schedule-popover a{color:var(--action);font-size:12px;font-weight:700}
@@ -1318,7 +1319,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 </style>`
 
 const workspaceRefinements = `<style>
-.topbar{height:48px;padding:0 12px;border-bottom:1px solid #ffffff24;box-shadow:none}
+.topbar{height:44px;padding:0 10px;border-bottom:0;box-shadow:none}
 .brand{max-width:220px}
 .search{height:34px;max-width:680px;padding:3px 8px;background:#ffffff20}
 .search-icon{width:16px;height:16px;flex:0 0 auto}
@@ -1345,22 +1346,34 @@ const workspaceRefinements = `<style>
 .search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
 .top-profile{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:7px;background:#ffffff35;font-weight:800;text-transform:uppercase}
 .workspace{grid-template-columns:260px minmax(0,1fr)}
-.sidebar{padding:12px 8px;background:linear-gradient(180deg,var(--accent),#3f1645)}
+.sidebar{padding:8px 0 16px;background:var(--chrome)}
 .workspace-name{font-size:17px;line-height:1.25}
 .workspace-sub{display:flex;align-items:center;gap:6px}
 .presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2eb67d;box-shadow:0 0 0 2px #ffffff2e}
-.side-link{min-height:34px}
+.side-link{min-height:28px}
 .side-link[aria-current=page]{background:#1264a3;color:#fff}
 .content{background:var(--panel-strong)}
-.channel-header{min-height:64px;padding:9px 20px;background:var(--panel-strong)}
+.channel-header{min-height:52px;padding:8px 20px;background:var(--panel-strong)}
 .channel-identity{display:flex;align-items:center;gap:10px;min-width:0}
 .channel-title{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .channel-copy{min-width:0}
 .channel-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:680px}
 .membership-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
-.channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
-.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:13px}
+/* Quiet controls. Slack's channel header carries the conversation — its name,
+   its topic, who is in it — and keeps its controls light so they do not compete
+   with it. These were bordered, bold and filled, which made five of them read
+   as the most important thing on the row. */
+.channel-actions button{border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);padding:4px 8px;font-weight:600;font-size:13px}
+.channel-actions button:hover{border-color:var(--line);color:var(--text)}
+/* A quiet line under the channel header rather than a banner across the top of
+   the conversation. The sentence stays: HUDDLE-01 requires the control to say
+   what pressing it does, and a control that silently connected nothing is the
+   promise the universal contract forbids. What changes is its weight — it is
+   secondary information, not a panel competing with the first message. */
+.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:5px 26px;border-bottom:1px solid var(--line);background:transparent;color:var(--muted);font-size:12px}
+.huddle-bar .huddle-media{color:var(--muted)}
+.huddle-bar button{min-height:26px;padding:3px 10px;font-size:12px}
 .add-column{margin:0 0 14px}
 .add-column form{display:flex;flex-direction:column;gap:6px;max-width:420px;margin-top:8px}
 .list-columns{margin:0 0 10px;font-size:12px}
@@ -1405,10 +1418,43 @@ const workspaceRefinements = `<style>
 .huddle-actions button:hover{background:var(--hover)}
 .huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
 .channel-actions button:hover{background:var(--hover)}
+.channel-actions a{color:var(--muted);text-decoration:none;font-weight:600;font-size:13px}
+.channel-actions a:hover{color:var(--text);text-decoration:underline}
 .timeline{padding-top:12px}
-.message{border-radius:6px;padding-top:8px;padding-bottom:8px}
-.message-actions{position:relative;display:flex;flex-wrap:wrap;justify-content:flex-end;min-height:0;gap:2px;margin-top:6px;padding:3px 5px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong)}
-.message:hover .message-actions a,.message-actions button,.message-actions summary{display:inline-flex;flex:0 0 auto;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
+.message{border-radius:6px;padding-top:5px;padding-bottom:5px}
+.message-actions{position:absolute;z-index:3;top:2px;right:10px;display:none;flex-wrap:nowrap;align-items:center;min-height:0;gap:2px;padding:3px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.message-action{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;list-style:none}
+.message-action::-webkit-details-marker{display:none}
+.message-action:hover{background:var(--hover);color:var(--text)}
+.action-icon{width:18px;height:18px;display:block}
+.message-more>.shortcut-list,.forward-menu>form{position:absolute;z-index:6;right:0;top:32px}
+.message-actions a,.message-actions button,.message-actions summary{display:inline-flex;flex:0 0 auto;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
+/* The toolbar is revealed by pointing at the message or focusing it, and is
+   otherwise out of the way. It used to be permanently visible under every
+   message, tripling the height of the timeline, because the rule above read
+   ".message:hover .message-actions a, .message-actions button, .message-actions
+   summary" — a comma-separated list, so the :hover prefix bound to the anchors
+   alone and every button and menu stayed on screen. Two media queries below
+   restore a visible state that nothing had ever hidden, which is the other half
+   of the same mistake.
+   Hidden with visibility, not opacity. Opacity was tried and fails WCAG: axe
+   blends a zero-opacity foreground with its background rather than treating the
+   text as absent, so every action reported a contrast of 1.42 against white.
+   visibility:hidden takes the row out of the accessibility tree and out of the
+   tab order, which is what "not currently offered" should mean, and :focus
+   brings it back the moment the message is reached by keyboard — the message
+   carries tabindex so roving focus lands on it. */
+.message-actions{display:none}
+.message:hover .message-actions,.message:focus .message-actions,.message:focus-within .message-actions{display:flex}
+/* A menu left open keeps the toolbar on screen: closing it because the pointer
+   moved into the menu it opened would make the menu unusable. */
+.message-actions:has(details[open]){display:flex}
+/* Overlaid at the top-right, the way Slack presents it, which needs the row to
+   be narrow: as ten text labels it was nine hundred pixels wide and covered the
+   message timestamp, which WCAG 2.2 target-size reports as a link obscured to a
+   strip one pixel tall. Five icon controls clear the head with room to spare,
+   and everything they displaced lives in More actions — which is also where
+   Slack keeps it. */
 .message-actions a:hover,.message-actions button:hover,.message-actions summary:hover{background:var(--hover);color:var(--text);text-decoration:none}
 .message-actions details{display:inline-block;position:relative}
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
@@ -1420,7 +1466,16 @@ const workspaceRefinements = `<style>
 .shortcut-list button{display:block;width:100%;padding:7px 9px;text-align:left}
 .shortcut-list small{display:block;color:var(--muted);font-weight:400}
 .composer-shortcuts{position:relative}
-.composer-shortcuts summary{cursor:pointer;color:var(--muted);font-weight:700}
+/* The attach control reads as part of the composer rather than a stray
+   disclosure above it: a small labelled control on the composer's own edge.
+   It cannot move inside the composer's bottom row, where Slack puts its plus
+   button, because it carries its own multipart form and HTML forbids a form
+   inside a form. Closing that gap means either driving the upload from script
+   with a hidden input, or folding the upload into the composer's own submit —
+   a decision about how uploads are posted, not a styling change, and it is
+   recorded in the product gap audit rather than worked around here. */
+.composer-shortcuts summary{display:inline-flex;align-items:center;gap:6px;min-height:28px;width:max-content;cursor:pointer;padding:2px 8px;border-radius:6px;color:var(--muted);font-size:13px;font-weight:700}
+.composer-shortcuts summary:hover{background:var(--hover);color:var(--text)}
 .composer-shortcuts[open]>.shortcut-list{position:absolute;z-index:6;left:0;bottom:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .message-actions .edit-message{width:min(420px,70vw)}
 .message-actions .edit-message textarea{width:min(320px,55vw);min-height:64px;resize:vertical;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:5px 7px}
@@ -1435,11 +1490,12 @@ const workspaceRefinements = `<style>
 .new-channel .privacy{display:flex;grid-template-columns:none;align-items:center;gap:6px}
 .new-channel button{width:100%;border:0;border-radius:5px;background:#fff;color:var(--accent);font-weight:800;padding:6px 9px}
 .composer-wrap{background:var(--panel-strong);padding-top:7px;padding-bottom:12px}
+.composer-shortcuts{margin:0 0 4px 2px}
 .composer{border-color:var(--field-line);border-radius:9px;box-shadow:none;padding:8px 10px}
 .composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
 .composer.is-dragging{border-color:var(--action);box-shadow:0 0 0 3px color-mix(in srgb,var(--action) 25%,transparent)}
 .composer textarea{min-height:44px}
-.composer-footer{border-top:1px solid var(--line);padding-top:6px}
+.composer-footer{border-top:1px solid var(--line);padding-top:7px;margin-top:6px}
 .composer-tools kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--panel);font:11px/1.4 inherit}
 .send{min-width:70px}
 .conversation-gate{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:18px}
@@ -1473,6 +1529,35 @@ const workspaceRefinements = `<style>
 .modal-input{display:grid;gap:6px}.modal-input>label,.modal-legend{font-weight:700}.modal-input input:not([type=radio]):not([type=checkbox]),.modal-input textarea,.modal-input select{width:100%;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:9px 10px;font:inherit}.modal-input textarea{min-height:96px;resize:vertical}.modal-input select[multiple]{min-height:120px}
 .modal-hint{margin:0;color:var(--muted);font-size:12px}.modal-error{margin:0;color:var(--danger);font-size:13px;font-weight:700}.modal-options{display:grid;gap:7px;margin:0;padding:0;border:0}.modal-options label{display:flex;align-items:flex-start;gap:7px}
 .modal-foot{justify-content:flex-end;border-top:1px solid var(--line)}.modal-button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:8px 16px;font-weight:800}.modal-button.primary{border-color:var(--ok);background:var(--ok);color:var(--on-strong)}.modal-button:disabled{opacity:.55}
+/* Timeline styling that belongs at every width. This run lived inside the
+   narrow-viewport media query below, so on a desktop the timeline had no date
+   separator, no unread divider, no system-message treatment, no edited label
+   and no thread summary — the rules were served and never applied. A date
+   divider rendered as bare left-aligned text because .day-separator was
+   mobile-only. */
+.day-separator{display:flex;align-items:center;gap:8px;margin:14px 0 6px;color:var(--muted);font-size:12px}
+.day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
+.unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
+.unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
+/* No blanket opacity. The rule that used to be here faded the whole message to
+   85%, which was harmless only because it had been stranded in a media query
+   and never applied; switched on, it blends the muted text toward whatever is
+   behind it and drops a system line to 4.35:1 against a highlighted row — under
+   the 4.5:1 AA needs. A system message is secondary because .system-text is
+   muted, which is a colour decision that survives being read on any background,
+   not a transparency that quietly degrades every one of them. */
+.system-text{margin:0;color:var(--muted);font-size:13px}
+.edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
+.thread-summary{margin:2px 0 0;font-size:12px}
+.thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
+.thread-last-reply{color:var(--muted);margin-left:6px}
+.file-delete summary{cursor:pointer;color:var(--muted);font-size:12px}
+.file-delete p{margin:6px 0;font-size:12px;color:var(--muted)}
+/* A system message carries no avatar, so its body landed in the 38px avatar
+   column of .message's two-column grid and wrapped one word per line. Putting
+   it in the text column keeps the gutter empty, which is where Slack aligns
+   these lines too. */
+.system-message>.message-body{grid-column:2}
 @media(max-width:800px){
 .brand{display:none}
 html.js .nav-toggle{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border:1px solid #ffffff8a;border-radius:6px;background:transparent;color:var(--on-accent);font-size:21px;line-height:1}
@@ -1494,18 +1579,6 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .membership-pill{display:none}
 .message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1;visibility:visible}
 .message-actions details[open]>form{left:0;right:auto}
-.day-separator{display:flex;align-items:center;gap:8px;margin:14px 0 6px;color:var(--muted);font-size:12px}
-.day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
-.unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
-.unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
-.system-message{opacity:.85}
-.system-text{margin:0;color:var(--muted);font-size:13px}
-.edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
-.thread-summary{margin:2px 0 0;font-size:12px}
-.thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
-.thread-last-reply{color:var(--muted);margin-left:6px}
-.file-delete summary{cursor:pointer;color:var(--muted);font-size:12px}
-.file-delete p{margin:6px 0;font-size:12px;color:var(--muted)}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
@@ -1531,7 +1604,12 @@ const attachmentPartial = `{{define "attachment"}}
 </article>
 {{end}}`
 
-const messagesPartial = `{{define "messages"}}
+const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7.4" cy="8.4" r="1" fill="currentColor"/><circle cx="12.6" cy="8.4" r="1" fill="currentColor"/><path d="M6.9 12.2a4 4 0 0 0 6.2 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>{{end}}
+{{define "icon-thread"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3.2 6.2A2 2 0 0 1 5.2 4.2h9.6a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2H8.4L5 16.2v-2.8a2 2 0 0 1-1.8-2Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
+{{define "icon-forward"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M11 4.5 17 10l-6 5.5V12C7.6 12 5.2 13.1 3.5 15.5c.3-4.6 3-7.4 7.5-7.9Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
+{{define "icon-bookmark"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5.5 3.8h9v12.4L10 12.6l-4.5 3.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
+{{define "icon-more"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="4.6" cy="10" r="1.4" fill="currentColor"/><circle cx="10" cy="10" r="1.4" fill="currentColor"/><circle cx="15.4" cy="10" r="1.4" fill="currentColor"/></svg>{{end}}
+{{define "messages"}}
 {{range $message := .Messages}}
 {{if $message.DaySeparator}}<div class="day-separator" role="separator"><time datetime="{{$message.DaySeparatorMachine}}">{{$message.DaySeparator}}</time></div>{{end}}
 {{if $message.FirstUnread}}<div class="unread-divider" role="separator" aria-label="New messages"><span>New</span></div>{{end}}
@@ -1640,10 +1718,16 @@ const messagesPartial = `{{define "messages"}}
     </ul>
     {{end}}
     {{if $message.ReplyCount}}<p class="thread-summary"><a href="{{$message.ReplyURL}}">{{$message.ReplySummary}}</a>{{if $message.LastReplyTime}} <span class="thread-last-reply">Last reply {{$message.LastReplyTime}}</span>{{end}}</p>{{end}}
-    {{if not $message.Ephemeral}}<div class="message-actions">
-      <a href="{{$message.ReplyURL}}">{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}</a>
-      {{if $message.CopyLinkURL}}<a class="copy-link" href="{{$message.CopyLinkURL}}" data-copy-link="{{$message.CopyLinkURL}}">Copy link</a>{{end}}
-      {{if and $message.ForwardURL $.CanReply}}<details class="forward-menu"><summary>Forward</summary>
+    {{if not $message.Ephemeral}}<div class="message-actions" role="group" aria-label="Actions for the message from {{$message.AuthorName}}">
+      {{if $.CanReact}}
+      <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <input type="hidden" name="name" value="">
+      </form>
+      <button class="message-action" type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog" aria-label="Add reaction" title="Add reaction">{{template "icon-emoji"}}</button>
+      {{end}}
+      <a class="message-action" href="{{$message.ReplyURL}}" aria-label="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}" title="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}">{{template "icon-thread"}}</a>
+      {{if and $message.ForwardURL $.CanReply}}<details class="forward-menu"><summary class="message-action" aria-label="Forward" title="Forward">{{template "icon-forward"}}</summary>
         <form method="post" action="{{$message.ForwardURL}}" hx-post="{{$message.ForwardURL}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
           <label>Forward to<select name="destination">{{range $.ForwardDestinations}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label>
@@ -1651,78 +1735,69 @@ const messagesPartial = `{{define "messages"}}
           <button type="submit">Forward</button>
         </form>
       </details>{{end}}
-      {{if $message.MarkUnreadURL}}<form method="post" action="{{$message.MarkUnreadURL}}" hx-post="{{$message.MarkUnreadURL}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <button type="submit">Mark unread from here</button>
-      </form>{{end}}
-      {{if $.CanReact}}
-      <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <input type="hidden" name="name" value="">
-      </form>
-      <button type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog">Add reaction</button>
-      {{end}}
       <form method="post" action="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" hx-post="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" data-message-save>
         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <button type="submit" aria-pressed="{{if $message.Saved}}true{{else}}false{{end}}">{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}</button>
+        <button class="message-action" type="submit" aria-pressed="{{if $message.Saved}}true{{else}}false{{end}}" aria-label="{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}" title="{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}">{{template "icon-bookmark"}}</button>
       </form>
-      <details data-reminder-menu>
-        <summary>Remind me about this</summary>
-        <form class="inline-form reminder-form" aria-label="Set a reminder for this message" method="post" action="{{$message.RemindURL}}">
+      <details class="message-more"><summary class="message-action" aria-label="More actions" title="More actions">{{template "icon-more"}}</summary>
+      <div class="shortcut-list">
+        {{if $message.CopyLinkURL}}<a class="copy-link" href="{{$message.CopyLinkURL}}" data-copy-link="{{$message.CopyLinkURL}}">Copy link</a>{{end}}
+        {{if $message.MarkUnreadURL}}<form method="post" action="{{$message.MarkUnreadURL}}" hx-post="{{$message.MarkUnreadURL}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <input type="hidden" name="timezone" data-browser-timezone value="UTC">
-          <button type="submit" name="preset" value="20m">In 20 minutes</button>
-          <button type="submit" name="preset" value="1h">In 1 hour</button>
-          <button type="submit" name="preset" value="tomorrow">Tomorrow at 9:00 AM</button>
-          <label>Custom date<input type="date" name="date"></label>
-          <label>Time<input type="time" name="time" value="09:00"></label>
-          <button type="submit" name="preset" value="custom">Set reminder</button>
-        </form>
-      </details>
-      {{if $.CanPin}}
-      <form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
-      </form>
-      {{end}}
-      {{if $message.Shortcuts}}
-      <details>
-        <summary>More actions</summary>
-        <div class="shortcut-list" role="menu">
-          {{range $shortcut := $message.Shortcuts}}
-          <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
+          <button type="submit">Mark unread from here</button>
+        </form>{{end}}
+        <details data-reminder-menu>
+          <summary>Remind me about this</summary>
+          <form class="inline-form reminder-form" aria-label="Set a reminder for this message" method="post" action="{{$message.RemindURL}}">
             <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <input type="hidden" name="channel" value="{{$message.Channel}}">
-            <input type="hidden" name="message_id" value="{{$message.MessageID}}">
-            <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
-            <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
-            <button type="submit" role="menuitem">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
+            <input type="hidden" name="timezone" data-browser-timezone value="UTC">
+            <button type="submit" name="preset" value="20m">In 20 minutes</button>
+            <button type="submit" name="preset" value="1h">In 1 hour</button>
+            <button type="submit" name="preset" value="tomorrow">Tomorrow at 9:00 AM</button>
+            <label>Custom date<input type="date" name="date"></label>
+            <label>Time<input type="time" name="time" value="09:00"></label>
+            <button type="submit" name="preset" value="custom">Set reminder</button>
           </form>
-          {{end}}
-        </div>
-      </details>
-      {{end}}
-      {{if $message.CanEdit}}
-      <details>
-        <summary>Edit</summary>
-        <form class="inline-form edit-message" aria-label="Edit message" method="post" action="{{$message.UpdateURL}}" hx-post="{{$message.UpdateURL}}">
+        </details>
+        {{if $.CanPin}}
+        <form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <label class="visually-hidden" for="edit-{{$message.ID}}">Edit your message</label>
-          <textarea id="edit-{{$message.ID}}" name="text" maxlength="40000" required>{{$message.Text}}</textarea>
-          <button type="submit">Save changes</button>
+          <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
         </form>
-      </details>
-      {{end}}
-      {{if $message.CanDelete}}
-      <details class="delete-message">
-        <summary>Delete</summary>
-        <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
+        {{end}}
+        {{range $shortcut := $message.Shortcuts}}
+        <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          {{if $message.Files}}<p>This message shares a file. Deleting it also removes the file from this conversation, unless another message here shares it too. The file itself is kept.</p>{{end}}
-          <button type="submit">Delete this message</button>
+          <input type="hidden" name="channel" value="{{$message.Channel}}">
+          <input type="hidden" name="message_id" value="{{$message.MessageID}}">
+          <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
+          <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
+          <button type="submit">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
         </form>
+        {{end}}
+        {{if $message.CanEdit}}
+        <details>
+          <summary>Edit</summary>
+          <form class="inline-form edit-message" aria-label="Edit message" method="post" action="{{$message.UpdateURL}}" hx-post="{{$message.UpdateURL}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label class="visually-hidden" for="edit-{{$message.ID}}">Edit your message</label>
+            <textarea id="edit-{{$message.ID}}" name="text" maxlength="40000" required>{{$message.Text}}</textarea>
+            <button type="submit">Save changes</button>
+          </form>
+        </details>
+        {{end}}
+        {{if $message.CanDelete}}
+        <details class="delete-message">
+          <summary>Delete</summary>
+          <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            {{if $message.Files}}<p>This message shares a file. Deleting it also removes the file from this conversation, unless another message here shares it too. The file itself is kept.</p>{{end}}
+            <button type="submit">Delete this message</button>
+          </form>
+        </details>
+        {{end}}
+      </div>
       </details>
-      {{end}}
     </div>{{end}}
   </div>
 </article>
@@ -1945,6 +2020,21 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
           <input type="hidden" name="timezone" data-browser-timezone value="UTC">
           <input type="hidden" id="draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
+          <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
+          <textarea id="text" name="text" maxlength="40000"{{if not .DraftAttachments}} required{{end}}{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions channel-suggestions emoji-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
+          {{if or .ComposerMembers .ComposerGroups}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
+            <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
+            <button type="button" role="option" data-mention-group="{{.ID}}" data-mention-name="{{.Handle}}" data-mention-search="{{.Handle}} {{.Name}} {{.Description}}"><span>@{{.Handle}}</span><small>{{.Name}} · {{.MemberCount}} members</small></button>{{end}}
+          </div>{{end}}
+          {{if .ComposerChannels}}<div class="channel-suggestions" id="channel-suggestions" role="listbox" aria-label="Channel suggestions" hidden>{{range .ComposerChannels}}
+            <button type="button" role="option" data-channel-id="{{.ID}}" data-channel-name="{{.Name}}">#{{.Name}}</button>{{end}}
+          </div>{{end}}
+          <div class="emoji-suggestions" id="emoji-suggestions" role="listbox" aria-label="Emoji suggestions" hidden></div>
+          {{if .SlashCommands}}<div class="slash-suggestions" id="slash-suggestions" role="listbox" aria-label="Shortcuts and slash commands" hidden>{{range .SlashCommands}}
+            <button type="button" role="option" data-slash-command="{{.Command}}" data-slash-search="{{.Command}} {{.Description}} {{.UsageHint}} {{.AppName}}"><strong>{{.Command}}</strong><span>{{.Description}}{{if .UsageHint}} <small>{{.UsageHint}}</small>{{end}}{{if .AppName}}<small>{{.AppName}}</small>{{end}}</span></button>{{end}}
+          </div>{{end}}
+          {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
+          <div class="composer-footer">
           <div class="composer-toolbar" role="toolbar" aria-label="Message formatting and insertions">
             <button class="composer-tool" type="button" data-wrap="*" aria-label="Bold" aria-controls="text"><strong>B</strong></button>
             <button class="composer-tool" type="button" data-wrap="_" aria-label="Italic" aria-controls="text"><em>I</em></button>
@@ -1962,21 +2052,6 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
               </div>
             </details>{{end}}
           </div>
-          <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
-          <textarea id="text" name="text" maxlength="40000"{{if not .DraftAttachments}} required{{end}}{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions channel-suggestions emoji-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
-          {{if or .ComposerMembers .ComposerGroups}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
-            <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
-            <button type="button" role="option" data-mention-group="{{.ID}}" data-mention-name="{{.Handle}}" data-mention-search="{{.Handle}} {{.Name}} {{.Description}}"><span>@{{.Handle}}</span><small>{{.Name}} · {{.MemberCount}} members</small></button>{{end}}
-          </div>{{end}}
-          {{if .ComposerChannels}}<div class="channel-suggestions" id="channel-suggestions" role="listbox" aria-label="Channel suggestions" hidden>{{range .ComposerChannels}}
-            <button type="button" role="option" data-channel-id="{{.ID}}" data-channel-name="{{.Name}}">#{{.Name}}</button>{{end}}
-          </div>{{end}}
-          <div class="emoji-suggestions" id="emoji-suggestions" role="listbox" aria-label="Emoji suggestions" hidden></div>
-          {{if .SlashCommands}}<div class="slash-suggestions" id="slash-suggestions" role="listbox" aria-label="Shortcuts and slash commands" hidden>{{range .SlashCommands}}
-            <button type="button" role="option" data-slash-command="{{.Command}}" data-slash-search="{{.Command}} {{.Description}} {{.UsageHint}} {{.AppName}}"><strong>{{.Command}}</strong><span>{{.Description}}{{if .UsageHint}} <small>{{.UsageHint}}</small>{{end}}{{if .AppName}}<small>{{.AppName}}</small>{{end}}</span></button>{{end}}
-          </div>{{end}}
-          {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
-          <div class="composer-footer">
             <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line</span>
             <div class="send-actions"><button class="send" type="submit">Send</button><details class="schedule-menu"><summary role="button" aria-label="Schedule message">⌄</summary><div class="schedule-popover"><label for="schedule-at">Send date and time<input id="schedule-at" type="datetime-local" name="schedule_at" value="{{.ScheduleAt}}" data-schedule-at aria-describedby="schedule-time-help"></label><input type="hidden" name="post_at"><p id="schedule-time-help">The time uses your current browser time zone and must be within 120 days.</p><button type="submit" formaction="{{.ScheduleURL}}">Schedule message</button><a href="/app/drafts?channel={{.Channel}}&amp;tab=scheduled">View scheduled messages</a></div></details></div>
           </div>
@@ -3491,10 +3566,14 @@ var details=message?message.querySelectorAll('.message-actions details'):null;
 for(var index=0;details&&index<details.length;index++){var summary=details[index].querySelector('summary');if(summary&&summary.textContent.trim()===label)return details[index]}
 return null;
 }
+function revealDisclosure(details){
+var node=details;
+while(node){node.open=true;node=node.parentElement?node.parentElement.closest('details'):null;}
+}
 function openMessageDetails(message,label,control){
 var details=messageDetails(message,label);
 if(!details)return false;
-details.open=true;
+revealDisclosure(details);
 var target=details.querySelector(control);
 if(target)target.focus();
 return true;
@@ -4057,7 +4136,7 @@ if(reactionButton&&openEmojiPicker(reactionButton)){event.preventDefault();retur
 }
 if(key==='m'){
 var reminderMenu=focusedMessage.querySelector('[data-reminder-menu]');
-if(reminderMenu){event.preventDefault();reminderMenu.open=true;var reminderControl=reminderMenu.querySelector('button,input');if(reminderControl)reminderControl.focus();return}
+if(reminderMenu){event.preventDefault();revealDisclosure(reminderMenu);var reminderControl=reminderMenu.querySelector('button,input');if(reminderControl)reminderControl.focus();return}
 }
 if(key==='a'){
 var save=focusedMessage.querySelector('[data-message-save] button[type=submit]');

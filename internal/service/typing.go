@@ -54,6 +54,14 @@ func (m Messages) SetTyping(ctx context.Context, workspaceID domain.WorkspaceID,
 // people are typing at this instant, and a cursor over a set that is different
 // by the time the second page is asked for would be a fiction.
 func (m Messages) TypingSignals(ctx context.Context, workspaceID domain.WorkspaceID, reader domain.UserID) ([]domain.TypingSignal, error) {
+	// The store joins on the conversations the reader can see, which decides
+	// what a member is shown. It does not decide whether the caller is a member
+	// at all: without this, a deactivated account or an identifier belonging to
+	// nobody was answered rather than refused, and a removed member's client
+	// kept being served for as long as it kept asking.
+	if err := m.authorizeWorkspace(ctx, workspaceID, reader); err != nil {
+		return nil, err
+	}
 	return m.Store.ListTypingSignals(ctx, workspaceID, reader, time.Now().UTC())
 }
 

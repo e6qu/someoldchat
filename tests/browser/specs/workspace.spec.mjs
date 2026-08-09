@@ -128,6 +128,24 @@ async function createAndInstallApp(page, request, manifest, redirectURI) {
 // selector scopes the scan to one region. It is used only where a journey is
 // about a specific surface; an unscoped scan stays the default, because a
 // scoped scan can pass while the page around it fails.
+// Pin, Edit, Delete, Copy link, Mark unread and Remind me live inside the
+// message's More actions menu, which is where Slack keeps them: the hover
+// toolbar carries five icons and everything else is one level down. A test
+// reaching for one of them opens the menu first, exactly as a person does.
+async function openMessageMenu(message) {
+  await message.hover();
+  // The control is an icon, so it is found by the name it carries for assistive
+  // technology rather than by text on screen — which is the same name a screen
+  // reader announces.
+  await message.locator('[aria-label="More actions"]').click();
+}
+
+// A message's actions are offered when the message is pointed at or focused,
+// which is how Slack presents them and how a person reaches them. Tests that
+// reach into .message-actions therefore hover the message first; one that
+// clicked straight through was relying on the toolbar being permanently on
+// screen, which is what made every message three rows tall.
+
 async function expectNoSeriousAccessibilityViolations(page, selector) {
   let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']);
   if (selector) {
@@ -453,6 +471,7 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and ca
   await page.getByRole('link', { name: 'Drafts and sent' }).click();
   await page.getByRole('link', { name: 'Scheduled', exact: true }).click();
   await expect(scheduled).toBeVisible();
+  await scheduled.hover();
   await scheduled.getByText('Edit', { exact: true }).click();
   const edited = `${message} edited`;
   await scheduled.locator('textarea[name="text"]').fill(edited);
@@ -646,6 +665,7 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(reminder.getByRole('link', { name: 'View source message' })).toBeVisible();
   await expect(reminder.getByRole('button', { name: 'Mark complete' })).toBeVisible();
 
+  await reminder.hover();
   await reminder.getByText('Edit', { exact: true }).click();
   const tomorrow = await page.evaluate(() => {
     const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -700,6 +720,18 @@ test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA aut
   await signIn(context);
   await page.goto('/app');
   await expectNoSeriousAccessibilityViolations(page);
+
+  // A blanket opacity on a message is not a style choice, it is a contrast
+  // reduction applied to every colour inside it. One on .system-message went
+  // unnoticed for as long as it was stranded in a media query and never
+  // applied; the moment it did apply, a muted system line on a highlighted row
+  // fell to 4.35:1 against the 4.5:1 AA needs. axe only sees that when the
+  // accumulated state happens to put a system message on that background, so
+  // the cause is asserted directly rather than left to chance.
+  const faded = await page.evaluate(() => Array.from(document.querySelectorAll('.message'))
+    .map((node) => ({ cls: node.className, opacity: getComputedStyle(node).opacity }))
+    .filter((entry) => Number(entry.opacity) < 1));
+  expect(faded, 'a message must not be faded: opacity multiplies against every contrast inside it').toEqual([]);
 
   const { primary } = await slackModifiers(page);
   await page.locator('form.composer textarea[name="text"]').press(`${primary}+k`);
@@ -1104,8 +1136,13 @@ test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls rend
   await expect(blockMessage.locator('.message-text')).toHaveCount(0);
   await expect(blockMessage.getByText(`notification fallback ${stamp}`, { exact: true })).toHaveCount(0);
   await expect(blockMessage.getByText('Edit', { exact: true })).toHaveCount(0);
-  await blockMessage.hover();
-  await expect(blockMessage.getByText('Delete', { exact: true })).toBeVisible();
+  // Delete lives in the message's More actions menu. This test is about how
+  // blocks render, so it asserts the control is offered rather than driving the
+  // menu open: a block message reflows as its table and chart lay out, and
+  // waiting for the toolbar to stop moving would be testing layout settling
+  // rather than block rendering. The menu path itself is exercised where it
+  // belongs, in the edit-and-delete journey.
+  await expect(blockMessage.getByText('Delete', { exact: true })).toHaveCount(1);
 
   const currentBlockMessage = page.locator('.message', { hasText: currentBlockTitle });
   await expect(currentBlockMessage.locator('.message-block.alert.success')).toContainText('Validated against the current catalog');
@@ -1179,13 +1216,30 @@ test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer
   // CI's Linux font metrics and not on a developer's machine. Measuring the
   // rendered boxes catches it wherever it happens instead of wherever axe
   // happens to be looking.
-  const undersized = await page.evaluate(() => Array.from(
+  // Controls inside a closed More actions menu are not rendered and so are not
+  // targets; the ones a person can actually hit are measured, and the menu is
+  // opened so its contents are measured too rather than skipped.
+  const measure = () => page.evaluate(() => Array.from(
     document.querySelectorAll('.message-actions a, .message-actions button, .message-actions summary'),
   ).map((node) => {
     const box = node.getBoundingClientRect();
-    return { label: node.textContent.trim().slice(0, 24), width: box.width, height: box.height };
-  }).filter((size) => size.width < 24 || size.height < 24));
-  expect(undersized, 'every message action must meet the 24px minimum target size').toEqual([]);
+    return {
+      label: (node.getAttribute('aria-label') || node.textContent).trim().slice(0, 24),
+      width: box.width,
+      height: box.height,
+    };
+  }).filter((size) => (size.width > 0 || size.height > 0) && (size.width < 24 || size.height < 24)));
+
+  expect(await measure(), 'every message action must meet the 24px minimum target size').toEqual([]);
+  // Scoped to the thread pane, which is the narrow container this check exists
+  // for. Reaching for the first such message anywhere on the page picked one in
+  // the main timeline that had to be scrolled to, and a hover-revealed toolbar
+  // cannot survive that: the scroll moves the pointer off the message, the
+  // toolbar goes away, and every retry waits for something that is no longer
+  // shown.
+  const menuOwner = thread.locator('.message').filter({ has: page.locator('[aria-label="More actions"]') }).first();
+  await openMessageMenu(menuOwner);
+  expect(await measure(), 'every action inside More actions must meet the 24px minimum target size').toEqual([]);
 });
 
 // The composer advertised "Enter to send · Shift+Enter for a new line" and no
@@ -1576,10 +1630,14 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
   }).toPass({ timeout: 20000 });
 
   await expect(async () => {
+    await target.hover();
+    await openMessageMenu(target);
     await target.getByRole('button', { name: 'Pin' }).click();
     await expect(target.locator('.pinned')).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 20000 });
   await expect(async () => {
+    await target.hover();
+    await openMessageMenu(target);
     await target.getByRole('button', { name: 'Unpin' }).click();
     await expect(target.locator('.pinned')).toHaveCount(0, { timeout: 2000 });
   }).toPass({ timeout: 20000 });
@@ -1595,7 +1653,7 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
   await composer.press('Enter');
 
   const target = page.locator('.message', { hasText: original });
-  await target.hover();
+  await openMessageMenu(target);
   await target.getByText('Edit', { exact: true }).click();
   const editor = target.getByRole('textbox', { name: 'Edit your message' });
   const changed = `edited in browser ${Date.now()}`;
@@ -1606,6 +1664,7 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
 
   const changedTarget = page.locator('.message', { hasText: changed });
   await changedTarget.hover();
+  await openMessageMenu(changedTarget);
   await changedTarget.getByText('Delete', { exact: true }).click();
   await changedTarget.getByRole('button', { name: 'Delete this message' }).click();
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(0);
@@ -1731,7 +1790,7 @@ test('[COMP-01 RESILIENCE-04] a rejected post explains itself and keeps the draf
   await page.unroute('**/app/message*');
   const target = page.locator('.message').last();
   await page.route('**/app/pin*', (route) => route.abort());
-  await target.hover();
+  await openMessageMenu(target);
   await target.getByRole('button', { name: 'Pin' }).click();
   const actionError = page.locator('#action-feedback');
   await expect(actionError).toBeVisible();
