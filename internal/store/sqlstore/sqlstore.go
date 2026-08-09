@@ -5575,6 +5575,90 @@ func (s *Store) SetUserExpiration(ctx context.Context, workspaceID domain.Worksp
 	return tx.Commit()
 }
 
+func (s *Store) DueUserExpirations(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) ([]domain.User, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("expiration limit must be positive")
+	}
+	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at
+		FROM users u JOIN user_expirations e ON e.user_id = u.id AND e.workspace_id = u.workspace_id
+		WHERE u.deleted = 0 AND e.expiration_ts > 0 AND e.expiration_ts <= ?`
+	args := []any{now.UTC().Unix()}
+	if workspaceID != "" {
+		query += ` AND u.workspace_id = ?`
+		args = append(args, workspaceID)
+	}
+	query += ` ORDER BY e.expiration_ts, u.id LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	users := make([]domain.User, 0, limit)
+	for rows.Next() {
+		var user domain.User
+		var deleted int
+		var statusExpiration int64
+		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}); err != nil {
+			return nil, err
+		}
+		user.Deleted = deleted != 0
+		if statusExpiration > 0 {
+			user.Profile.StatusExpiration = time.Unix(statusExpiration, 0).UTC()
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (s *Store) ExpireUserAccount(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected time.Time, event events.Event) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var present int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id = ? AND workspace_id = ?`, userID, workspaceID).Scan(&present); err != nil {
+		return false, err
+	}
+	if present == 0 {
+		return false, store.ErrNotFound
+	}
+	// The claim is the deactivation, and the expiration instant is what is
+	// claimed against: a caller that reads a due account and finds the instant
+	// moved, or the account already deactivated, has lost the race and must
+	// not append a second event for one expiry.
+	result, err := tx.ExecContext(ctx, `UPDATE users SET deleted = 1 WHERE id = ? AND workspace_id = ? AND deleted = 0
+		AND EXISTS (SELECT 1 FROM user_expirations e WHERE e.user_id = users.id AND e.workspace_id = users.workspace_id AND e.expiration_ts = ?)`,
+		userID, workspaceID, expected.UTC().Unix())
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed != 1 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE workspace_members SET active = 0 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
+		return false, err
+	}
+	// The credentials go with the account, exactly as SetUserDeleted does it.
+	// A deactivation that left a live token or session behind would take the
+	// guest off the member list and leave them signed in.
+	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, revokeSessionsStatement+` WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
+		return false, err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
 func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, deleted bool, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

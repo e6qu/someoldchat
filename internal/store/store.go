@@ -415,6 +415,17 @@ type Store interface {
 	// GetUserExpiration reports when a guest account lapses. A zero time means
 	// the account does not lapse.
 	GetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
+	// DueUserExpirations reports the accounts whose expiration has arrived and
+	// which are still active. A deleted account is not due: expiry is a way of
+	// deactivating an account, so one already deactivated has nothing left to
+	// do and must not be swept again.
+	DueUserExpirations(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.User, error)
+	// ExpireUserAccount deactivates one lapsed account, reporting whether this
+	// caller is the one that did it. Like the other expiry queues in this port
+	// there is no lease: two workers may read the same due account and the
+	// compare-and-set on the expiration instant lets exactly one act, so the
+	// deactivation event is appended once.
+	ExpireUserAccount(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) (bool, error)
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
 	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
 	SetWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error
