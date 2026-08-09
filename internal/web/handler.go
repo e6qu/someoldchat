@@ -1110,9 +1110,9 @@ type oauthConsentData struct {
 //     --line is a decorative separator at 1.35:1 and cannot serve both.
 //   - --focus-chrome is the focus ring over the purple topbar and sidebar,
 //     where --focus measures 1.65:1 — and where every primary control lives.
-const lightTokens = `color-scheme:light;--bg:#fff;--panel:#f7f5f8;--panel-strong:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--field-line:#6b6570;--accent:#611f69;--on-accent:#fff;--on-strong:#fff;--action:#5c1a64;--hover:#f1edf2;--focus:#0b5cad;--focus-chrome:#fff;--danger:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--mark-bg:#fbe9a8;--shadow:0 8px 24px #1d1c1d1f`
+const lightTokens = `color-scheme:light;--bg:#fff;--panel:#f7f5f8;--panel-strong:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--field-line:#6b6570;--accent:#611f69;--chrome:#3f0e40;--chrome-top:#350d36;--chrome-line:#ffffff1f;--chrome-muted:#cfc3d0;--on-accent:#fff;--on-strong:#fff;--action:#5c1a64;--hover:#f1edf2;--focus:#0b5cad;--focus-chrome:#fff;--danger:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--mark-bg:#fbe9a8;--shadow:0 8px 24px #1d1c1d1f`
 
-const darkTokens = `color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--field-line:#8a8f96;--accent:#4a1750;--on-accent:#fff;--on-strong:#141719;--action:#8fd7f4;--hover:#2c3035;--focus:#7cc4ff;--focus-chrome:#fff;--danger:#ff9db4;--danger-bg:#3a1622;--ok:#3fbf95;--mark-bg:#5a4a12;--shadow:0 8px 24px #0006`
+const darkTokens = `color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--field-line:#8a8f96;--accent:#4a1750;--chrome:#231e26;--chrome-top:#1b171d;--chrome-line:#ffffff17;--chrome-muted:#b9b2bb;--on-accent:#fff;--on-strong:#141719;--action:#8fd7f4;--hover:#2c3035;--focus:#7cc4ff;--focus-chrome:#fff;--danger:#ff9db4;--danger-bg:#3a1622;--ok:#3fbf95;--mark-bg:#5a4a12;--shadow:0 8px 24px #0006`
 
 const sharedStyle = `*{box-sizing:border-box}
 :root{` + lightTokens + `}
@@ -1159,7 +1159,7 @@ func mustPage(markup string) *template.Template {
 
 const pageStyle = `<style>
 .shell{height:100vh;display:grid;grid-template-rows:52px minmax(0,1fr)}
-.topbar{background:var(--accent);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:var(--shadow)}
+.topbar{background:var(--chrome-top);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:none}
 .brand{font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .search{position:relative;flex:1 1 auto;min-width:0;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #ffffff8a;border-radius:7px;padding:4px 10px}
 .search input[name=q]{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;color:var(--on-accent)}
@@ -1171,7 +1171,7 @@ const pageStyle = `<style>
 .icon-button{border:0;background:transparent;color:var(--on-accent);border-radius:6px;padding:7px 9px;text-decoration:none}
 .icon-button:hover{background:#ffffff2b}
 .workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}
-.sidebar{background:var(--accent);color:var(--on-accent);padding:16px 10px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+.sidebar{background:var(--chrome);color:var(--on-accent);padding:8px 0 16px;display:flex;flex-direction:column;gap:2px;overflow:auto}
 .workspace-name{font-weight:800;padding:0 10px}
 .connect-invites{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
 .connect-invites li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--line);border-radius:8px}
@@ -1189,9 +1189,10 @@ const pageStyle = `<style>
 .workspace-current small{display:block;color:#e8cbe9;font-weight:400}
 .workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}
 .side-section{display:grid;gap:2px}
-.side-label{color:#e8cbe9;font-size:12px;font-weight:700;padding:6px 10px;text-transform:uppercase;letter-spacing:.06em}
-.side-link{display:flex;align-items:center;gap:9px;width:100%;padding:7px 10px;border:0;border-radius:5px;background:transparent;color:var(--on-accent);font:inherit;text-align:left;text-decoration:none}
-.side-link:hover,.side-link[aria-current=page]{background:#ffffff2b}
+.side-label{color:var(--chrome-muted);font-size:13px;font-weight:700;padding:14px 16px 4px;text-transform:none;letter-spacing:0}
+.side-link{display:flex;align-items:center;gap:9px;width:100%;min-height:28px;padding:2px 16px;border:0;border-radius:0;background:transparent;color:var(--chrome-muted);font:inherit;line-height:1.3;text-align:left;text-decoration:none}
+.side-link:hover{background:#ffffff14;color:var(--on-accent)}
+.side-link[aria-current=page]{background:#1164a3;color:#fff}
 .side-link[aria-current=page]{font-weight:700}
 .side-icon{flex:0 0 auto;display:inline-block;min-width:1em;text-align:center}
 .side-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1213,7 +1214,7 @@ const pageStyle = `<style>
 .pager-older{grid-row:1}
 .timeline{grid-row:2;overflow:auto;padding:18px 26px 12px;scroll-behavior:smooth}
 .pager-newer{grid-row:3}
-.message{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:10px 8px;border-radius:7px}
+.message{position:relative;display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:6px 8px;border-radius:7px}
 .message:hover{background:var(--hover)}
 .message:focus{background:var(--hover);outline:3px solid var(--focus);outline-offset:-1px}
 .message:target{background:var(--hover);outline:2px solid var(--focus)}
@@ -1318,7 +1319,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 </style>`
 
 const workspaceRefinements = `<style>
-.topbar{height:48px;padding:0 12px;border-bottom:1px solid #ffffff24;box-shadow:none}
+.topbar{height:44px;padding:0 10px;border-bottom:0;box-shadow:none}
 .brand{max-width:220px}
 .search{height:34px;max-width:680px;padding:3px 8px;background:#ffffff20}
 .search-icon{width:16px;height:16px;flex:0 0 auto}
@@ -1345,11 +1346,11 @@ const workspaceRefinements = `<style>
 .search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
 .top-profile{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:7px;background:#ffffff35;font-weight:800;text-transform:uppercase}
 .workspace{grid-template-columns:260px minmax(0,1fr)}
-.sidebar{padding:12px 8px;background:linear-gradient(180deg,var(--accent),#3f1645)}
+.sidebar{padding:8px 0 16px;background:var(--chrome)}
 .workspace-name{font-size:17px;line-height:1.25}
 .workspace-sub{display:flex;align-items:center;gap:6px}
 .presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2eb67d;box-shadow:0 0 0 2px #ffffff2e}
-.side-link{min-height:34px}
+.side-link{min-height:28px}
 .side-link[aria-current=page]{background:#1264a3;color:#fff}
 .content{background:var(--panel-strong)}
 .channel-header{min-height:64px;padding:9px 20px;background:var(--panel-strong)}
@@ -1406,9 +1407,31 @@ const workspaceRefinements = `<style>
 .huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
 .channel-actions button:hover{background:var(--hover)}
 .timeline{padding-top:12px}
-.message{border-radius:6px;padding-top:8px;padding-bottom:8px}
-.message-actions{position:relative;display:flex;flex-wrap:wrap;justify-content:flex-end;min-height:0;gap:2px;margin-top:6px;padding:3px 5px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong)}
-.message:hover .message-actions a,.message-actions button,.message-actions summary{display:inline-flex;flex:0 0 auto;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
+.message{border-radius:6px;padding-top:5px;padding-bottom:5px}
+.message-actions{position:absolute;z-index:3;top:2px;right:10px;display:flex;flex-wrap:nowrap;justify-content:flex-end;min-height:0;gap:2px;margin-top:0;padding:3px 5px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.message-actions a,.message-actions button,.message-actions summary{display:inline-flex;flex:0 0 auto;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
+/* The toolbar is revealed by pointing at the message or focusing it, and is
+   otherwise out of the way. It used to be permanently visible under every
+   message, tripling the height of the timeline, because the rule above read
+   ".message:hover .message-actions a, .message-actions button, .message-actions
+   summary" — a comma-separated list, so the :hover prefix bound to the anchors
+   alone and every button and menu stayed on screen. Two media queries below
+   restore a visible state that nothing had ever hidden, which is the other half
+   of the same mistake.
+   Hidden with visibility, not opacity. Opacity was tried and fails WCAG: axe
+   blends a zero-opacity foreground with its background rather than treating the
+   text as absent, so every action reported a contrast of 1.42 against white.
+   visibility:hidden takes the row out of the accessibility tree and out of the
+   tab order, which is what "not currently offered" should mean, and :focus
+   brings it back the moment the message is reached by keyboard — the message
+   carries tabindex so roving focus lands on it. */
+.message-actions{visibility:hidden}
+.message:hover .message-actions,.message:focus .message-actions,.message:focus-within .message-actions,.message-actions:hover{visibility:visible}
+/* The toolbar sits inside the message's own box rather than straddling its top
+   edge, so travelling from the message to a button never leaves the area that
+   reveals it, and it holds itself visible while it is the thing being pointed
+   at. Positioned above the box it vanished as the pointer crossed the gap,
+   which neither a person nor a test could click through. */
 .message-actions a:hover,.message-actions button:hover,.message-actions summary:hover{background:var(--hover);color:var(--text);text-decoration:none}
 .message-actions details{display:inline-block;position:relative}
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
@@ -1473,6 +1496,29 @@ const workspaceRefinements = `<style>
 .modal-input{display:grid;gap:6px}.modal-input>label,.modal-legend{font-weight:700}.modal-input input:not([type=radio]):not([type=checkbox]),.modal-input textarea,.modal-input select{width:100%;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:9px 10px;font:inherit}.modal-input textarea{min-height:96px;resize:vertical}.modal-input select[multiple]{min-height:120px}
 .modal-hint{margin:0;color:var(--muted);font-size:12px}.modal-error{margin:0;color:var(--danger);font-size:13px;font-weight:700}.modal-options{display:grid;gap:7px;margin:0;padding:0;border:0}.modal-options label{display:flex;align-items:flex-start;gap:7px}
 .modal-foot{justify-content:flex-end;border-top:1px solid var(--line)}.modal-button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:8px 16px;font-weight:800}.modal-button.primary{border-color:var(--ok);background:var(--ok);color:var(--on-strong)}.modal-button:disabled{opacity:.55}
+/* Timeline styling that belongs at every width. This run lived inside the
+   narrow-viewport media query below, so on a desktop the timeline had no date
+   separator, no unread divider, no system-message treatment, no edited label
+   and no thread summary — the rules were served and never applied. A date
+   divider rendered as bare left-aligned text because .day-separator was
+   mobile-only. */
+.day-separator{display:flex;align-items:center;gap:8px;margin:14px 0 6px;color:var(--muted);font-size:12px}
+.day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
+.unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
+.unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
+.system-message{opacity:.85}
+.system-text{margin:0;color:var(--muted);font-size:13px}
+.edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
+.thread-summary{margin:2px 0 0;font-size:12px}
+.thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
+.thread-last-reply{color:var(--muted);margin-left:6px}
+.file-delete summary{cursor:pointer;color:var(--muted);font-size:12px}
+.file-delete p{margin:6px 0;font-size:12px;color:var(--muted)}
+/* A system message carries no avatar, so its body landed in the 38px avatar
+   column of .message's two-column grid and wrapped one word per line. Putting
+   it in the text column keeps the gutter empty, which is where Slack aligns
+   these lines too. */
+.system-message>.message-body{grid-column:2}
 @media(max-width:800px){
 .brand{display:none}
 html.js .nav-toggle{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border:1px solid #ffffff8a;border-radius:6px;background:transparent;color:var(--on-accent);font-size:21px;line-height:1}
@@ -1494,18 +1540,6 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .membership-pill{display:none}
 .message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1;visibility:visible}
 .message-actions details[open]>form{left:0;right:auto}
-.day-separator{display:flex;align-items:center;gap:8px;margin:14px 0 6px;color:var(--muted);font-size:12px}
-.day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
-.unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
-.unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
-.system-message{opacity:.85}
-.system-text{margin:0;color:var(--muted);font-size:13px}
-.edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
-.thread-summary{margin:2px 0 0;font-size:12px}
-.thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
-.thread-last-reply{color:var(--muted);margin-left:6px}
-.file-delete summary{cursor:pointer;color:var(--muted);font-size:12px}
-.file-delete p{margin:6px 0;font-size:12px;color:var(--muted)}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}

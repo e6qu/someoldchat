@@ -128,6 +128,12 @@ async function createAndInstallApp(page, request, manifest, redirectURI) {
 // selector scopes the scan to one region. It is used only where a journey is
 // about a specific surface; an unscoped scan stays the default, because a
 // scoped scan can pass while the page around it fails.
+// A message's actions are offered when the message is pointed at or focused,
+// which is how Slack presents them and how a person reaches them. Tests that
+// reach into .message-actions therefore hover the message first; one that
+// clicked straight through was relying on the toolbar being permanently on
+// screen, which is what made every message three rows tall.
+
 async function expectNoSeriousAccessibilityViolations(page, selector) {
   let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']);
   if (selector) {
@@ -453,6 +459,7 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and ca
   await page.getByRole('link', { name: 'Drafts and sent' }).click();
   await page.getByRole('link', { name: 'Scheduled', exact: true }).click();
   await expect(scheduled).toBeVisible();
+  await scheduled.hover();
   await scheduled.getByText('Edit', { exact: true }).click();
   const edited = `${message} edited`;
   await scheduled.locator('textarea[name="text"]').fill(edited);
@@ -646,6 +653,7 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(reminder.getByRole('link', { name: 'View source message' })).toBeVisible();
   await expect(reminder.getByRole('button', { name: 'Mark complete' })).toBeVisible();
 
+  await reminder.hover();
   await reminder.getByText('Edit', { exact: true }).click();
   const tomorrow = await page.evaluate(() => {
     const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1576,10 +1584,12 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
   }).toPass({ timeout: 20000 });
 
   await expect(async () => {
+    await target.hover();
     await target.getByRole('button', { name: 'Pin' }).click();
     await expect(target.locator('.pinned')).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 20000 });
   await expect(async () => {
+    await target.hover();
     await target.getByRole('button', { name: 'Unpin' }).click();
     await expect(target.locator('.pinned')).toHaveCount(0, { timeout: 2000 });
   }).toPass({ timeout: 20000 });
