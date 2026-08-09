@@ -152,15 +152,29 @@ func (h Handler) huddleMutation(name string, apply func(context.Context, domain.
 // participants.
 //
 // It answers JSON rather than a redirect because the caller is the media
-// script, not a form: a redirect would navigate the page away mid-call.
+// script, not a form: a redirect would navigate the page away mid-call. Every
+// outcome answers JSON, including the refusals. It used to answer three
+// different shapes depending on which check refused it — JSON where this
+// function wrote the body itself, plain text from the shared authentication
+// helper, and a whole rendered HTML error page from the shared form decoder,
+// because that decoder is built for a form post and this is not one. A caller
+// cannot rely on a body whose shape depends on which guard rejected it.
 func (h Handler) huddleSignal(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
-		h.writeAuthError(w, r, err)
+		writeJSONAuthError(w, err)
 		return
 	}
-	fields, ok := h.decodeMutation(w, r, "Reload the page and try again.")
-	if !ok {
+	// decodeFormFields rather than decodeMutation: the two differ only in that
+	// decodeMutation reports its own failures as pages, which is what this
+	// route must not do. The CSRF check it also performs is kept, below.
+	fields, err := decodeFormFields(w, r)
+	if err != nil {
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_signal")
+		return
+	}
+	if err := auth.ValidateCSRF(r); err != nil {
+		writeJSONRefusal(w, http.StatusForbidden, "invalid_csrf")
 		return
 	}
 	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))
@@ -168,13 +182,13 @@ func (h Handler) huddleSignal(w http.ResponseWriter, r *http.Request) {
 	kind := domain.CallSignalKind(strings.TrimSpace(fields["signal"]))
 	payload := fields["payload"]
 	if callID == "" || recipient == "" || !kind.Valid() {
-		http.Error(w, `{"ok":false,"error":"invalid_signal"}`, http.StatusBadRequest)
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_signal")
 		return
 	}
 	if err := h.Messages.SendCallSignal(r.Context(), principal.WorkspaceID, principal.UserID, callID, recipient, kind, payload); err != nil {
 		// A signal that is refused is not an error the member can act on: the
 		// peer left, or the call ended. The script stops signalling that peer.
-		http.Error(w, `{"ok":false,"error":"signal_refused"}`, http.StatusConflict)
+		writeJSONRefusal(w, http.StatusConflict, "signal_refused")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

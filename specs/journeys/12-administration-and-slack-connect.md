@@ -86,6 +86,13 @@ acceptance are distinct where Slack requires both. The channel becomes shared
 only after all required durable states complete. Decline, expiry, cancellation,
 and revocation notify eligible parties without leaking protected content.
 
+An invitation lapses fourteen days after it is sent. Expiry is a state the
+surfaces show and the operations enforce, not a date left sitting in the past:
+a lapsed invitation cannot be approved, because acceptance refuses it on the
+same deadline and the approval would record a live invitation that nothing
+could ever accept. Withdrawing one stays available, so a queue of lapsed
+invitations can be cleared rather than accumulating for ever.
+
 ## CONNECT-03 — Use and manage a shared channel
 
 The UI identifies external organizations and members, respects each side's

@@ -2893,6 +2893,73 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Both connection families hand out a single-use ticket and then hold
+			// a slot against a limit. What matters, and what a single read cannot
+			// show, is that the slot is actually given back: if release did not
+			// free one, an app that reconnected normally would be locked out
+			// after its quota of reconnections, which is a failure that only
+			// appears in production and only after a while.
+			name: "connection tickets are single use and their slots are returned",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				ticket, err := chat.CreateRTMConnection(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				consumed, err := chat.ConsumeRTMConnection(ctx, ticket.ID)
+				if err != nil {
+					return nil, err
+				}
+				// A ticket is a one-time credential: dialling it twice must not
+				// open two streams from one grant.
+				_, reuseErr := chat.ConsumeRTMConnection(ctx, ticket.ID)
+				expiry := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
+				// Fill the socket mode quota exactly, then give one slot back and
+				// take it again.
+				for index := range domain.SocketModeConnectionLimit {
+					identifier := fmt.Sprintf("release-socket-%d", index)
+					if err := chat.CreateSocketModeConnection(ctx, domain.SocketModeConnection{
+						ID: identifier, AppID: "A1", ExpiresAt: expiry,
+					}); err != nil {
+						return nil, err
+					}
+					if _, err := chat.ConsumeSocketModeConnection(ctx, identifier); err != nil {
+						return nil, err
+					}
+				}
+				atLimit, err := chat.CountSocketModeConnections(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.ReleaseSocketModeConnection(ctx, "release-socket-0"); err != nil {
+					return nil, err
+				}
+				afterRelease, err := chat.CountSocketModeConnections(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CreateSocketModeConnection(ctx, domain.SocketModeConnection{
+					ID: "release-socket-replacement", AppID: "A1", ExpiresAt: expiry,
+				}); err != nil {
+					return nil, err
+				}
+				_, replacementErr := chat.ConsumeSocketModeConnection(ctx, "release-socket-replacement")
+				// Renewal extends a live connection rather than opening another,
+				// so the count must not move.
+				renewErr := chat.RenewSocketModeConnection(ctx, "release-socket-replacement", expiry.Add(time.Hour))
+				afterRenew, err := chat.CountSocketModeConnections(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					ticket.WorkspaceID, ticket.UserID, ticket.ExpiresAt.After(time.Now().UTC()),
+					consumed.ID == ticket.ID, consumed.UserID, consumed.Cursor == ticket.Cursor,
+					reuseErr != nil, errors.Is(reuseErr, storepkg.ErrNotFound),
+					atLimit, afterRelease, atLimit - afterRelease,
+					replacementErr == nil, renewErr == nil, afterRenew,
+				}, nil
+			},
+		},
+		{
 			name:         "upload without blob storage",
 			wantSentinel: service.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
@@ -3076,6 +3143,295 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Blocks and attachments are the richest strings the seam carries, and
+			// the writers that take them are the ones a converter is most likely to
+			// drop a field from: each has a slightly different arity and the
+			// difference between them is exactly which content column is written.
+			// Reading the thread back afterwards is what proves the content was
+			// stored rather than merely echoed by the writer's own response.
+			name: "blocks and attachments survive every message writer across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				blocks := `[{"type":"section","text":{"type":"mrkdwn","text":"root"}}]`
+				attachments := `[{"color":"#36a64f","text":"attached"}]`
+				root, err := chat.PostWithBlocks(ctx, "T1", "U1", "C1", "root text", blocks, "", "")
+				if err != nil {
+					return nil, err
+				}
+				rootTimestamp := domain.NewMessageTimestamp(root.CreatedAt)
+				reply, err := chat.PostWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "reply text",
+					`[{"type":"divider"}]`, attachments, rootTimestamp, "", "A1")
+				if err != nil {
+					return nil, err
+				}
+				replyTimestamp := domain.NewMessageTimestamp(reply.CreatedAt)
+				editedBlocks, err := chat.UpdateWithBlocks(ctx, "T1", "U1", "C1", rootTimestamp, "root edited",
+					`[{"type":"section","text":{"type":"mrkdwn","text":"root edited"}}]`)
+				if err != nil {
+					return nil, err
+				}
+				editedBoth, err := chat.UpdateWithBlocksAndAttachments(ctx, "T1", "U1", "C1", replyTimestamp,
+					"reply edited", `[{"type":"divider"}]`, `[{"color":"#ff0000","text":"re-attached"}]`)
+				if err != nil {
+					return nil, err
+				}
+				// A patch names some fields and not others, so it takes two to
+				// exercise the shape: one that must leave the unnamed fields as
+				// they were, and one that must carry a field the first omitted. A
+				// converter that dropped a pointer, or that turned an absent one
+				// into an empty string, fails exactly one of the two.
+				patchedText := "reply patched"
+				patched, err := chat.UpdateMessage(ctx, "T1", "U1", "C1", replyTimestamp,
+					domain.MessagePatch{Text: &patchedText})
+				if err != nil {
+					return nil, err
+				}
+				patchedAttachments := `[{"color":"#0000ff","text":"patched attachment"}]`
+				patchedBlocks := `[{"type":"section","text":{"type":"mrkdwn","text":"patched block"}}]`
+				repatched, err := chat.UpdateMessage(ctx, "T1", "U1", "C1", replyTimestamp,
+					domain.MessagePatch{Blocks: &patchedBlocks, Attachments: &patchedAttachments})
+				if err != nil {
+					return nil, err
+				}
+				permalink, err := chat.Permalink(ctx, "T1", "U1", "C1", rootTimestamp)
+				if err != nil {
+					return nil, err
+				}
+				thread, err := chat.Replies(ctx, "T1", "U1", "C1", rootTimestamp, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				stored := make([]string, 0, len(thread.Messages))
+				for _, message := range thread.Messages {
+					stored = append(stored, strings.Join([]string{
+						message.Text, message.Blocks, message.Attachments, string(message.AppID),
+					}, "|"))
+				}
+				// The permalink carries the message's own generated timestamp, so
+				// the two compositions cannot produce the same string. What they
+				// must agree on is the shape, which is what the comparison asserts.
+				wantPermalink := "/archives/C1/p" + strings.ReplaceAll(string(rootTimestamp), ".", "")
+				return []any{
+					root.Blocks, root.Text, reply.Blocks, reply.Attachments, string(reply.AppID),
+					reply.ThreadTimestamp == rootTimestamp,
+					editedBlocks.Text, editedBlocks.Blocks, editedBlocks.EditedBy,
+					editedBoth.Text, editedBoth.Blocks, editedBoth.Attachments,
+					patched.Text, patched.Blocks, patched.Attachments,
+					repatched.Text, repatched.Blocks, repatched.Attachments,
+					permalink == wantPermalink, stored, thread.HasMore,
+				}, nil
+			},
+		},
+		{
+			// The scheduled writers store the same content a posted message
+			// carries, one send in the future. They are separate seam methods from
+			// the posting ones and drop fields independently of them.
+			name: "scheduled message blocks and attachments survive the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// Scheduling is capped at 120 days out, so the instant has to be
+				// near. The two compositions run this body separately and each
+				// reads its own clock, so nothing derived from it is compared
+				// directly: the projections below are all relative to postAt.
+				postAt := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Hour)
+				withBlocks, err := chat.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", "later text",
+					`[{"type":"section","text":{"type":"mrkdwn","text":"later"}}]`, postAt)
+				if err != nil {
+					return nil, err
+				}
+				withBoth, err := chat.ScheduleMessageWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "later both",
+					`[{"type":"divider"}]`, `[{"color":"#36a64f","text":"attached later"}]`, postAt.Add(time.Hour))
+				if err != nil {
+					return nil, err
+				}
+				page, err := chat.ScheduledMessages(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				stored := make([]string, 0, len(page.Items))
+				for _, message := range page.Items {
+					stored = append(stored, strings.Join([]string{
+						message.Text, message.Blocks, message.Attachments, message.PostAt.UTC().Sub(postAt).String(),
+					}, "|"))
+				}
+				return []any{
+					withBlocks.Text, withBlocks.Blocks, withBlocks.Attachments, withBlocks.PostAt.UTC().Equal(postAt),
+					withBoth.Text, withBoth.Blocks, withBoth.Attachments, withBoth.PostAt.UTC().Sub(postAt).String(),
+					stored, page.HasMore,
+				}, nil
+			},
+		},
+		{
+			// Retention is the one policy in the product whose mistakes are
+			// irreversible: the sweep deletes, it does not tombstone. The seam
+			// therefore has to agree not only on what was stored but on which of
+			// the two policies actually governs a conversation, because that is
+			// the number the sweep uses.
+			name: "retention policy and its resolution agree across the seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleOwner))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				workspace, err := chat.SetWorkspaceRetention(ctx, "T1", "U1", domain.RetentionPolicy{MessageDays: 90, FileDays: 30})
+				if err != nil {
+					return nil, err
+				}
+				readBack, err := chat.WorkspaceRetention(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// With no override the workspace default governs.
+				noOverride, defaultGoverning, err := chat.ConversationRetention(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetConversationRetention(ctx, "T1", "U1", "C1", 7); err != nil {
+					return nil, err
+				}
+				override, overrideGoverning, err := chat.ConversationRetention(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveConversationRetention(ctx, "T1", "U1", "C1"); err != nil {
+					return nil, err
+				}
+				reverted, revertedGoverning, err := chat.ConversationRetention(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				// A workspace that has never been swept reports the zero instant
+				// rather than an error, so the admin surface can say "never".
+				swept, err := chat.LastRetentionSweep(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					workspace.MessageDays, workspace.FileDays, readBack.MessageDays, readBack.FileDays,
+					noOverride.DurationDays, defaultGoverning,
+					override.DurationDays, string(override.ConversationID), overrideGoverning,
+					reverted.DurationDays, revertedGoverning, swept.IsZero(),
+				}, nil
+			},
+		},
+		{
+			// A call is the one object whose participant list is edited by two
+			// methods that are not each other's inverse at the seam: adding takes
+			// a set and removing takes a set, and either can be handed someone who
+			// is not there. The projection reads the list back after each edit
+			// rather than trusting the writers to report it.
+			name: "external call lifecycle and participants agree across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				started := time.Now().UTC().Truncate(time.Second)
+				call, err := chat.AddCall(ctx, "T1", "U1", "ext-call-1", "EXT-1",
+					"https://example.com/join", "https://example.com/desktop", "Design review", started,
+					[]domain.UserID{"U1", "U2"})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AddCallParticipants(ctx, "T1", "U1", call.ID, []domain.UserID{"UA"}); err != nil {
+					return nil, err
+				}
+				added, err := chat.GetCall(ctx, "T1", "U1", call.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveCallParticipants(ctx, "T1", "U1", call.ID, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				removed, err := chat.GetCall(ctx, "T1", "U1", call.ID)
+				if err != nil {
+					return nil, err
+				}
+				updated, err := chat.UpdateCall(ctx, "T1", "U1", call.ID, "Design review (final)",
+					"https://example.com/join2", "https://example.com/desktop2")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.EndCall(ctx, "T1", "U1", call.ID, 1800); err != nil {
+					return nil, err
+				}
+				ended, err := chat.GetCall(ctx, "T1", "U1", call.ID)
+				if err != nil {
+					return nil, err
+				}
+				participants := func(call domain.Call) []string {
+					names := make([]string, 0, len(call.Participants))
+					for _, participant := range call.Participants {
+						names = append(names, string(participant))
+					}
+					sort.Strings(names)
+					return names
+				}
+				return []any{
+					call.ExternalUniqueID, call.ExternalDisplayID, call.Title, string(call.Kind),
+					call.StartedAt.UTC().Equal(started), participants(call),
+					participants(added), participants(removed),
+					updated.Title, updated.JoinURL, updated.DesktopAppJoinURL,
+					ended.DurationSeconds, ended.EndedAt.IsZero(), participants(ended),
+				}, nil
+			},
+		},
+		{
+			// The event cursor is how a disconnected client catches up: SSE
+			// resumption and the workflow trigger poller both read it. A cursor
+			// that skipped or repeated a record would lose or duplicate a
+			// notification, and neither is visible from a single read, so the
+			// case walks the log twice and compares the halves against the whole.
+			name: "the event cursor pages the same log across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "first", "", ""); err != nil {
+					return nil, err
+				}
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "second", "", ""); err != nil {
+					return nil, err
+				}
+				topics := func(records []events.Record) []string {
+					names := make([]string, 0, len(records))
+					for _, record := range records {
+						names = append(names, record.Event.Topic)
+					}
+					return names
+				}
+				whole, err := chat.ListEventsAfter(ctx, "T1", 0, 100)
+				if err != nil {
+					return nil, err
+				}
+				ascending := true
+				for index := 1; index < len(whole); index++ {
+					if whole[index].Sequence <= whole[index-1].Sequence {
+						ascending = false
+					}
+				}
+				// Reading from the first record's own sequence must return the
+				// rest and not repeat it: "after" is exclusive.
+				var rest []events.Record
+				if len(whole) > 0 {
+					rest, err = chat.ListEventsAfter(ctx, "T1", whole[0].Sequence, 100)
+					if err != nil {
+						return nil, err
+					}
+				}
+				limited, err := chat.ListEventsAfter(ctx, "T1", 0, 1)
+				if err != nil {
+					return nil, err
+				}
+				userScoped, err := chat.ListUserEventsAfter(ctx, "T1", "U1", 0, 100)
+				if err != nil {
+					return nil, err
+				}
+				// No app is installed in the fixture, so an app's view of the log
+				// is empty. That is the answer both compositions must give: an
+				// empty page, not a failure and not somebody else's events.
+				appScoped, err := chat.ListAppEventsAfter(ctx, "A-absent", 0, 100)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					topics(whole), ascending, topics(rest), len(whole) == len(rest)+1,
+					topics(limited), topics(userScoped), topics(appScoped),
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -3186,11 +3542,23 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// Deleting the photo must clear every rendition on the profile,
+				// not just the one the member happened to be looking at, so the
+				// projection reads them all back rather than the largest.
+				if err := chat.DeleteUserPhoto(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
+				cleared, err := chat.UserInfo(ctx, "T1", "U1", "U1")
+				if err != nil {
+					return nil, err
+				}
 				return []any{
 					opened.ID, opened.WorkspaceID, opened.Email, opened.Name, opened.RealName,
 					opened.Presence, opened.Deleted, opened.Profile.DisplayName,
 					opened.Profile.StatusText, opened.Profile.StatusEmoji,
 					bytes.Equal(content, photo),
+					cleared.Profile.Image24, cleared.Profile.Image32, cleared.Profile.Image48,
+					cleared.Profile.Image72, cleared.Profile.Image192, cleared.Profile.Image512,
 				}, nil
 			},
 		},
@@ -3268,7 +3636,17 @@ func parityCases() []parityCase {
 				for _, item := range listed {
 					titles = append(titles, item.Title)
 				}
-				return []any{bookmark.Title, bookmark.Link, bookmark.Emoji, edited.Title, titles}, nil
+				// Removal is the half of the lifecycle the case used to stop
+				// short of, so a bookmark that survived deletion on one
+				// composition and not the other read as agreement.
+				if err := chat.RemoveBookmark(ctx, "T1", "U1", "C1", bookmark.ID); err != nil {
+					return nil, err
+				}
+				remaining, err := chat.Bookmarks(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{bookmark.Title, bookmark.Link, bookmark.Emoji, edited.Title, titles, len(remaining)}, nil
 			},
 		},
 		{
@@ -4388,8 +4766,21 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// EndDND clears the schedule itself, which EndSnooze does not: a
+				// snooze is an override of the schedule and ending it leaves the
+				// schedule in force. Reading the state back is what separates them.
+				if err := chat.EndDND(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
+				afterEndDND, err := chat.DoNotDisturbInfo(ctx, "T1", "U1", "")
+				if err != nil {
+					return nil, err
+				}
 				reference := time.Now().UTC()
-				return []any{initial.Enabled, snoozed.SnoozeEnabled(reference), ended.SnoozeEnabled(reference)}, nil
+				return []any{
+					initial.Enabled, snoozed.SnoozeEnabled(reference), ended.SnoozeEnabled(reference),
+					afterEndDND.Enabled, afterEndDND.SnoozeEnabled(reference),
+				}, nil
 			},
 		},
 		{
@@ -4854,7 +5245,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 98
+const parityGapCeiling = 67
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -4872,8 +5263,6 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 var parityGaps = map[string]struct{}{
 	"AcceptSharedInvite":                {},
 	"AcknowledgeEntityCommentAction":    {},
-	"AddCall":                           {},
-	"AddCallParticipants":               {},
 	"AdminApproveApp":                   {},
 	"AdminApproveInviteRequest":         {},
 	"AdminAssignUser":                   {},
@@ -4886,7 +5275,6 @@ var parityGaps = map[string]struct{}{
 	"AdminInviteUser":                   {},
 	"AcceptInvitationForEmail":          {},
 	"ApproveSharedInvite":               {},
-	"ConversationRetention":             {},
 	"DeclineSharedInvite":               {},
 	"DenySharedInvite":                  {},
 	"InvitationPreview":                 {},
@@ -4895,10 +5283,8 @@ var parityGaps = map[string]struct{}{
 	"AdminTeamUsers":                    {},
 	"BotInfo":                           {},
 	"CompleteExternalUploads":           {},
-	"ConsumeRTMConnection":              {},
 	"CreateAppInstallation":             {},
 	"CreateExternalIdentity":            {},
-	"CreateRTMConnection":               {},
 	"CreateSession":                     {},
 	"DeleteCanvas":                      {},
 	// These three credential-aware methods share the scheduled-message RPCs
@@ -4906,71 +5292,45 @@ var parityGaps = map[string]struct{}{
 	// focused transport tests because parityCases seeds both compositions with
 	// fresh independent stores and therefore cannot compare one token's durable
 	// schedule across calls.
-	"DeleteUserPhoto":                         {},
-	"DispatchBlockAction":                     {},
-	"DispatchViewBlockAction":                 {},
-	"DispatchSlashCommand":                    {},
-	"EndCall":                                 {},
-	"EndDND":                                  {},
-	"GetAuthMethod":                           {},
-	"GetCall":                                 {},
-	"HandleAppResponse":                       {},
-	"InviteShared":                            {},
-	"LastRetentionSweep":                      {},
-	"ListWorkspaceApps":                       {},
-	"ListAppEventsAfter":                      {},
-	"ListUserEventsAfter":                     {},
-	"ListEventsAfter":                         {},
-	"LookupAppToken":                          {},
-	"LookupCanvasSections":                    {},
-	"LoadAppOptions":                          {},
-	"MigrationExchange":                       {},
-	"OAuthExchange":                           {},
-	"OpenDialog":                              {},
-	"OpenAppHome":                             {},
-	"OpenIDConnectToken":                      {},
-	"OpenIDConnectUserInfo":                   {},
-	"OpenPublicFile":                          {},
-	"OpenView":                                {},
-	"AppHome":                                 {},
-	"Permalink":                               {},
-	"PostWithBlocks":                          {},
-	"PostWithBlocksAndAttachments":            {},
-	"PresentEntityComments":                   {},
-	"PresentEntityDetails":                    {},
-	"PublishView":                             {},
-	"PushView":                                {},
-	"RecordAccess":                            {},
-	"ReleaseSocketModeConnection":             {},
-	"RemoveBookmark":                          {},
-	"RemoveCallParticipants":                  {},
-	"RemoveConversationRetention":             {},
-	"RemoveUser":                              {},
-	"RenewSocketModeConnection":               {},
-	"Replies":                                 {},
-	"RequestAppPermissions":                   {},
-	"ResetUserSessions":                       {},
-	"RevokeSession":                           {},
-	"RevokeSharedInvite":                      {},
-	"RevokeToken":                             {},
-	"ScheduleMessageWithBlocks":               {},
-	"ScheduleMessageWithBlocksAndAttachments": {},
-	"SetAuthMethod":                           {},
-	"SetConversationRetention":                {},
-	"SetExternalInvitePermissions":            {},
-	"SetWorkspaceRetention":                   {},
-	"TeamBillableInfo":                        {},
-	"Unfurl":                                  {},
-	"UninstallApp":                            {},
-	"UpdateCall":                              {},
-	"UpdateView":                              {},
-	"UpdateWithBlocks":                        {},
-	"UpdateWithBlocksAndAttachments":          {},
-	"UpdateMessage":                           {},
-	"UserWorkspaces":                          {},
-	"WorkflowStepCompleted":                   {},
-	"WorkflowStepFailed":                      {},
-	"WorkflowUpdateStep":                      {},
-	"WorkspaceAnalytics":                      {},
-	"WorkspaceRetention":                      {},
+	"DispatchBlockAction":          {},
+	"DispatchViewBlockAction":      {},
+	"DispatchSlashCommand":         {},
+	"GetAuthMethod":                {},
+	"HandleAppResponse":            {},
+	"InviteShared":                 {},
+	"ListWorkspaceApps":            {},
+	"LookupAppToken":               {},
+	"LookupCanvasSections":         {},
+	"LoadAppOptions":               {},
+	"MigrationExchange":            {},
+	"OAuthExchange":                {},
+	"OpenDialog":                   {},
+	"OpenAppHome":                  {},
+	"OpenIDConnectToken":           {},
+	"OpenIDConnectUserInfo":        {},
+	"OpenPublicFile":               {},
+	"OpenView":                     {},
+	"AppHome":                      {},
+	"PresentEntityComments":        {},
+	"PresentEntityDetails":         {},
+	"PublishView":                  {},
+	"PushView":                     {},
+	"RecordAccess":                 {},
+	"RemoveUser":                   {},
+	"RequestAppPermissions":        {},
+	"ResetUserSessions":            {},
+	"RevokeSession":                {},
+	"RevokeSharedInvite":           {},
+	"RevokeToken":                  {},
+	"SetAuthMethod":                {},
+	"SetExternalInvitePermissions": {},
+	"TeamBillableInfo":             {},
+	"Unfurl":                       {},
+	"UninstallApp":                 {},
+	"UpdateView":                   {},
+	"UserWorkspaces":               {},
+	"WorkflowStepCompleted":        {},
+	"WorkflowStepFailed":           {},
+	"WorkflowUpdateStep":           {},
+	"WorkspaceAnalytics":           {},
 }

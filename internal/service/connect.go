@@ -125,6 +125,14 @@ func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.Wor
 		return domain.SharedInvite{}, ErrSharedInviteSettled
 	}
 	now := time.Now().UTC()
+	// Approving a lapsed invitation records it as live and sends nobody
+	// anything: acceptance refuses it on the deadline, so the approval can
+	// never become a shared channel. Withdrawing one stays available, because
+	// clearing a queue of dead invitations is the remaining useful action and
+	// refusing it would leave them there permanently.
+	if to == domain.SharedInviteApproved && invite.Expired(now) {
+		return domain.SharedInvite{}, ErrInvitationExpired
+	}
 	event, err := sharedInviteEvent(workspaceID, actorID, topic, invite, now)
 	if err != nil {
 		return domain.SharedInvite{}, err

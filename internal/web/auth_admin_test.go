@@ -767,6 +767,12 @@ func TestAnExpiredInvitationIsRefusedDistinctly(t *testing.T) {
 	ctx := context.Background()
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	store.SeedConversationMember("C1", "U1")
+	// The invitation is seeded already approved rather than approved here,
+	// because this is the state the test is about: a request approved while it
+	// was fresh, whose deadline passed afterwards. Reaching it by approving a
+	// lapsed request is no longer possible, and was never the real sequence —
+	// approval of a lapsed request now answers ErrInvitationExpired, which
+	// TestALapsedInviteRequestCannotBeApprovedButCanBeDenied covers.
 	stale := domain.InviteRequest{
 		ID: "IR_stale", WorkspaceID: "T1", Email: "late@example.test", RequestedBy: "U1",
 		ChannelIDs: []domain.ConversationID{"C1"}, RealName: "Late", Status: domain.InviteRequestPending,
@@ -775,10 +781,15 @@ func TestAnExpiredInvitationIsRefusedDistinctly(t *testing.T) {
 	if err := store.CreateInviteRequest(ctx, stale, events.Event{ID: "Estale", WorkspaceID: "T1", Topic: "invite_request.created", Payload: `{"type":"invite_request.created"}`, CreatedAt: stale.CreatedAt}); err != nil {
 		t.Fatal(err)
 	}
-	messages := service.Messages{Store: store}
-	if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", stale.ID); err != nil {
+	// The approval is written at the store, which is where an approval taken
+	// while the request was still fresh would have left it. A request is always
+	// created pending, so this is the only way to reach the state.
+	reviewed := time.Now().UTC().Add(-29 * 24 * time.Hour)
+	if err := store.SetInviteRequestStatus(ctx, "T1", stale.ID, domain.InviteRequestPending, domain.InviteRequestApproved, reviewed,
+		events.Event{ID: "Estale-approved", WorkspaceID: "T1", Topic: "invite_request.approved", Payload: `{"type":"invite_request.approved"}`, CreatedAt: reviewed}); err != nil {
 		t.Fatal(err)
 	}
+	messages := service.Messages{Store: store}
 	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "late@example.test", "Late"); !errors.Is(err, service.ErrInvitationExpired) {
 		t.Fatalf("an expired invitation was not refused as expired: %v", err)
 	}
@@ -1584,5 +1595,70 @@ func TestAChannelCanTakeItsOwnRetentionLimit(t *testing.T) {
 	after, err := store.GetConversationRetention(ctx, "T1", "C1")
 	if err != nil || after.DurationDays != 0 {
 		t.Fatalf("override after removal=%+v err=%v", after, err)
+	}
+}
+
+// CONNECT-01 requires the expired state to be explicit. The panel used to
+// render "valid until <date>" from the deadline alone, which for a lapsed
+// invitation stated the opposite of the truth, and it offered Approve beside
+// it — a control that recorded the invitation as live when acceptance would
+// refuse it on the same deadline.
+func TestTheConnectPanelSaysWhenAnInvitationHasLapsed(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+
+	// The deadline is written directly: an invitation sent through the service
+	// is always dated fourteen days out, and waiting is not a test.
+	past := time.Now().UTC().Add(-time.Hour)
+	invite := domain.SharedInvite{
+		ID: "SI_lapsed", WorkspaceID: "T1", ConversationID: "C1", TargetWorkspaceID: "T2",
+		InvitedBy: "U1", Status: domain.SharedInvitePending,
+		CreatedAt: past.Add(-service.SharedInviteLifetime), ExpiresAt: past,
+	}
+	event, err := events.New("E-lapsed", "T1", "U1",
+		events.NewPayload("shared_invite.created", events.String("invite_id", string(invite.ID))), past)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateSharedInvite(ctx, invite, event); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/app?channel=C1&details=1", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "can no longer be approved") {
+		t.Fatalf("the panel does not say the invitation lapsed: %s", body)
+	}
+	if strings.Contains(body, "valid until") {
+		t.Fatalf("the panel calls a lapsed invitation valid: %s", body)
+	}
+	if strings.Contains(body, ">Approve<") {
+		t.Fatalf("the panel offers Approve for a lapsed invitation: %s", body)
+	}
+
+	// The control is gone, and the operation behind it refuses too, so a
+	// request made without the page cannot approve it either.
+	approve := adminMutationRequest(http.MethodPost, "/app/connect/approve?channel=C1", "invite_id="+string(invite.ID))
+	approveResponse := httptest.NewRecorder()
+	handler.ServeHTTP(approveResponse, approve)
+	if approveResponse.Code != http.StatusConflict {
+		t.Fatalf("approve=%d body=%s, want 409", approveResponse.Code, approveResponse.Body.String())
+	}
+	// Withdrawing stays available: a queue of lapsed invitations has to be
+	// clearable rather than accumulating for ever.
+	deny := adminMutationRequest(http.MethodPost, "/app/connect/deny?channel=C1", "invite_id="+string(invite.ID))
+	denyResponse := httptest.NewRecorder()
+	handler.ServeHTTP(denyResponse, deny)
+	if denyResponse.Code != http.StatusSeeOther {
+		t.Fatalf("withdraw=%d body=%s", denyResponse.Code, denyResponse.Body.String())
 	}
 }
