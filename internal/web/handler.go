@@ -1408,7 +1408,12 @@ const workspaceRefinements = `<style>
 .channel-actions button:hover{background:var(--hover)}
 .timeline{padding-top:12px}
 .message{border-radius:6px;padding-top:5px;padding-bottom:5px}
-.message-actions{position:absolute;z-index:3;top:2px;right:10px;display:flex;flex-wrap:nowrap;justify-content:flex-end;min-height:0;gap:2px;margin-top:0;padding:3px 5px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.message-actions{position:absolute;z-index:3;top:2px;right:10px;display:none;flex-wrap:nowrap;align-items:center;min-height:0;gap:2px;padding:3px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.message-action{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;list-style:none}
+.message-action::-webkit-details-marker{display:none}
+.message-action:hover{background:var(--hover);color:var(--text)}
+.action-icon{width:18px;height:18px;display:block}
+.message-more>.shortcut-list,.forward-menu>form{position:absolute;z-index:6;right:0;top:32px}
 .message-actions a,.message-actions button,.message-actions summary{display:inline-flex;flex:0 0 auto;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 /* The toolbar is revealed by pointing at the message or focusing it, and is
    otherwise out of the way. It used to be permanently visible under every
@@ -1425,13 +1430,17 @@ const workspaceRefinements = `<style>
    tab order, which is what "not currently offered" should mean, and :focus
    brings it back the moment the message is reached by keyboard — the message
    carries tabindex so roving focus lands on it. */
-.message-actions{visibility:hidden}
-.message:hover .message-actions,.message:focus .message-actions,.message:focus-within .message-actions,.message-actions:hover{visibility:visible}
-/* The toolbar sits inside the message's own box rather than straddling its top
-   edge, so travelling from the message to a button never leaves the area that
-   reveals it, and it holds itself visible while it is the thing being pointed
-   at. Positioned above the box it vanished as the pointer crossed the gap,
-   which neither a person nor a test could click through. */
+.message-actions{display:none}
+.message:hover .message-actions,.message:focus .message-actions,.message:focus-within .message-actions{display:flex}
+/* A menu left open keeps the toolbar on screen: closing it because the pointer
+   moved into the menu it opened would make the menu unusable. */
+.message-actions:has(details[open]){display:flex}
+/* Overlaid at the top-right, the way Slack presents it, which needs the row to
+   be narrow: as ten text labels it was nine hundred pixels wide and covered the
+   message timestamp, which WCAG 2.2 target-size reports as a link obscured to a
+   strip one pixel tall. Five icon controls clear the head with room to spare,
+   and everything they displaced lives in More actions — which is also where
+   Slack keeps it. */
 .message-actions a:hover,.message-actions button:hover,.message-actions summary:hover{background:var(--hover);color:var(--text);text-decoration:none}
 .message-actions details{display:inline-block;position:relative}
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
@@ -1565,7 +1574,12 @@ const attachmentPartial = `{{define "attachment"}}
 </article>
 {{end}}`
 
-const messagesPartial = `{{define "messages"}}
+const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7.4" cy="8.4" r="1" fill="currentColor"/><circle cx="12.6" cy="8.4" r="1" fill="currentColor"/><path d="M6.9 12.2a4 4 0 0 0 6.2 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>{{end}}
+{{define "icon-thread"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3.2 6.2A2 2 0 0 1 5.2 4.2h9.6a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2H8.4L5 16.2v-2.8a2 2 0 0 1-1.8-2Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
+{{define "icon-forward"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M11 4.5 17 10l-6 5.5V12C7.6 12 5.2 13.1 3.5 15.5c.3-4.6 3-7.4 7.5-7.9Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
+{{define "icon-bookmark"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5.5 3.8h9v12.4L10 12.6l-4.5 3.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
+{{define "icon-more"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="4.6" cy="10" r="1.4" fill="currentColor"/><circle cx="10" cy="10" r="1.4" fill="currentColor"/><circle cx="15.4" cy="10" r="1.4" fill="currentColor"/></svg>{{end}}
+{{define "messages"}}
 {{range $message := .Messages}}
 {{if $message.DaySeparator}}<div class="day-separator" role="separator"><time datetime="{{$message.DaySeparatorMachine}}">{{$message.DaySeparator}}</time></div>{{end}}
 {{if $message.FirstUnread}}<div class="unread-divider" role="separator" aria-label="New messages"><span>New</span></div>{{end}}
@@ -1674,10 +1688,16 @@ const messagesPartial = `{{define "messages"}}
     </ul>
     {{end}}
     {{if $message.ReplyCount}}<p class="thread-summary"><a href="{{$message.ReplyURL}}">{{$message.ReplySummary}}</a>{{if $message.LastReplyTime}} <span class="thread-last-reply">Last reply {{$message.LastReplyTime}}</span>{{end}}</p>{{end}}
-    {{if not $message.Ephemeral}}<div class="message-actions">
-      <a href="{{$message.ReplyURL}}">{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}</a>
-      {{if $message.CopyLinkURL}}<a class="copy-link" href="{{$message.CopyLinkURL}}" data-copy-link="{{$message.CopyLinkURL}}">Copy link</a>{{end}}
-      {{if and $message.ForwardURL $.CanReply}}<details class="forward-menu"><summary>Forward</summary>
+    {{if not $message.Ephemeral}}<div class="message-actions" role="group" aria-label="Actions for the message from {{$message.AuthorName}}">
+      {{if $.CanReact}}
+      <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <input type="hidden" name="name" value="">
+      </form>
+      <button class="message-action" type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog" aria-label="Add reaction" title="Add reaction">{{template "icon-emoji"}}</button>
+      {{end}}
+      <a class="message-action" href="{{$message.ReplyURL}}" aria-label="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}" title="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}">{{template "icon-thread"}}</a>
+      {{if and $message.ForwardURL $.CanReply}}<details class="forward-menu"><summary class="message-action" aria-label="Forward" title="Forward">{{template "icon-forward"}}</summary>
         <form method="post" action="{{$message.ForwardURL}}" hx-post="{{$message.ForwardURL}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
           <label>Forward to<select name="destination">{{range $.ForwardDestinations}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label>
@@ -1685,78 +1705,69 @@ const messagesPartial = `{{define "messages"}}
           <button type="submit">Forward</button>
         </form>
       </details>{{end}}
-      {{if $message.MarkUnreadURL}}<form method="post" action="{{$message.MarkUnreadURL}}" hx-post="{{$message.MarkUnreadURL}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <button type="submit">Mark unread from here</button>
-      </form>{{end}}
-      {{if $.CanReact}}
-      <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <input type="hidden" name="name" value="">
-      </form>
-      <button type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog">Add reaction</button>
-      {{end}}
       <form method="post" action="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" hx-post="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" data-message-save>
         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <button type="submit" aria-pressed="{{if $message.Saved}}true{{else}}false{{end}}">{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}</button>
+        <button class="message-action" type="submit" aria-pressed="{{if $message.Saved}}true{{else}}false{{end}}" aria-label="{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}" title="{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}">{{template "icon-bookmark"}}</button>
       </form>
-      <details data-reminder-menu>
-        <summary>Remind me about this</summary>
-        <form class="inline-form reminder-form" aria-label="Set a reminder for this message" method="post" action="{{$message.RemindURL}}">
+      <details class="message-more"><summary class="message-action" aria-label="More actions" title="More actions">{{template "icon-more"}}</summary>
+      <div class="shortcut-list">
+        {{if $message.CopyLinkURL}}<a class="copy-link" href="{{$message.CopyLinkURL}}" data-copy-link="{{$message.CopyLinkURL}}">Copy link</a>{{end}}
+        {{if $message.MarkUnreadURL}}<form method="post" action="{{$message.MarkUnreadURL}}" hx-post="{{$message.MarkUnreadURL}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <input type="hidden" name="timezone" data-browser-timezone value="UTC">
-          <button type="submit" name="preset" value="20m">In 20 minutes</button>
-          <button type="submit" name="preset" value="1h">In 1 hour</button>
-          <button type="submit" name="preset" value="tomorrow">Tomorrow at 9:00 AM</button>
-          <label>Custom date<input type="date" name="date"></label>
-          <label>Time<input type="time" name="time" value="09:00"></label>
-          <button type="submit" name="preset" value="custom">Set reminder</button>
-        </form>
-      </details>
-      {{if $.CanPin}}
-      <form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
-      </form>
-      {{end}}
-      {{if $message.Shortcuts}}
-      <details>
-        <summary>More actions</summary>
-        <div class="shortcut-list" role="menu">
-          {{range $shortcut := $message.Shortcuts}}
-          <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
+          <button type="submit">Mark unread from here</button>
+        </form>{{end}}
+        <details data-reminder-menu>
+          <summary>Remind me about this</summary>
+          <form class="inline-form reminder-form" aria-label="Set a reminder for this message" method="post" action="{{$message.RemindURL}}">
             <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <input type="hidden" name="channel" value="{{$message.Channel}}">
-            <input type="hidden" name="message_id" value="{{$message.MessageID}}">
-            <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
-            <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
-            <button type="submit" role="menuitem">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
+            <input type="hidden" name="timezone" data-browser-timezone value="UTC">
+            <button type="submit" name="preset" value="20m">In 20 minutes</button>
+            <button type="submit" name="preset" value="1h">In 1 hour</button>
+            <button type="submit" name="preset" value="tomorrow">Tomorrow at 9:00 AM</button>
+            <label>Custom date<input type="date" name="date"></label>
+            <label>Time<input type="time" name="time" value="09:00"></label>
+            <button type="submit" name="preset" value="custom">Set reminder</button>
           </form>
-          {{end}}
-        </div>
-      </details>
-      {{end}}
-      {{if $message.CanEdit}}
-      <details>
-        <summary>Edit</summary>
-        <form class="inline-form edit-message" aria-label="Edit message" method="post" action="{{$message.UpdateURL}}" hx-post="{{$message.UpdateURL}}">
+        </details>
+        {{if $.CanPin}}
+        <form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <label class="visually-hidden" for="edit-{{$message.ID}}">Edit your message</label>
-          <textarea id="edit-{{$message.ID}}" name="text" maxlength="40000" required>{{$message.Text}}</textarea>
-          <button type="submit">Save changes</button>
+          <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
         </form>
-      </details>
-      {{end}}
-      {{if $message.CanDelete}}
-      <details class="delete-message">
-        <summary>Delete</summary>
-        <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
+        {{end}}
+        {{range $shortcut := $message.Shortcuts}}
+        <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          {{if $message.Files}}<p>This message shares a file. Deleting it also removes the file from this conversation, unless another message here shares it too. The file itself is kept.</p>{{end}}
-          <button type="submit">Delete this message</button>
+          <input type="hidden" name="channel" value="{{$message.Channel}}">
+          <input type="hidden" name="message_id" value="{{$message.MessageID}}">
+          <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
+          <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
+          <button type="submit">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
         </form>
+        {{end}}
+        {{if $message.CanEdit}}
+        <details>
+          <summary>Edit</summary>
+          <form class="inline-form edit-message" aria-label="Edit message" method="post" action="{{$message.UpdateURL}}" hx-post="{{$message.UpdateURL}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label class="visually-hidden" for="edit-{{$message.ID}}">Edit your message</label>
+            <textarea id="edit-{{$message.ID}}" name="text" maxlength="40000" required>{{$message.Text}}</textarea>
+            <button type="submit">Save changes</button>
+          </form>
+        </details>
+        {{end}}
+        {{if $message.CanDelete}}
+        <details class="delete-message">
+          <summary>Delete</summary>
+          <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            {{if $message.Files}}<p>This message shares a file. Deleting it also removes the file from this conversation, unless another message here shares it too. The file itself is kept.</p>{{end}}
+            <button type="submit">Delete this message</button>
+          </form>
+        </details>
+        {{end}}
+      </div>
       </details>
-      {{end}}
     </div>{{end}}
   </div>
 </article>
@@ -3525,10 +3536,14 @@ var details=message?message.querySelectorAll('.message-actions details'):null;
 for(var index=0;details&&index<details.length;index++){var summary=details[index].querySelector('summary');if(summary&&summary.textContent.trim()===label)return details[index]}
 return null;
 }
+function revealDisclosure(details){
+var node=details;
+while(node){node.open=true;node=node.parentElement?node.parentElement.closest('details'):null;}
+}
 function openMessageDetails(message,label,control){
 var details=messageDetails(message,label);
 if(!details)return false;
-details.open=true;
+revealDisclosure(details);
 var target=details.querySelector(control);
 if(target)target.focus();
 return true;
@@ -4091,7 +4106,7 @@ if(reactionButton&&openEmojiPicker(reactionButton)){event.preventDefault();retur
 }
 if(key==='m'){
 var reminderMenu=focusedMessage.querySelector('[data-reminder-menu]');
-if(reminderMenu){event.preventDefault();reminderMenu.open=true;var reminderControl=reminderMenu.querySelector('button,input');if(reminderControl)reminderControl.focus();return}
+if(reminderMenu){event.preventDefault();revealDisclosure(reminderMenu);var reminderControl=reminderMenu.querySelector('button,input');if(reminderControl)reminderControl.focus();return}
 }
 if(key==='a'){
 var save=focusedMessage.querySelector('[data-message-save] button[type=submit]');

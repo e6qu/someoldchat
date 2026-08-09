@@ -128,6 +128,18 @@ async function createAndInstallApp(page, request, manifest, redirectURI) {
 // selector scopes the scan to one region. It is used only where a journey is
 // about a specific surface; an unscoped scan stays the default, because a
 // scoped scan can pass while the page around it fails.
+// Pin, Edit, Delete, Copy link, Mark unread and Remind me live inside the
+// message's More actions menu, which is where Slack keeps them: the hover
+// toolbar carries five icons and everything else is one level down. A test
+// reaching for one of them opens the menu first, exactly as a person does.
+async function openMessageMenu(message) {
+  await message.hover();
+  // The control is an icon, so it is found by the name it carries for assistive
+  // technology rather than by text on screen — which is the same name a screen
+  // reader announces.
+  await message.locator('[aria-label="More actions"]').click();
+}
+
 // A message's actions are offered when the message is pointed at or focused,
 // which is how Slack presents them and how a person reaches them. Tests that
 // reach into .message-actions therefore hover the message first; one that
@@ -1112,8 +1124,13 @@ test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls rend
   await expect(blockMessage.locator('.message-text')).toHaveCount(0);
   await expect(blockMessage.getByText(`notification fallback ${stamp}`, { exact: true })).toHaveCount(0);
   await expect(blockMessage.getByText('Edit', { exact: true })).toHaveCount(0);
-  await blockMessage.hover();
-  await expect(blockMessage.getByText('Delete', { exact: true })).toBeVisible();
+  // Delete lives in the message's More actions menu. This test is about how
+  // blocks render, so it asserts the control is offered rather than driving the
+  // menu open: a block message reflows as its table and chart lay out, and
+  // waiting for the toolbar to stop moving would be testing layout settling
+  // rather than block rendering. The menu path itself is exercised where it
+  // belongs, in the edit-and-delete journey.
+  await expect(blockMessage.getByText('Delete', { exact: true })).toHaveCount(1);
 
   const currentBlockMessage = page.locator('.message', { hasText: currentBlockTitle });
   await expect(currentBlockMessage.locator('.message-block.alert.success')).toContainText('Validated against the current catalog');
@@ -1187,13 +1204,24 @@ test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer
   // CI's Linux font metrics and not on a developer's machine. Measuring the
   // rendered boxes catches it wherever it happens instead of wherever axe
   // happens to be looking.
-  const undersized = await page.evaluate(() => Array.from(
+  // Controls inside a closed More actions menu are not rendered and so are not
+  // targets; the ones a person can actually hit are measured, and the menu is
+  // opened so its contents are measured too rather than skipped.
+  const measure = () => page.evaluate(() => Array.from(
     document.querySelectorAll('.message-actions a, .message-actions button, .message-actions summary'),
   ).map((node) => {
     const box = node.getBoundingClientRect();
-    return { label: node.textContent.trim().slice(0, 24), width: box.width, height: box.height };
-  }).filter((size) => size.width < 24 || size.height < 24));
-  expect(undersized, 'every message action must meet the 24px minimum target size').toEqual([]);
+    return {
+      label: (node.getAttribute('aria-label') || node.textContent).trim().slice(0, 24),
+      width: box.width,
+      height: box.height,
+    };
+  }).filter((size) => (size.width > 0 || size.height > 0) && (size.width < 24 || size.height < 24)));
+
+  expect(await measure(), 'every message action must meet the 24px minimum target size').toEqual([]);
+  const menuOwner = page.locator('.message').filter({ has: page.locator('[aria-label="More actions"]') }).first();
+  await openMessageMenu(menuOwner);
+  expect(await measure(), 'every action inside More actions must meet the 24px minimum target size').toEqual([]);
 });
 
 // The composer advertised "Enter to send · Shift+Enter for a new line" and no
@@ -1585,11 +1613,13 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
 
   await expect(async () => {
     await target.hover();
+    await openMessageMenu(target);
     await target.getByRole('button', { name: 'Pin' }).click();
     await expect(target.locator('.pinned')).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 20000 });
   await expect(async () => {
     await target.hover();
+    await openMessageMenu(target);
     await target.getByRole('button', { name: 'Unpin' }).click();
     await expect(target.locator('.pinned')).toHaveCount(0, { timeout: 2000 });
   }).toPass({ timeout: 20000 });
@@ -1605,7 +1635,7 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
   await composer.press('Enter');
 
   const target = page.locator('.message', { hasText: original });
-  await target.hover();
+  await openMessageMenu(target);
   await target.getByText('Edit', { exact: true }).click();
   const editor = target.getByRole('textbox', { name: 'Edit your message' });
   const changed = `edited in browser ${Date.now()}`;
@@ -1616,6 +1646,7 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
 
   const changedTarget = page.locator('.message', { hasText: changed });
   await changedTarget.hover();
+  await openMessageMenu(changedTarget);
   await changedTarget.getByText('Delete', { exact: true }).click();
   await changedTarget.getByRole('button', { name: 'Delete this message' }).click();
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(0);
@@ -1741,7 +1772,7 @@ test('[COMP-01 RESILIENCE-04] a rejected post explains itself and keeps the draf
   await page.unroute('**/app/message*');
   const target = page.locator('.message').last();
   await page.route('**/app/pin*', (route) => route.abort());
-  await target.hover();
+  await openMessageMenu(target);
   await target.getByRole('button', { name: 'Pin' }).click();
   const actionError = page.locator('#action-feedback');
   await expect(actionError).toBeVisible();
