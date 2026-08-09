@@ -2989,3 +2989,65 @@ func TestAnOrdinaryMemberStillJoinsAndCreatesChannels(t *testing.T) {
 		t.Fatalf("a member could not create a channel: %v", err)
 	}
 }
+
+// Ending a member's sessions is idempotent: the asked-for state is that they
+// hold none, and a member who already holds none is not a missing member. The
+// store used to report ErrNotFound when there was nothing to revoke, which the
+// single-member path passed straight through — so an administrator signing out
+// somebody who was not signed in was told the user did not exist. The bulk
+// path had already noticed and worked around it, which is what proved the
+// single path wrong rather than the store right.
+func TestResettingSessionsSucceedsWhenThereAreNone(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	seedWorkspaceAdmin(t, s, "T1", "U1")
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "quiet@example.com", Name: "quiet"}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s}
+
+	if err := messages.ResetUserSessions(ctx, "T1", "U1", "U2"); err != nil {
+		t.Fatalf("resetting the sessions of a member who has none: %v", err)
+	}
+	if err := messages.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U2"}); err != nil {
+		t.Fatalf("the bulk path disagreed with the single one: %v", err)
+	}
+	// A member who really is not there is still not found, so the fix did not
+	// swallow the answer that matters.
+	if err := messages.ResetUserSessions(ctx, "T1", "U1", "U-absent"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("resetting sessions for a missing member err=%v, want ErrNotFound", err)
+	}
+}
+
+// admin.teams.admins.list and admin.teams.owners.list are the only routes that
+// reach this listing, so any other role is refused — but it used to be refused
+// with ErrInvalidUserGroup, "user group name, handle, and members are invalid",
+// which sent a caller asking about workspace roles to look at user groups.
+func TestListingTeamUsersRefusesAnUnsupportedRoleAsAWorkspaceError(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	seedWorkspaceAdmin(t, s, "T1", "U1")
+	messages := Messages{Store: s}
+
+	if _, err := messages.AdminTeamUsers(ctx, "T1", "U1", domain.WorkspaceRoleMember, domain.PageRequest{Limit: 10}); !errors.Is(err, ErrInvalidWorkspace) {
+		t.Fatalf("listing members err=%v, want ErrInvalidWorkspace", err)
+	}
+	// The two roles the routes do pass still work.
+	for _, role := range []domain.WorkspaceRole{domain.WorkspaceRoleAdmin, domain.WorkspaceRoleOwner} {
+		if _, err := messages.AdminTeamUsers(ctx, "T1", "U1", role, domain.PageRequest{Limit: 10}); err != nil {
+			t.Fatalf("listing %s: %v", role, err)
+		}
+	}
+}

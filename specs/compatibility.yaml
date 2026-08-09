@@ -817,7 +817,7 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
-      - go-test:internal/api/slack:TestAdminUsersSessionResetIsRegistered
+      - go-test:internal/api/slack:TestAdminUsersSessionResetIsIdempotentButStillFindsTheMember
   - method: admin.users.setAdmin
     status: behavior-compatible
     provenance: slack-api-specs-openapi

@@ -23,7 +23,9 @@ message RecordAccessRequest {
 message AccessLogsRequest {
   string workspace_id = 1;
   string user_id = 2;
-  int64 before = 3;
+  // Optional because a bare int64 cannot tell the Unix epoch from an absent
+  // instant: both encode as 0, and the two compositions read that differently.
+  optional int64 before = 3;
   int32 limit = 4;
   int32 page = 5;
 }
@@ -40,7 +42,8 @@ message AccessMutationResponse {
 message WorkspaceAnalyticsRequest {
   string workspace_id = 1;
   string user_id = 2;
-  int64 since = 3;
+  // Optional for the same reason as AccessLogsRequest.before.
+  optional int64 since = 3;
 }
 
 message ChannelActivity {
@@ -62,7 +65,8 @@ message WorkspaceAnalytics {
   int32 files = 10;
   int32 recent_files = 11;
   repeated ChannelActivity busiest_channels = 12;
-  int64 since = 13;
+  // Optional for the same reason as AccessLogsRequest.before.
+  optional int64 since = 13;
 }
 
 message IntegrationLog {

@@ -12,6 +12,9 @@ import (
 	"go/token"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path"
 	"reflect"
 	"regexp"
@@ -101,6 +104,14 @@ type parityCase struct {
 	// seed prepares a store. It runs once per composition with an empty store, so
 	// both compositions start from the same state.
 	seed func(t *testing.T, target *memory.Store)
+
+	// seedWithApp is seed for a case whose methods call an app over HTTP. The
+	// harness starts one receiver per composition and hands its URL to the
+	// seed, because the manifest has to name the endpoint and the manifest is
+	// written by the seed. The two receivers are distinct servers answering
+	// identically, so what the compositions compare is what each stored, not
+	// which port it dialled.
+	seedWithApp func(t *testing.T, target *memory.Store, appURL string)
 
 	// operate runs the case against one composition and returns the value to
 	// compare. A failure case returns a nil value; a success case must project
@@ -276,6 +287,9 @@ func seedWebhookParity(t *testing.T, target *memory.Store) {
 func seedViewParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
+	// Approving and restricting an app are administrative decisions, so the
+	// actor holds the authority for them as well as ordinary membership.
+	requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleAdmin))
 	now := time.Unix(1_700_000_700, 0).UTC()
 	manifest := `{"display_information":{"name":"View parity"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}},"oauth_config":{"scopes":{"bot":["chat:write"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"https://apps.example.test/interactions"}}}`
 	requireSeed(t, target.CreateApp(context.Background(), domain.App{
@@ -333,9 +347,99 @@ func seedConnectParity(t *testing.T, target *memory.Store) {
 	// Three channels, because an invitation is settled per channel and the case
 	// needs one it can approve, one it can deny and one it can revoke without
 	// the outcomes interfering.
-	for _, id := range []domain.ConversationID{"C-accept", "C-deny", "C-revoke"} {
-		requireSeed(t, target.SeedConversation(domain.Conversation{ID: id, WorkspaceID: "T1", Name: string(id)}))
-		requireSeed(t, target.SeedConversationMember(id, "U1"))
+	for _, channel := range []struct {
+		id   domain.ConversationID
+		name string
+	}{{"C-accept", "connect-accept"}, {"C-deny", "connect-deny"}, {"C-revoke", "connect-revoke"}} {
+		requireSeed(t, target.SeedConversation(domain.Conversation{ID: channel.id, WorkspaceID: "T1", Name: channel.name}))
+		requireSeed(t, target.SeedConversationMember(channel.id, "U1"))
+	}
+}
+
+// parityAppEndpoint is the app both compositions dial. It answers the shapes
+// the interaction contract defines and nothing else, so a difference between
+// the compositions cannot come from the app: each has its own server running
+// this same handler.
+// seedDispatchParity installs an app that answers over HTTP: a slash command,
+// an interactivity endpoint and a message-menu options endpoint, all pointing
+// at the receiver the harness started for this composition.
+func seedDispatchParity(t *testing.T, target *memory.Store, appURL string) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_900, 0).UTC()
+	manifest := `{"display_information":{"name":"Dispatch parity"},"features":{"slash_commands":[{"command":"/deploy","url":"` + appURL + `","description":"Deploy","usage_hint":"environment","should_escape":true}]},"oauth_config":{"scopes":{"bot":["commands","chat:write"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"` + appURL + `","message_menu_options_url":"` + appURL + `"}}}`
+	// The app's credentials are sealed for real, because a dispatch opens the
+	// verification token to sign the request it sends. The associated data
+	// mirrors the service's own private helpers; if that format ever changes,
+	// every dispatch in this case stops working, which is the tripwire.
+	key := bytes.Repeat([]byte("k"), 32)
+	const signingSecret, verificationToken = "dispatch-signing-secret", "dispatch-verification-token"
+	signingCiphertext, err := secretbox.Seal(key, "app:A1:signing-secret", signingSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationCiphertext, err := secretbox.Seal(key, "app:A1:verification-token", verificationToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireSeed(t, target.CreateApp(context.Background(), domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Dispatch parity", ClientID: "dispatch-client",
+		SigningSecretHash: domain.HashToken(signingSecret), SigningSecretCiphertext: signingCiphertext,
+		VerificationTokenHash: domain.HashToken(verificationToken), VerificationTokenCiphertext: verificationCiphertext,
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "dispatch-client", SecretHash: "client-hash", AppID: "A1"}))
+	requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+		AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+	}))
+	requireSeed(t, target.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "dispatch-bot"}))
+	requireSeed(t, target.SeedConversationMember("C1", "UBOT"))
+	requireSeed(t, target.CreateBot(context.Background(), domain.Bot{
+		ID: "Bdispatch", WorkspaceID: "T1", AppID: "A1", UserID: "UBOT", Name: "dispatch-bot", UpdatedAt: now,
+	}))
+	// A response URL is normally minted by a dispatch and handed to the app
+	// over HTTP, where this case cannot reach it. Seeding one with a known
+	// token is what lets the response path be exercised at all.
+	minted := time.Now().UTC()
+	requireSeed(t, target.CreateAppInteractionCapabilities(context.Background(),
+		domain.AppTrigger{
+			TokenHash: domain.HashToken("trigger_dispatch"), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			CreatedAt: minted, ExpiresAt: minted.Add(time.Hour),
+		},
+		domain.AppResponseURL{
+			TokenHash: domain.HashToken("response_dispatch"), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			ConversationID: "C1", CreatedAt: minted, ExpiresAt: minted.Add(time.Hour), UsesRemaining: 5,
+		}))
+}
+
+func parityAppEndpoint(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// A slash command arrives form-encoded and an interaction arrives as a
+	// JSON body, so the payload is whichever of the two this request carries.
+	payload := string(body)
+	if values, parseErr := url.ParseQuery(payload); parseErr == nil && values.Get("payload") != "" {
+		payload = values.Get("payload")
+	}
+	switch {
+	case strings.Contains(payload, `"type":"block_suggestion"`):
+		// The typed value is echoed into the answer. An app that ignored it
+		// would make a dropped value invisible, and this endpoint exists to
+		// make the seam's fields observable, not to be realistic.
+		var suggestion struct {
+			Value string `json:"value"`
+		}
+		_ = json.Unmarshal([]byte(payload), &suggestion)
+		_, _ = io.WriteString(w, `{"options":[{"text":{"type":"plain_text","text":"Production `+suggestion.Value+`"},"value":"prod"}]}`)
+	case strings.Contains(payload, `"type":"view_submission"`):
+		_, _ = io.WriteString(w, `{}`)
+	default:
+		_, _ = io.WriteString(w, `{"text":"acknowledged"}`)
 	}
 }
 
@@ -462,13 +566,25 @@ func seedBranchParity(t *testing.T, target *memory.Store) {
 func newParity(t *testing.T, testCase parityCase) parity {
 	t.Helper()
 	seed := testCase.seed
-	if seed == nil {
+	if seed == nil && testCase.seedWithApp == nil {
 		seed = seedBaseline
 	}
 	build := func(name string) chatWorld {
 		target := memory.New()
-		seed(t, target)
 		implementation := service.Messages{Store: target, AppCredentialKey: bytes.Repeat([]byte("k"), 32)}
+		if testCase.seedWithApp != nil {
+			// TLS, because the manifest validator requires HTTPS endpoints: a
+			// plain-HTTP receiver makes every manifest invalid and every
+			// dispatch fail identically, which a differential case would report
+			// as agreement.
+			receiver := httptest.NewTLSServer(http.HandlerFunc(parityAppEndpoint))
+			t.Cleanup(receiver.Close)
+			implementation.AppHTTPClient = receiver.Client()
+			testCase.seedWithApp(t, target, receiver.URL)
+		}
+		if seed != nil {
+			seed(t, target)
+		}
 		if testCase.blobs {
 			blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
 			if err != nil {
@@ -3691,6 +3807,658 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Workspace administration is one long sequence rather than a set of
+			// independent calls: a workspace is created, people are put in it by
+			// three different routes — created outright, invited and approved,
+			// invited and denied — and then counted, billed, reassigned and
+			// removed. Splitting it into a case per method would lose the part
+			// that matters, which is that each step sees what the last one did.
+			name: "workspace administration agrees across the seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleOwner))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.AdminCreateWorkspace(ctx, "T1", "U1", "T-new", "New team", "A second workspace", domain.WorkspaceDiscoverabilityInviteOnly)
+				if err != nil {
+					return nil, err
+				}
+				member, err := chat.AdminCreateUser(ctx, "T1", "U1", "created@example.test", "Created Person", domain.WorkspaceRoleMember)
+				if err != nil {
+					return nil, err
+				}
+				// Two invitations: one that will be approved and accepted, one
+				// that will be denied, so both terminal states are compared.
+				for _, email := range []string{"approved@example.test", "denied@example.test"} {
+					if err := chat.AdminInviteUser(ctx, "T1", "U1", email, []domain.ConversationID{"C1"}, "Join us", "Invited Person", false, false, false, time.Time{}); err != nil {
+						return nil, err
+					}
+				}
+				pending, err := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				byEmail := make(map[string]domain.InviteRequestID, len(pending.Requests))
+				for _, request := range pending.Requests {
+					byEmail[request.Email] = request.ID
+				}
+				// The preview is what a signed-out invitee sees, so it takes no
+				// actor at all and must still answer.
+				preview, err := chat.InvitationPreview(ctx, "T1", byEmail["approved@example.test"])
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminApproveInviteRequest(ctx, "T1", "U1", byEmail["approved@example.test"]); err != nil {
+					return nil, err
+				}
+				if err := chat.AdminDenyInviteRequest(ctx, "T1", "U1", byEmail["denied@example.test"]); err != nil {
+					return nil, err
+				}
+				accepted, err := chat.AcceptInvitationForEmail(ctx, "T1", "approved@example.test", "Accepted Person")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminAssignUser(ctx, "T1", "U1", accepted.ID, []domain.ConversationID{"C2"}); err != nil {
+					return nil, err
+				}
+				// Only the two authority roles are listable: the routes that
+				// reach this are admin.teams.admins.list and .owners.list.
+				members, err := chat.AdminTeamUsers(ctx, "T1", "U1", domain.WorkspaceRoleAdmin, domain.PageRequest{Limit: 50})
+				if err != nil {
+					return nil, err
+				}
+				emails := make([]string, 0, len(members.Users))
+				for _, user := range members.Users {
+					emails = append(emails, user.Email)
+				}
+				sort.Strings(emails)
+				billable, err := chat.TeamBillableInfo(ctx, "T1", "U1", "")
+				if err != nil {
+					return nil, err
+				}
+				// The accounts this case creates carry generated identifiers, so
+				// only the seeded ones are named; the rest are counted, which
+				// is what says everybody created along the way is billable.
+				seeded := map[domain.UserID]bool{"U1": true, "U2": true, "UA": true}
+				billing := make([]string, 0, len(billable.Users))
+				billingCount := 0
+				for _, user := range billable.Users {
+					billingCount++
+					if seeded[user.UserID] {
+						billing = append(billing, string(user.UserID)+":"+strconv.FormatBool(user.BillingActive))
+					}
+				}
+				sort.Strings(billing)
+				// Access is recorded before the analytics window opens so the
+				// count it feeds is deterministic.
+				if err := chat.RecordAccess(ctx, "T1", "U1", "198.51.100.7", "qualification-agent"); err != nil {
+					return nil, err
+				}
+				// Reading the access back is what gives the record teeth: the
+				// write reports nothing, so a dropped field is invisible until
+				// somebody asks for the log.
+				logs, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), 10, 1)
+				if err != nil {
+					return nil, err
+				}
+				// The Unix epoch is a real instant, not an absent one: asking
+				// for accesses before it must answer with none. It used to
+				// answer none locally and everything remotely, because the
+				// seam encoded the instant as a bare int64 whose zero also
+				// meant "no filter".
+				beforeEpoch, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Unix(0, 0).UTC(), 10, 1)
+				if err != nil {
+					return nil, err
+				}
+				accesses := make([]string, 0, len(logs))
+				for _, entry := range logs {
+					accesses = append(accesses, strings.Join([]string{string(entry.UserID), entry.IP, entry.UserAgent}, "|"))
+				}
+				sort.Strings(accesses)
+				analytics, err := chat.WorkspaceAnalytics(ctx, "T1", "U1", time.Unix(0, 0).UTC())
+				if err != nil {
+					return nil, err
+				}
+				workspaces, err := chat.UserWorkspaces(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				held := make([]string, 0, len(workspaces))
+				for _, summary := range workspaces {
+					held = append(held, string(summary.Workspace.ID)+":"+string(summary.Role))
+				}
+				sort.Strings(held)
+				// Resetting sessions and removing the account are the two ways
+				// an administrator ends someone's access, and they are not the
+				// same: the first leaves the member in the workspace.
+				if err := chat.ResetUserSessions(ctx, "T1", "U1", member.ID); err != nil {
+					return nil, err
+				}
+				stillHere, err := chat.UserInfo(ctx, "T1", "U1", member.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveUser(ctx, "T1", "U1", member.ID); err != nil {
+					return nil, err
+				}
+				// A removed account is gone from the directory rather than
+				// returned as a deleted row, so the projection holds the
+				// refusal instead of a user.
+				_, removedErr := chat.UserInfo(ctx, "T1", "U1", member.ID)
+				denied, err := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestDenied, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				deniedEmails := make([]string, 0, len(denied.Requests))
+				for _, request := range denied.Requests {
+					deniedEmails = append(deniedEmails, request.Email)
+				}
+				return []any{
+					created.Domain, created.Name, created.Description, string(created.Discoverability),
+					member.Email, member.RealName,
+					preview.Email, preview.RealName, string(preview.Status),
+					accepted.Email, accepted.Name != "",
+					emails, billing, billingCount, deniedEmails, accesses, len(beforeEpoch),
+					analytics.Members, analytics.Admins, analytics.PublicChannels,
+					analytics.ArchivedChannels, analytics.Messages >= 0,
+					held, stillHere.Deleted,
+					removedErr != nil, errors.Is(removedErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
+			// Connecting organizations to a channel and taking them off it are
+			// the administrative half of Slack Connect, separate from the
+			// invitation lifecycle: an administrator can attach a team without
+			// an invitation ever existing, and disconnecting is not the same as
+			// revoking one.
+			name: "connected channel administration agrees across the seam",
+			seed: seedConnectParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// A conversation may only be associated with the acting
+				// workspace: this deployment holds no organization edge, so a
+				// foreign team is refused rather than written.
+				foreignErr := chat.AdminSetConversationTeams(ctx, "T1", "U1", "C-accept", []domain.WorkspaceID{"T1", "T2"}, false)
+				if err := chat.AdminSetConversationTeams(ctx, "T1", "U1", "C-accept", []domain.WorkspaceID{"T1"}, false); err != nil {
+					return nil, err
+				}
+				// The second organization arrives the way Slack Connect puts it
+				// there, by accepting an invitation, which is the only route
+				// that attaches one.
+				invite, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", "T2", "")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", invite.ID); err != nil {
+					return nil, err
+				}
+				if _, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", invite.ID); err != nil {
+					return nil, err
+				}
+				teams, hasMore, _, err := chat.AdminConversationTeams(ctx, "T1", "U1", "C-accept", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				attached := make([]string, 0, len(teams))
+				for _, team := range teams {
+					attached = append(attached, string(team))
+				}
+				sort.Strings(attached)
+				infos, infoMore, _, err := chat.AdminConnectedChannelInfo(ctx, "T1", "U1", []domain.ConversationID{"C-accept"}, nil, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				connected := make([]string, 0, len(infos))
+				for _, info := range infos {
+					internal := make([]string, 0, len(info.InternalTeamIDs))
+					for _, team := range info.InternalTeamIDs {
+						internal = append(internal, string(team))
+					}
+					sort.Strings(internal)
+					connected = append(connected, string(info.ChannelID)+"="+strings.Join(internal, ","))
+				}
+				sort.Strings(connected)
+				if err := chat.AdminDisconnectSharedConversation(ctx, "T1", "U1", "C-accept", []domain.WorkspaceID{"T2"}); err != nil {
+					return nil, err
+				}
+				remaining, _, _, err := chat.AdminConversationTeams(ctx, "T1", "U1", "C-accept", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				left := make([]string, 0, len(remaining))
+				for _, team := range remaining {
+					left = append(left, string(team))
+				}
+				sort.Strings(left)
+				return []any{
+					foreignErr != nil, errors.Is(foreignErr, service.ErrInvalidConversation),
+					attached, hasMore, connected, infoMore, left,
+				}, nil
+			},
+		},
+		{
+			// An app's presence in a workspace is three separate facts —
+			// installed, approved, and holding a credential — and the methods
+			// that report them are different. The case walks the whole arc so a
+			// composition that lost one of the three is caught rather than one
+			// that merely answered each call.
+			name: "app installation and approval agree across the seam",
+			seed: seedViewParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				installed, err := chat.ListWorkspaceApps(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				names := make([]string, 0, len(installed))
+				for _, app := range installed {
+					names = append(names, string(app.ID)+":"+app.Name+":"+strconv.FormatBool(app.HomeTabEnabled))
+				}
+				sort.Strings(names)
+				// A second installation is a different workspace's decision,
+				// so it must not appear in this one's listing.
+				if err := chat.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T2-absent", Enabled: true, CreatedAt: time.Unix(1_700_000_800, 0).UTC()}); err != nil {
+					return nil, err
+				}
+				installations, err := chat.ListAppInstallations(ctx, "A1")
+				if err != nil {
+					return nil, err
+				}
+				workspaces := make([]string, 0, len(installations))
+				for _, installation := range installations {
+					workspaces = append(workspaces, string(installation.WorkspaceID)+":"+strconv.FormatBool(installation.Enabled))
+				}
+				sort.Strings(workspaces)
+				if err := chat.AdminApproveApp(ctx, "T1", "U1", "A1", "R-1"); err != nil {
+					return nil, err
+				}
+				approved, err := chat.AdminListApps(ctx, "T1", "U1", domain.AppApprovalApproved, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				// The approval is named, not just counted: a request that lost
+				// its app id is stored under a synthesised key, which a count
+				// alone cannot tell from the real thing.
+				approvedIDs := make([]string, 0, len(approved.Apps))
+				for _, approval := range approved.Apps {
+					approvedIDs = append(approvedIDs, string(approval.ID)+"/"+string(approval.RequestID))
+				}
+				sort.Strings(approvedIDs)
+				// Requesting scopes is a member asking an administrator for
+				// something, which is recorded rather than granted.
+				permissionErr := chat.RequestAppPermissions(ctx, "T1", "U1", "U2", []string{"channels:read"}, "trigger_replay")
+				// Restricting uninstalls the app, so what it did is read back
+				// from the installation rather than from the approval alone.
+				if err := chat.AdminRestrictApp(ctx, "T1", "U1", "A1", "R-1"); err != nil {
+					return nil, err
+				}
+				afterRestriction, err := chat.ListWorkspaceApps(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				restricted, err := chat.AdminListApps(ctx, "T1", "U1", domain.AppApprovalRestricted, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				restrictedIDs := make([]string, 0, len(restricted.Apps))
+				for _, approval := range restricted.Apps {
+					restrictedIDs = append(restrictedIDs, string(approval.ID)+":"+string(approval.Status))
+				}
+				sort.Strings(restrictedIDs)
+				// Uninstalling an app that restriction already removed is
+				// refused, and both compositions must refuse it alike.
+				uninstallErr := chat.UninstallApp(ctx, "view-client", "client-hash", "T1", "A1")
+				_, tokenErr := chat.LookupAppToken(ctx, "xapp-absent")
+				return []any{
+					names, workspaces, approvedIDs, restrictedIDs,
+					len(afterRestriction), permissionErr == nil,
+					uninstallErr != nil, tokenErr != nil,
+					errors.Is(tokenErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
+			// A workflow step is finished by the app that ran it, and the three
+			// ways it can end — configured, completed, failed — are separate
+			// methods writing separate durable states. seedWorkflowParity
+			// leaves one step executing, which is the state all three act on.
+			name: "workflow step completion agrees across the seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// Configuring is keyed by the edit identifier the builder holds,
+				// not by the execution identifier the runtime holds; they are
+				// different names for different moments and a case that used one
+				// for both would pass while the seam confused them.
+				if err := chat.WorkflowUpdateStep(ctx, "T1", "U1", "triage", `{"item":{"value":"request"}}`, `[{"name":"result","type":"text"}]`, "Triage request", "https://example.test/icon.png"); err != nil {
+					return nil, err
+				}
+				// No seam method returns a stored workflow step, so what these
+				// three write is observable only through the run they move and
+				// through whether they were accepted at all. That bounds this
+				// case honestly: dropping an identifier is caught, dropping a
+				// payload field is not, because nothing can read the payload
+				// back. The product gap audit records that separately — an app
+				// completes a step with outputs and no method reports them.
+				configured, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity")
+				if err != nil {
+					return nil, err
+				}
+				completeErr := chat.WorkflowStepCompleted(ctx, "T1", "U1", "FxParity", `{"result":"done"}`)
+				completed, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity")
+				if err != nil {
+					return nil, err
+				}
+				// A step that has already ended cannot end again, and a failure
+				// payload that is not an object is refused rather than stored.
+				repeatErr := chat.WorkflowStepCompleted(ctx, "T1", "U1", "FxParity", `{"result":"again"}`)
+				malformedErr := chat.WorkflowStepFailed(ctx, "T1", "U1", "FxParity", `not-json`)
+				return []any{
+					string(configured.Status), configured.Inputs,
+					completeErr == nil, string(completed.Status), completed.Outputs,
+					repeatErr != nil, malformedErr != nil,
+					errors.Is(malformedErr, service.ErrInvalidWorkflowStep),
+				}, nil
+			},
+		},
+		{
+			// The three entity surfaces store nothing: they validate what an app
+			// hands back and answer yes or no. What the seam has to agree on is
+			// therefore the decision itself, so the case drives one accepted
+			// shape and every rejected one each method declares.
+			name: "entity presentation validates identically across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				detailsOK := chat.PresentEntityDetails(ctx, "T1", "U1", "trigger", `{"title":"Item"}`, false, "", "")
+				detailsNoTrigger := chat.PresentEntityDetails(ctx, "T1", "U1", "  ", `{"title":"Item"}`, false, "", "")
+				detailsBadMetadata := chat.PresentEntityDetails(ctx, "T1", "U1", "trigger", `["not","an","object"]`, false, "", "")
+				// Declaring that the member must authenticate without saying
+				// where is a promise with nowhere to send them.
+				detailsNoAuthURL := chat.PresentEntityDetails(ctx, "T1", "U1", "trigger", `{"title":"Item"}`, true, "", "")
+				commentsOK := chat.PresentEntityComments(ctx, "T1", "U1", "trigger", `[{"id":"c1","text":"hello"}]`, "", true, "delete", false, "", "")
+				commentsEmpty := chat.PresentEntityComments(ctx, "T1", "U1", "trigger", "", "", true, "delete", false, "", "")
+				commentsNotArray := chat.PresentEntityComments(ctx, "T1", "U1", "trigger", `{"id":"c1"}`, "", true, "delete", false, "", "")
+				acknowledgeOK := chat.AcknowledgeEntityCommentAction(ctx, "T1", "U1", "trigger", `{"id":"c1"}`, "")
+				acknowledgeBad := chat.AcknowledgeEntityCommentAction(ctx, "T1", "U1", "trigger", `[1,2,3]`, "")
+				classify := func(err error) string {
+					switch {
+					case err == nil:
+						return "ok"
+					case errors.Is(err, service.ErrInvalidEntity):
+						return "invalid_entity"
+					default:
+						return "other:" + err.Error()
+					}
+				}
+				return []any{
+					classify(detailsOK), classify(detailsNoTrigger), classify(detailsBadMetadata), classify(detailsNoAuthURL),
+					classify(commentsOK), classify(commentsEmpty), classify(commentsNotArray),
+					classify(acknowledgeOK), classify(acknowledgeBad),
+				}, nil
+			},
+		},
+		{
+			// External uploads, public links, canvases, bots and unfurls have
+			// nothing in common except that each is a durable object a message
+			// or a member points at, and each was uncovered. They share a case
+			// because they share a fixture, not because they share a story.
+			name:  "durable attachments agree across the seam",
+			blobs: true,
+			seed:  seedWebhookParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// An external upload is a ticket, bytes, then a completion that
+				// turns both into a shared file. The completion is the seam
+				// method under test; the first two set it up.
+				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", "report.txt", "text/plain", 6, time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.UploadExternalFile(ctx, upload.ID, 6, bytes.NewReader([]byte("report"))); err != nil {
+					return nil, err
+				}
+				files, err := chat.CompleteExternalUploads(ctx, "T1", "U1",
+					[]domain.ExternalUploadCompletion{{ID: upload.ID, Title: "Quarterly report"}},
+					[]domain.ConversationID{"C1"}, "Here it is", "", "")
+				if err != nil {
+					return nil, err
+				}
+				completed := make([]string, 0, len(files))
+				for _, file := range files {
+					completed = append(completed, file.Name+"|"+file.Title+"|"+strconv.FormatInt(file.Size, 10))
+				}
+				sort.Strings(completed)
+				// A public link is a token that anyone holding it may read, so
+				// the case reads the bytes back through it rather than trusting
+				// the token to exist.
+				shared, err := chat.ShareFilePublic(ctx, "T1", "U1", files[0].ID)
+				if err != nil {
+					return nil, err
+				}
+				public, reader, err := chat.OpenPublicFile(ctx, shared.PublicToken)
+				if err != nil {
+					return nil, err
+				}
+				defer reader.Close()
+				content, err := io.ReadAll(reader)
+				if err != nil {
+					return nil, err
+				}
+				revoked, err := chat.RevokeFilePublic(ctx, "T1", "U1", files[0].ID)
+				if err != nil {
+					return nil, err
+				}
+				_, _, revokedErr := chat.OpenPublicFile(ctx, shared.PublicToken)
+
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Runbook", `{"type":"markdown","markdown":"# Runbook\n\nStep one."}`, "")
+				if err != nil {
+					return nil, err
+				}
+				sections, err := chat.LookupCanvasSections(ctx, "T1", "U1", canvas.ID, `{"section_types":["h1"]}`)
+				if err != nil {
+					return nil, err
+				}
+				found := make([]string, 0, len(sections))
+				for _, section := range sections {
+					found = append(found, string(section.Type)+":"+section.Text)
+				}
+				sort.Strings(found)
+				if err := chat.DeleteCanvas(ctx, "T1", "U1", canvas.ID); err != nil {
+					return nil, err
+				}
+				_, deletedErr := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+
+				bot, err := chat.BotInfo(ctx, "T1", "U1", "Bhook")
+				if err != nil {
+					return nil, err
+				}
+				// An unfurl attaches link previews to a message that already
+				// exists, so it is read back from the message rather than from
+				// the call's own answer.
+				posted, err := chat.Post(ctx, "T1", "U1", "C1", "see https://example.test/page", "", "")
+				if err != nil {
+					return nil, err
+				}
+				timestamp := domain.NewMessageTimestamp(posted.CreatedAt)
+				unfurled, err := chat.Unfurl(ctx, "T1", "U1", "C1", timestamp, map[string]string{
+					"https://example.test/page": `{"title":"A page","text":"Preview"}`,
+				})
+				if err != nil {
+					return nil, err
+				}
+				previews := make([]string, 0, len(unfurled.Unfurls))
+				for link, preview := range unfurled.Unfurls {
+					previews = append(previews, link+"="+preview)
+				}
+				sort.Strings(previews)
+				return []any{
+					completed, upload.Name,
+					public.Name, public.Title, string(content),
+					shared.PublicToken != "", revoked.PublicToken,
+					revokedErr != nil, errors.Is(revokedErr, storepkg.ErrNotFound),
+					canvas.Title, found, deletedErr != nil,
+					string(bot.ID), bot.Name, string(bot.AppID), string(bot.UserID),
+					previews,
+				}, nil
+			},
+		},
+		{
+			// Credentials are the one family where a seam disagreement is a
+			// security answer rather than a display one: a session or token the
+			// two compositions disagree about is one that is live in a
+			// deployment that believes it revoked it. The case therefore reads
+			// every credential back after each write, and again after revoking.
+			name: "sessions, tokens and external identities agree across the seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleAdmin))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				expiry := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+				if err := chat.CreateSession(ctx, "session-parity", domain.SessionRecord{
+					WorkspaceID: "T1", UserID: "U1", Scopes: []string{"channels:history", "chat:write"},
+					CreatedAt: expiry.Add(-time.Hour), ExpiresAt: expiry,
+					OIDCProvider: "shauth", OIDCSubject: "subject-1", OIDCSID: "sid-1",
+				}); err != nil {
+					return nil, err
+				}
+				opened, err := chat.LookupSession(ctx, "session-parity")
+				if err != nil {
+					return nil, err
+				}
+				listed, err := chat.UserSessions(ctx, "T1", "U1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RevokeSession(ctx, "session-parity"); err != nil {
+					return nil, err
+				}
+				afterRevoke, revokeErr := chat.LookupSession(ctx, "session-parity")
+
+				// A token is revoked by value, and the record must say so
+				// rather than disappear: a caller has to be able to tell a
+				// revoked credential from one that never existed.
+				tokenErr := chat.RevokeToken(ctx, "token")
+				revokedToken, tokenLookupErr := chat.Tokens.LookupToken(ctx, "token")
+
+				if err := chat.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1", Provider: "shauth", Enabled: true}); err != nil {
+					return nil, err
+				}
+				method, err := chat.GetAuthMethod(ctx, "T1", "shauth")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1", Provider: "shauth", Enabled: false}); err != nil {
+					return nil, err
+				}
+				disabled, err := chat.GetAuthMethod(ctx, "T1", "shauth")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CreateExternalIdentity(ctx, domain.ExternalIdentity{
+					WorkspaceID: "T1", Provider: "shauth", Subject: "subject-1", UserID: "U1",
+				}); err != nil {
+					return nil, err
+				}
+				identity, err := chat.GetExternalIdentity(ctx, "T1", "shauth", "subject-1")
+				if err != nil {
+					return nil, err
+				}
+				_, missingIdentityErr := chat.GetExternalIdentity(ctx, "T1", "shauth", "subject-absent")
+
+				// A migration exchange maps this workspace's member ids onto
+				// their global ones and names the ones it could not, which is
+				// the half a caller acts on.
+				exchange, err := chat.MigrationExchange(ctx, "T1", "U1", []domain.UserID{"U1", "U-absent"}, false)
+				if err != nil {
+					return nil, err
+				}
+				mapped := make([]string, 0, len(exchange.UserIDMap))
+				for from, to := range exchange.UserIDMap {
+					mapped = append(mapped, string(from)+"->"+strconv.FormatBool(to != ""))
+				}
+				sort.Strings(mapped)
+				invalid := make([]string, 0, len(exchange.InvalidUserIDs))
+				for _, id := range exchange.InvalidUserIDs {
+					invalid = append(invalid, string(id))
+				}
+				sort.Strings(invalid)
+				return []any{
+					opened.WorkspaceID, opened.UserID, len(opened.Scopes),
+					opened.ExpiresAt.UTC().Equal(expiry), opened.OIDCProvider, opened.OIDCSubject, opened.OIDCSID,
+					len(listed) > 0,
+					afterRevoke.Revoked, revokeErr != nil,
+					tokenErr == nil, revokedToken.Revoked, tokenLookupErr != nil,
+					method.Provider, method.Enabled, disabled.Enabled,
+					string(identity.UserID), identity.Provider, identity.Subject,
+					missingIdentityErr != nil, errors.Is(missingIdentityErr, storepkg.ErrNotFound),
+					string(exchange.WorkspaceID), mapped, invalid,
+				}, nil
+			},
+		},
+		{
+			// The dispatch family is the only one that leaves this process: each
+			// method posts to the app and turns what comes back into durable
+			// state. Both compositions dial their own receiver running the same
+			// handler, so what they compare is what each stored — a difference
+			// cannot come from the app.
+			name:        "app dispatch agrees across the seam",
+			seedWithApp: seedDispatchParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				slashErr := chat.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/deploy", "production", "https://chat.example.test")
+				// A slash command in a thread is refused before the app is
+				// reached, which both compositions must decide alike.
+				threadErr := chat.DispatchSlashCommand(ctx, "T1", "U1", "C1", "1700000000.000100", "/deploy", "production", "https://chat.example.test")
+				unknownErr := chat.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/nothing", "", "https://chat.example.test")
+
+				posted, err := chat.PostWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "Deployment",
+					`[{"type":"actions","block_id":"deployment","elements":[{"type":"button","action_id":"go","text":{"type":"plain_text","text":"Go"},"value":"prod"}]}]`,
+					"", "", "", "A1")
+				if err != nil {
+					return nil, err
+				}
+				actionErr := chat.DispatchBlockAction(ctx, "T1", "U1", domain.AppBlockAction{
+					MessageID: posted.ID, BlockID: "deployment", ActionID: "go", Type: "button", Value: "prod",
+				}, "https://chat.example.test")
+
+				view, err := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_dispatch",
+					`{"type":"modal","callback_id":"deploy","title":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"actions","block_id":"env","elements":[{"type":"external_select","action_id":"pick","placeholder":{"type":"plain_text","text":"Environment"}}]},{"type":"actions","block_id":"go","elements":[{"type":"button","action_id":"confirm","text":{"type":"plain_text","text":"Confirm"},"value":"x"}]}]}`)
+				if err != nil {
+					return nil, err
+				}
+				viewActionErr := chat.DispatchViewBlockAction(ctx, "T1", "U1", "C1", domain.AppViewBlockAction{
+					ViewID: view.ID, BlockID: "go", ActionID: "confirm", Type: "button", Value: "x", State: `{}`,
+				}, "https://chat.example.test")
+
+				options, optionsErr := chat.LoadAppOptions(ctx, "T1", "U1", "C1", domain.AppOptionQuery{
+					AppID: "A1", ViewID: view.ID, BlockID: "env", ActionID: "pick", Value: "pro",
+				}, "https://chat.example.test")
+				loaded := make([]string, 0, len(options))
+				for _, option := range options {
+					loaded = append(loaded, option.Text+"="+option.Value)
+				}
+				sort.Strings(loaded)
+
+				// The response URL was seeded, because a real one is handed to
+				// the app over HTTP where this case cannot read it.
+				responseErr := chat.HandleAppResponse(ctx, "response_dispatch", `{"text":"from the app"}`)
+				spentErr := chat.HandleAppResponse(ctx, "response-absent", `{"text":"nobody"}`)
+				page, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 20})
+				if err != nil {
+					return nil, err
+				}
+				texts := make([]string, 0, len(page.Messages))
+				for _, message := range page.Messages {
+					texts = append(texts, message.Text)
+				}
+				sort.Strings(texts)
+				return []any{
+					slashErr == nil, threadErr != nil, errors.Is(threadErr, service.ErrSlashCommandInThread),
+					unknownErr != nil, errors.Is(unknownErr, service.ErrSlashCommandNotFound),
+					actionErr == nil, viewActionErr == nil,
+					optionsErr == nil, loaded,
+					responseErr == nil, spentErr != nil,
+					errors.Is(spentErr, service.ErrInvalidAppResponse), texts,
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -5361,7 +6129,10 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				updatedManifest := `{"display_information":{"name":"Updated"},"oauth_config":{"redirect_urls":["https://example.test/oauth"],"scopes":{"bot":["chat:write"]}},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":true}}`
+				// The app declares user scopes as well as bot ones, because the v1
+				// exchange and Sign in with Slack both mint user tokens and a
+				// scope the manifest does not declare is not granted.
+				updatedManifest := `{"display_information":{"name":"Updated"},"oauth_config":{"redirect_urls":["https://example.test/oauth"],"scopes":{"bot":["chat:write"],"user":["identity.basic","openid","email","profile"]}},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":true}}`
 				updated, err := chat.UpdateAppFromManifest(ctx, configuration.Token, app.ID, updatedManifest)
 				if err != nil {
 					return nil, err
@@ -5379,6 +6150,39 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The v1 exchange is a separate method with its own code, so it
+				// gets its own authorization: an authorization code is spent by
+				// the first exchange that redeems it.
+				// The v1 exchange asks for a user token, so the authorization it
+				// redeems has to have granted user scopes.
+				v1Request := oauthRequest
+				v1Request.State = "state-v1"
+				v1Request.UserScopes = []string{"identity.basic"}
+				v1Authorized, err := chat.AuthorizeOAuth(ctx, v1Request)
+				if err != nil {
+					return nil, err
+				}
+				v1Token, err := chat.OAuthExchange(ctx, credentials.ClientID, credentials.ClientSecret, v1Authorized.Code, v1Authorized.RedirectURI)
+				if err != nil {
+					return nil, err
+				}
+				// Sign in with Slack rides the same authorization and adds an
+				// identity token, which is the whole point of the OIDC pair.
+				oidcRequest := oauthRequest
+				oidcRequest.State = "state-oidc"
+				oidcRequest.UserScopes = []string{"openid", "email", "profile"}
+				oidcAuthorized, err := chat.AuthorizeOAuth(ctx, oidcRequest)
+				if err != nil {
+					return nil, err
+				}
+				openID, err := chat.OpenIDConnectToken(ctx, credentials.ClientID, credentials.ClientSecret, oidcAuthorized.Code, oidcAuthorized.RedirectURI, "", "", "")
+				if err != nil {
+					return nil, err
+				}
+				userInfo, err := chat.OpenIDConnectUserInfo(ctx, openID.AccessToken)
+				if err != nil {
+					return nil, err
+				}
 				refreshed, err := chat.OAuthV2Refresh(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.RefreshToken)
 				if err != nil {
 					return nil, err
@@ -5393,7 +6197,10 @@ func parityCases() []parityCase {
 				if err := chat.DeleteDeveloperApp(ctx, rotated.Token, app.ID); err != nil {
 					return nil, err
 				}
-				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != ""}, nil
+				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
+					v1Token.AccessToken != "", string(v1Token.TokenType), len(v1Token.Scopes) > 0,
+					openID.IDToken != "", openID.AccessToken != "",
+					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName}, nil
 			},
 		},
 	}
@@ -5504,7 +6311,21 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 53
+//
+// It is zero. Every method chatapi.Service declares is exercised by a case, so
+// there is no backlog left to shrink and a new method has nowhere to hide: it
+// either gets a case or this constant has to be raised, which is a decision
+// somebody has to argue for rather than a list somebody can quietly append to.
+//
+// Two limits are worth knowing rather than discovering. The workflow step
+// methods can be checked for a dropped identifier but not for a dropped
+// payload, because nothing on this seam reads a stored step back; the case says
+// so and the product gap audit records the underlying gap. And a case whose
+// methods call an app over HTTP must use seedWithApp: the receiver has to be
+// TLS and the app's credentials sealed for real, or every dispatch fails
+// identically in both compositions and the case reports an agreement it has
+// not established.
+const parityGapCeiling = 0
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5520,62 +6341,9 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 }
 
 var parityGaps = map[string]struct{}{
-	"AcknowledgeEntityCommentAction":    {},
-	"AdminApproveApp":                   {},
-	"AdminApproveInviteRequest":         {},
-	"AdminAssignUser":                   {},
-	"AdminConnectedChannelInfo":         {},
-	"AdminConversationTeams":            {},
-	"AdminCreateUser":                   {},
-	"AdminCreateWorkspace":              {},
-	"AdminDenyInviteRequest":            {},
-	"AdminDisconnectSharedConversation": {},
-	"AdminInviteUser":                   {},
-	"AcceptInvitationForEmail":          {},
-	"InvitationPreview":                 {},
-	"AdminRestrictApp":                  {},
-	"AdminSetConversationTeams":         {},
-	"AdminTeamUsers":                    {},
-	"BotInfo":                           {},
-	"CompleteExternalUploads":           {},
-	"CreateAppInstallation":             {},
-	"CreateExternalIdentity":            {},
-	"CreateSession":                     {},
-	"DeleteCanvas":                      {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
 	// focused transport tests because parityCases seeds both compositions with
 	// fresh independent stores and therefore cannot compare one token's durable
 	// schedule across calls.
-	"DispatchBlockAction":     {},
-	"DispatchViewBlockAction": {},
-	"DispatchSlashCommand":    {},
-	"GetAuthMethod":           {},
-	"HandleAppResponse":       {},
-	"ListWorkspaceApps":       {},
-	"LookupAppToken":          {},
-	"LookupCanvasSections":    {},
-	"LoadAppOptions":          {},
-	"MigrationExchange":       {},
-	"OAuthExchange":           {},
-	"OpenIDConnectToken":      {},
-	"OpenIDConnectUserInfo":   {},
-	"OpenPublicFile":          {},
-	"PresentEntityComments":   {},
-	"PresentEntityDetails":    {},
-	"RecordAccess":            {},
-	"RemoveUser":              {},
-	"RequestAppPermissions":   {},
-	"ResetUserSessions":       {},
-	"RevokeSession":           {},
-	"RevokeToken":             {},
-	"SetAuthMethod":           {},
-	"TeamBillableInfo":        {},
-	"Unfurl":                  {},
-	"UninstallApp":            {},
-	"UserWorkspaces":          {},
-	"WorkflowStepCompleted":   {},
-	"WorkflowStepFailed":      {},
-	"WorkflowUpdateStep":      {},
-	"WorkspaceAnalytics":      {},
 }

@@ -33,7 +33,12 @@ var (
 	ErrInvalidTimestamp      = errors.New("message timestamp is invalid")
 	ErrMessageNotOwned       = errors.New("message is not owned by user")
 	ErrMessageAlreadyDeleted = errors.New("message is already deleted")
-	ErrInvalidConversation   = errors.New("conversation name is invalid")
+	// The message describes the class rather than one member of it. It used to
+	// read "conversation name is invalid", which is right for a rejected name
+	// and wrong for the other forty-odd sites that raise it — a foreign team
+	// id, a kind that cannot carry the operation, a conversation that is not a
+	// channel — each of which told the caller to go and look at a name.
+	ErrInvalidConversation = errors.New("conversation is invalid for this operation")
 	// ErrBarrieredFromMember is refusal by an information barrier. It is its
 	// own error because "you may not reach this person" is a different fact
 	// from a malformed request or a member who is not here, and an
@@ -504,8 +509,9 @@ func (m Messages) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.
 			return err
 		}
 		// A member with no live session is not a failure of the request: they
-		// are already signed out, which is what was asked for.
-		if err := m.Store.RevokeUserSessions(ctx, workspaceID, targetID, event); err != nil && !errors.Is(err, store.ErrNotFound) {
+		// are already signed out, which is what was asked for. That rule lives
+		// in the store now, so this reads like every other write.
+		if err := m.Store.RevokeUserSessions(ctx, workspaceID, targetID, event); err != nil {
 			return err
 		}
 	}
@@ -5918,8 +5924,13 @@ func (m Messages) AdminTeamUsers(ctx context.Context, workspaceID domain.Workspa
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserPage{}, err
 	}
+	// Only the two authority roles are listable here, because the two routes
+	// that reach this are admin.teams.admins.list and admin.teams.owners.list.
+	// The refusal used to be ErrInvalidUserGroup — "user group name, handle,
+	// and members are invalid" — which told a caller asking about workspace
+	// roles to go and look at user groups.
 	if role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
-		return domain.UserPage{}, ErrInvalidUserGroup
+		return domain.UserPage{}, ErrInvalidWorkspace
 	}
 	return m.Store.ListUsersByRole(ctx, workspaceID, role, request)
 }
