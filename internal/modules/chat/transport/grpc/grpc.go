@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type Remote struct {
@@ -404,7 +405,7 @@ func (r Remote) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID
 func (r Remote) WorkspaceAnalytics(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, since time.Time) (domain.WorkspaceAnalytics, error) {
 	input := &chatv1.WorkspaceAnalyticsRequest{WorkspaceId: string(workspaceID), UserId: string(userID)}
 	if !since.IsZero() {
-		input.Since = since.Unix()
+		input.Since = proto.Int64(since.Unix())
 	}
 	out, err := r.audit.GetWorkspaceAnalytics(ctx, input)
 	if err != nil {
@@ -425,7 +426,7 @@ func encodeProtoWorkspaceAnalytics(value domain.WorkspaceAnalytics) *chatv1.Work
 		Files: int32(value.Files), RecentFiles: int32(value.RecentFiles), BusiestChannels: busiest,
 	}
 	if !value.Since.IsZero() {
-		result.Since = value.Since.Unix()
+		result.Since = proto.Int64(value.Since.Unix())
 	}
 	return result
 }
@@ -441,7 +442,7 @@ func decodeProtoWorkspaceAnalytics(value *chatv1.WorkspaceAnalytics) domain.Work
 		Messages: int(value.GetMessages()), RecentMessages: int(value.GetRecentMessages()),
 		Files: int(value.GetFiles()), RecentFiles: int(value.GetRecentFiles()), BusiestChannels: busiest,
 	}
-	if value.GetSince() != 0 {
+	if value.Since != nil {
 		result.Since = time.Unix(value.GetSince(), 0).UTC()
 	}
 	return result
@@ -450,7 +451,11 @@ func decodeProtoWorkspaceAnalytics(value *chatv1.WorkspaceAnalytics) domain.Work
 func (r Remote) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
 	input := &chatv1.AccessLogsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(limit), Page: int32(page)}
 	if !before.IsZero() {
-		input.Before = before.Unix()
+		// Set through the pointer rather than as a value: the Unix epoch is a
+		// real instant whose seconds are 0, and a bare field could not tell it
+		// from an absent one. Asking for logs before the epoch answered
+		// "nothing" in one composition and "everything" in the other.
+		input.Before = proto.Int64(before.Unix())
 	}
 	out, err := r.audit.AccessLogs(ctx, input)
 	if err != nil {
@@ -7755,7 +7760,7 @@ func (s *Server) ListEphemeral(ctx context.Context, input *chatv1.EphemeralMessa
 // GetWorkspaceAnalytics is the transport name; see the comment on the rpc.
 func (s *Server) GetWorkspaceAnalytics(ctx context.Context, input *chatv1.WorkspaceAnalyticsRequest) (*chatv1.WorkspaceAnalytics, error) {
 	since := time.Time{}
-	if input.GetSince() != 0 {
+	if input.Since != nil {
 		since = time.Unix(input.GetSince(), 0).UTC()
 	}
 	value, err := s.implementation.WorkspaceAnalytics(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), since)
@@ -7773,7 +7778,7 @@ func (s *Server) RecordAccess(ctx context.Context, input *chatv1.RecordAccessReq
 }
 func (s *Server) AccessLogs(ctx context.Context, input *chatv1.AccessLogsRequest) (*chatv1.AccessLogsResponse, error) {
 	var before time.Time
-	if input.GetBefore() != 0 {
+	if input.Before != nil {
 		before = time.Unix(input.GetBefore(), 0).UTC()
 	}
 	values, hasMore, err := s.implementation.ListAccessLogs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), before, seamPage(int(input.GetLimit())), int(input.GetPage()))

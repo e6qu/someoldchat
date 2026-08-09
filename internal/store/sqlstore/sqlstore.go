@@ -6461,17 +6461,15 @@ func (s *Store) RevokeUserSessions(ctx context.Context, workspaceID domain.Works
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, revokeSessionsStatement+` WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, revokeSessionsStatement+` WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
 		return err
 	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed == 0 {
-		return store.ErrNotFound
-	}
+	// A member with no live session is not a missing member: ending their
+	// sessions is idempotent and the asked-for state already holds. Reporting
+	// ErrNotFound sent an administrator looking for a user who was there all
+	// along, and the caller had already proved the user exists before asking.
+	// The event is appended either way, because the administrator took the
+	// action whether or not anybody was signed in to be thrown out.
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}

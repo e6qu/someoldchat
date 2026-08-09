@@ -174,12 +174,14 @@ func (x *RecordAccessRequest) GetUserAgent() string {
 }
 
 type AccessLogsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Before        int64                  `protobuf:"varint,3,opt,name=before,proto3" json:"before,omitempty"`
-	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
-	Page          int32                  `protobuf:"varint,5,opt,name=page,proto3" json:"page,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// Optional because a bare int64 cannot tell the Unix epoch from an absent
+	// instant: both encode as 0, and the two compositions read that differently.
+	Before        *int64 `protobuf:"varint,3,opt,name=before,proto3,oneof" json:"before,omitempty"`
+	Limit         int32  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	Page          int32  `protobuf:"varint,5,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -229,8 +231,8 @@ func (x *AccessLogsRequest) GetUserId() string {
 }
 
 func (x *AccessLogsRequest) GetBefore() int64 {
-	if x != nil {
-		return x.Before
+	if x != nil && x.Before != nil {
+		return *x.Before
 	}
 	return 0
 }
@@ -346,10 +348,11 @@ func (x *AccessMutationResponse) GetOk() bool {
 }
 
 type WorkspaceAnalyticsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Since         int64                  `protobuf:"varint,3,opt,name=since,proto3" json:"since,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// Optional for the same reason as AccessLogsRequest.before.
+	Since         *int64 `protobuf:"varint,3,opt,name=since,proto3,oneof" json:"since,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -399,8 +402,8 @@ func (x *WorkspaceAnalyticsRequest) GetUserId() string {
 }
 
 func (x *WorkspaceAnalyticsRequest) GetSince() int64 {
-	if x != nil {
-		return x.Since
+	if x != nil && x.Since != nil {
+		return *x.Since
 	}
 	return 0
 }
@@ -479,9 +482,10 @@ type WorkspaceAnalytics struct {
 	Files            int32                  `protobuf:"varint,10,opt,name=files,proto3" json:"files,omitempty"`
 	RecentFiles      int32                  `protobuf:"varint,11,opt,name=recent_files,json=recentFiles,proto3" json:"recent_files,omitempty"`
 	BusiestChannels  []*ChannelActivity     `protobuf:"bytes,12,rep,name=busiest_channels,json=busiestChannels,proto3" json:"busiest_channels,omitempty"`
-	Since            int64                  `protobuf:"varint,13,opt,name=since,proto3" json:"since,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Optional for the same reason as AccessLogsRequest.before.
+	Since         *int64 `protobuf:"varint,13,opt,name=since,proto3,oneof" json:"since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkspaceAnalytics) Reset() {
@@ -599,8 +603,8 @@ func (x *WorkspaceAnalytics) GetBusiestChannels() []*ChannelActivity {
 }
 
 func (x *WorkspaceAnalytics) GetSince() int64 {
-	if x != nil {
-		return x.Since
+	if x != nil && x.Since != nil {
+		return *x.Since
 	}
 	return 0
 }
@@ -908,26 +912,28 @@ const file_sameoldchat_chat_v1_audit_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x0e\n" +
 	"\x02ip\x18\x03 \x01(\tR\x02ip\x12\x1d\n" +
 	"\n" +
-	"user_agent\x18\x04 \x01(\tR\tuserAgent\"\x91\x01\n" +
+	"user_agent\x18\x04 \x01(\tR\tuserAgent\"\xa1\x01\n" +
 	"\x11AccessLogsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
-	"\x06before\x18\x03 \x01(\x03R\x06before\x12\x14\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1b\n" +
+	"\x06before\x18\x03 \x01(\x03H\x00R\x06before\x88\x01\x01\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x12\n" +
-	"\x04page\x18\x05 \x01(\x05R\x04page\"c\n" +
+	"\x04page\x18\x05 \x01(\x05R\x04pageB\t\n" +
+	"\a_before\"c\n" +
 	"\x12AccessLogsResponse\x122\n" +
 	"\x04logs\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.AccessLogR\x04logs\x12\x19\n" +
 	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"(\n" +
 	"\x16AccessMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"m\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"|\n" +
 	"\x19WorkspaceAnalyticsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
-	"\x05since\x18\x03 \x01(\x03R\x05since\"j\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x19\n" +
+	"\x05since\x18\x03 \x01(\x03H\x00R\x05since\x88\x01\x01B\b\n" +
+	"\x06_since\"j\n" +
 	"\x0fChannelActivity\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
-	"\bmessages\x18\x03 \x01(\x05R\bmessages\"\xeb\x03\n" +
+	"\bmessages\x18\x03 \x01(\x05R\bmessages\"\xfa\x03\n" +
 	"\x12WorkspaceAnalytics\x12\x18\n" +
 	"\amembers\x18\x01 \x01(\x05R\amembers\x12%\n" +
 	"\x0eactive_members\x18\x02 \x01(\x05R\ractiveMembers\x12\x16\n" +
@@ -941,8 +947,9 @@ const file_sameoldchat_chat_v1_audit_proto_rawDesc = "" +
 	"\x05files\x18\n" +
 	" \x01(\x05R\x05files\x12!\n" +
 	"\frecent_files\x18\v \x01(\x05R\vrecentFiles\x12O\n" +
-	"\x10busiest_channels\x18\f \x03(\v2$.sameoldchat.chat.v1.ChannelActivityR\x0fbusiestChannels\x12\x14\n" +
-	"\x05since\x18\r \x01(\x03R\x05since\"\xad\x02\n" +
+	"\x10busiest_channels\x18\f \x03(\v2$.sameoldchat.chat.v1.ChannelActivityR\x0fbusiestChannels\x12\x19\n" +
+	"\x05since\x18\r \x01(\x03H\x00R\x05since\x88\x01\x01B\b\n" +
+	"\x06_since\"\xad\x02\n" +
 	"\x0eIntegrationLog\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x19\n" +
 	"\bapp_type\x18\x02 \x01(\tR\aappType\x12\x1f\n" +
@@ -1032,6 +1039,9 @@ func file_sameoldchat_chat_v1_audit_proto_init() {
 	if File_sameoldchat_chat_v1_audit_proto != nil {
 		return
 	}
+	file_sameoldchat_chat_v1_audit_proto_msgTypes[2].OneofWrappers = []any{}
+	file_sameoldchat_chat_v1_audit_proto_msgTypes[5].OneofWrappers = []any{}
+	file_sameoldchat_chat_v1_audit_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

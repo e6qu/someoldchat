@@ -2733,15 +2733,38 @@ func TestAppCredentialsAndAssistantSearch(t *testing.T) {
 	}
 }
 
-func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
+// admin.users.session.reset ends a member's sessions, which is idempotent: a
+// member holding none is already in the asked-for state.
+//
+// This test used to assert that resetting U2 answered user_not_found, which
+// was true only because U2 held no session and the store reported "nothing to
+// revoke" as "no such user". The assertion pinned the defect rather than the
+// contract, so it is rewritten to state both halves: a real member succeeds
+// whether or not they were signed in, and a member who is genuinely absent is
+// still refused.
+func TestAdminUsersSessionResetIsIdempotentButStillFindsTheMember(t *testing.T) {
 	handler := testHandler()
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id=U2"))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Authorization", "Bearer token")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"user_not_found"`) {
-		t.Fatalf("reset status=%d body=%s", response.Code, response.Body)
+	reset := func(t *testing.T, user string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id="+user))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("reset %s status=%d body=%s", user, response.Code, response.Body)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+			t.Fatalf("reset %s body is not JSON (%v): %s", user, err, response.Body)
+		}
+		return decoded
+	}
+	if answer := reset(t, "U2"); answer["ok"] != true {
+		t.Fatalf("resetting a member who holds no session: %v", answer)
+	}
+	if answer := reset(t, "U-absent"); answer["error"] != "user_not_found" {
+		t.Fatalf("resetting a member who is not there: %v", answer)
 	}
 }
 

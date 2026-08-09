@@ -504,8 +504,9 @@ func (m Messages) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.
 			return err
 		}
 		// A member with no live session is not a failure of the request: they
-		// are already signed out, which is what was asked for.
-		if err := m.Store.RevokeUserSessions(ctx, workspaceID, targetID, event); err != nil && !errors.Is(err, store.ErrNotFound) {
+		// are already signed out, which is what was asked for. That rule lives
+		// in the store now, so this reads like every other write.
+		if err := m.Store.RevokeUserSessions(ctx, workspaceID, targetID, event); err != nil {
 			return err
 		}
 	}
@@ -5918,8 +5919,13 @@ func (m Messages) AdminTeamUsers(ctx context.Context, workspaceID domain.Workspa
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserPage{}, err
 	}
+	// Only the two authority roles are listable here, because the two routes
+	// that reach this are admin.teams.admins.list and admin.teams.owners.list.
+	// The refusal used to be ErrInvalidUserGroup — "user group name, handle,
+	// and members are invalid" — which told a caller asking about workspace
+	// roles to go and look at user groups.
 	if role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
-		return domain.UserPage{}, ErrInvalidUserGroup
+		return domain.UserPage{}, ErrInvalidWorkspace
 	}
 	return m.Store.ListUsersByRole(ctx, workspaceID, role, request)
 }

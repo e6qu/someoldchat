@@ -1391,16 +1391,17 @@ func (s *Store) ListUserSessions(_ context.Context, workspace domain.WorkspaceID
 func (s *Store) RevokeUserSessions(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	found := false
 	for key, record := range s.sessions {
 		if record.WorkspaceID == workspaceID && record.UserID == userID {
 			s.sessions[key] = revokeSessionLocked(record)
-			found = true
 		}
 	}
-	if !found {
-		return store.ErrNotFound
-	}
+	// A member with no live session is not a missing member: ending their
+	// sessions is idempotent and the asked-for state already holds. Reporting
+	// ErrNotFound sent an administrator looking for a user who was there all
+	// along, and the caller had already proved the user exists before asking.
+	// The event is appended either way, because the administrator took the
+	// action whether or not anybody was signed in to be thrown out.
 	s.outbox = append(s.outbox, event)
 	return nil
 }

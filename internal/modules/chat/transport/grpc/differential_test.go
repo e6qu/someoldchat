@@ -3691,6 +3691,166 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Workspace administration is one long sequence rather than a set of
+			// independent calls: a workspace is created, people are put in it by
+			// three different routes — created outright, invited and approved,
+			// invited and denied — and then counted, billed, reassigned and
+			// removed. Splitting it into a case per method would lose the part
+			// that matters, which is that each step sees what the last one did.
+			name: "workspace administration agrees across the seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleOwner))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.AdminCreateWorkspace(ctx, "T1", "U1", "T-new", "New team", "A second workspace", domain.WorkspaceDiscoverabilityInviteOnly)
+				if err != nil {
+					return nil, err
+				}
+				member, err := chat.AdminCreateUser(ctx, "T1", "U1", "created@example.test", "Created Person", domain.WorkspaceRoleMember)
+				if err != nil {
+					return nil, err
+				}
+				// Two invitations: one that will be approved and accepted, one
+				// that will be denied, so both terminal states are compared.
+				for _, email := range []string{"approved@example.test", "denied@example.test"} {
+					if err := chat.AdminInviteUser(ctx, "T1", "U1", email, []domain.ConversationID{"C1"}, "Join us", "Invited Person", false, false, false, time.Time{}); err != nil {
+						return nil, err
+					}
+				}
+				pending, err := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				byEmail := make(map[string]domain.InviteRequestID, len(pending.Requests))
+				for _, request := range pending.Requests {
+					byEmail[request.Email] = request.ID
+				}
+				// The preview is what a signed-out invitee sees, so it takes no
+				// actor at all and must still answer.
+				preview, err := chat.InvitationPreview(ctx, "T1", byEmail["approved@example.test"])
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminApproveInviteRequest(ctx, "T1", "U1", byEmail["approved@example.test"]); err != nil {
+					return nil, err
+				}
+				if err := chat.AdminDenyInviteRequest(ctx, "T1", "U1", byEmail["denied@example.test"]); err != nil {
+					return nil, err
+				}
+				accepted, err := chat.AcceptInvitationForEmail(ctx, "T1", "approved@example.test", "Accepted Person")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminAssignUser(ctx, "T1", "U1", accepted.ID, []domain.ConversationID{"C2"}); err != nil {
+					return nil, err
+				}
+				// Only the two authority roles are listable: the routes that
+				// reach this are admin.teams.admins.list and .owners.list.
+				members, err := chat.AdminTeamUsers(ctx, "T1", "U1", domain.WorkspaceRoleAdmin, domain.PageRequest{Limit: 50})
+				if err != nil {
+					return nil, err
+				}
+				emails := make([]string, 0, len(members.Users))
+				for _, user := range members.Users {
+					emails = append(emails, user.Email)
+				}
+				sort.Strings(emails)
+				billable, err := chat.TeamBillableInfo(ctx, "T1", "U1", "")
+				if err != nil {
+					return nil, err
+				}
+				// The accounts this case creates carry generated identifiers, so
+				// only the seeded ones are named; the rest are counted, which
+				// is what says everybody created along the way is billable.
+				seeded := map[domain.UserID]bool{"U1": true, "U2": true, "UA": true}
+				billing := make([]string, 0, len(billable.Users))
+				billingCount := 0
+				for _, user := range billable.Users {
+					billingCount++
+					if seeded[user.UserID] {
+						billing = append(billing, string(user.UserID)+":"+strconv.FormatBool(user.BillingActive))
+					}
+				}
+				sort.Strings(billing)
+				// Access is recorded before the analytics window opens so the
+				// count it feeds is deterministic.
+				if err := chat.RecordAccess(ctx, "T1", "U1", "198.51.100.7", "qualification-agent"); err != nil {
+					return nil, err
+				}
+				// Reading the access back is what gives the record teeth: the
+				// write reports nothing, so a dropped field is invisible until
+				// somebody asks for the log.
+				logs, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), 10, 1)
+				if err != nil {
+					return nil, err
+				}
+				// The Unix epoch is a real instant, not an absent one: asking
+				// for accesses before it must answer with none. It used to
+				// answer none locally and everything remotely, because the
+				// seam encoded the instant as a bare int64 whose zero also
+				// meant "no filter".
+				beforeEpoch, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Unix(0, 0).UTC(), 10, 1)
+				if err != nil {
+					return nil, err
+				}
+				accesses := make([]string, 0, len(logs))
+				for _, entry := range logs {
+					accesses = append(accesses, strings.Join([]string{string(entry.UserID), entry.IP, entry.UserAgent}, "|"))
+				}
+				sort.Strings(accesses)
+				analytics, err := chat.WorkspaceAnalytics(ctx, "T1", "U1", time.Unix(0, 0).UTC())
+				if err != nil {
+					return nil, err
+				}
+				workspaces, err := chat.UserWorkspaces(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				held := make([]string, 0, len(workspaces))
+				for _, summary := range workspaces {
+					held = append(held, string(summary.Workspace.ID)+":"+string(summary.Role))
+				}
+				sort.Strings(held)
+				// Resetting sessions and removing the account are the two ways
+				// an administrator ends someone's access, and they are not the
+				// same: the first leaves the member in the workspace.
+				if err := chat.ResetUserSessions(ctx, "T1", "U1", member.ID); err != nil {
+					return nil, err
+				}
+				stillHere, err := chat.UserInfo(ctx, "T1", "U1", member.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveUser(ctx, "T1", "U1", member.ID); err != nil {
+					return nil, err
+				}
+				// A removed account is gone from the directory rather than
+				// returned as a deleted row, so the projection holds the
+				// refusal instead of a user.
+				_, removedErr := chat.UserInfo(ctx, "T1", "U1", member.ID)
+				denied, err := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestDenied, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				deniedEmails := make([]string, 0, len(denied.Requests))
+				for _, request := range denied.Requests {
+					deniedEmails = append(deniedEmails, request.Email)
+				}
+				return []any{
+					created.Domain, created.Name, created.Description, string(created.Discoverability),
+					member.Email, member.RealName,
+					preview.Email, preview.RealName, string(preview.Status),
+					accepted.Email, accepted.Name != "",
+					emails, billing, billingCount, deniedEmails, accesses, len(beforeEpoch),
+					analytics.Members, analytics.Admins, analytics.PublicChannels,
+					analytics.ArchivedChannels, analytics.Messages >= 0,
+					held, stillHere.Deleted,
+					removedErr != nil, errors.Is(removedErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -5504,7 +5664,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 53
+const parityGapCeiling = 38
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5522,20 +5682,11 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 var parityGaps = map[string]struct{}{
 	"AcknowledgeEntityCommentAction":    {},
 	"AdminApproveApp":                   {},
-	"AdminApproveInviteRequest":         {},
-	"AdminAssignUser":                   {},
 	"AdminConnectedChannelInfo":         {},
 	"AdminConversationTeams":            {},
-	"AdminCreateUser":                   {},
-	"AdminCreateWorkspace":              {},
-	"AdminDenyInviteRequest":            {},
 	"AdminDisconnectSharedConversation": {},
-	"AdminInviteUser":                   {},
-	"AcceptInvitationForEmail":          {},
-	"InvitationPreview":                 {},
 	"AdminRestrictApp":                  {},
 	"AdminSetConversationTeams":         {},
-	"AdminTeamUsers":                    {},
 	"BotInfo":                           {},
 	"CompleteExternalUploads":           {},
 	"CreateAppInstallation":             {},
@@ -5563,19 +5714,13 @@ var parityGaps = map[string]struct{}{
 	"OpenPublicFile":          {},
 	"PresentEntityComments":   {},
 	"PresentEntityDetails":    {},
-	"RecordAccess":            {},
-	"RemoveUser":              {},
 	"RequestAppPermissions":   {},
-	"ResetUserSessions":       {},
 	"RevokeSession":           {},
 	"RevokeToken":             {},
 	"SetAuthMethod":           {},
-	"TeamBillableInfo":        {},
 	"Unfurl":                  {},
 	"UninstallApp":            {},
-	"UserWorkspaces":          {},
 	"WorkflowStepCompleted":   {},
 	"WorkflowStepFailed":      {},
 	"WorkflowUpdateStep":      {},
-	"WorkspaceAnalytics":      {},
 }
