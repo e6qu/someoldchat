@@ -320,6 +320,25 @@ var viewBlockIDPattern = regexp.MustCompile(`"block_id":"[^"]*"`)
 // rather than generated because both compositions must present the same ones.
 var viewParityTriggers = []string{"trigger_open", "trigger_push", "trigger_dialog", "trigger_replay"}
 
+// seedConnectParity gives the fixture a second organization with an
+// administrator of its own. A Slack Connect invitation is a decision taken by
+// two organizations, so one workspace cannot exercise it.
+func seedConnectParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleAdmin))
+	requireSeed(t, target.SeedWorkspace(domain.Workspace{ID: "T2", Name: "second"}))
+	requireSeed(t, target.SeedUser(domain.User{ID: "U2-second", WorkspaceID: "T2", Name: "guest-admin", Email: "admin@second.example"}))
+	requireSeed(t, seedWorkspaceRole(target, "T2", "U2-second", domain.WorkspaceRoleAdmin))
+	// Three channels, because an invitation is settled per channel and the case
+	// needs one it can approve, one it can deny and one it can revoke without
+	// the outcomes interfering.
+	for _, id := range []domain.ConversationID{"C-accept", "C-deny", "C-revoke"} {
+		requireSeed(t, target.SeedConversation(domain.Conversation{ID: id, WorkspaceID: "T1", Name: string(id)}))
+		requireSeed(t, target.SeedConversationMember(id, "U1"))
+	}
+}
+
 func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedBaseline(t, target)
@@ -3559,6 +3578,119 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A Slack Connect invitation is settled by two organizations taking
+			// different decisions, and the seam has to agree on which decision
+			// each method records: denying and revoking both end an invitation
+			// but are not the same fact, and declining belongs to the invited
+			// side rather than the host.
+			name: "the Slack Connect invitation lifecycle agrees across the seam",
+			seed: seedConnectParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				accepted, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", "T2", "")
+				if err != nil {
+					return nil, err
+				}
+				approved, err := chat.ApproveSharedInvite(ctx, "T1", "U1", accepted.ID)
+				if err != nil {
+					return nil, err
+				}
+				// Approving twice is refused: the invitation is no longer
+				// pending, and both compositions must say so the same way.
+				_, settledErr := chat.ApproveSharedInvite(ctx, "T1", "U1", accepted.ID)
+				conversation, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", accepted.ID)
+				if err != nil {
+					return nil, err
+				}
+
+				denied, err := chat.InviteShared(ctx, "T1", "U1", "C-deny", "T2", "")
+				if err != nil {
+					return nil, err
+				}
+				refused, err := chat.DenySharedInvite(ctx, "T1", "U1", denied.ID)
+				if err != nil {
+					return nil, err
+				}
+
+				revoked, err := chat.InviteShared(ctx, "T1", "U1", "C-revoke", "T2", "")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", revoked.ID); err != nil {
+					return nil, err
+				}
+				withdrawn, err := chat.RevokeSharedInvite(ctx, "T1", "U1", revoked.ID)
+				if err != nil {
+					return nil, err
+				}
+				// Declining is the invited organization's answer, so it is
+				// taken by the other workspace's administrator.
+				declinable, err := chat.InviteShared(ctx, "T1", "U1", "C-revoke", "T2", "")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", declinable.ID); err != nil {
+					return nil, err
+				}
+				declined, err := chat.DeclineSharedInvite(ctx, "T2", "U2-second", declinable.ID)
+				if err != nil {
+					return nil, err
+				}
+				// The host decides whether the organization it let in may
+				// invite others, which is state on the conversation.
+				permitted, err := chat.SetExternalInvitePermissions(ctx, "T1", "U1", "C-accept", "T2", true)
+				if err != nil {
+					return nil, err
+				}
+				// The permission is carried by the event and nowhere else: the
+				// conversation the call returns is unchanged by it. Reading the
+				// journal is therefore the only way to see whether the flag
+				// survived the seam, and a case that skipped it would pass with
+				// the flag dropped.
+				records, err := chat.ListEventsAfter(ctx, "T1", 0, 200)
+				if err != nil {
+					return nil, err
+				}
+				permissionEvents := make([]string, 0, 1)
+				for _, record := range records {
+					if record.Event.Topic != "conversation.external_invite_permissions_set" {
+						continue
+					}
+					var payload struct {
+						Channel   string `json:"channel_id"`
+						Team      string `json:"team_id"`
+						CanInvite string `json:"can_invite"`
+					}
+					if err := json.Unmarshal([]byte(record.Event.Payload), &payload); err != nil {
+						return nil, err
+					}
+					permissionEvents = append(permissionEvents, strings.Join([]string{payload.Channel, payload.Team, payload.CanInvite}, "|"))
+				}
+				sort.Strings(permissionEvents)
+				listed, err := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInviteRevoked, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				revokedChannels := make([]string, 0, len(listed.Invites))
+				for _, invite := range listed.Invites {
+					revokedChannels = append(revokedChannels, string(invite.ConversationID))
+				}
+				sort.Strings(revokedChannels)
+				return []any{
+					string(accepted.ConversationID), string(accepted.TargetWorkspaceID),
+					string(accepted.Status), accepted.InvitedBy,
+					string(approved.Status), settledErr != nil,
+					errors.Is(settledErr, service.ErrSharedInviteSettled),
+					string(conversation.ID), conversation.WorkspaceID,
+					// Denying and revoking both end an invitation and are both
+					// recorded as revoked, which is only correct if the reason
+					// is carried elsewhere; the projection pins the status so a
+					// composition that invented a distinct one is caught.
+					string(refused.Status), string(withdrawn.Status), string(declined.Status),
+					string(permitted.ID), permissionEvents, revokedChannels, listed.HasMore,
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -5372,7 +5504,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 60
+const parityGapCeiling = 53
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5388,7 +5520,6 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 }
 
 var parityGaps = map[string]struct{}{
-	"AcceptSharedInvite":                {},
 	"AcknowledgeEntityCommentAction":    {},
 	"AdminApproveApp":                   {},
 	"AdminApproveInviteRequest":         {},
@@ -5401,9 +5532,6 @@ var parityGaps = map[string]struct{}{
 	"AdminDisconnectSharedConversation": {},
 	"AdminInviteUser":                   {},
 	"AcceptInvitationForEmail":          {},
-	"ApproveSharedInvite":               {},
-	"DeclineSharedInvite":               {},
-	"DenySharedInvite":                  {},
 	"InvitationPreview":                 {},
 	"AdminRestrictApp":                  {},
 	"AdminSetConversationTeams":         {},
@@ -5419,38 +5547,35 @@ var parityGaps = map[string]struct{}{
 	// focused transport tests because parityCases seeds both compositions with
 	// fresh independent stores and therefore cannot compare one token's durable
 	// schedule across calls.
-	"DispatchBlockAction":          {},
-	"DispatchViewBlockAction":      {},
-	"DispatchSlashCommand":         {},
-	"GetAuthMethod":                {},
-	"HandleAppResponse":            {},
-	"InviteShared":                 {},
-	"ListWorkspaceApps":            {},
-	"LookupAppToken":               {},
-	"LookupCanvasSections":         {},
-	"LoadAppOptions":               {},
-	"MigrationExchange":            {},
-	"OAuthExchange":                {},
-	"OpenIDConnectToken":           {},
-	"OpenIDConnectUserInfo":        {},
-	"OpenPublicFile":               {},
-	"PresentEntityComments":        {},
-	"PresentEntityDetails":         {},
-	"RecordAccess":                 {},
-	"RemoveUser":                   {},
-	"RequestAppPermissions":        {},
-	"ResetUserSessions":            {},
-	"RevokeSession":                {},
-	"RevokeSharedInvite":           {},
-	"RevokeToken":                  {},
-	"SetAuthMethod":                {},
-	"SetExternalInvitePermissions": {},
-	"TeamBillableInfo":             {},
-	"Unfurl":                       {},
-	"UninstallApp":                 {},
-	"UserWorkspaces":               {},
-	"WorkflowStepCompleted":        {},
-	"WorkflowStepFailed":           {},
-	"WorkflowUpdateStep":           {},
-	"WorkspaceAnalytics":           {},
+	"DispatchBlockAction":     {},
+	"DispatchViewBlockAction": {},
+	"DispatchSlashCommand":    {},
+	"GetAuthMethod":           {},
+	"HandleAppResponse":       {},
+	"ListWorkspaceApps":       {},
+	"LookupAppToken":          {},
+	"LookupCanvasSections":    {},
+	"LoadAppOptions":          {},
+	"MigrationExchange":       {},
+	"OAuthExchange":           {},
+	"OpenIDConnectToken":      {},
+	"OpenIDConnectUserInfo":   {},
+	"OpenPublicFile":          {},
+	"PresentEntityComments":   {},
+	"PresentEntityDetails":    {},
+	"RecordAccess":            {},
+	"RemoveUser":              {},
+	"RequestAppPermissions":   {},
+	"ResetUserSessions":       {},
+	"RevokeSession":           {},
+	"RevokeToken":             {},
+	"SetAuthMethod":           {},
+	"TeamBillableInfo":        {},
+	"Unfurl":                  {},
+	"UninstallApp":            {},
+	"UserWorkspaces":          {},
+	"WorkflowStepCompleted":   {},
+	"WorkflowStepFailed":      {},
+	"WorkflowUpdateStep":      {},
+	"WorkspaceAnalytics":      {},
 }
