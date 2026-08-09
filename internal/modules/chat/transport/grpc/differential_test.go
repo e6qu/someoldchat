@@ -4085,6 +4085,110 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// External uploads, public links, canvases, bots and unfurls have
+			// nothing in common except that each is a durable object a message
+			// or a member points at, and each was uncovered. They share a case
+			// because they share a fixture, not because they share a story.
+			name:  "durable attachments agree across the seam",
+			blobs: true,
+			seed:  seedWebhookParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// An external upload is a ticket, bytes, then a completion that
+				// turns both into a shared file. The completion is the seam
+				// method under test; the first two set it up.
+				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", "report.txt", "text/plain", 6, time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.UploadExternalFile(ctx, upload.ID, 6, bytes.NewReader([]byte("report"))); err != nil {
+					return nil, err
+				}
+				files, err := chat.CompleteExternalUploads(ctx, "T1", "U1",
+					[]domain.ExternalUploadCompletion{{ID: upload.ID, Title: "Quarterly report"}},
+					[]domain.ConversationID{"C1"}, "Here it is", "", "")
+				if err != nil {
+					return nil, err
+				}
+				completed := make([]string, 0, len(files))
+				for _, file := range files {
+					completed = append(completed, file.Name+"|"+file.Title+"|"+strconv.FormatInt(file.Size, 10))
+				}
+				sort.Strings(completed)
+				// A public link is a token that anyone holding it may read, so
+				// the case reads the bytes back through it rather than trusting
+				// the token to exist.
+				shared, err := chat.ShareFilePublic(ctx, "T1", "U1", files[0].ID)
+				if err != nil {
+					return nil, err
+				}
+				public, reader, err := chat.OpenPublicFile(ctx, shared.PublicToken)
+				if err != nil {
+					return nil, err
+				}
+				defer reader.Close()
+				content, err := io.ReadAll(reader)
+				if err != nil {
+					return nil, err
+				}
+				revoked, err := chat.RevokeFilePublic(ctx, "T1", "U1", files[0].ID)
+				if err != nil {
+					return nil, err
+				}
+				_, _, revokedErr := chat.OpenPublicFile(ctx, shared.PublicToken)
+
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Runbook", `{"type":"markdown","markdown":"# Runbook\n\nStep one."}`, "")
+				if err != nil {
+					return nil, err
+				}
+				sections, err := chat.LookupCanvasSections(ctx, "T1", "U1", canvas.ID, `{"section_types":["h1"]}`)
+				if err != nil {
+					return nil, err
+				}
+				found := make([]string, 0, len(sections))
+				for _, section := range sections {
+					found = append(found, string(section.Type)+":"+section.Text)
+				}
+				sort.Strings(found)
+				if err := chat.DeleteCanvas(ctx, "T1", "U1", canvas.ID); err != nil {
+					return nil, err
+				}
+				_, deletedErr := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+
+				bot, err := chat.BotInfo(ctx, "T1", "U1", "Bhook")
+				if err != nil {
+					return nil, err
+				}
+				// An unfurl attaches link previews to a message that already
+				// exists, so it is read back from the message rather than from
+				// the call's own answer.
+				posted, err := chat.Post(ctx, "T1", "U1", "C1", "see https://example.test/page", "", "")
+				if err != nil {
+					return nil, err
+				}
+				timestamp := domain.NewMessageTimestamp(posted.CreatedAt)
+				unfurled, err := chat.Unfurl(ctx, "T1", "U1", "C1", timestamp, map[string]string{
+					"https://example.test/page": `{"title":"A page","text":"Preview"}`,
+				})
+				if err != nil {
+					return nil, err
+				}
+				previews := make([]string, 0, len(unfurled.Unfurls))
+				for link, preview := range unfurled.Unfurls {
+					previews = append(previews, link+"="+preview)
+				}
+				sort.Strings(previews)
+				return []any{
+					completed, upload.Name,
+					public.Name, public.Title, string(content),
+					shared.PublicToken != "", revoked.PublicToken,
+					revokedErr != nil, errors.Is(revokedErr, storepkg.ErrNotFound),
+					canvas.Title, found, deletedErr != nil,
+					string(bot.ID), bot.Name, string(bot.AppID), string(bot.UserID),
+					previews,
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -5898,7 +6002,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 21
+const parityGapCeiling = 15
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5914,11 +6018,8 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 }
 
 var parityGaps = map[string]struct{}{
-	"BotInfo":                 {},
-	"CompleteExternalUploads": {},
-	"CreateExternalIdentity":  {},
-	"CreateSession":           {},
-	"DeleteCanvas":            {},
+	"CreateExternalIdentity": {},
+	"CreateSession":          {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
 	// focused transport tests because parityCases seeds both compositions with
@@ -5929,15 +6030,12 @@ var parityGaps = map[string]struct{}{
 	"DispatchSlashCommand":    {},
 	"GetAuthMethod":           {},
 	"HandleAppResponse":       {},
-	"LookupCanvasSections":    {},
 	"LoadAppOptions":          {},
 	"MigrationExchange":       {},
 	"OAuthExchange":           {},
 	"OpenIDConnectToken":      {},
 	"OpenIDConnectUserInfo":   {},
-	"OpenPublicFile":          {},
 	"RevokeSession":           {},
 	"RevokeToken":             {},
 	"SetAuthMethod":           {},
-	"Unfurl":                  {},
 }
