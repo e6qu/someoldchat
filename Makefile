@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-mutation test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -90,6 +90,12 @@ test-load-race:
 
 test-transport-load:
 	GOCACHE=$(GOCACHE) go test ./internal/modules/chat/transport/grpc -run '^TestRemoteConcurrentPostsPreserveEveryCall$$' -count=1
+
+# Deletes each authorization guard in internal/service in turn and requires a
+# suite to notice. Its own target because each guard is a separate compile and
+# suite run, and there are hundreds; -timeout is raised for the same reason.
+test-mutation:
+	SAMEOLDCHAT_MUTATION=1 GOCACHE=$(GOCACHE) go test ./tests/mutation -count=1 -timeout=180m
 
 test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzListCursorRoundTrips -fuzztime=25000x -parallel=1 -timeout=2m
@@ -330,7 +336,7 @@ check: fmt-check vet workflow-check container-check module-docs-check module-sta
 # target cannot assume is installed. It used to claim it covered everything,
 # while reaching neither `terraform fmt` nor the activator tests. `check-dqlite`
 # is the fifth: run it on a machine that has the libdqlite headers.
-check-full: check terraform-check vuln-check test-race test-load test-transport-load test-fuzz build-static
+check-full: check terraform-check vuln-check test-race test-load test-transport-load test-mutation test-fuzz build-static
 
 clean:
 	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform terraform/ecs-runtime/.terraform \

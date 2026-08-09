@@ -91,6 +91,9 @@ jobs:
       - name: Run distributed transport load test
         run: make test-transport-load
 
+      - name: Delete every authorization guard and require a suite to notice
+        run: make test-mutation
+
       - name: Run fuzz smoke tests
         run: make test-fuzz
 

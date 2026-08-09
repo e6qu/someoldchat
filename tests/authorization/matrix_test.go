@@ -131,12 +131,33 @@ func TestATierBelowTheRequirementIsRefusedForItsStanding(t *testing.T) {
 				continue
 			}
 			t.Run(method.Name+"/"+caller.name, func(t *testing.T) {
-				messages := newFixture(t)
-				err := invoke(t, messages, method.Name, caller.user)
+				err, decisive := probe(t, method.Name, caller.user)
 				if err == nil {
 					t.Fatalf("%s answered a %s, which holds less than %s", method.Name, caller.name, required)
 				}
-				if isStandingRefusal(err) {
+				if decisive {
+					// "Not found" is a real refusal about standing — Slack
+					// declines to confirm that something a caller may not see
+					// exists — but it is also what an operation says when the
+					// thing genuinely is not there. Those are indistinguishable
+					// from one answer, so ask a caller who holds the authority:
+					// if the owner is refused the very same way, the refusal is
+					// about the argument and this pair proves nothing.
+					//
+					// Without this, stripping every guard from an operation left
+					// the suite green for eighty seam methods, because the call
+					// then ran on to its own "not found" and the matrix accepted
+					// that as enforcement. The guard-mutation gate is what
+					// showed it.
+					if err != nil && errors.Is(err, store.ErrNotFound) {
+						holder, holderDecisive := probe(t, method.Name, holderOf(required))
+						if holderDecisive && holder != nil && holder.Error() == err.Error() {
+							if _, declared := refusalDoesNotDistinguishTheHolder()[method.Name]; !declared {
+								t.Fatalf("%s refuses a %s and a %s alike with %v, so the refusal is about the argument and not about standing. Give the fixture an object this operation can find, or add it to refusalDoesNotDistinguishTheHolder.", method.Name, caller.name, holderOf(required), err)
+							}
+							return
+						}
+					}
 					return
 				}
 				// The probe passes zero arguments, so a method that checks a
@@ -153,6 +174,17 @@ func TestATierBelowTheRequirementIsRefusedForItsStanding(t *testing.T) {
 			})
 		}
 	}
+}
+
+// holderOf names a caller who holds the given authority, used to tell a
+// refusal about standing apart from a refusal about arguments.
+func holderOf(required authority) domain.UserID {
+	for _, candidate := range tiers() {
+		if candidate.user == "U-owner" && candidate.holds(required) {
+			return candidate.user
+		}
+	}
+	return "U-owner"
 }
 
 // isStandingRefusal reports the refusals that mean "not you". store.ErrNotFound
@@ -176,7 +208,7 @@ func isStandingRefusal(err error) bool {
 // workspace and the caller. Reflection rather than a written call per method:
 // there are four hundred of them, and a hand-written list is the thing this
 // gate exists to replace.
-func invoke(t *testing.T, messages service.Messages, name string, caller domain.UserID) error {
+func invoke(t *testing.T, messages service.Messages, name string, caller domain.UserID, chosen filling) error {
 	t.Helper()
 	value := reflect.ValueOf(messages).MethodByName(name)
 	if !value.IsValid() {
@@ -197,7 +229,7 @@ func invoke(t *testing.T, messages service.Messages, name string, caller domain.
 			arguments[index] = reflect.ValueOf(caller)
 			callerFilled = true
 		default:
-			arguments[index] = reflect.Zero(argument)
+			arguments[index] = fixtureArgument(argument, caller, chosen)
 		}
 	}
 	results := value.Call(arguments)
@@ -210,6 +242,87 @@ func invoke(t *testing.T, messages service.Messages, name string, caller domain.
 		}
 	}
 	return nil
+}
+
+// filling is how much of a signature the probe fills in. They are tried richest
+// first, and a leaner one is reached only when the richer one produced an answer
+// that is not about standing.
+//
+// One filling is not enough because reflection sees types, not meanings. A
+// domain.MessageTimestamp is a message to one operation and a thread root to
+// the next: handing DispatchSlashCommand the seeded message's timestamp makes
+// it refuse everybody with "slash commands cannot be invoked in threads", which
+// says nothing about who called it. Rather than exempt that method by name — a
+// list that grows and never shrinks — the probe drops the argument it cannot
+// know the meaning of and asks again.
+type filling int
+
+const (
+	fillingFixture filling = iota
+	fillingWithoutTimestamps
+	fillingBare
+)
+
+func fillings() []filling { return []filling{fillingFixture, fillingWithoutTimestamps, fillingBare} }
+
+// probe calls one operation as one caller, trying each filling until an answer
+// is decisive: either the operation answered, or it refused for standing.
+//
+// Each attempt gets its own fixture. An earlier attempt may have changed the
+// workspace, and a probe whose second question is asked of the state its first
+// question left behind is measuring something it did not intend.
+func probe(t *testing.T, name string, caller domain.UserID) (err error, decisive bool) {
+	t.Helper()
+	for _, chosen := range fillings() {
+		err = invoke(t, newFixture(t), name, caller, chosen)
+		if err == nil || isStandingRefusal(err) {
+			return err, true
+		}
+	}
+	return err, false
+}
+
+// fixtureArgument supplies a value the fixture actually holds, so a call
+// reaches its own front door instead of dying at its argument check.
+//
+// Every argument beyond the workspace and the caller used to be zeroed. An
+// operation that validates before it authorizes therefore refused all seven
+// tiers with "page limit must be positive" or "invalid conversation", which
+// looks like enforcement and is not: the guard-mutation gate in tests/mutation
+// could delete the authorization from such an operation with this suite still
+// green. That is what the inconclusive set below was recording, one method at
+// a time, and it is the reason it had 39 members.
+//
+// A type the fixture has nothing for is still zeroed. That is honest — the
+// operation is then inconclusive for a reason this file can state — and it is
+// where the remaining members of the inconclusive set come from.
+func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling) reflect.Value {
+	if chosen == fillingBare {
+		return reflect.Zero(argument)
+	}
+	switch argument {
+	case reflect.TypeOf(domain.UserID("")):
+		// The second user in a signature is the target, not the caller, and it
+		// must be somebody else. Several operations let a member act on their
+		// own record and nobody else's — WorkspaceMembership is one — so a
+		// target equal to the caller asks a different question than the one
+		// this matrix declares an authority for, and answering it here reported
+		// a member reaching an admin-only read.
+		if caller == "U-member" {
+			return reflect.ValueOf(domain.UserID("U-owner"))
+		}
+		return reflect.ValueOf(domain.UserID("U-member"))
+	case reflect.TypeOf(domain.ConversationID("")):
+		return reflect.ValueOf(domain.ConversationID("C1"))
+	case reflect.TypeOf(domain.MessageTimestamp("")):
+		if chosen == fillingWithoutTimestamps {
+			return reflect.Zero(argument)
+		}
+		return reflect.ValueOf(fixtureMessageTimestamp)
+	case reflect.TypeOf(domain.PageRequest{}):
+		return reflect.ValueOf(domain.PageRequest{Limit: 10})
+	}
+	return reflect.Zero(argument)
 }
 
 func newFixture(t *testing.T) service.Messages {
@@ -255,8 +368,25 @@ func newFixture(t *testing.T) service.Messages {
 			}))
 		}
 	}
+	// A real message in the seeded conversation, so an operation that names one
+	// reaches its authorization instead of being refused for naming nothing.
+	// A message's public timestamp is derived from its creation instant rather
+	// than stored beside it, so the instant is what pins the identifier.
+	created := time.Unix(1700000000, 100*1000).UTC()
+	requireSeed(t, repository.CreateMessage(ctx, domain.Message{
+		ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U-member",
+		Text: "seeded", CreatedAt: created,
+	}, events.Event{
+		ID: "E-message", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created,
+	}, ""))
+	if got := domain.NewMessageTimestamp(created); got != fixtureMessageTimestamp {
+		t.Fatalf("the seeded message's timestamp is %s, and the probe hands out %s", got, fixtureMessageTimestamp)
+	}
 	return service.Messages{Store: repository}
 }
+
+// fixtureMessageTimestamp names the one seeded message.
+const fixtureMessageTimestamp domain.MessageTimestamp = "1700000000.000100"
 
 func requireSeed(t *testing.T, err error) {
 	t.Helper()
@@ -275,9 +405,11 @@ func requireSeed(t *testing.T, err error) {
 func TestEveryInconclusiveMethodReallyIsInconclusive(t *testing.T) {
 	for name := range inconclusiveStanding() {
 		t.Run(name, func(t *testing.T) {
-			messages := newFixture(t)
-			owner := invoke(t, messages, name, "U-owner")
-			stranger := invoke(t, messages, name, "U-stranger")
+			owner, ownerDecisive := probe(t, name, "U-owner")
+			stranger, strangerDecisive := probe(t, name, "U-stranger")
+			if ownerDecisive || strangerDecisive {
+				t.Fatalf("%s is decidable under some filling: remove it from inconclusiveStanding", name)
+			}
 			switch {
 			case owner == nil && stranger == nil:
 				t.Fatalf("%s answered both an owner and a stranger; it is not inconclusive, it is unguarded", name)
@@ -300,5 +432,54 @@ func TestTheInconclusiveSetOnlyShrinks(t *testing.T) {
 	}
 	if len(inconclusiveStanding()) < inconclusiveStandingCeiling {
 		t.Fatalf("the probe now decides all but %d operations: lower inconclusiveStandingCeiling to match, so the ground gained is kept", len(inconclusiveStanding()))
+	}
+}
+
+// TestEveryIndistinguishableRefusalReallyIsIndistinguishable stops the list
+// being used to excuse a method that has since been given a fixture object.
+//
+// A method belongs there only while a caller who holds the authority is
+// refused exactly as one who does not. The moment the fixture lets the holder
+// through, the refusal distinguishes them and the entry is a stale exemption.
+func TestEveryIndistinguishableRefusalReallyIsIndistinguishable(t *testing.T) {
+	declared := authorityMatrix()
+	for name := range refusalDoesNotDistinguishTheHolder() {
+		t.Run(name, func(t *testing.T) {
+			required := declared[name]
+			holder, holderDecisive := probe(t, name, holderOf(required))
+			if !holderDecisive {
+				return
+			}
+			// The entry earns its place if ANY tier below the requirement is
+			// still refused exactly as the holder is. A method may refuse a
+			// member with "not a workspace administrator" — which does
+			// distinguish — while refusing a stranger with the holder's own
+			// "not found", and that second pair is the one proving nothing.
+			for _, caller := range tiers() {
+				if caller.holds(required) {
+					continue
+				}
+				beneath, decisive := probe(t, name, caller.user)
+				if !decisive || beneath == nil || holder == nil {
+					continue
+				}
+				if holder.Error() == beneath.Error() {
+					return
+				}
+			}
+			t.Fatalf("%s now answers a %s differently from every tier beneath it, so its refusal does distinguish them: remove it from refusalDoesNotDistinguishTheHolder", name, holderOf(required))
+		})
+	}
+}
+
+// TestTheIndistinguishableRefusalSetOnlyShrinks holds the count, so the
+// weakness the guard-mutation gate exposed cannot grow back quietly.
+func TestTheIndistinguishableRefusalSetOnlyShrinks(t *testing.T) {
+	actual := len(refusalDoesNotDistinguishTheHolder())
+	if actual > indistinguishableRefusalCeiling {
+		t.Fatalf("%d operations refuse a holder and a non-holder alike, above the ceiling of %d", actual, indistinguishableRefusalCeiling)
+	}
+	if actual < indistinguishableRefusalCeiling {
+		t.Fatalf("only %d operations do now: lower indistinguishableRefusalCeiling to %d, so the ground gained is kept", actual, actual)
 	}
 }

@@ -201,6 +201,16 @@ Absent, and named on the page rather than rendered as an inert control:
   enforcement was exhaustive and role enforcement was not tested at all, which
   is how a single-channel guest could reach every public channel in the
   workspace and how three operations answered a deactivated account.
+- The guard-mutation gate in `tests/mutation` strips every authorization guard
+  standing in front of an operation and requires a suite to notice. It is what
+  keeps the line above honest, and its first run showed the line was overstated:
+  the matrix accepted `store.ErrNotFound` as a refusal about standing, and that
+  is equally what an operation says when the object is simply not there, so
+  ninety operations stayed green with nothing in front of them. The matrix now
+  asks a caller who holds the authority as well, and the operations whose
+  refusal still cannot tell the two apart are named in
+  `refusalDoesNotDistinguishTheHolder` under a ceiling that only shrinks. What
+  shrinks it is a fixture rich enough for each operation to find its object.
 - Current official SDKs exercise applicable `admin.*`, `team.*`, `users.*`,
   `apps.*`, and Slack Connect `conversations.*` methods.
 - The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey creates and
