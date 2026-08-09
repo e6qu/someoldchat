@@ -10,8 +10,10 @@
 // requires the suite to fail.
 //
 // It is not part of `make check`. Each mutant is a separate compile-and-run of
-// the suites below, and there are hundreds. `make test-mutation` runs it, and
-// check-full includes that.
+// the suites below, and there are hundreds. `make test-mutation` runs it,
+// check-full includes that, and CI gives it a job of its own — putting it in the
+// job that already spends most of its twenty minutes on the race suite would
+// cancel a healthy gate rather than report one.
 package mutation
 
 import (
