@@ -213,6 +213,14 @@ func main() {
 			panic(err)
 		}
 	}
+	// ARESTRICT exists so the walk can restrict an app without restricting the
+	// one it is authenticated as. Restricting an app uninstalls it and revokes
+	// its credentials, so restricting A1 would revoke the walk's own token —
+	// which is a real outcome, not one worth spending the rest of the walk on.
+	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "ARESTRICT", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		panic(err)
+	}
+	store.SeedToken(context.Background(), "xoxb-restricted-app", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "ARESTRICT", TokenType: "bot", Scopes: auth.AllScopes()})
 	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite), string(auth.ScopeAuthorizationsRead)}})
 	store.SeedAppToken(context.Background(), "xapp-interactions", domain.AppTokenRecord{AppID: "A2", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {

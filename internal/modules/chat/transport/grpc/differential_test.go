@@ -14,6 +14,7 @@ import (
 	"net"
 	"path"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -264,6 +265,60 @@ func seedWebhookParity(t *testing.T, target *memory.Store) {
 		ID: "Bhook", WorkspaceID: "T1", AppID: "A1", UserID: "UBOT", Name: "hook-bot", UpdatedAt: now,
 	}))
 }
+
+// seedViewParity installs an app that can own modals and a Home tab, and mints
+// the trigger identifiers its modal methods consume.
+//
+// A trigger is normally minted inside a dispatch, which needs an app endpoint
+// answering over HTTP. Seeding the rows directly is what lets the seam be
+// compared without one: the methods under test read a trigger, they do not care
+// which dispatch wrote it. Each is single use, so there is one per call.
+func seedViewParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_700, 0).UTC()
+	manifest := `{"display_information":{"name":"View parity"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}},"oauth_config":{"scopes":{"bot":["chat:write"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"https://apps.example.test/interactions"}}}`
+	requireSeed(t, target.CreateApp(context.Background(), domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "View parity", ClientID: "view-client",
+		SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "view-client", SecretHash: "client-hash", AppID: "A1"}))
+	requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+		AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+	}))
+	requireSeed(t, target.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "view-bot"}))
+	requireSeed(t, target.CreateBot(context.Background(), domain.Bot{
+		ID: "Bview", WorkspaceID: "T1", AppID: "A1", UserID: "UBOT", Name: "view-bot", UpdatedAt: now,
+	}))
+	// The triggers are dated against the wall clock rather than the fixture
+	// instant, which is in the past: a trigger is refused once it expires, and
+	// the case is about what the methods do with a live one.
+	minted := time.Now().UTC()
+	for _, id := range viewParityTriggers {
+		requireSeed(t, target.CreateAppTrigger(context.Background(), domain.AppTrigger{
+			TokenHash: domain.HashToken(id), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			CreatedAt: minted, ExpiresAt: minted.Add(time.Hour),
+		}))
+	}
+}
+
+// normalizeViewPayload replaces the block identifiers the product mints when a
+// view is stored. They are derived from the view's own generated id, so the two
+// compositions produce different ones for identical input and comparing the raw
+// payload would report a disagreement that is not one. Everything else in the
+// payload is still compared exactly, which is where a real divergence would be.
+func normalizeViewPayload(payload string) string {
+	return viewBlockIDPattern.ReplaceAllString(payload, `"block_id":"<generated>"`)
+}
+
+var viewBlockIDPattern = regexp.MustCompile(`"block_id":"[^"]*"`)
+
+// viewParityTriggers are consumed in order by the case below. They are named
+// rather than generated because both compositions must present the same ones.
+var viewParityTriggers = []string{"trigger_open", "trigger_push", "trigger_dialog", "trigger_replay"}
 
 func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	t.Helper()
@@ -3432,6 +3487,78 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The modal stack is the richest state an app owns: a view carries a
+			// payload, a hash guarding concurrent updates, a parent, and a root,
+			// and every one of those is a field the seam can drop. The case
+			// walks a real stack — open, push onto it, update by id — and reads
+			// the Home tab back, because a surface that reports the write and
+			// stores something else is the failure worth catching.
+			name: "the modal stack and the Home tab agree across the seam",
+			seed: seedViewParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				modal := `{"type":"modal","callback_id":"deploy","external_id":"deploy-1","title":{"type":"plain_text","text":"Deploy"},"submit":{"type":"plain_text","text":"Go"},"blocks":[{"type":"input","block_id":"env","label":{"type":"plain_text","text":"Environment"},"element":{"type":"plain_text_input","action_id":"env_input"}}]}`
+				opened, err := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_open", modal)
+				if err != nil {
+					return nil, err
+				}
+				pushed, err := chat.PushView(ctx, "T1", "UBOT", "A1", "trigger_push",
+					`{"type":"modal","callback_id":"confirm","title":{"type":"plain_text","text":"Confirm"},"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Sure?"}}]}`)
+				if err != nil {
+					return nil, err
+				}
+				// The hash is the concurrency guard: an update carrying a stale
+				// one must be refused, and both compositions must refuse it the
+				// same way.
+				staleErr := func() error {
+					_, err := chat.UpdateView(ctx, "T1", "UBOT", "A1", string(pushed.ID), "",
+						`{"type":"modal","title":{"type":"plain_text","text":"Stale"},"blocks":[]}`, "not-the-hash")
+					return err
+				}()
+				updated, err := chat.UpdateView(ctx, "T1", "UBOT", "A1", string(pushed.ID), "",
+					`{"type":"modal","title":{"type":"plain_text","text":"Confirmed"},"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Yes"}}]}`,
+					pushed.Hash)
+				if err != nil {
+					return nil, err
+				}
+				// A trigger is single use, so the one already spent on the open
+				// must not open a second modal.
+				_, replayErr := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_open", modal)
+
+				published, err := chat.PublishView(ctx, "T1", "UBOT", "A1", "U1",
+					`{"type":"home","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Welcome"}}]}`, "")
+				if err != nil {
+					return nil, err
+				}
+				installed, home, err := chat.AppHome(ctx, "T1", "U1", "A1")
+				if err != nil {
+					return nil, err
+				}
+				openedApp, openedHome, err := chat.OpenAppHome(ctx, "T1", "U1", "A1")
+				if err != nil {
+					return nil, err
+				}
+				dialogErr := chat.OpenDialog(ctx, "T1", "UBOT", "A1", "trigger_dialog",
+					`{"callback_id":"ticket","title":"File a ticket","elements":[{"type":"text","name":"summary","label":"Summary"}]}`)
+				// A dialog that is not a dialog is refused rather than stored,
+				// and the spent trigger is what makes the refusal observable:
+				// both compositions must reject the payload, not the trigger.
+				invalidDialogErr := chat.OpenDialog(ctx, "T1", "UBOT", "A1", "trigger_replay", `{"callback_id":"ticket"}`)
+				return []any{
+					opened.Type, opened.ExternalID, opened.AppID, opened.UserID,
+					opened.Hash != "", opened.RootViewID == "", opened.PreviousViewID == "",
+					pushed.Type, pushed.RootViewID == opened.ID, pushed.PreviousViewID == opened.ID,
+					staleErr != nil, errors.Is(staleErr, storepkg.ErrConflict),
+					updated.ID == pushed.ID, updated.Hash != pushed.Hash, normalizeViewPayload(updated.Payload),
+					replayErr != nil, errors.Is(replayErr, service.ErrInvalidTrigger),
+					published.Type, published.UserID, normalizeViewPayload(published.Payload),
+					installed.ID, installed.Name, installed.HomeTabEnabled, normalizeViewPayload(home.Payload),
+					openedApp.ID, openedHome.Payload == home.Payload,
+					dialogErr == nil, invalidDialogErr != nil,
+					errors.Is(invalidDialogErr, service.ErrInvalidDialog),
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -5245,7 +5372,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 67
+const parityGapCeiling = 60
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -5304,17 +5431,11 @@ var parityGaps = map[string]struct{}{
 	"LoadAppOptions":               {},
 	"MigrationExchange":            {},
 	"OAuthExchange":                {},
-	"OpenDialog":                   {},
-	"OpenAppHome":                  {},
 	"OpenIDConnectToken":           {},
 	"OpenIDConnectUserInfo":        {},
 	"OpenPublicFile":               {},
-	"OpenView":                     {},
-	"AppHome":                      {},
 	"PresentEntityComments":        {},
 	"PresentEntityDetails":         {},
-	"PublishView":                  {},
-	"PushView":                     {},
 	"RecordAccess":                 {},
 	"RemoveUser":                   {},
 	"RequestAppPermissions":        {},
@@ -5327,7 +5448,6 @@ var parityGaps = map[string]struct{}{
 	"TeamBillableInfo":             {},
 	"Unfurl":                       {},
 	"UninstallApp":                 {},
-	"UpdateView":                   {},
 	"UserWorkspaces":               {},
 	"WorkflowStepCompleted":        {},
 	"WorkflowStepFailed":           {},

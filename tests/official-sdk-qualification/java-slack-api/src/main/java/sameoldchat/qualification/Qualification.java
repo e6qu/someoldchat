@@ -307,6 +307,9 @@ public final class Qualification {
                             .teamId("T1").limit(10).build());
             require(restrictedApps.isOk() && restrictedApps.getRestrictedApps() != null,
                     "admin.apps.restricted.list failed: " + restrictedApps.getError());
+            // Restriction targets another app on purpose: it uninstalls the app
+            // and revokes its credentials, so restricting A1 would revoke this
+            // walk's own token.
             require(methods.appsPermissionsInfo(
                     com.slack.api.methods.request.apps.permissions.AppsPermissionsInfoRequest.builder().build()).isOk(),
                     "apps.permissions.info failed");
@@ -335,7 +338,7 @@ public final class Qualification {
                             .appId("A1").teamId("T1").build()).isOk(), "admin.apps.approve failed");
             require(methods.adminAppsRestrict(
                     com.slack.api.methods.request.admin.apps.AdminAppsRestrictRequest.builder()
-                            .appId("A1").teamId("T1").build()).isOk(), "admin.apps.restrict failed");
+                            .appId("ARESTRICT").teamId("T1").build()).isOk(), "admin.apps.restrict failed");
             require(methods.adminConversationsInvite(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsInviteRequest.builder()
                             .channelId("C2").userIds(java.util.List.of("U2")).build()).isOk(), "admin.conversations.invite failed");

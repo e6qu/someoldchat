@@ -540,7 +540,18 @@ assert.equal((await client.apiCall("apps.permissions.users.request", {
 	user: "U1",
 })).ok, true);
 assert.equal((await client.admin.apps.approve({ app_id: "A1", team_id: "T1" })).ok, true);
-assert.equal((await client.admin.apps.restrict({ app_id: "A1", team_id: "T1" })).ok, true);
+// Restriction is restricted to another app on purpose: it uninstalls the app
+// and revokes its credentials, so restricting A1 would revoke this walk's own
+// token. The app is checked to have actually stopped rather than merely to
+// appear in a list, which is what the restricted.list assertion above covers.
+const restrictedClient = new WebClient("xoxb-restricted-app", clientOptions);
+assert.equal((await restrictedClient.auth.test()).ok, true);
+assert.equal((await client.admin.apps.restrict({ app_id: "ARESTRICT", team_id: "T1" })).ok, true);
+await assert.rejects(
+	() => restrictedClient.auth.test(),
+	(error) => error.data?.error === "token_revoked",
+	"a restricted app kept a usable token",
+);
 const adminInvite = await client.admin.conversations.invite({ channel_id: "C2", users: "U2" });
 assert.equal(adminInvite.ok, true);
 const searchedConversations = await client.admin.conversations.search({ query: "general", limit: 10 });
