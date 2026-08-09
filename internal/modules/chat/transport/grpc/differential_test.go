@@ -4189,6 +4189,100 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Credentials are the one family where a seam disagreement is a
+			// security answer rather than a display one: a session or token the
+			// two compositions disagree about is one that is live in a
+			// deployment that believes it revoked it. The case therefore reads
+			// every credential back after each write, and again after revoking.
+			name: "sessions, tokens and external identities agree across the seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, seedWorkspaceRole(target, "T1", "U1", domain.WorkspaceRoleAdmin))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				expiry := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+				if err := chat.CreateSession(ctx, "session-parity", domain.SessionRecord{
+					WorkspaceID: "T1", UserID: "U1", Scopes: []string{"channels:history", "chat:write"},
+					CreatedAt: expiry.Add(-time.Hour), ExpiresAt: expiry,
+					OIDCProvider: "shauth", OIDCSubject: "subject-1", OIDCSID: "sid-1",
+				}); err != nil {
+					return nil, err
+				}
+				opened, err := chat.LookupSession(ctx, "session-parity")
+				if err != nil {
+					return nil, err
+				}
+				listed, err := chat.UserSessions(ctx, "T1", "U1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RevokeSession(ctx, "session-parity"); err != nil {
+					return nil, err
+				}
+				afterRevoke, revokeErr := chat.LookupSession(ctx, "session-parity")
+
+				// A token is revoked by value, and the record must say so
+				// rather than disappear: a caller has to be able to tell a
+				// revoked credential from one that never existed.
+				tokenErr := chat.RevokeToken(ctx, "token")
+				revokedToken, tokenLookupErr := chat.Tokens.LookupToken(ctx, "token")
+
+				if err := chat.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1", Provider: "shauth", Enabled: true}); err != nil {
+					return nil, err
+				}
+				method, err := chat.GetAuthMethod(ctx, "T1", "shauth")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1", Provider: "shauth", Enabled: false}); err != nil {
+					return nil, err
+				}
+				disabled, err := chat.GetAuthMethod(ctx, "T1", "shauth")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CreateExternalIdentity(ctx, domain.ExternalIdentity{
+					WorkspaceID: "T1", Provider: "shauth", Subject: "subject-1", UserID: "U1",
+				}); err != nil {
+					return nil, err
+				}
+				identity, err := chat.GetExternalIdentity(ctx, "T1", "shauth", "subject-1")
+				if err != nil {
+					return nil, err
+				}
+				_, missingIdentityErr := chat.GetExternalIdentity(ctx, "T1", "shauth", "subject-absent")
+
+				// A migration exchange maps this workspace's member ids onto
+				// their global ones and names the ones it could not, which is
+				// the half a caller acts on.
+				exchange, err := chat.MigrationExchange(ctx, "T1", "U1", []domain.UserID{"U1", "U-absent"}, false)
+				if err != nil {
+					return nil, err
+				}
+				mapped := make([]string, 0, len(exchange.UserIDMap))
+				for from, to := range exchange.UserIDMap {
+					mapped = append(mapped, string(from)+"->"+strconv.FormatBool(to != ""))
+				}
+				sort.Strings(mapped)
+				invalid := make([]string, 0, len(exchange.InvalidUserIDs))
+				for _, id := range exchange.InvalidUserIDs {
+					invalid = append(invalid, string(id))
+				}
+				sort.Strings(invalid)
+				return []any{
+					opened.WorkspaceID, opened.UserID, len(opened.Scopes),
+					opened.ExpiresAt.UTC().Equal(expiry), opened.OIDCProvider, opened.OIDCSubject, opened.OIDCSID,
+					len(listed) > 0,
+					afterRevoke.Revoked, revokeErr != nil,
+					tokenErr == nil, revokedToken.Revoked, tokenLookupErr != nil,
+					method.Provider, method.Enabled, disabled.Enabled,
+					string(identity.UserID), identity.Provider, identity.Subject,
+					missingIdentityErr != nil, errors.Is(missingIdentityErr, storepkg.ErrNotFound),
+					string(exchange.WorkspaceID), mapped, invalid,
+				}, nil
+			},
+		},
+		{
 			name: "streaming message lifecycle preserves state and metadata across the composition seam",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
@@ -6002,7 +6096,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 15
+const parityGapCeiling = 8
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -6018,8 +6112,6 @@ func TestTheParityBacklogOnlyShrinks(t *testing.T) {
 }
 
 var parityGaps = map[string]struct{}{
-	"CreateExternalIdentity": {},
-	"CreateSession":          {},
 	// These three credential-aware methods share the scheduled-message RPCs
 	// exercised by the legacy wrappers above. Their token/range fields have
 	// focused transport tests because parityCases seeds both compositions with
@@ -6028,14 +6120,9 @@ var parityGaps = map[string]struct{}{
 	"DispatchBlockAction":     {},
 	"DispatchViewBlockAction": {},
 	"DispatchSlashCommand":    {},
-	"GetAuthMethod":           {},
 	"HandleAppResponse":       {},
 	"LoadAppOptions":          {},
-	"MigrationExchange":       {},
 	"OAuthExchange":           {},
 	"OpenIDConnectToken":      {},
 	"OpenIDConnectUserInfo":   {},
-	"RevokeSession":           {},
-	"RevokeToken":             {},
-	"SetAuthMethod":           {},
 }
