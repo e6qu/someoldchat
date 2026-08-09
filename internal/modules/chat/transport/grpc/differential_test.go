@@ -5953,7 +5953,10 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				updatedManifest := `{"display_information":{"name":"Updated"},"oauth_config":{"redirect_urls":["https://example.test/oauth"],"scopes":{"bot":["chat:write"]}},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":true}}`
+				// The app declares user scopes as well as bot ones, because the v1
+				// exchange and Sign in with Slack both mint user tokens and a
+				// scope the manifest does not declare is not granted.
+				updatedManifest := `{"display_information":{"name":"Updated"},"oauth_config":{"redirect_urls":["https://example.test/oauth"],"scopes":{"bot":["chat:write"],"user":["identity.basic","openid","email","profile"]}},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":true}}`
 				updated, err := chat.UpdateAppFromManifest(ctx, configuration.Token, app.ID, updatedManifest)
 				if err != nil {
 					return nil, err
@@ -5971,6 +5974,39 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The v1 exchange is a separate method with its own code, so it
+				// gets its own authorization: an authorization code is spent by
+				// the first exchange that redeems it.
+				// The v1 exchange asks for a user token, so the authorization it
+				// redeems has to have granted user scopes.
+				v1Request := oauthRequest
+				v1Request.State = "state-v1"
+				v1Request.UserScopes = []string{"identity.basic"}
+				v1Authorized, err := chat.AuthorizeOAuth(ctx, v1Request)
+				if err != nil {
+					return nil, err
+				}
+				v1Token, err := chat.OAuthExchange(ctx, credentials.ClientID, credentials.ClientSecret, v1Authorized.Code, v1Authorized.RedirectURI)
+				if err != nil {
+					return nil, err
+				}
+				// Sign in with Slack rides the same authorization and adds an
+				// identity token, which is the whole point of the OIDC pair.
+				oidcRequest := oauthRequest
+				oidcRequest.State = "state-oidc"
+				oidcRequest.UserScopes = []string{"openid", "email", "profile"}
+				oidcAuthorized, err := chat.AuthorizeOAuth(ctx, oidcRequest)
+				if err != nil {
+					return nil, err
+				}
+				openID, err := chat.OpenIDConnectToken(ctx, credentials.ClientID, credentials.ClientSecret, oidcAuthorized.Code, oidcAuthorized.RedirectURI, "", "", "")
+				if err != nil {
+					return nil, err
+				}
+				userInfo, err := chat.OpenIDConnectUserInfo(ctx, openID.AccessToken)
+				if err != nil {
+					return nil, err
+				}
 				refreshed, err := chat.OAuthV2Refresh(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.RefreshToken)
 				if err != nil {
 					return nil, err
@@ -5985,7 +6021,10 @@ func parityCases() []parityCase {
 				if err := chat.DeleteDeveloperApp(ctx, rotated.Token, app.ID); err != nil {
 					return nil, err
 				}
-				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != ""}, nil
+				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
+					v1Token.AccessToken != "", string(v1Token.TokenType), len(v1Token.Scopes) > 0,
+					openID.IDToken != "", openID.AccessToken != "",
+					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName}, nil
 			},
 		},
 	}
@@ -6096,7 +6135,7 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // of the promise that was being made. Closing a gap means lowering this, and a
 // method that arrives without a parity case cannot join the backlog without
 // taking somebody else's place.
-const parityGapCeiling = 8
+const parityGapCeiling = 5
 
 // TestTheParityBacklogOnlyShrinks makes that promise checkable in both
 // directions: the backlog cannot grow, and it cannot quietly shrink either —
@@ -6122,7 +6161,4 @@ var parityGaps = map[string]struct{}{
 	"DispatchSlashCommand":    {},
 	"HandleAppResponse":       {},
 	"LoadAppOptions":          {},
-	"OAuthExchange":           {},
-	"OpenIDConnectToken":      {},
-	"OpenIDConnectUserInfo":   {},
 }
