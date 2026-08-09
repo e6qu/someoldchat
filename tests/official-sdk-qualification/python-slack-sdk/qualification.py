@@ -299,7 +299,9 @@ assert client.api_call(
     params={"scopes": "channels:read", "trigger_id": "permission-user-trigger", "user": "U1"},
 )["ok"] is True
 assert client.admin_apps_approve(app_id="A1", team_id="T1")["ok"] is True
-assert client.admin_apps_restrict(app_id="A1", team_id="T1")["ok"] is True
+# Restriction targets another app on purpose: it uninstalls the app and revokes
+# its credentials, so restricting A1 would revoke this walk's own token.
+assert client.admin_apps_restrict(app_id="ARESTRICT", team_id="T1")["ok"] is True
 assert client.admin_conversations_invite(channel_id="C2", user_ids="U2")["ok"] is True
 searched_conversations = client.admin_conversations_search(query="general", limit=10)
 assert searched_conversations["ok"] is True
