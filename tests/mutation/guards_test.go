@@ -247,7 +247,13 @@ func TestEveryAuthorizationGuardIsLoadBearing(t *testing.T) {
 	results := make([]outcome, len(sites))
 	work := make(chan int)
 	var wait sync.WaitGroup
-	workers := runtime.NumCPU() / 2
+	// One worker per core, not per two. Each worker spends most of its time
+	// waiting on a compile that is itself parallel, so half the cores meant a
+	// two-core CI runner ran this almost entirely sequentially: 4m30s here on
+	// twelve cores became 44m28s there, against a 45-minute budget. A gate that
+	// passes by thirty-two seconds fails the week after and teaches people to
+	// re-run CI rather than read it.
+	workers := runtime.NumCPU()
 	if workers < 1 {
 		workers = 1
 	}
