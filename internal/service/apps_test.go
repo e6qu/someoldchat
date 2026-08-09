@@ -220,3 +220,88 @@ func TestAppManifestValidationDoesNotCreatePartialApp(t *testing.T) {
 		t.Fatalf("partial apps=%+v err=%v", apps, err)
 	}
 }
+
+// Journey 12 requires app policy to reach subsequent API, event, Socket Mode,
+// scheduled and response-URL use, and states that a disabled app does not
+// remain operational through a stale token.
+//
+// Restriction used to write an approval row and nothing else, so it moved the
+// app between two administrative lists and changed nothing: the installation
+// stayed enabled, its tokens stayed live, its bot stayed in every conversation,
+// and it went on acting. An administrator shutting down a misbehaving app was
+// told it had worked.
+func TestRestrictingAnAppStopsItActing(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "admin"})
+	seedWorkspaceAdmin(t, store, "T1", "U1")
+	store.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "bot"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "UBOT")
+	now := time.Now().UTC()
+	manifest := `{"display_information":{"name":"Restricted"},"features":{"app_home":{"home_tab_enabled":true}},"oauth_config":{"scopes":{"bot":["chat:write"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"https://apps.example.test/i"}}}`
+	if err := store.CreateApp(ctx, domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Restricted", ClientID: "client",
+		SigningSecretHash: "hash", SigningSecretCiphertext: "cipher",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "cipher",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "client", SecretHash: "secret", AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateBot(ctx, domain.Bot{ID: "B1", AppID: "A1", WorkspaceID: "T1", UserID: "UBOT", Name: "bot", UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedToken(ctx, "xoxb-restricted", domain.TokenRecord{
+		WorkspaceID: "T1", AppID: "A1", BotID: "B1", UserID: "UBOT",
+		Scopes: []string{"chat:write"}, TokenType: domain.TokenBot,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: store}
+
+	home := `{"type":"home","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"hello"}}]}`
+	if _, err := messages.PublishView(ctx, "T1", "UBOT", "A1", "U1", home, ""); err != nil {
+		t.Fatalf("the app could not act before being restricted: %v", err)
+	}
+
+	if err := messages.AdminRestrictApp(ctx, "T1", "U1", "A1", ""); err != nil {
+		t.Fatalf("restrict: %v", err)
+	}
+
+	if _, err := messages.PublishView(ctx, "T1", "UBOT", "A1", "U1", home, ""); err == nil {
+		t.Fatal("a restricted app published to a Home tab")
+	}
+	// The credential is the other half: a token that outlives the decision
+	// leaves the app operational through the Web API whatever the surfaces say.
+	record, err := store.LookupToken(ctx, "xoxb-restricted")
+	if err != nil {
+		t.Fatalf("look up the restricted app's token: %v", err)
+	}
+	if !record.Revoked {
+		t.Fatal("a restricted app kept a live token")
+	}
+	// The policy is still recorded: applying it must not erase it.
+	page, err := messages.AdminListApps(ctx, "T1", "U1", domain.AppApprovalRestricted, domain.PageRequest{Limit: 5})
+	if err != nil || len(page.Apps) != 1 {
+		t.Fatalf("restricted list=%+v err=%v, want the app recorded", page, err)
+	}
+}
+
+// Restricting an app the workspace never installed is a legitimate pre-emptive
+// decision and must not fail for want of something to uninstall.
+func TestAnAppCanBeRestrictedBeforeItIsInstalled(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "admin"})
+	seedWorkspaceAdmin(t, store, "T1", "U1")
+	messages := Messages{Store: store}
+	if err := messages.AdminRestrictApp(ctx, "T1", "U1", "A-never", ""); err != nil {
+		t.Fatalf("restrict an uninstalled app: %v", err)
+	}
+}

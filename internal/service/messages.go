@@ -2213,8 +2213,43 @@ func (m Messages) AdminApproveApp(ctx context.Context, workspaceID domain.Worksp
 	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalApproved)
 }
 
+// AdminRestrictApp records the policy and applies it.
+//
+// It used to only write the approval row, so restricting an app moved it
+// between two administrative lists and changed nothing else: the installation
+// stayed enabled, its tokens stayed live, its bot stayed in every conversation,
+// and it went on posting, opening modals and answering interactions. An
+// administrator shutting down a misbehaving app was told it had worked.
+//
+// Restriction therefore uninstalls the app from the workspace, which is the
+// operation that already revokes its credentials, disables its hooks, clears
+// its datastore and removes its bot. Journey 12 states the requirement this
+// meets: a disabled app does not remain operational through a stale token.
+// Doing it through the existing uninstall keeps one definition of what
+// stopping an app means, rather than a second, weaker one for policy.
 func (m Messages) AdminRestrictApp(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID) error {
-	return m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalRestricted)
+	if err := m.changeAppApproval(ctx, workspaceID, actorID, appID, requestID, domain.AppApprovalRestricted); err != nil {
+		return err
+	}
+	// A restriction may name only a request, in which case the approval lives
+	// under a synthesised app id and there is no installation to act on.
+	installed := domain.AppID(strings.TrimSpace(string(appID)))
+	if installed == "" {
+		return nil
+	}
+	announcement, err := newEvent(workspaceID, actorID, events.NewPayload("app.uninstalled",
+		events.String("app_id", string(installed)),
+		events.String("target_app_id", string(installed)),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	// Restricting an app the workspace never installed is a legitimate
+	// pre-emptive decision, so an absent installation is not a failure.
+	if err := m.Store.UninstallApp(ctx, workspaceID, installed, announcement); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 // AdminCancelAppRequest withdraws an app request. The member who asked or an
