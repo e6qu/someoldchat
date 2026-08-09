@@ -113,6 +113,14 @@ test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/lifecycle -run '^$$' -fuzz FuzzManifestVerificationRejectsForeignSignatures -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/lifecycle -run '^$$' -fuzz FuzzManifestVerificationRejectsTamperedFields -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/lifecycle -run '^$$' -fuzz FuzzManifestVerificationRejectsForeignKeyIDs -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzDecodeListCursorNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzDecodeMessageCursorNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzStoredTimeOrderIsChronological -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzClampLimitNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzParseIDListNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzParseSlackTimestampNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzReminderTimeNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/socketmode -run '^$$' -fuzz FuzzEncodeEventMatchesDeliverability -fuzztime=25000x -parallel=1 -timeout=2m
 
 generate:
 	$(MAKE) proto-tools

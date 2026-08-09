@@ -652,10 +652,29 @@ func TestResponseRecorderRequiresDurableStore(t *testing.T) {
 	}
 }
 
-// The Socket Mode envelope encoder must accept exactly the records the shared
-// deliverability rule accepts, and must never produce an envelope that cannot
-// be marshalled. Restating the JSON rules here would only assert that the
-// encoder is implemented the way it is implemented.
+// The Socket Mode envelope encoder must never encode a record the shared
+// deliverability rule refuses, must never produce an envelope that cannot be
+// marshalled, and must refuse anything else only with a classified event error.
+// Restating the JSON rules here would only assert that the encoder is
+// implemented the way it is implemented.
+//
+// It used to claim the encoder accepts EXACTLY what Deliverable accepts, and
+// that claim went stale: Deliverable deliberately stopped requiring a payload's
+// own type to equal its topic, because the equality "broke every official Socket
+// Mode and real-time client while protecting nothing" — a payload may arrive
+// already carrying a Slack event type. The encoder still refuses a record whose
+// payload names one event while its topic names another, and that is right: it
+// declines to emit a mislabelled event rather than guessing which of the two
+// names is true. Only a record rebuilt from independent parts can disagree with
+// itself that way, which is exactly the case Deliverable says it judges by what
+// the record carries.
+//
+// So the two are not equal, and the property that matters is the direction that
+// protects a client: nothing undeliverable is ever encoded, and a refusal is
+// always a classified error rather than a panic or a broken envelope.
+//
+// This target existed and no gate ran it, with a saved crasher sitting in
+// testdata proving the disagreement had already been found once.
 func FuzzEncodeEventMatchesDeliverability(f *testing.F) {
 	f.Add(`{"type":"message.created","event_ts":"1700000000.000000"}`, "message.created")
 	f.Add("not json", "message.created")
@@ -671,7 +690,14 @@ func FuzzEncodeEventMatchesDeliverability(f *testing.F) {
 			return
 		}
 		if err != nil {
-			t.Fatal(err)
+			// A refusal is allowed here, and it must be one the callers can
+			// classify: the outbox worker decides whether to drop a record or
+			// retry it from exactly these sentinels, and an unclassified error
+			// would be retried for ever.
+			if !errors.Is(err, events.ErrPayloadFieldInvalid) && !errors.Is(err, events.ErrPayloadMalformed) && !errors.Is(err, events.ErrEventIncomplete) {
+				t.Fatalf("a deliverable record was refused with an unclassified error: topic=%q payload=%q err=%v", topic, payload, err)
+			}
+			return
 		}
 		if _, err := json.Marshal(encoded); err != nil {
 			t.Fatal(err)
