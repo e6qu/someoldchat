@@ -1755,6 +1755,13 @@ operations:
       - go-test:internal/api/slack:TestAdminUsersSessionSettings
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:sessionSettingsAreAbsentRatherThanZero
+      # The three above prove the setting is accepted, reported and durable.
+      # They were the whole evidence while the duration decided nothing, which
+      # is how this row read behavior-compatible for a call whose effect was
+      # fictional. These are the readers.
+      - go-test:internal/web:TestSignInAppliesTheMembersConfiguredSessionDuration
+      - go-test:internal/web:TestSignInEndsWithTheBrowserWhenTheAdministratorRequiresIt
+      - go-test:internal/web:TestSwitchingWorkspacesAppliesTheTargetWorkspacesSessionPolicy
   - method: admin.users.unsupportedVersions.export
     status: behavior-compatible
     provenance: slack-reference

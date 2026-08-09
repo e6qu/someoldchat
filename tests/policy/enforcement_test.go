@@ -49,6 +49,7 @@ func enforced() map[string]enforcement {
 		"ListBarriers":                           {at: "internal/service/messages.go", why: "barrierSeparates refuses to put two separated people together"},
 		"ListConversationTeams":                  {at: "internal/service/connect.go", why: "which organizations are in a shared channel, and who may invite another"},
 		"ListUsersByRole":                        {at: "internal/service/messages.go", why: "refuseLastOwnerChange will not leave a workspace ownerless"},
+		"ListSessionSettings":                    {at: "internal/service/messages.go", why: "MemberSessionSettings gives both session-minting paths how long the session they are about to issue may live"},
 	}
 }
 
@@ -75,15 +76,10 @@ func unenforced() map[string]string {
 			"guess denies legitimate posts, which is worse than the present permissiveness.",
 		"ListAuthPolicyEntities": "admin.auth.policy.assignEntities records entities against a policy that no sign-in path " +
 			"consults. Same undefined vocabulary as channel posting policy, and here a wrong guess denies sign-in.",
-		"ListSessionSettings": "a workspace's configured session duration is never consulted: internal/web/identity.go mints " +
-			"every browser session at a hardcoded 24 hours, capped only by the identity provider's own expiry, so an " +
-			"administrator who sets an hour gets a day. Unlike the two above this needs no vocabulary and is implementable — " +
-			"it wants a seam method for a member's own session settings, which the sign-in path reads before choosing the " +
-			"expiry. It is recorded rather than half-built at the end of a session.",
 	}
 }
 
-const unenforcedCeiling = 3
+const unenforcedCeiling = 2
 
 // policyShaped is how a policy reader is recognised. It is a name test, which
 // is a real limit: a policy whose reader is named outside this vocabulary is

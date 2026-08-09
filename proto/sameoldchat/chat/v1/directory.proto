@@ -635,6 +635,10 @@ service DirectoryService {
   rpc AdminSetSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
   rpc AdminClearSessionSettings(SessionSettingsMutationRequest) returns (MutationResponse);
   rpc AdminSessionSettings(SessionSettingsMutationRequest) returns (SessionSettingsResponse);
+  // MemberSessionSettings is the member's own read of the policy that governs
+  // their sessions. The sign-in paths need it and are not administrators, so
+  // AdminSessionSettings cannot serve them.
+  rpc MemberSessionSettings(WorkspaceRequest) returns (SessionSettings);
   rpc AdminAssignAuthPolicy(AuthPolicyMutationRequest) returns (MutationResponse);
   rpc AdminRemoveAuthPolicyEntities(AuthPolicyMutationRequest) returns (MutationResponse);
   rpc AdminAuthPolicyEntities(AuthPolicyEntitiesRequest) returns (AuthPolicyEntityPage);

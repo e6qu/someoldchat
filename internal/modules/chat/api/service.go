@@ -324,6 +324,7 @@ type Service interface {
 	AdminSetSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, domain.SessionSettings) error
 	AdminClearSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) error
 	AdminSessionSettings(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) ([]domain.SessionSettings, error)
+	MemberSessionSettings(context.Context, domain.WorkspaceID, domain.UserID) (domain.SessionSettings, error)
 	AdminAssignAuthPolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminRemoveAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)

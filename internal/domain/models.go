@@ -2652,6 +2652,11 @@ func (duration SessionDuration) Duration() time.Duration {
 	return time.Duration(duration) * time.Second
 }
 
+// DefaultSessionDuration is how long a session lives when no administrator has
+// chosen a duration for the member. It is the workspace default the zero value
+// of SessionDuration refers to.
+const DefaultSessionDuration SessionDuration = 24 * 60 * 60
+
 // SessionSettings is how long one member's sessions live and what ends them.
 type SessionSettings struct {
 	UserID                UserID
@@ -2660,6 +2665,21 @@ type SessionSettings struct {
 	DesktopAppBrowserQuit bool
 	MobileDeviceCheck     bool
 	UpdatedAt             time.Time
+}
+
+// Lifetime is how long a session minted for this member may live.
+//
+// A session-minting path must ask this rather than write a constant. Both of
+// them used to write 24 hours directly, so a duration an administrator set was
+// stored, reported back by admin.users.session.getSettings, and then ignored:
+// an administrator who set eight hours got a day. Resolving the default here
+// means the zero value — "no override" — cannot be mistaken for "no session",
+// and there is one place a caller can be wrong about.
+func (settings SessionSettings) Lifetime() time.Duration {
+	if settings.Duration == 0 {
+		return DefaultSessionDuration.Duration()
+	}
+	return settings.Duration.Duration()
 }
 
 // AuthPolicyName names one authentication policy. Slack defines exactly one,

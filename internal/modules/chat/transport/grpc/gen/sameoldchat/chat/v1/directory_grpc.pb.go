@@ -45,6 +45,7 @@ const (
 	DirectoryService_AdminSetSessionSettings_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminSetSessionSettings"
 	DirectoryService_AdminClearSessionSettings_FullMethodName          = "/sameoldchat.chat.v1.DirectoryService/AdminClearSessionSettings"
 	DirectoryService_AdminSessionSettings_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminSessionSettings"
+	DirectoryService_MemberSessionSettings_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/MemberSessionSettings"
 	DirectoryService_AdminAssignAuthPolicy_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminAssignAuthPolicy"
 	DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveAuthPolicyEntities"
 	DirectoryService_AdminAuthPolicyEntities_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminAuthPolicyEntities"
@@ -119,6 +120,10 @@ type DirectoryServiceClient interface {
 	AdminSetSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminClearSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminSessionSettings(ctx context.Context, in *SessionSettingsMutationRequest, opts ...grpc.CallOption) (*SessionSettingsResponse, error)
+	// MemberSessionSettings is the member's own read of the policy that governs
+	// their sessions. The sign-in paths need it and are not administrators, so
+	// AdminSessionSettings cannot serve them.
+	MemberSessionSettings(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*SessionSettings, error)
 	AdminAssignAuthPolicy(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRemoveAuthPolicyEntities(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminAuthPolicyEntities(ctx context.Context, in *AuthPolicyEntitiesRequest, opts ...grpc.CallOption) (*AuthPolicyEntityPage, error)
@@ -425,6 +430,16 @@ func (c *directoryServiceClient) AdminSessionSettings(ctx context.Context, in *S
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SessionSettingsResponse)
 	err := c.cc.Invoke(ctx, DirectoryService_AdminSessionSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) MemberSessionSettings(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*SessionSettings, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionSettings)
+	err := c.cc.Invoke(ctx, DirectoryService_MemberSessionSettings_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -881,6 +896,10 @@ type DirectoryServiceServer interface {
 	AdminSetSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error)
 	AdminClearSessionSettings(context.Context, *SessionSettingsMutationRequest) (*MutationResponse, error)
 	AdminSessionSettings(context.Context, *SessionSettingsMutationRequest) (*SessionSettingsResponse, error)
+	// MemberSessionSettings is the member's own read of the policy that governs
+	// their sessions. The sign-in paths need it and are not administrators, so
+	// AdminSessionSettings cannot serve them.
+	MemberSessionSettings(context.Context, *WorkspaceRequest) (*SessionSettings, error)
 	AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
 	AdminRemoveAuthPolicyEntities(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
 	AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error)
@@ -1009,6 +1028,9 @@ func (UnimplementedDirectoryServiceServer) AdminClearSessionSettings(context.Con
 }
 func (UnimplementedDirectoryServiceServer) AdminSessionSettings(context.Context, *SessionSettingsMutationRequest) (*SessionSettingsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminSessionSettings not implemented")
+}
+func (UnimplementedDirectoryServiceServer) MemberSessionSettings(context.Context, *WorkspaceRequest) (*SessionSettings, error) {
+	return nil, status.Error(codes.Unimplemented, "method MemberSessionSettings not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminAssignAuthPolicy not implemented")
@@ -1620,6 +1642,24 @@ func _DirectoryService_AdminSessionSettings_Handler(srv interface{}, ctx context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).AdminSessionSettings(ctx, req.(*SessionSettingsMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_MemberSessionSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).MemberSessionSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_MemberSessionSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).MemberSessionSettings(ctx, req.(*WorkspaceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2490,6 +2530,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminSessionSettings",
 			Handler:    _DirectoryService_AdminSessionSettings_Handler,
+		},
+		{
+			MethodName: "MemberSessionSettings",
+			Handler:    _DirectoryService_MemberSessionSettings_Handler,
 		},
 		{
 			MethodName: "AdminAssignAuthPolicy",

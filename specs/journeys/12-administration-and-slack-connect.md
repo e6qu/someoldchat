@@ -120,9 +120,22 @@ now, and a session whose start was never recorded says so rather than claiming
 to have begun at the epoch. A bulk sign-out naming a member who is not in the
 workspace stops before anything is revoked, so an administrator acting on a
 pasted list finds out they were wrong instead of signing out an arbitrary prefix
-of it. Session *policy* — Slack's per-member duration and mobile settings behind
-`admin.users.session.{get,set,clear}Settings` — is not implemented and is
-recorded as absent rather than approximated. The surface has no browser
+of it. Session *policy* — Slack's per-member duration and desktop settings behind
+`admin.users.session.{get,set,clear}Settings` — is stored, reported and now
+applied. A duration an administrator sets is what the session a member is given
+lives for, in both places one is minted: signing in, and switching into a
+workspace, where the target workspace's own policy governs because settings are
+held per workspace. Slack's `desktop_app_browser_quit` becomes a cookie with no
+Max-Age, which is what "ends when the browser is quit" is on the web; the
+durable session keeps its own expiry, so quitting is one of the two things that
+ends it rather than the only one. An identity provider's asserted expiry still
+caps the result: the policy says how long this deployment will trust a sign-in
+and the provider says how long its assertion holds, and neither extends the
+other. The duration decided nothing at all until then — it was written, read
+back by `getSettings`, and every session was minted at a hardcoded day, so an
+administrator who set eight hours got twenty-four. `mobile_device_check` remains
+recorded and unapplied, and the reason is that there is no mobile client here to
+check a device on; it is named rather than quietly treated as enforced. The surface has no browser
 citation, and the reason is structural rather than an unwritten test: it lives
 on the identity-provider administration page, whose routes are registered only
 where a provider is configured, and the browser servers run without one. That is
