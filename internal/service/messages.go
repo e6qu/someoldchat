@@ -2310,6 +2310,26 @@ func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.Work
 		return ErrInvalidAppApproval
 	}
 	appID = appApprovalKey(appID, requestID)
+	// Cancelling is final in both directions. AdminCancelAppRequest already
+	// refused to cancel a decision an administrator had taken; nothing refused
+	// the reverse, so approving or restricting a withdrawn request wrote a live
+	// decision over it and the request came back from the dead. Restricting one
+	// went further and uninstalled the app, on the strength of a request its
+	// author had taken back.
+	//
+	// The check lives here rather than in the three callers because it is one
+	// rule about one row: a caller that forgets it is the defect, and a rule
+	// written three times is a rule two of them can drift from.
+	//
+	// An approval that does not exist yet is not a resurrection: the first
+	// decision on a request nobody has recorded is how the row is created.
+	current, err := m.Store.GetAppApproval(ctx, workspaceID, appID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err == nil && current.Status == domain.AppApprovalCancelled && status != domain.AppApprovalCancelled {
+		return ErrInvalidAppApproval
+	}
 	now := time.Now().UTC()
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("app."+string(status), events.String("app_id", string(appID)), events.String("app_request_id", string(requestID))), now)
 	if err != nil {
