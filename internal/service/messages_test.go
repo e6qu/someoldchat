@@ -2899,3 +2899,93 @@ func TestALapsedInviteRequestCannotBeApprovedButCanBeDenied(t *testing.T) {
 		}
 	})
 }
+
+// A guest reaches channels by being added to them, never by naming one. Without
+// this rule a single-channel guest — someone invited to exactly one channel —
+// could walk into every public channel in the workspace, one identifier at a
+// time, and could create channels of their own.
+func TestAGuestCannotReachAChannelNobodyAddedThemTo(t *testing.T) {
+	ctx := context.Background()
+	for _, guest := range []struct {
+		name    string
+		tier    domain.WorkspaceMembership
+		refusal error
+	}{
+		{
+			name:    "single-channel guest",
+			tier:    domain.WorkspaceMembership{Role: domain.WorkspaceRoleMember, Active: true, UltraRestricted: true},
+			refusal: ErrUserIsUltraRestricted,
+		},
+		{
+			name:    "multi-channel guest",
+			tier:    domain.WorkspaceMembership{Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
+			refusal: ErrUserIsRestricted,
+		},
+	} {
+		t.Run(guest.name, func(t *testing.T) {
+			s := memory.New()
+			if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+				t.Fatal(err)
+			}
+			user := domain.User{ID: "UG", WorkspaceID: "T1", Email: "guest@example.com", Name: "guest"}
+			membership := guest.tier
+			membership.WorkspaceID, membership.UserID = "T1", user.ID
+			if err := s.CreateUser(ctx, user, membership, events.Event{ID: "E-guest", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != nil {
+				t.Fatal(err)
+			}
+			// The channel they were invited to, and one they were not.
+			for _, id := range []domain.ConversationID{"C-invited", "C-elsewhere"} {
+				if err := s.SeedConversation(domain.Conversation{ID: id, WorkspaceID: "T1", Name: string(id)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.SeedConversationMember("C-invited", user.ID); err != nil {
+				t.Fatal(err)
+			}
+			messages := Messages{Store: s}
+
+			if _, err := messages.JoinConversation(ctx, "T1", user.ID, "C-elsewhere"); !errors.Is(err, guest.refusal) {
+				t.Fatalf("joining err=%v, want %v", err, guest.refusal)
+			}
+			if _, err := messages.CreateConversation(ctx, "T1", user.ID, "guest-made", false); !errors.Is(err, guest.refusal) {
+				t.Fatalf("creating err=%v, want %v", err, guest.refusal)
+			}
+			// The refusal is about reaching, not about being there: the channel
+			// they were added to stays fully usable.
+			if _, err := messages.Post(ctx, "T1", user.ID, "C-invited", "hello", "", ""); err != nil {
+				t.Fatalf("the guest could not post in their own channel: %v", err)
+			}
+			// And it left no membership behind: a refusal that still wrote the
+			// row would be the same breach one step later.
+			member, err := s.IsConversationMember(ctx, "C-elsewhere", user.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if member {
+				t.Fatal("a refused join still added the guest to the channel")
+			}
+		})
+	}
+}
+
+// The rule is about guests, so it must not touch an ordinary member.
+func TestAnOrdinaryMemberStillJoinsAndCreatesChannels(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "member@example.com", Name: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s}
+	if _, err := messages.JoinConversation(ctx, "T1", "U1", "C1"); err != nil {
+		t.Fatalf("a member could not join a public channel: %v", err)
+	}
+	if _, err := messages.CreateConversation(ctx, "T1", "U1", "member-made", false); err != nil {
+		t.Fatalf("a member could not create a channel: %v", err)
+	}
+}

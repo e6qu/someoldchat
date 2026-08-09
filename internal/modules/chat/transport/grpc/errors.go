@@ -193,6 +193,8 @@ var errorClasses = []errorClass{
 	// because renaming the fallback would change what a peer that sends no detail
 	// means, and only one class per code may hold it.
 	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: service.ErrNotWorkspaceAdmin},
+	{key: "service.user_is_restricted", code: codes.PermissionDenied, sentinel: service.ErrUserIsRestricted},
+	{key: "service.user_is_ultra_restricted", code: codes.PermissionDenied, sentinel: service.ErrUserIsUltraRestricted},
 	{key: "service.workflow_permission_denied", code: codes.PermissionDenied, sentinel: service.ErrWorkflowPermissionDenied},
 	{key: "service.function_access_denied", code: codes.PermissionDenied, sentinel: service.ErrFunctionAccessDenied},
 	// An information barrier is a standing rule, not a transient conflict: the

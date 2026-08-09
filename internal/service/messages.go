@@ -110,6 +110,14 @@ var (
 	// does not exist, and would hide the real reason from the operator reading the
 	// audit trail.
 	ErrNotWorkspaceAdmin = errors.New("actor is not a workspace administrator")
+	// ErrUserIsRestricted and ErrUserIsUltraRestricted are the two guest tiers
+	// refusing an action Slack keeps away from guests. They are separate
+	// sentinels because the pinned enums for conversations.join and
+	// conversations.invite declare both codes: a caller told
+	// user_is_ultra_restricted knows the person is confined to one channel,
+	// which user_is_restricted does not say.
+	ErrUserIsRestricted      = errors.New("actor is a guest")
+	ErrUserIsUltraRestricted = errors.New("actor is a single-channel guest")
 
 	// ErrNotInConversation refuses an operation whose Slack contract requires the
 	// actor to be a member of the conversation it names.
@@ -5006,6 +5014,9 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
 	}
+	if err := m.refuseGuest(ctx, workspaceID, userID); err != nil {
+		return domain.Conversation{}, err
+	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
 		return domain.Conversation{}, ErrInvalidConversation
@@ -5142,6 +5153,12 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	}
 	if conversation.Archived {
 		return domain.Conversation{}, ErrInvalidConversation
+	}
+	// Joining is self-service, which is exactly what a guest does not have: a
+	// single-channel guest could otherwise walk into every public channel in
+	// the workspace, one identifier at a time.
+	if err := m.refuseGuest(ctx, workspaceID, userID); err != nil {
+		return domain.Conversation{}, err
 	}
 	// Joining is self-service, so it is only ever available for an open channel.
 	// A private channel is joined by invitation and a direct conversation by
@@ -8450,6 +8467,27 @@ func (m Messages) authorizeConversationAccessGroups(ctx context.Context, workspa
 // A user who is absent, deleted, in another workspace, or whose membership is
 // inactive is indistinguishable from a user who does not exist: the caller has
 // proved nothing about this workspace, so it learns nothing about it.
+// refuseGuest is the one place that answers "may a guest do this themselves?".
+//
+// Guests reach channels by being added to them, never by naming one: a
+// single-channel guest belongs to the one channel they were invited to, and a
+// multi-channel guest to the ones members put them in. Neither browses the
+// workspace. Creating and joining both let a guest reach a channel nobody
+// invited them to, so both ask here rather than each growing its own rule.
+func (m Messages) refuseGuest(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case membership.UltraRestricted:
+		return ErrUserIsUltraRestricted
+	case membership.Restricted:
+		return ErrUserIsRestricted
+	}
+	return nil
+}
+
 func (m Messages) activeWorkspaceMembership(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceMembership, error) {
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
 		return domain.WorkspaceMembership{}, err
