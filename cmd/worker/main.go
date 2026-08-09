@@ -136,6 +136,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	var scheduledWorker scheduler.Worker
 	var reminderWorker scheduler.ReminderWorker
 	var statusWorker scheduler.StatusWorker
+	var userExpirationWorker scheduler.UserExpirationWorker
 	var scheduledStatusWorker scheduler.ScheduledStatusWorker
 	var reminderDeliveryWorker scheduler.ReminderDeliveryWorker
 	var appEventProcessor slackapp.EventProcessor
@@ -169,6 +170,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	scheduledStatusWorker, err = scheduler.NewScheduledStatusWorker(runtime.Store, *limit)
 	if err != nil {
 		logger.Error("configure scheduled status worker", "error", err)
+		return exitConfiguration
+	}
+	userExpirationWorker, err = scheduler.NewUserExpirationWorker(runtime.Store, *limit)
+	if err != nil {
+		logger.Error("configure user expiration worker", "error", err)
 		return exitConfiguration
 	}
 	reminderDeliveryWorker, err = scheduler.NewReminderDeliveryWorker(runtime.Store, *limit)
@@ -240,6 +246,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			statusCount, statusErr := statusWorker.RunOnce(cycleContext, "")
 			if statusErr != nil {
 				logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
+			}
+			userExpirationCount, userExpirationErr := userExpirationWorker.RunOnce(cycleContext, "")
+			if userExpirationErr != nil {
+				logger.Error("user expiration failed", "count", userExpirationCount, "error", userExpirationErr)
 			}
 			retentionCount, retentionErr := retentionWorker.RunOnce(cycleContext, "")
 			if retentionErr != nil {

@@ -2584,6 +2584,74 @@ func (s *Store) SetUserExpiration(_ context.Context, workspaceID domain.Workspac
 	return nil
 }
 
+func (s *Store) DueUserExpirations(_ context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.User, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("expiration limit must be positive")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	due := make([]domain.User, 0, limit)
+	for id, expiration := range s.userExpirations {
+		if expiration.IsZero() || expiration.After(now) {
+			continue
+		}
+		user, exists := s.users[id]
+		if !exists || user.Deleted {
+			continue
+		}
+		if workspace != "" && user.WorkspaceID != workspace {
+			continue
+		}
+		due = append(due, user)
+	}
+	// The map has no order of its own and two workers reading different orders
+	// would take the same accounts in different sequences, so the queue is
+	// sorted before it is cut to the limit.
+	sort.Slice(due, func(first, second int) bool { return due[first].ID < due[second].ID })
+	if len(due) > limit {
+		due = due[:limit]
+	}
+	return due, nil
+}
+
+func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected time.Time, event events.Event) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[userID]
+	if !ok || user.WorkspaceID != workspaceID {
+		return false, store.ErrNotFound
+	}
+	// The claim is the deactivation. A caller that reads a due account and
+	// finds the expiration moved, or the account already deactivated, has lost
+	// the race and must not append a second event for one expiry.
+	if user.Deleted || !s.userExpirations[userID].Equal(expected.UTC()) {
+		return false, nil
+	}
+	user.Deleted = true
+	s.users[userID] = user
+	key := string(workspaceID) + "\x00" + string(userID)
+	if membership, exists := s.members[key]; exists {
+		membership.Active = false
+		s.members[key] = membership
+	}
+	// The credentials go with the account, exactly as SetUserDeleted does it.
+	// A deactivation that left a live token or session behind would take the
+	// guest off the member list and leave them signed in.
+	for tokenKey, token := range s.tokens {
+		if token.WorkspaceID == workspaceID && token.UserID == userID {
+			token.Revoked = true
+			s.tokens[tokenKey] = token
+		}
+	}
+	for sessionKey, session := range s.sessions {
+		if session.WorkspaceID == workspaceID && session.UserID == userID {
+			s.sessions[sessionKey] = revokeSessionLocked(session)
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	return true, nil
+}
+
 func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, deleted bool, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

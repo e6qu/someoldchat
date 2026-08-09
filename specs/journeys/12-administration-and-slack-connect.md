@@ -14,6 +14,12 @@ pending invitations, last-owner protection, and self-administration follow
 distinct Slack rules. Bulk operations report per-member outcomes and are safe
 to retry.
 
+A guest account given an expiration is deactivated when it arrives, not merely
+refused. Credential lookup already declines a lapsed account, so access ends at
+the instant; deactivation is what makes the rest of the workspace agree, rather
+than leaving a member other people can direct message, mention, add to channels
+and be billed for, whom nobody can sign in as.
+
 ## ADMIN-02 — Configure workspace policy
 
 Workspace settings expose only implemented, durable policy: identity/access,

@@ -77,6 +77,7 @@ func runQualification(t *testing.T, open opener) {
 		{"workflow delays wait on a durable instant", workflowDelaysWaitOnADurableInstant},
 		{"create message validates and is referential", createMessageValidatesAndIsReferential},
 		{"expired outbox lease is fenced", expiredOutboxLeaseIsFenced},
+		{"a lapsed account is deactivated once", lapsedAccountsAreDeactivatedOnce},
 		{"internal topics stay internal", internalTopicsStayInternal},
 		{"events retain their actor", eventsRetainTheirActor},
 		{"email identity is case folded", emailIdentityIsCaseFolded},
@@ -2763,5 +2764,89 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 	absent, err := repository.MarkReminderDelivered(ctx, workspaceID, domain.ReminderID("Rm-absent-"+suffix), now, notice("absent"))
 	if err != nil || absent {
 		t.Fatalf("claiming a reminder that does not exist: claimed=%t err=%v", absent, err)
+	}
+}
+
+// lapsedAccountsAreDeactivatedOnce pins the queue behind guest expiry on both
+// profiles. The claim is the deactivation, so the interesting properties are
+// that a due account is offered, that a stale claim is refused rather than
+// deactivating twice, and that the deactivation carries the credentials with
+// it — the same thing SetUserDeleted does, which is why the two must not drift.
+func lapsedAccountsAreDeactivatedOnce(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspace := domain.WorkspaceID("T-expire-" + suffix)
+	guest := domain.UserID("U-guest-" + suffix)
+	permanent := domain.UserID("U-permanent-" + suffix)
+	now := time.Now().UTC().Truncate(time.Second)
+	lapsed := now.Add(-time.Hour)
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspace, Topic: topic, CreatedAt: now}
+	}
+	for _, seed := range []func() error{
+		func() error { return repository.SeedWorkspace(ctx, domain.Workspace{ID: workspace, Name: "Expiry"}) },
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: guest, WorkspaceID: workspace, Name: "guest"})
+		},
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: permanent, WorkspaceID: workspace, Name: "permanent"})
+		},
+		func() error {
+			return repository.SeedToken(ctx, "xoxp-expire-"+suffix, domain.TokenRecord{
+				WorkspaceID: workspace, UserID: guest, TokenType: domain.TokenUser, Scopes: []string{"chat:write"},
+			})
+		},
+		func() error {
+			return repository.SetUserExpiration(ctx, workspace, guest, lapsed, event("expiration-set", "user.expiration_changed"))
+		},
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	due, err := repository.DueUserExpirations(ctx, workspace, now, 10)
+	if err != nil || len(due) != 1 || due[0].ID != guest {
+		t.Fatalf("due expirations=%+v err=%v, want the lapsed guest alone", due, err)
+	}
+
+	// A claim against an instant the row does not hold is refused, which is
+	// what stops two workers deactivating one account twice.
+	if changed, err := repository.ExpireUserAccount(ctx, workspace, guest, now.Add(time.Hour), event("stale-claim", "user.removed")); err != nil || changed {
+		t.Fatalf("stale claim changed=%t err=%v, want it refused", changed, err)
+	}
+
+	if changed, err := repository.ExpireUserAccount(ctx, workspace, guest, lapsed, event("expired", "user.removed")); err != nil || !changed {
+		t.Fatalf("expire changed=%t err=%v", changed, err)
+	}
+	deactivated, err := repository.GetUser(ctx, guest)
+	if err != nil || !deactivated.Deleted {
+		t.Fatalf("guest=%+v err=%v, want it deactivated", deactivated, err)
+	}
+	membership, err := repository.GetWorkspaceMembership(ctx, workspace, guest)
+	if err != nil || membership.Active {
+		t.Fatalf("membership=%+v err=%v, want it inactive", membership, err)
+	}
+	if _, err := repository.LookupToken(ctx, "xoxp-expire-"+suffix); err == nil {
+		t.Fatal("a deactivated account kept a usable token")
+	}
+
+	// Deactivated is not due: the sweep must not revisit an account it has
+	// already acted on, and a second claim writes nothing.
+	after, err := repository.DueUserExpirations(ctx, workspace, now, 10)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("due after deactivation=%+v err=%v, want none", after, err)
+	}
+	if changed, err := repository.ExpireUserAccount(ctx, workspace, guest, lapsed, event("expired-again", "user.removed")); err != nil || changed {
+		t.Fatalf("second claim changed=%t err=%v, want it refused", changed, err)
+	}
+	// An account with no expiration is never due.
+	untouched, err := repository.GetUser(ctx, permanent)
+	if err != nil || untouched.Deleted {
+		t.Fatalf("permanent account=%+v err=%v, want it left alone", untouched, err)
 	}
 }
