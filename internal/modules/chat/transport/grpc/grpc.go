@@ -1785,6 +1785,14 @@ func (r Remote) AdminSessionSettings(ctx context.Context, workspaceID domain.Wor
 	return settings, nil
 }
 
+func (r Remote) MemberSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.SessionSettings, error) {
+	out, err := r.directory.MemberSessionSettings(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.SessionSettings{}, err
+	}
+	return decodeProtoSessionSettings(out), nil
+}
+
 func sessionSettingsMutation(workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) *chatv1.SessionSettingsMutationRequest {
 	ids := make([]string, 0, len(targets))
 	for _, target := range targets {
@@ -5877,6 +5885,14 @@ func (s *Server) AdminClearSessionSettings(ctx context.Context, input *chatv1.Se
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) MemberSessionSettings(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.SessionSettings, error) {
+	settings, err := s.implementation.MemberSessionSettings(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSessionSettings(settings), nil
 }
 
 func (s *Server) AdminSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.SessionSettingsResponse, error) {

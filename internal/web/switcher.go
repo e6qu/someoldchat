@@ -100,11 +100,21 @@ func (h Handler) switchWorkspace(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusServiceUnavailable, "You were not switched", "A session could not be created. Nothing changed.")
 		return
 	}
+	// Session settings are held per workspace, so the policy that applies is the
+	// target's, read as the identity held there. Without it the switcher would
+	// be a way to hold a longer session in a workspace than signing into it
+	// gives, which is the same defect as the sign-in path had and one door
+	// further along.
+	settings, err := h.Messages.MemberSessionSettings(r.Context(), chosen.Workspace.ID, chosen.UserID)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "You were not switched", "A session could not be created. Nothing changed.")
+		return
+	}
 	// The switched session must not outlive the one it replaces. A sign-in
 	// caps its session at what the identity provider asserted, and switching
 	// carries no fresh assertion — minting a full-length session here would
 	// let a switch quietly extend an expiry the provider set.
-	expiresAt := time.Now().UTC().Add(switchedSessionLifetime)
+	expiresAt := time.Now().UTC().Add(settings.Lifetime())
 	if cookie, cookieErr := r.Cookie(auth.SessionCookieName); cookieErr == nil {
 		if current, lookupErr := h.Messages.LookupSession(r.Context(), cookie.Value); lookupErr == nil && !current.ExpiresAt.IsZero() && current.ExpiresAt.Before(expiresAt) {
 			expiresAt = current.ExpiresAt
@@ -127,11 +137,12 @@ func (h Handler) switchWorkspace(w http.ResponseWriter, r *http.Request) {
 		// that session either way.
 		_ = h.Messages.RevokeSession(r.Context(), cookie.Value)
 	}
-	http.SetCookie(w, auth.SessionCookie(token, int(time.Until(expiresAt).Seconds()), h.CookieDomain))
+	// A cookie with no Max-Age dies when the browser does, which is what Slack's
+	// desktop_app_browser_quit asks for. The durable session keeps its expiry.
+	cookieMaxAge := int(time.Until(expiresAt).Seconds())
+	if settings.DesktopAppBrowserQuit {
+		cookieMaxAge = 0
+	}
+	http.SetCookie(w, auth.SessionCookie(token, cookieMaxAge, h.CookieDomain))
 	h.redirectMutation(w, r, "/app?notice="+url.QueryEscape("You are now in "+chosen.Workspace.Name))
 }
-
-// switchedSessionLifetime is the ceiling a switched session may reach; the
-// session being left caps it further whenever it expires sooner. It matches
-// what a fresh sign-in issues before the identity provider narrows it.
-const switchedSessionLifetime = 24 * time.Hour

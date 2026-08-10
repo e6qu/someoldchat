@@ -1339,3 +1339,123 @@ func TestABrowserSignInIsRecordedInTheAccessLogOnce(t *testing.T) {
 		t.Fatalf("entry=%+v", entry)
 	}
 }
+
+// TestSignInAppliesTheMembersConfiguredSessionDuration is the regression for a
+// policy that was stored, reported back, and never read. An administrator set
+// eight hours through admin.users.session.setSettings, getSettings agreed, and
+// the sign-in path minted twenty-four anyway because it wrote the constant
+// itself. The policy-enforcement gate in tests/policy found it by asking which
+// reader consults ListSessionSettings; the answer was nobody.
+func TestSignInAppliesTheMembersConfiguredSessionDuration(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	store.SeedUser(domain.User{ID: "UADMIN", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
+	store.SeedWorkspaceRole("T1", "UADMIN", domain.WorkspaceRoleAdmin)
+	messages := service.Messages{Store: store}
+	if err := messages.AdminSetSessionSettings(context.Background(), "T1", "UADMIN", []domain.UserID{"U1"},
+		domain.SessionSettings{Duration: domain.MinimumSessionDuration}); err != nil {
+		t.Fatal(err)
+	}
+
+	cookie, _ := googleSignIn(t, messages, store, "")
+	// Eight hours, not twenty-four. The bounds allow for the seconds the
+	// request itself takes.
+	if cookie.MaxAge < 8*60*60-60 || cookie.MaxAge > 8*60*60 {
+		t.Fatalf("session cookie max-age = %d, want the administrator's eight hours", cookie.MaxAge)
+	}
+	session, err := store.LookupSession(context.Background(), cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining := time.Until(session.ExpiresAt); remaining > 8*time.Hour || remaining < 8*time.Hour-time.Minute {
+		t.Fatalf("durable session expires in %s, want the administrator's eight hours", remaining)
+	}
+}
+
+// TestSignInEndsWithTheBrowserWhenTheAdministratorRequiresIt covers the other
+// half of the same setting. Slack's desktop_app_browser_quit means the session
+// ends when the browser is quit, and on the web that is exactly a cookie with
+// no Max-Age. The durable session still expires on its own schedule, so
+// quitting the browser is not the only thing that ends it.
+func TestSignInEndsWithTheBrowserWhenTheAdministratorRequiresIt(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	store.SeedUser(domain.User{ID: "UADMIN", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
+	store.SeedWorkspaceRole("T1", "UADMIN", domain.WorkspaceRoleAdmin)
+	messages := service.Messages{Store: store}
+	if err := messages.AdminSetSessionSettings(context.Background(), "T1", "UADMIN", []domain.UserID{"U1"},
+		domain.SessionSettings{Duration: domain.MinimumSessionDuration, DesktopAppBrowserQuit: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	cookie, _ := googleSignIn(t, messages, store, "")
+	if cookie.MaxAge != 0 || !cookie.Expires.IsZero() {
+		t.Fatalf("session cookie max-age=%d expires=%s, want a cookie that dies with the browser", cookie.MaxAge, cookie.Expires)
+	}
+	session, err := store.LookupSession(context.Background(), cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining := time.Until(session.ExpiresAt); remaining > 8*time.Hour || remaining < 8*time.Hour-time.Minute {
+		t.Fatalf("durable session expires in %s, want the administrator's eight hours", remaining)
+	}
+}
+
+// TestSignInWithoutAConfiguredDurationKeepsTheWorkspaceDefault pins the other
+// direction, so a member nobody configured is not caught by the enforcement.
+func TestSignInWithoutAConfiguredDurationKeepsTheWorkspaceDefault(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	cookie, _ := googleSignIn(t, service.Messages{Store: store}, store, "")
+	if cookie.MaxAge < 24*60*60-60 || cookie.MaxAge > 24*60*60 {
+		t.Fatalf("session cookie max-age = %d, want the workspace default of a day", cookie.MaxAge)
+	}
+}
+
+// googleSignIn drives one complete Google authorization for alice@example.com
+// and returns the session cookie it produced.
+func googleSignIn(t *testing.T, messages service.Messages, _ *memory.Store, cookieDomain string) (*http.Cookie, *httptest.ResponseRecorder) {
+	t.Helper()
+	providerClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/token":
+			return providerResponse(r, `{"access_token":"provider-token"}`), nil
+		case "/userinfo":
+			return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","email_verified":true,"name":"Alice"}`), nil
+		default:
+			return providerResponse(r, "not found"), nil
+		}
+	})}
+	handler, err := NewLoginHandler(messages, "T1", "U1", "https://chat.example.test", cookieDomain, []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "google", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://accounts.google.com/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.client = providerClient
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	begin := httptest.NewRecorder()
+	mux.ServeHTTP(begin, httptest.NewRequest(http.MethodGet, "/auth/google", nil))
+	location, err := url.Parse(begin.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackRequest := httptest.NewRequest(http.MethodGet, "/auth/google/callback?code=one-time-code&state="+url.QueryEscape(location.Query().Get("state")), nil)
+	for _, cookie := range begin.Result().Cookies() {
+		callbackRequest.AddCookie(cookie)
+	}
+	callback := httptest.NewRecorder()
+	mux.ServeHTTP(callback, callbackRequest)
+	if callback.Code != http.StatusSeeOther {
+		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
+	}
+	cookie := findSessionCookie(callback.Result().Cookies())
+	if cookie == nil || cookie.Value == "" {
+		t.Fatal("callback did not create a browser session cookie")
+	}
+	return cookie, callback
+}

@@ -1322,6 +1322,60 @@ func TestSwitchingWorkspacesMintsAnIsolatedSession(t *testing.T) {
 	}
 }
 
+// TestSwitchingWorkspacesAppliesTheTargetWorkspacesSessionPolicy pins the
+// second place a session is minted. A member's session settings are held per
+// workspace, so switching into a workspace whose administrator set a shorter
+// duration must adopt it — otherwise the switcher is a way to hold a longer
+// session in a workspace than signing into it would give.
+func TestSwitchingWorkspacesAppliesTheTargetWorkspacesSessionPolicy(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	// The session being left has to outlast the one being minted, or its own
+	// expiry would be the cap and the policy would decide nothing here either.
+	// The harness session lasts an hour, so this one is its own token.
+	if err := store.SeedSession(ctx, "long-session", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U1", Scopes: authScopeStrings(allAdminScopes()), ExpiresAt: time.Now().UTC().Add(48 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
+	store.SeedUser(domain.User{ID: "U1-second", WorkspaceID: "T2", Email: "admin@example.test", Name: "Admin", RealName: "Workspace Admin"})
+	if err := store.SetWorkspaceRole(ctx, "T2", "U1-second", domain.WorkspaceRoleAdmin, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	messages := service.Messages{Store: store}
+	if err := messages.AdminSetSessionSettings(ctx, "T2", "U1-second", []domain.UserID{"U1-second"},
+		domain.SessionSettings{Duration: domain.MinimumSessionDuration}); err != nil {
+		t.Fatal(err)
+	}
+
+	switched := httptest.NewRequest(http.MethodPost, "/app/workspace/switch",
+		strings.NewReader("workspace_id=T2&_csrf="+auth.CSRFToken("long-session")))
+	switched.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	switched.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "long-session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, switched)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("switch=%d body=%s", response.Code, response.Body.String())
+	}
+	var issued *http.Cookie
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == auth.SessionCookieName {
+			issued = cookie
+		}
+	}
+	if issued == nil || issued.Value == "" {
+		t.Fatalf("the switch did not mint a new session: %+v", issued)
+	}
+	record, err := store.LookupSession(ctx, issued.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining := time.Until(record.ExpiresAt); remaining > 8*time.Hour || remaining < 8*time.Hour-time.Minute {
+		t.Fatalf("switched session expires in %s, want the target workspace's eight hours", remaining)
+	}
+}
+
 // A workspace the reader is not a member of is not switchable into, and the
 // refusal declines to confirm it exists.
 func TestSwitchingRefusesAWorkspaceYouAreNotIn(t *testing.T) {

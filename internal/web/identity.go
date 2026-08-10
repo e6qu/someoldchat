@@ -506,16 +506,12 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	}
 	provider := h.providers[name]
 	oidcSubject, oidcSID := "", ""
-	sessionExpiresAt := time.Now().UTC().Add(24 * time.Hour)
+	var providerExpiresAt time.Time
 	if provider.Issuer != "" {
-		var providerExpiresAt time.Time
 		oidcSubject, oidcSID, providerExpiresAt, err = h.verifyOIDCLoginToken(r.Context(), provider, tokens.IDToken, parts[3])
 		if err != nil {
 			http.Error(w, "authorization identity is unavailable", http.StatusBadGateway)
 			return
-		}
-		if providerExpiresAt.Before(sessionExpiresAt) {
-			sessionExpiresAt = providerExpiresAt
 		}
 	}
 	identity, err := h.userInfo(r.Context(), provider, tokens.AccessToken, name)
@@ -544,6 +540,34 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "authorization identity has no supported access role", http.StatusForbidden)
 		return
 	}
+	// How long this session lives is the administrator's decision, not this
+	// handler's. It used to be a literal twenty-four hours here, which is how a
+	// duration set through admin.users.session.setSettings could be stored,
+	// reported back by getSettings, and decide nothing.
+	//
+	// The read fails the sign-in rather than falling back to the default: a
+	// default chosen because the policy could not be read is the same defect
+	// with an excuse, and it would be longer than the policy every time it
+	// mattered.
+	settings, err := h.service.MemberSessionSettings(r.Context(), user.WorkspaceID, user.ID)
+	if err != nil {
+		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	sessionExpiresAt := time.Now().UTC().Add(settings.Lifetime())
+	// An identity provider's own expiry still caps it. The policy says how long
+	// this deployment is willing to trust the sign-in; the provider says how
+	// long its assertion holds, and neither may extend the other.
+	//
+	// The zero check is what keeps a provider-less sign-in from being capped at
+	// the zero time, which is how the cap used to be skipped — by not existing
+	// yet when the provider branch was the only thing that set it. It cannot
+	// loosen the provider case: SkipExpiryCheck is never set, so go-oidc
+	// refuses an ID token whose exp is absent before this is reached, and a
+	// verified token therefore always carries one.
+	if !providerExpiresAt.IsZero() && providerExpiresAt.Before(sessionExpiresAt) {
+		sessionExpiresAt = providerExpiresAt
+	}
 	sessionToken, err := randomURLValue(32)
 	if err != nil {
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
@@ -560,6 +584,14 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	if cookieMaxAge < 1 {
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
+	}
+	// Slack's desktop_app_browser_quit ends the session when the application is
+	// quit. On the web that is precisely a cookie with no Max-Age and no
+	// Expires: the browser drops it when it closes. The durable session keeps
+	// its own expiry, so quitting is one of the two things that ends it rather
+	// than the only one.
+	if settings.DesktopAppBrowserQuit {
+		cookieMaxAge = 0
 	}
 	if err := h.service.CreateSession(r.Context(), sessionToken, record); err != nil {
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)

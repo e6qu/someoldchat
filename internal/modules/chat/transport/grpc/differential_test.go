@@ -2107,6 +2107,37 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The member's own read is what the sign-in paths use to decide how
+			// long a session lives, so the two compositions must agree on the
+			// duration, on the absence that means the workspace default, and on
+			// refusing somebody who is not a member. A distributed composition
+			// that answered zero where the local one answered twelve hours would
+			// hand out sessions three times too long.
+			name: "a member reads their own session policy identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminSetSessionSettings(ctx, "T1", "UA", []domain.UserID{"U1"},
+					domain.SessionSettings{Duration: 12 * 60 * 60, DesktopAppBrowserQuit: true}); err != nil {
+					return nil, err
+				}
+				configured, err := chat.MemberSessionSettings(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// U2 has no row: the absence is the workspace default, and
+				// Lifetime resolves it rather than the caller.
+				def, err := chat.MemberSessionSettings(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				_, strangerErr := chat.MemberSessionSettings(ctx, "T1", "U-nobody")
+				return []any{
+					fmt.Sprintf("%s/%d/%t/%s", configured.UserID, configured.Duration, configured.DesktopAppBrowserQuit, configured.Lifetime()),
+					fmt.Sprintf("%s/%d/%s", def.UserID, def.Duration, def.Lifetime()),
+					strangerErr != nil,
+				}, nil
+			},
+		},
+		{
 			// An authentication policy this deployment does not hold cannot be
 			// assigned, and both compositions must refuse the same names.
 			name: "authentication policy entities are assigned, paged, and refused identically",

@@ -4441,6 +4441,36 @@ func (m Messages) AdminSessionSettings(ctx context.Context, workspaceID domain.W
 	return m.Store.ListSessionSettings(ctx, workspaceID, targets)
 }
 
+// MemberSessionSettings reports the settings that govern one member's own
+// sessions.
+//
+// This exists because the sign-in paths need the policy and are not
+// administrators: a member signing in reads their own setting to decide how
+// long the session they are being given lives. AdminSessionSettings cannot
+// serve them, so before this method the policy had no reader at all and the
+// duration an administrator set decided nothing.
+//
+// The member reads their own and nobody else's. An administrator reading
+// another member's already has AdminSessionSettings, and widening this one to
+// take a target would put a second authority rule on the same data.
+//
+// A member with no setting is not an error: the absence is the workspace
+// default, so an empty value is returned and domain.SessionSettings.Lifetime
+// resolves it.
+func (m Messages) MemberSessionSettings(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.SessionSettings, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SessionSettings{}, err
+	}
+	settings, err := m.Store.ListSessionSettings(ctx, workspaceID, []domain.UserID{userID})
+	if err != nil {
+		return domain.SessionSettings{}, err
+	}
+	if len(settings) == 0 {
+		return domain.SessionSettings{WorkspaceID: workspaceID, UserID: userID}, nil
+	}
+	return settings[0], nil
+}
+
 // AdminAssignAuthPolicy puts members under an authentication policy. Every
 // named member is checked before one row is written, so a request that names
 // somebody outside the workspace leaves nothing behind.
