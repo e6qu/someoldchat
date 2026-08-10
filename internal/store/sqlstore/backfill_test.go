@@ -633,21 +633,38 @@ func TestSQLiteBackfillRateIsLinear(t *testing.T) {
 		return elapsed
 	}
 	// Package tests run in separate processes and may contend for the same
-	// runner. Contention can inflate either half of a sample arbitrarily, so
-	// compare the median of three paired ratios. Pairing preserves the runner
-	// conditions better than combining independently fastest measurements, and
-	// the median tolerates one disturbed pair without allowing a consistently
-	// quadratic implementation through.
-	ratios := make([]float64, 0, 3)
-	for sample := 0; sample < 3; sample++ {
-		measuredSmall := measure(10000)
-		measuredLarge := measure(20000)
-		ratios = append(ratios, float64(measuredLarge)/float64(measuredSmall))
+	// runner, and contention only ever makes a measurement SLOWER. The fastest
+	// time observed at each size is therefore the closest estimate of what the
+	// pass actually costs, and the ratio of the two fastest is the least
+	// contaminated comparison available.
+	//
+	// This used to take the median of three paired ratios, on the argument that
+	// pairing preserves runner conditions better than combining independently
+	// fastest measurements. CI disproved both halves of that: the runner
+	// disturbed TWO of the three pairs, so the median was disturbed too, and it
+	// disturbed the halves of a single pair very differently — 1.143s for ten
+	// thousand rows against 3.902s for twenty thousand, while another pair ran
+	// the same twenty thousand in 1.656s. Throughput swung from 5,125 to 12,079
+	// rows a second inside one run. A ratio of two independently noisy numbers
+	// amplifies that noise; taking the best of each does not.
+	//
+	// It still catches what it is for. A quadratic pass costs four times as much
+	// at twenty thousand rows as at ten thousand in EVERY sample, including its
+	// fastest, so the best-of ratio is just as damning — there is no sample for
+	// it to hide in.
+	best := func(rows, samples int) time.Duration {
+		t.Helper()
+		fastest := time.Duration(0)
+		for sample := 0; sample < samples; sample++ {
+			if elapsed := measure(rows); fastest == 0 || elapsed < fastest {
+				fastest = elapsed
+			}
+		}
+		return fastest
 	}
-	sort.Float64s(ratios)
-	median := ratios[len(ratios)/2]
-	if median > 3 {
-		t.Fatalf("doubling the rows had a median time multiplier of %.1f (paired samples %.1f, %.1f, %.1f); the pass is not linear", median, ratios[0], ratios[1], ratios[2])
+	small, large := best(10000, 3), best(20000, 3)
+	if multiplier := float64(large) / float64(small); multiplier > 3 {
+		t.Fatalf("doubling the rows multiplied the fastest time by %.1f (%s against %s); the pass is not linear", multiplier, large.Round(time.Millisecond), small.Round(time.Millisecond))
 	}
 }
 
