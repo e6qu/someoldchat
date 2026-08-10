@@ -194,6 +194,13 @@ func TestContentionIsRecognisedOnEveryEngine(t *testing.T) {
 		{"postgres constraint failure", sqlStateError{state: "23505", message: "duplicate key"}, false},
 		{"sqlite busy text", errors.New("database is locked"), true},
 		{"dqlite lost leadership", errors.New("driver: leadership lost while committing"), true},
+		// A write refused because a WAL checkpoint is running is contention,
+		// not a fault: nothing committed and the same call succeeds when it is
+		// made again. dqlite forwards it as bare text, so it was answered false
+		// and the raw string reached the caller — the persistence qualification
+		// failed with "a mutation did not return the value it wrote: checkpoint
+		// in progress" on a change that touched no storage profile at all.
+		{"sqlite checkpoint collision", errors.New("checkpoint in progress"), true},
 		{"unrelated failure", errors.New("disk I/O error"), false},
 	} {
 		if got := contended(testCase.err); got != testCase.want {

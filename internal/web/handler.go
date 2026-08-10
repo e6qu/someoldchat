@@ -3134,6 +3134,24 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // identifiers and no content by design. Three things must be true, each
 // somebody else's decision — the preference is on, the browser granted
 // permission, and Do Not Disturb is not active.
+//
+// A submitting control is re-enabled when the mutation finishes, not when the
+// view catches up. Those are separate facts and used to be one promise: on a
+// 204 the submit handler returns refresh(true) and released only after it, so a
+// refresh that never settled left the control disabled for ever and the next
+// click did nothing at all — no request, no error, no feedback. A CI failure
+// showed exactly that, with one POST /app/conversation/create in the network
+// trace where the test made two, and data-discarded-refreshes at 0 ruling out
+// the refresh-discard defect recorded separately in the product gap audit. The
+// composer's sending flag still waits for the end, because it guards against
+// sending the same text twice and the text is not cleared until the view
+// updates.
+//
+// This explanation lives here rather than beside the code it describes: the
+// script's bytes are hashed for its Content-Security-Policy, html/template
+// elides comments in script context, and an elided comment makes the served
+// document disagree with the hash that permits it. There is deliberately not one
+// comment inside the script for that reason.
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
@@ -3902,7 +3920,8 @@ if(scheduleInput&&action.indexOf('/app/message/schedule')===0&&scheduleInput.val
 var sent=text?text.value:'';
 var button=submitter||form.querySelector('button[type=submit]');
 if(button)button.disabled=true;
-var release=function(){if(button)button.disabled=false;if(form===composer)sending=false};
+var releaseButton=function(){if(button)button.disabled=false};
+var release=function(){releaseButton();if(form===composer)sending=false};
 clearError(form);
 fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
 if(!response.ok)return response.text().then(function(body){throw new Error(body)});
@@ -3912,6 +3931,7 @@ if(redirect){if(form===composer&&text&&text.value===sent){text.value='';draftAtt
 if(response.status===204)return '';
 return response.text();
 }).then(function(html){
+releaseButton();
 if(html===null)return null;
 if(quiet){form.hidden=true;return null}
 if(html===''){return refresh(true).then(function(){

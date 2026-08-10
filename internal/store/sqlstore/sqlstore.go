@@ -1017,9 +1017,19 @@ var contendedSQLStates = map[string]bool{"40001": true, "40P01": true, "55P03": 
 // failure with no machine-readable classification at all. dqlite forwards a
 // leadership change that way, and a PostgreSQL error that has been flattened to
 // text on its way through a wrapper carries its SQLSTATE in the message.
+//
+// "checkpoint in progress" is the same class and was missing. SQLite refuses a
+// write that collides with a WAL checkpoint, the transaction does not commit,
+// and the same call succeeds when it is made again — which is the definition
+// this list exists to capture. dqlite forwards it as bare text, so contended
+// answered false, underContention made exactly one attempt, and the raw string
+// surfaced to the caller: the persistence qualification failed with "a mutation
+// did not return the value it wrote: checkpoint in progress" on a change that
+// touched neither the store nor any storage profile.
 var contendedMessages = []string{
 	"database is locked",
 	"database table is locked",
+	"checkpoint in progress",
 	"sqlite_busy",
 	"sqlstate 40001",
 	"sqlstate 40p01",
