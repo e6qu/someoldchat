@@ -32,12 +32,20 @@ import (
 	"testing"
 )
 
-// killers are the packages a removed guard must be noticed by. The matrix is
-// the one built for this, and the service and transport suites are included
-// because a guard those cover and the matrix does not is still a guard under
-// test — the question is whether anything notices, not whether one chosen
+// killers are the packages a removed guard must be noticed by, CHEAPEST FIRST.
+// The matrix is the one built for this, and the service and API suites are
+// included because a guard those cover and the matrix does not is still a guard
+// under test — the question is whether anything notices, not whether one chosen
 // suite does.
-var killers = []string{"./tests/authorization", "./internal/service", "./internal/api/slack"}
+//
+// They are run in order and stop at the first that notices, which is not a
+// shortcut but the definition: a mutant is killed if ANY suite fails, so once
+// one has, the rest cannot change the verdict. Running all three every time
+// spent the cost of the slowest answer on questions already answered — most
+// mutants die to the matrix, and the sweep was taking over half an hour on CI
+// for that. Only a survivor pays for every package, which is exactly the case
+// where every package is needed.
+var killers = []string{"./tests/authorization", "./internal/api/slack", "./internal/service"}
 
 // guardPrefixes name the authorization helpers. A guard is recognised by the
 // shape of its name, which is a real limit: an authorization check written
@@ -348,11 +356,25 @@ func runMutant(root string, target operation) (verdict, string) {
 	// rather than recorded, because recording it silently turns a killed mutant
 	// into an undecided one — the second sweep reported 32 undecided and most
 	// of them were this. Only a fault that survives every attempt stops the run.
+	for _, killer := range killers {
+		verdict, detail, decided := runKiller(root, overlay, killer)
+		if decided {
+			return verdict, detail
+		}
+	}
+	// Every suite ran and none noticed.
+	return survived, ""
+}
+
+// runKiller runs one suite against the mutant. The third result says whether
+// the answer settles the mutant's fate: a failure kills it and a build problem
+// or a broken toolchain stops it, while a pass only means this suite did not
+// notice and the next one must be asked.
+func runKiller(root, overlay, killer string) (verdict, string, bool) {
 	var text string
 	var runErr error
 	for attempt := 0; attempt < mutantAttempts; attempt++ {
-		arguments := append([]string{"test", "-count=1", "-overlay=" + overlay}, killers...)
-		command := exec.Command("go", arguments...)
+		command := exec.Command("go", "test", "-count=1", "-overlay="+overlay, killer)
 		command.Dir = root
 		// The repository's own cache, which is what the Makefile builds
 		// through. Sharing the developer's default cache means the sweep
@@ -366,15 +388,15 @@ func runMutant(root string, target operation) (verdict, string) {
 		}
 	}
 	if fault, broken := toolchainFault(text); broken {
-		return harnessBroke, fault
+		return harnessBroke, fault, true
 	}
 	if strings.Contains(text, "[build failed]") {
-		return didNotBuild, buildErrorLine(text)
+		return didNotBuild, buildErrorLine(text), true
 	}
-	if runErr == nil {
-		return survived, ""
+	if runErr != nil {
+		return killed, "", true
 	}
-	return killed, ""
+	return survived, "", false
 }
 
 // mutantAttempts is how many times a mutant is retried when the toolchain
