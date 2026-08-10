@@ -64,8 +64,16 @@ func machines() map[string]machine {
 			why:         "a step ends with the run that contains it, and a completed step is not executed again",
 		},
 		"SharedInviteStatus": {
-			terminal:    []string{"accepted", "declined", "revoked"},
-			transitions: map[string][]string{"pending": {"approved", "declined", "revoked"}, "approved": {"accepted", "declined", "revoked"}},
+			terminal: []string{"accepted", "declined", "revoked"},
+			// Pending does NOT lead to declined, and this said it did until a
+			// driver asked the product. Declining is the invited organization's
+			// answer, and it has nothing to answer until the host has approved
+			// the invitation and it has reached them; DeclineSharedInvite is
+			// approved-to-declined and there is no operation anywhere that
+			// declines a pending one. The host refusing at that stage is denying,
+			// which lands on revoked — the same state revoking reaches from
+			// approved, by a different operation and a different event.
+			transitions: map[string][]string{"pending": {"approved", "revoked"}, "approved": {"accepted", "declined", "revoked"}},
 			why:         "acceptance creates the shared channel and is not undone by this machine; declining and revoking end the invitation. Expiry is a deadline read against the clock rather than a stored state, which is why fourteen days is enforced at approval and acceptance instead of appearing here",
 		},
 		"SavedItemState": {
@@ -74,8 +82,20 @@ func machines() map[string]machine {
 			why:         "a member's own saved item moves freely; marking something done is not a promise it stays done",
 		},
 		"InviteRequestStatus": {
-			terminal:    []string{"accepted", "denied", "revoked"},
-			transitions: map[string][]string{"pending": {"approved", "denied", "revoked"}, "approved": {"accepted", "denied", "revoked"}},
+			terminal: []string{"accepted", "denied", "revoked"},
+			// Denied and revoked are not interchangeable, and this machine had
+			// them both reachable from both states. The service says which is
+			// which: "denied is the answer to a request, revoked is the
+			// withdrawal of an answer already given". So a pending request is
+			// denied and never revoked, and an approved one is revoked and
+			// never denied — one operation, AdminDenyInviteRequest, and the
+			// state it lands on depends on where it started.
+			//
+			// The driver reported both edges, but only after it was made to
+			// check that an accepted transition ARRIVES: while it required no
+			// more than the absence of an error, denying a pending request
+			// satisfied "pending may become revoked" by landing on denied.
+			transitions: map[string][]string{"pending": {"approved", "denied"}, "approved": {"accepted", "revoked"}},
 			why:         "an accepted invitation has produced an account; a denied or revoked one is over",
 		},
 		"AppApprovalStatus": {
