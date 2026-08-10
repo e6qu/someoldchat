@@ -69,7 +69,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DeleteReminder":                          {},
 		"DeleteScheduledUserStatus":               {},
 		"DeleteWorkflow":                          {},
-		"DenySharedInvite":                        {},
 		"DiscardWorkflowStagedChanges":            {},
 		"DispatchAppShortcut":                     {},
 		"DispatchSlashCommand":                    {},
@@ -82,8 +81,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"GetFunctionPermission":                   {},
 		"GetListDownload":                         {},
 		"GetListItem":                             {},
-		"GetTriggerPermission":                    {},
-		"GetWorkflowRun":                          {},
 		"InviteShared":                            {},
 		"IssueDeveloperAppToken":                  {},
 		"JoinHuddle":                              {},
@@ -132,10 +129,9 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"UpdateWorkflow":                          {},
 		"UserByEmail":                             {},
 		"WebhookTriggerURL":                       {},
-		"WorkflowRunInteraction":                  {},
 	}
 }
 
 // indistinguishableRefusalCeiling is how many operations still answer a caller
 // who holds the authority exactly as they answer one who does not.
-const indistinguishableRefusalCeiling = 108
+const indistinguishableRefusalCeiling = 104
