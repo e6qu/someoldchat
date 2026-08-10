@@ -12224,10 +12224,32 @@ func (s *Store) IsThreadFollowed(ctx context.Context, workspace domain.Workspace
 	return followed != 0, nil
 }
 
+// SetThreadFollowed runs under contention because its transaction reads before
+// it writes.
+//
+// SQLite's busy_timeout does not absorb that shape. A deferred transaction that
+// takes a read snapshot and then asks for the write lock is refused
+// SQLITE_BUSY immediately, with no wait, because waiting could only deadlock —
+// the writer it would wait for needs the snapshot this transaction is holding.
+// The only remedies are to begin the transaction as IMMEDIATE or to retry the
+// whole thing, and underContention is the second one; that is why it retries an
+// attempt rather than a statement.
+//
+// Following two hundred and fifty thread roots in a row surfaced it as
+// "database is locked (5) (SQLITE_BUSY)" under the race detector, which widens
+// the window rather than creating it. Every writer here with the same
+// read-then-write shape has the same exposure; this is the one an actual
+// failure named.
 func (s *Store) SetThreadFollowed(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, root domain.MessageTimestamp, followed bool, event events.Event) error {
 	if _, err := domain.ParseMessageTimestamp(root); err != nil {
 		return err
 	}
+	return underContention(ctx, func() error {
+		return s.setThreadFollowedOnce(ctx, workspace, user, conversation, root, followed, event)
+	})
+}
+
+func (s *Store) setThreadFollowedOnce(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, root domain.MessageTimestamp, followed bool, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
