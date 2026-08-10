@@ -22,6 +22,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  mutation:
+    name: Guard mutation qualification
+    runs-on: ubuntu-24.04
+    # Every operation in internal/service is a separate compile and suite run —
+    # three hundred and fifty of them. It is its own job for the same reason the
+    # browser and SDK qualifications are: putting it in `Go checks`, which
+    # already spends most of its twenty minutes on the race suite, would cancel
+    # a healthy gate rather than report one.
+    #
+    # The budget is roughly double the observed run rather than just above it.
+    # The first run here finished in 44m28s against a 45-minute budget, which is
+    # not a margin — one slow runner and a healthy gate reports a failure.
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Delete the authorization in front of each operation and require a suite to notice
+        run: make test-mutation
+
   go:
     name: Go checks
     runs-on: ubuntu-24.04

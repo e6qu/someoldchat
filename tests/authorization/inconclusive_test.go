@@ -17,7 +17,6 @@ func inconclusiveStanding() map[string]struct{} {
 		"AdminTriggerTypePermission":         {},
 		"AppendMessageStream":                {},
 		"AssistantSearchContext":             {},
-		"Delete":                             {},
 		"DeleteExternalAuthToken":            {},
 		"DispatchViewBlockAction":            {},
 		"GetWorkflowPermission":              {},
@@ -32,7 +31,6 @@ func inconclusiveStanding() map[string]struct{} {
 		"PostWithBlocksAndAttachments":       {},
 		"PublishView":                        {},
 		"RequestWorkflowStepResponsesExport": {},
-		"SetAssistantThreadStatus":           {},
 		"SetAssistantThreadSuggestedPrompts": {},
 		"SetAssistantThreadTitle":            {},
 		"SetWorkflowPermission":              {},
@@ -40,12 +38,8 @@ func inconclusiveStanding() map[string]struct{} {
 		"StartMessageStream":                 {},
 		"StopMessageStream":                  {},
 		"SynchronizeExternalUserRole":        {},
-		"Unfurl":                             {},
-		"Update":                             {},
 		"UpdateMessage":                      {},
 		"UpdateScheduledMessage":             {},
-		"UpdateWithBlocks":                   {},
-		"UpdateWithBlocksAndAttachments":     {},
 		"WorkflowStepCompleted":              {},
 		"WorkflowStepFailed":                 {},
 		"WorkflowStepResponses":              {},
@@ -54,4 +48,4 @@ func inconclusiveStanding() map[string]struct{} {
 }
 
 // inconclusiveStandingCeiling is how blind the probe is allowed to be.
-const inconclusiveStandingCeiling = 39
+const inconclusiveStandingCeiling = 33

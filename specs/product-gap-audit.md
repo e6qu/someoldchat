@@ -90,6 +90,17 @@ itself with the thing being judged.
 Claims at `sdk-compatible` or above that carry no method-level evidence must
 not inherit it from the aggregate green suite. The count is in the report.
 
+Authorization is now qualified from two directions rather than one. The matrix
+in `tests/authorization` drives every operation as seven tiers, and the
+guard-mutation gate in `tests/mutation` deletes every guard in front of an
+operation and requires a suite to notice. The second exists because the first
+cannot check itself: it reported ninety operations as authorization-tested that
+stayed green with no authorization at all. Two ceilings record what is left —
+`refusalDoesNotDistinguishTheHolder` for operations whose refusal cannot be told
+apart from a missing object, and `survivingGuardCeiling` for operations nothing
+notices the loss of. Both only shrink, and one fixture object per operation is
+what shrinks them.
+
 The remaining layers:
 
 1. pin per-method argument, response and error schemas, not only the method
