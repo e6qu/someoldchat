@@ -49,12 +49,29 @@ type machine struct {
 func machines() map[string]machine {
 	return map[string]machine{
 		"WorkflowStatus": {
-			terminal:    []string{},
-			transitions: map[string][]string{"draft": {"published"}, "published": {"disabled", "draft"}, "disabled": {"published", "draft"}},
-			why:         "a workflow has no dead end: a disabled workflow is published again, and a published one is edited back to draft",
+			terminal: []string{},
+			// Two edges here were wrong, and UpdateWorkflow's own comments say
+			// so. A published workflow is NOT edited back to draft: "a staged
+			// edit to a published workflow keeps the published revision live",
+			// so the edit is accepted and the status stays published — which is
+			// why the driver had to check that a transition arrives rather than
+			// that it was accepted. And a draft CAN be taken offline: unpublish
+			// is the caller's explicit action and does not ask what the status
+			// was, because "every other edit leaves a draft or published head
+			// exactly as the caller's action says".
+			transitions: map[string][]string{"draft": {"published", "disabled"}, "published": {"disabled"}, "disabled": {"published", "draft"}},
+			why:         "a workflow has no dead end: a disabled workflow is published again or edited back to draft",
 		},
 		"WorkflowRunStatus": {
-			terminal:    []string{"completed", "failed", "cancelled"},
+			terminal: []string{"completed", "failed", "cancelled"},
+			// "queued" is declared, counted, and never produced. runWorkflow
+			// creates a run already running, and the only other mentions of
+			// queued in the tree are the two stores counting it for the Workflow
+			// Activity summary — so that view reports a Queued figure which is
+			// structurally always zero. It is left in the machine because the
+			// domain declares it and the activity view reads it; what to do
+			// about a state nothing can reach is recorded in the product gap
+			// audit rather than decided by deleting the constant here.
 			transitions: map[string][]string{"queued": {"running", "cancelled", "failed"}, "running": {"completed", "failed", "cancelled"}},
 			why:         "a run that finished, failed or was cancelled is over; nothing restarts it in place",
 		},

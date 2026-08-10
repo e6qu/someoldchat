@@ -1,10 +1,14 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
 
+	"path/filepath"
+
+	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
@@ -34,16 +38,33 @@ type driver struct {
 
 func drivers() map[string]driver {
 	return map[string]driver{
-		"AppApprovalStatus":   appApprovalDriver(),
-		"SavedItemState":      savedItemDriver(),
-		"SharedInviteStatus":  sharedInviteDriver(),
-		"InviteRequestStatus": inviteRequestDriver(),
+		"AppApprovalStatus":    appApprovalDriver(),
+		"SavedItemState":       savedItemDriver(),
+		"SharedInviteStatus":   sharedInviteDriver(),
+		"InviteRequestStatus":  inviteRequestDriver(),
+		"ExternalUploadStatus": externalUploadDriver(),
+		"WorkflowStatus":       workflowDriver(),
 	}
 }
 
 // undrivenLifecycleCeiling is how many declared machines are still checked only
 // against themselves. Each is a set of rules nothing holds the product to.
-const undrivenLifecycleCeiling = 4
+//
+// The two left are WorkflowRunStatus and WorkflowStepStatus, and the reason is
+// not that they resist driving — it is what driving them costs. A run needs an
+// app whose manifest declares the step's function, an installation, a published
+// workflow, a trigger, and then the app-facing completion calls that advance a
+// step; the run and the step machines have to be driven together because a step
+// is what moves the run. That is a fixture, not a driver, and it belongs in its
+// own change rather than bolted onto this one.
+//
+// Looking for the driver found something first: a run can never be queued.
+// runWorkflow creates every run already running, nothing else sets the state,
+// and both stores count queued runs into the Workflow Activity summary — so it
+// reports a figure that is always zero. That is recorded in the product gap
+// audit, because it is a question about the execution model rather than a bug
+// with an obvious fix.
+const undrivenLifecycleCeiling = 2
 
 func TestEveryLifecycleWithoutADriverIsCounted(t *testing.T) {
 	undriven := 0
@@ -87,7 +108,17 @@ func TestTheProductRefusesEveryTransitionTheMachineForbids(t *testing.T) {
 					case allowed[to] && err != nil:
 						t.Errorf("%s says %q may become %q and the product refused with %v", name, from, to, err)
 					case !allowed[to] && err == nil:
-						t.Errorf("%s says %q may not become %q and the product allowed it, leaving %q", name, from, to, wiring.observe(t, messages))
+						// Accepting the call is not the same as making the
+						// move. A staged edit to a published workflow is
+						// accepted and deliberately leaves it published, and
+						// reading that as a forbidden transition would be this
+						// harness confusing an operation with a transition —
+						// the mirror of the mistake it just caught on the
+						// allowed side. What the machine constrains is the
+						// state the instance ends in.
+						if reached := wiring.observe(t, messages); reached == to {
+							t.Errorf("%s says %q may not become %q and the product did it anyway", name, from, to)
+						}
 					case allowed[to] && err == nil:
 						// A transition that is accepted and does not arrive is
 						// the defect this whole project keeps finding: the call
@@ -479,6 +510,223 @@ func inviteRequestDriver() driver {
 		observe: func(t *testing.T, messages service.Messages) string {
 			t.Helper()
 			current, err := messages.Store.GetInviteRequest(context.Background(), workspace, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(current.Status)
+		},
+	}
+}
+
+// externalUploadDriver drives Slack's two-step upload: a ticket is created, the
+// bytes are put, and the upload is completed into a real file.
+//
+// It needs a blob store, because putting the bytes is the transition. A driver
+// that skipped that step would be writing rows rather than driving the product,
+// which is the thing these drivers exist not to do.
+func externalUploadDriver() driver {
+	const (
+		workspace = domain.WorkspaceID("T1")
+		member    = domain.UserID("U-member")
+		channel   = domain.ConversationID("C1")
+		payload   = "hello"
+	)
+	var uploadID domain.ExternalUploadID
+	return driver{
+		start: func(t *testing.T, state string) (service.Messages, bool) {
+			t.Helper()
+			ctx := context.Background()
+			repository := memory.New()
+			now := time.Now().UTC()
+			if err := repository.SeedWorkspace(domain.Workspace{ID: workspace, Name: "test"}); err != nil {
+				t.Fatal(err)
+			}
+			membership := domain.WorkspaceMembership{WorkspaceID: workspace, UserID: member, Role: domain.WorkspaceRoleMember, Active: true}
+			if err := repository.CreateUser(ctx, domain.User{ID: member, WorkspaceID: workspace, Name: "member", Email: "member@example.test"}, membership, events.Event{
+				ID: "E-user", WorkspaceID: workspace, Topic: "user.created", CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repository.CreateConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: workspace, Name: "general"}, member, events.Event{
+				ID: "E-conversation", WorkspaceID: workspace, Topic: "conversation.created", CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages := service.Messages{Store: repository, Blob: objects}
+			ticket, err := messages.CreateExternalUpload(ctx, workspace, member, "fixture.txt", "text/plain", int64(len(payload)), time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			uploadID = ticket.ID
+			switch domain.ExternalUploadStatus(state) {
+			case domain.ExternalUploadPending:
+			case domain.ExternalUploadUploaded:
+				if err := messages.UploadExternalFile(ctx, uploadID, int64(len(payload)), bytes.NewReader([]byte(payload))); err != nil {
+					t.Fatalf("reaching %s: %v", state, err)
+				}
+			case domain.ExternalUploadCompleted:
+				if err := messages.UploadExternalFile(ctx, uploadID, int64(len(payload)), bytes.NewReader([]byte(payload))); err != nil {
+					t.Fatalf("reaching %s: %v", state, err)
+				}
+				if _, err := messages.CompleteExternalUpload(ctx, workspace, member, uploadID, "fixture", []domain.ConversationID{channel}, "", "", ""); err != nil {
+					t.Fatalf("reaching %s: %v", state, err)
+				}
+			}
+			return messages, true
+		},
+		attempt: func(messages service.Messages, from, to string) error {
+			ctx := context.Background()
+			switch domain.ExternalUploadStatus(to) {
+			case domain.ExternalUploadUploaded:
+				return messages.UploadExternalFile(ctx, uploadID, int64(len(payload)), bytes.NewReader([]byte(payload)))
+			case domain.ExternalUploadCompleted:
+				_, err := messages.CompleteExternalUpload(ctx, workspace, member, uploadID, "fixture", []domain.ConversationID{channel}, "", "", "")
+				return err
+			}
+			// Nothing puts a spent ticket back to pending.
+			return errNoSuchTransition
+		},
+		observe: func(t *testing.T, messages service.Messages) string {
+			t.Helper()
+			current, err := messages.Store.GetExternalUpload(context.Background(), uploadID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(current.Status)
+		},
+	}
+}
+
+// workflowDriver drives a workflow between draft, published and disabled.
+//
+// One operation carries every transition: UpdateWorkflow publishes when asked
+// to, takes the workflow offline when handed a disabled status, and otherwise
+// leaves a draft — except on a published workflow, where a plain edit is staged
+// and the published revision stays live. That last rule is the interesting one,
+// and it is the product's own comment rather than an inference.
+func workflowDriver() driver {
+	const (
+		workspace = domain.WorkspaceID("T1")
+		owner     = domain.UserID("U-owner")
+		app       = domain.AppID("A1")
+	)
+	// The service mints the identifier, so the driver reads it back rather than
+	// assuming one.
+	var workflow domain.WorkflowID
+	definition := func(status domain.WorkflowStatus) domain.WorkflowDefinition {
+		return domain.WorkflowDefinition{
+			ID: workflow, WorkspaceID: workspace, AppID: app, OwnerID: owner,
+			CallbackID: "fixture", Title: "fixture workflow", Status: status,
+			InputSchema: `{}`,
+			// Publishing validates the steps, so a workflow with none cannot be
+			// published and the driver would never reach the state it is for.
+			Steps: `[{"function_id":"triage","title":"Classify","inputs":{"source":"workflow"}}]`,
+		}
+	}
+	version := func(t *testing.T, messages service.Messages) uint64 {
+		t.Helper()
+		current, err := messages.Store.GetWorkflow(context.Background(), workspace, workflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return current.Version
+	}
+	return driver{
+		start: func(t *testing.T, state string) (service.Messages, bool) {
+			t.Helper()
+			ctx := context.Background()
+			repository := memory.New()
+			now := time.Now().UTC()
+			if err := repository.SeedWorkspace(domain.Workspace{ID: workspace, Name: "test"}); err != nil {
+				t.Fatal(err)
+			}
+			membership := domain.WorkspaceMembership{WorkspaceID: workspace, UserID: owner, Role: domain.WorkspaceRoleMember, Active: true}
+			if err := repository.CreateUser(ctx, domain.User{ID: owner, WorkspaceID: workspace, Name: "owner", Email: "owner@example.test"}, membership, events.Event{
+				ID: "E-user", WorkspaceID: workspace, Topic: "user.created", CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// The workflow's step names a function, and a function the app's
+			// manifest does not declare is refused — so the app has to be real,
+			// with the manifest that declares it, before a workflow can exist
+			// at all.
+			if err := repository.CreateApp(ctx, domain.App{
+				ID: app, DevelopmentWorkspaceID: workspace, OwnerID: owner, Name: "Automation",
+				ClientID: "client", SigningSecretHash: "signing-hash",
+				SigningSecretCiphertext: "signing-ciphertext", VerificationTokenHash: "verification-hash",
+				VerificationTokenCiphertext: "verification-ciphertext",
+				ManifestVersion:             1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+			}, domain.AppManifestRevision{
+				AppID: app, Version: 1, CreatedBy: owner, CreatedAt: now,
+				Manifest: `{
+					"display_information":{"name":"Automation"},
+					"settings":{"function_runtime":"remote"},
+					"functions":{"triage":{
+						"title":"Triage incident","description":"Classifies one incident",
+						"input_parameters":{"properties":{"incident":{"type":"string","title":"Incident"}},"required":["incident"]},
+						"output_parameters":{"properties":{"priority":{"type":"integer","title":"Priority"}},"required":["priority"]}
+					}}
+				}`,
+			}, domain.OAuthClient{ID: "client", SecretHash: "secret", AppID: app}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{
+				AppID: app, WorkspaceID: workspace, Enabled: true, CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			messages := service.Messages{Store: repository}
+			// Created through the product rather than written as a row: the
+			// service normalises the step payload, and a workflow whose steps
+			// were never normalised cannot be published, so a seeded row would
+			// have made the very transition under test unreachable.
+			created, err := messages.CreateWorkflow(ctx, workspace, owner, definition(domain.WorkflowDraft))
+			if err != nil {
+				t.Fatal(err)
+			}
+			workflow = created.ID
+			switch domain.WorkflowStatus(state) {
+			case domain.WorkflowDraft:
+			case domain.WorkflowPublished:
+				if _, err := messages.UpdateWorkflow(ctx, workspace, owner, definition(domain.WorkflowDraft), version(t, messages), true); err != nil {
+					t.Fatalf("reaching %s: %v", state, err)
+				}
+			case domain.WorkflowDisabled:
+				if _, err := messages.UpdateWorkflow(ctx, workspace, owner, definition(domain.WorkflowDraft), version(t, messages), true); err != nil {
+					t.Fatalf("publishing on the way to %s: %v", state, err)
+				}
+				if _, err := messages.UpdateWorkflow(ctx, workspace, owner, definition(domain.WorkflowDisabled), version(t, messages), false); err != nil {
+					t.Fatalf("reaching %s: %v", state, err)
+				}
+			}
+			return messages, true
+		},
+		attempt: func(messages service.Messages, from, to string) error {
+			ctx := context.Background()
+			current, err := messages.Store.GetWorkflow(ctx, workspace, workflow)
+			if err != nil {
+				return err
+			}
+			switch domain.WorkflowStatus(to) {
+			case domain.WorkflowPublished:
+				_, err := messages.UpdateWorkflow(ctx, workspace, owner, definition(domain.WorkflowDraft), current.Version, true)
+				return err
+			case domain.WorkflowDisabled:
+				_, err := messages.UpdateWorkflow(ctx, workspace, owner, definition(domain.WorkflowDisabled), current.Version, false)
+				return err
+			case domain.WorkflowDraft:
+				_, err := messages.UpdateWorkflow(ctx, workspace, owner, definition(domain.WorkflowDraft), current.Version, false)
+				return err
+			}
+			return errNoSuchTransition
+		},
+		observe: func(t *testing.T, messages service.Messages) string {
+			t.Helper()
+			current, err := messages.Store.GetWorkflow(context.Background(), workspace, workflow)
 			if err != nil {
 				t.Fatal(err)
 			}
