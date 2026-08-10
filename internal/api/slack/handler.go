@@ -5807,8 +5807,14 @@ func (h Handler) adminEmojiAddAlias(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The second argument is the reason a NOT-FOUND is reported with, and this
+	// route named fatal_error. Aliasing an emoji that does not exist is an
+	// ordinary mistake with an ordinary answer, and telling a client that
+	// something broke unexpectedly is both wrong and unactionable — it cannot
+	// be told apart from a genuine fault. Its two neighbours, remove and rename,
+	// already answer emoji_not_found for the very same condition.
 	if err := h.Messages.AdminAddEmojiAlias(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], fields["alias_for"]); err != nil {
-		writeError(w, mapServiceError(err, "fatal_error"))
+		writeError(w, mapServiceError(err, "emoji_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
