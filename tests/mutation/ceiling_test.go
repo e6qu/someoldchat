@@ -9,5 +9,8 @@ package mutation
 // act the same way when the object is not there, so the matrix was accepting
 // evidence equally consistent with no enforcement. See
 // refusalDoesNotDistinguishTheHolder in tests/authorization. Giving the fixture
-// an object each operation can find is what lowers both numbers together.
-const survivingGuardCeiling = 102
+// an object each operation can find is what lowers both numbers together, and
+// it does: seeding a canvas, a list, a call, a reminder, a bookmark, a user
+// group, a file, a workflow and a real app took this from 102 to 90 and that
+// list from 138 to 108 in one change.
+const survivingGuardCeiling = 90

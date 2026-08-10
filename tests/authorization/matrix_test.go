@@ -314,6 +314,24 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(domain.UserID("U-member"))
 	case reflect.TypeOf(domain.ConversationID("")):
 		return reflect.ValueOf(domain.ConversationID("C1"))
+	case reflect.TypeOf(domain.CanvasID("")):
+		return reflect.ValueOf(fixtureCanvasID)
+	case reflect.TypeOf(domain.ListID("")):
+		return reflect.ValueOf(fixtureListID)
+	case reflect.TypeOf(domain.CallID("")):
+		return reflect.ValueOf(fixtureCallID)
+	case reflect.TypeOf(domain.ReminderID("")):
+		return reflect.ValueOf(fixtureReminderID)
+	case reflect.TypeOf(domain.BookmarkID("")):
+		return reflect.ValueOf(fixtureBookmarkID)
+	case reflect.TypeOf(domain.UserGroupID("")):
+		return reflect.ValueOf(fixtureUserGroupID)
+	case reflect.TypeOf(domain.FileID("")):
+		return reflect.ValueOf(fixtureFileID)
+	case reflect.TypeOf(domain.WorkflowID("")):
+		return reflect.ValueOf(fixtureWorkflowID)
+	case reflect.TypeOf(domain.AppID("")):
+		return reflect.ValueOf(fixtureAppID)
 	case reflect.TypeOf(domain.MessageTimestamp("")):
 		if chosen == fillingWithoutTimestamps {
 			return reflect.Zero(argument)
@@ -382,11 +400,124 @@ func newFixture(t *testing.T) service.Messages {
 	if got := domain.NewMessageTimestamp(created); got != fixtureMessageTimestamp {
 		t.Fatalf("the seeded message's timestamp is %s, and the probe hands out %s", got, fixtureMessageTimestamp)
 	}
+	seedFixtureObjects(t, repository, created)
 	return service.Messages{Store: repository}
+}
+
+// seedFixtureObjects gives the workspace one of each thing an operation can
+// name. A failure here fails the fixture rather than the operation under test:
+// a probe that silently ran without its objects would report the very blindness
+// this exists to remove.
+func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	event := func(id string, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id), WorkspaceID: "T1", Topic: topic, CreatedAt: at}
+	}
+	seed := func(what string, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("seed %s: %v", what, err)
+		}
+	}
+	seed("canvas", repository.CreateCanvas(ctx, domain.Canvas{
+		ID: fixtureCanvasID, WorkspaceID: "T1", OwnerID: "U-member", Title: "fixture canvas",
+		Version: 1, CreatedAt: at, UpdatedAt: at,
+	}, event("E-canvas", "canvas.created")))
+	seed("list", repository.CreateList(ctx, domain.List{
+		ID: fixtureListID, WorkspaceID: "T1", OwnerID: "U-member", Name: "fixture list",
+		Version: 1, CreatedAt: at, UpdatedAt: at,
+	}, event("E-list", "list.created")))
+	// The holder the differential asks is the workspace owner, and a document
+	// belonging to a member is not theirs to read. Without a grant the holder
+	// and the tier beneath are refused alike — "it is not there" both times —
+	// which is the very blindness this fixture exists to remove. Ownership stays
+	// with the member so "mine" and "anybody's" remain different questions; the
+	// grant is what lets the holder through.
+	seed("canvas access", repository.SetCanvasAccess(ctx, domain.CanvasAccess{
+		CanvasID: fixtureCanvasID, EntityType: domain.GrantUser, EntityID: "U-owner", Access: domain.AccessWrite,
+	}, event("E-canvas-access", "canvas.access_set")))
+	seed("list access", repository.SetListAccess(ctx, domain.ListAccess{
+		ListID: fixtureListID, EntityType: domain.GrantUser, EntityID: "U-owner", Access: domain.AccessWrite,
+	}, event("E-list-access", "list.access_set")))
+	seed("call", repository.CreateCall(ctx, domain.Call{
+		ID: fixtureCallID, WorkspaceID: "T1", ConversationID: "C1", ExternalUniqueID: "fixture-call",
+		JoinURL: "https://example.test/call", Title: "fixture call", CreatedBy: "U-member",
+		Participants: []domain.UserID{"U-member"}, StartedAt: at,
+	}, event("E-call", "call.created")))
+	seed("reminder", repository.CreateReminder(ctx, domain.Reminder{
+		WorkspaceID: "T1", ID: fixtureReminderID, Creator: "U-member", User: "U-member",
+		Text: "fixture reminder", Time: at.Add(time.Hour),
+	}, event("E-reminder", "reminder.created")))
+	seed("bookmark", repository.CreateBookmark(ctx, domain.Bookmark{
+		ID: fixtureBookmarkID, WorkspaceID: "T1", Conversation: "C1", Title: "fixture bookmark",
+		Type: "link", Link: "https://example.test/bookmark", UpdatedBy: "U-member",
+		CreatedAt: at, UpdatedAt: at,
+	}, event("E-bookmark", "bookmark.created")))
+	// A workflow names an app, and an app identifier the probe hands out with no
+	// app behind it is worse than none: the holder is then refused "not found"
+	// exactly as a stranger is, which is the blindness rather than a step out of
+	// it. The app is real, owned by the member, with the manifest revision and
+	// OAuth client the store requires before it will accept one.
+	seed("app", repository.CreateApp(ctx, domain.App{
+		ID: fixtureAppID, DevelopmentWorkspaceID: "T1", OwnerID: "U-member", Name: "Fixture app",
+		ClientID: "fixture-client", SigningSecretHash: "fixture-signing-hash",
+		SigningSecretCiphertext:     "fixture-signing-ciphertext",
+		VerificationTokenHash:       "fixture-verification-hash",
+		VerificationTokenCiphertext: "fixture-verification-ciphertext",
+		ManifestVersion:             1, Distribution: "private", CreatedAt: at, UpdatedAt: at,
+	}, domain.AppManifestRevision{
+		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"}}`, CreatedAt: at,
+	}, domain.OAuthClient{
+		ID: "fixture-client", AppID: fixtureAppID, SecretHash: "fixture-client-secret-hash",
+	}))
+	seed("file", repository.CreateFile(ctx, domain.File{
+		// Uploaded by the holder rather than by the member: a file has no grant
+		// separate from its shares, so the uploader is the only thing that can
+		// make it visible to the caller the differential asks. A file the holder
+		// cannot see is answered "not found" exactly as a stranger is.
+		ID: fixtureFileID, WorkspaceID: "T1", Uploader: "U-owner", Name: "fixture.txt",
+		Title: "fixture file", MIMEType: "text/plain", BlobKey: "fixture-blob", Size: 4,
+	}, event("E-file", "file.created")))
+	seed("workflow", repository.CreateWorkflow(ctx, domain.WorkflowDefinition{
+		ID: fixtureWorkflowID, WorkspaceID: "T1", AppID: fixtureAppID, OwnerID: "U-owner",
+		CallbackID: "fixture-workflow", Title: "fixture workflow", Status: domain.WorkflowDraft,
+		CreatedAt: at, UpdatedAt: at,
+	}, event("E-workflow", "workflow.created")))
+	seed("usergroup", repository.CreateUserGroup(ctx, domain.UserGroup{
+		WorkspaceID: "T1", ID: fixtureUserGroupID, Name: "fixture group", Handle: "fixture-group",
+		Creator: "U-member", UpdatedBy: "U-member", CreatedAt: at, UpdatedAt: at, Enabled: true,
+		Users: []domain.UserID{"U-member"},
+	}, event("E-usergroup", "usergroup.created")))
 }
 
 // fixtureMessageTimestamp names the one seeded message.
 const fixtureMessageTimestamp domain.MessageTimestamp = "1700000000.000100"
+
+// The objects the fixture holds so that an operation naming one reaches its own
+// authorization instead of dying at "not found".
+//
+// Without them a caller who may act and a caller who may not are answered
+// identically — store.ErrNotFound both times, meaning "it is not there" rather
+// than "it is not for you" — and the matrix cannot tell enforcement from its
+// absence. That is what refusalDoesNotDistinguishTheHolder records, and it is
+// what the guard-mutation gate independently reported as operations whose guards
+// can all be deleted with this suite still green.
+//
+// Each belongs to U-member rather than to the caller under test, so an operation
+// that distinguishes "mine" from "anybody's" is asked the question it actually
+// answers.
+const (
+	fixtureCanvasID    domain.CanvasID    = "F-canvas"
+	fixtureListID      domain.ListID      = "F-list"
+	fixtureCallID      domain.CallID      = "F-call"
+	fixtureReminderID  domain.ReminderID  = "F-reminder"
+	fixtureBookmarkID  domain.BookmarkID  = "F-bookmark"
+	fixtureUserGroupID domain.UserGroupID = "F-usergroup"
+	fixtureFileID      domain.FileID      = "F-file"
+	fixtureWorkflowID  domain.WorkflowID  = "F-workflow"
+	fixtureAppID       domain.AppID       = "F-app"
+)
 
 func requireSeed(t *testing.T, err error) {
 	t.Helper()
