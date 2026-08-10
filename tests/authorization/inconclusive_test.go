@@ -12,12 +12,10 @@ package authorization
 func inconclusiveStanding() map[string]struct{} {
 	return map[string]struct{}{
 		"AddPeopleToDirectConversation":      {},
-		"AdminCreateIncomingWebhook":         {},
 		"AdminSetTriggerTypePermission":      {},
 		"AdminTriggerTypePermission":         {},
 		"AppendMessageStream":                {},
 		"AssistantSearchContext":             {},
-		"DeleteExternalAuthToken":            {},
 		"DispatchViewBlockAction":            {},
 		"GetWorkflowPermission":              {},
 		"ListEventsAfter":                    {},
@@ -29,12 +27,10 @@ func inconclusiveStanding() map[string]struct{} {
 		"PostMessageAs":                      {},
 		"PostWithBlocks":                     {},
 		"PostWithBlocksAndAttachments":       {},
-		"PublishView":                        {},
 		"RequestWorkflowStepResponsesExport": {},
 		"SetAssistantThreadSuggestedPrompts": {},
 		"SetAssistantThreadTitle":            {},
 		"SetWorkflowPermission":              {},
-		"ShareFile":                          {},
 		"StartMessageStream":                 {},
 		"StopMessageStream":                  {},
 		"SynchronizeExternalUserRole":        {},
@@ -48,4 +44,4 @@ func inconclusiveStanding() map[string]struct{} {
 }
 
 // inconclusiveStandingCeiling is how blind the probe is allowed to be.
-const inconclusiveStandingCeiling = 33
+const inconclusiveStandingCeiling = 29
