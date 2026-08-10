@@ -22,6 +22,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  race:
+    name: Race tests
+    runs-on: ubuntu-24.04
+    # Its own job because `Go checks` was running the whole suite twice — once
+    # plain and once under the detector — inside one twenty-minute budget. The
+    # sqlstore package alone takes eight and a half minutes plain, so the job
+    # reached 18m01s on a good day and was cancelled at 20m15s on a bad one,
+    # with every test having passed. A gate that fails by running out of time
+    # reports nothing about the change that triggered it.
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run the suite under the race detector
+        run: make test-race
+
   mutation:
     name: Guard mutation qualification
     runs-on: ubuntu-24.04
@@ -119,9 +142,6 @@ jobs:
 
       - name: Run fuzz smoke tests
         run: make test-fuzz
-
-      - name: Run race tests
-        run: make test-race
 
       - name: Run static analysis
         run: make vet

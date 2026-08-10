@@ -332,6 +332,16 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureWorkflowID)
 	case reflect.TypeOf(domain.AppID("")):
 		return reflect.ValueOf(fixtureAppID)
+	case reflect.TypeOf(domain.SharedInviteID("")):
+		return reflect.ValueOf(fixtureSharedInviteID)
+	case reflect.TypeOf(domain.WorkflowTriggerID("")):
+		return reflect.ValueOf(fixtureWorkflowTriggerD)
+	case reflect.TypeOf(domain.WorkflowRunID("")):
+		return reflect.ValueOf(fixtureWorkflowRunID)
+	case reflect.TypeOf(domain.SavedItemID("")):
+		return reflect.ValueOf(fixtureSavedItemID)
+	case reflect.TypeOf(domain.MessageID("")):
+		return reflect.ValueOf(fixtureMessageID)
 	case reflect.TypeOf(domain.MessageTimestamp("")):
 		if chosen == fillingWithoutTimestamps {
 			return reflect.Zero(argument)
@@ -484,6 +494,47 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		CallbackID: "fixture-workflow", Title: "fixture workflow", Status: domain.WorkflowDraft,
 		CreatedAt: at, UpdatedAt: at,
 	}, event("E-workflow", "workflow.created")))
+	// A shared invitation needs a second organization; a conversation cannot be
+	// shared with the workspace that already holds it. The second workspace
+	// exists for that alone — the matrix asks about standing, not federation.
+	seed("second workspace", repository.SeedWorkspace(domain.Workspace{ID: "T2", Name: "other", Domain: "other"}))
+	seed("shared invite", repository.CreateSharedInvite(ctx, domain.SharedInvite{
+		ID: fixtureSharedInviteID, WorkspaceID: "T1", ConversationID: "C1", TargetWorkspaceID: "T2",
+		TargetEmail: "invited@example.test", InvitedBy: "U-owner", Status: domain.SharedInvitePending,
+		CreatedAt: at, ExpiresAt: at.Add(14 * 24 * time.Hour),
+	}, event("E-invite", "conversation.shared_invite_sent")))
+	seed("workflow trigger", repository.SetWorkflowTrigger(ctx, domain.WorkflowTrigger{
+		ID: fixtureWorkflowTriggerD, WorkflowID: fixtureWorkflowID, WorkspaceID: "T1", AppID: fixtureAppID,
+		Title: "fixture trigger", Type: domain.WorkflowTriggerWebhook, Config: "{}", Enabled: true,
+		Version: 1, CreatedAt: at, UpdatedAt: at,
+	}, event("E-trigger", "workflow.trigger_set")))
+	seed("workflow run", repository.CreateWorkflowRun(ctx, domain.WorkflowRun{
+		ID: fixtureWorkflowRunID, WorkflowID: fixtureWorkflowID, WorkflowVersion: 1,
+		TriggerID: fixtureWorkflowTriggerD, WorkspaceID: "T1", AppID: fixtureAppID, ActorID: "U-owner",
+		ConversationID: "C1", Status: domain.WorkflowRunQueued, CreatedAt: at, UpdatedAt: at,
+	}, nil, []events.Event{event("E-run", "workflow.run_started")}))
+	// Things attached to the one seeded message, so an operation that removes one
+	// finds something to remove. They belong to the member and not to the holder:
+	// a pin the holder already owns makes AddPin answer "already exists", which is
+	// neither an answer nor a refusal about standing, so the probe falls through
+	// to its leaner filling and lands on "not found" for everybody — trading two
+	// decidable operations for two indistinguishable ones.
+	seed("reaction", repository.AddReaction(ctx, domain.Reaction{
+		Message: fixtureMessageID, Name: "wave", UserID: "U-member", CreatedAt: at,
+	}, event("E-reaction", "reaction.added")))
+	seed("pin", repository.AddPin(ctx, domain.Pin{
+		Message: fixtureMessageID, UserID: "U-member", CreatedAt: at,
+	}, event("E-pin", "pin.added")))
+	seed("star", repository.AddStar(ctx, domain.Star{
+		Message:      domain.Message{ID: fixtureMessageID, WorkspaceID: "T1", Conversation: "C1"},
+		Conversation: "C1", UserID: "U-member", CreatedAt: at,
+	}, event("E-star", "star.added")))
+	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
+		ID: fixtureSavedItemID, WorkspaceID: "T1", UserID: "U-member", MessageID: fixtureMessageID,
+		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
+	}, event("E-saved", "saved_item.created")); err != nil {
+		t.Fatalf("seed saved item: %v", err)
+	}
 	seed("usergroup", repository.CreateUserGroup(ctx, domain.UserGroup{
 		WorkspaceID: "T1", ID: fixtureUserGroupID, Name: "fixture group", Handle: "fixture-group",
 		Creator: "U-member", UpdatedBy: "U-member", CreatedAt: at, UpdatedAt: at, Enabled: true,
@@ -517,6 +568,12 @@ const (
 	fixtureFileID      domain.FileID      = "F-file"
 	fixtureWorkflowID  domain.WorkflowID  = "F-workflow"
 	fixtureAppID       domain.AppID       = "F-app"
+
+	fixtureSharedInviteID   domain.SharedInviteID    = "F-invite"
+	fixtureWorkflowTriggerD domain.WorkflowTriggerID = "F-trigger"
+	fixtureWorkflowRunID    domain.WorkflowRunID     = "F-run"
+	fixtureSavedItemID      domain.SavedItemID       = "F-saved"
+	fixtureMessageID        domain.MessageID         = "M1"
 )
 
 func requireSeed(t *testing.T, err error) {

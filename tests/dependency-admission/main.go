@@ -670,8 +670,13 @@ var integrationJobGates = map[string][]string{
 		"fmt-check", "vet", "workflow-check", "container-check", "module-docs-check",
 		"module-startup-check", "task-flags-check", "dependency-check", "contract-check",
 		"sdk-inventory-check", "generated-check", "proto-lint", "vuln-check",
-		"test", "test-race", "test-load", "test-transport-load", "test-fuzz", "build-static",
+		"test", "test-load", "test-transport-load", "test-fuzz", "build-static",
 	},
+	// The race suite runs the whole of ./... a second time, and doing that
+	// inside the go job's budget meant the job was cancelled with every test
+	// passing. Moving the step moves its requirement with it, so deleting the
+	// race job is still exactly as visible as deleting the step was.
+	"race":                 {"test-race"},
 	"scale-zero-artifacts": {"activator-check"},
 	"sdk":                  {"sdk-qualification"},
 	"browser":              {"browser-qualification"},
