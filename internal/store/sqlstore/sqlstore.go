@@ -933,6 +933,15 @@ func fromDB(ctx context.Context, db *sql.DB, sqliteDialect bool, pragmas []strin
 		return nil, errors.New("SQL store requires a database handle")
 	}
 	s := &Store{db: db, migrationLockStatement: migrationLockStatement, sqliteDialect: sqliteDialect, now: systemClock}
+	// Contention is retryable on every engine, and only PostgreSQL was saying
+	// so. Without a predicate the loop in Migrate returns the first error it
+	// sees, so two SQLite replicas starting together had no retry at all: one
+	// took the write lock for its whole migration — a hundred and sixty steps,
+	// slower still under the race detector — and the other was refused
+	// "database is locked" while initialising the migration fence and gave up.
+	// contended is the cross-engine predicate this repository already keeps for
+	// exactly that question.
+	s.retryableMigrationError = contended
 	if len(retryable) == 1 {
 		s.retryableMigrationError = retryable[0]
 	}
