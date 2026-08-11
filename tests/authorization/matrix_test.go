@@ -346,6 +346,13 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 	case reflect.TypeOf(domain.AppID("")):
 		return reflect.ValueOf(fixtureAppID)
 	case reflect.TypeOf(domain.SharedInviteID("")):
+		// The operation decides which invitation it needs: approving and
+		// denying act on a pending one, revoking on an approved one. Handing
+		// the wrong-state invitation would refuse the holder for the state
+		// rather than for standing, which is the trap this fixture avoids.
+		if method == "RevokeSharedInvite" {
+			return reflect.ValueOf(fixtureApprovedInviteID)
+		}
 		return reflect.ValueOf(fixtureSharedInviteID)
 	case reflect.TypeOf(domain.WorkflowTriggerID("")):
 		return reflect.ValueOf(fixtureWorkflowTriggerD)
@@ -543,18 +550,36 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// shared with the workspace that already holds it. The second workspace
 	// exists for that alone — the matrix asks about standing, not federation.
 	seed("second workspace", repository.SeedWorkspace(domain.Workspace{ID: "T2", Name: "other", Domain: "other"}))
+	seed("third workspace", repository.SeedWorkspace(domain.Workspace{ID: "T3", Name: "third", Domain: "third"}))
 	// A fourth organization with no outstanding invitation to C1, so InviteShared
-	// can be driven to a real creation: T2 already holds one and a second to it is
-	// refused for the state. Handing InviteShared a target it can actually invite
-	// lets the holder through to success while a caller below membership is still
-	// refused for standing — the pair the guard-mutation gate needs to catch the
-	// membership check being deleted.
+	// can be driven to a real creation: T2 and T3 already hold invitations and a
+	// second to either is refused for the state. Handing InviteShared a target it
+	// can actually invite lets the holder through to success while a caller below
+	// membership is still refused for standing — the pair the guard-mutation gate
+	// needs to catch the membership check being deleted.
 	seed("fourth workspace", repository.SeedWorkspace(domain.Workspace{ID: "T4", Name: "fourth", Domain: "fourth"}))
+	// A live expiry: the fixture's deterministic `at` is in the past, so an
+	// invitation expiring fourteen days after it is already lapsed, and
+	// approving a lapsed invitation is refused for everyone — for the state, not
+	// for standing, which is why approve/deny/revoke were all indistinguishable.
+	inviteExpiry := time.Now().Add(14 * 24 * time.Hour).UTC()
 	seed("shared invite", repository.CreateSharedInvite(ctx, domain.SharedInvite{
 		ID: fixtureSharedInviteID, WorkspaceID: "T1", ConversationID: "C1", TargetWorkspaceID: "T2",
 		TargetEmail: "invited@example.test", InvitedBy: "U-owner", Status: domain.SharedInvitePending,
-		CreatedAt: at, ExpiresAt: at.Add(14 * 24 * time.Hour),
+		CreatedAt: at, ExpiresAt: inviteExpiry,
 	}, event("E-invite", "conversation.shared_invite_sent")))
+	// A second invitation driven to approved through the product, so revoking —
+	// which acts on an approved invitation — has one in the state it needs.
+	// Seeding an approved row directly is refused: CreateSharedInvite admits
+	// only pending, which is the store enforcing the machine at creation.
+	seed("approved shared invite", repository.CreateSharedInvite(ctx, domain.SharedInvite{
+		ID: fixtureApprovedInviteID, WorkspaceID: "T1", ConversationID: "C1", TargetWorkspaceID: "T3",
+		TargetEmail: "approved@example.test", InvitedBy: "U-owner", Status: domain.SharedInvitePending,
+		CreatedAt: at, ExpiresAt: inviteExpiry,
+	}, event("E-approved-invite", "conversation.shared_invite_sent")))
+	if _, err := (service.Messages{Store: repository}).ApproveSharedInvite(ctx, "T1", "U-owner", fixtureApprovedInviteID); err != nil {
+		t.Fatalf("driving the approved invitation: %v", err)
+	}
 	seed("workflow trigger", repository.SetWorkflowTrigger(ctx, domain.WorkflowTrigger{
 		ID: fixtureWorkflowTriggerD, WorkflowID: fixtureWorkflowID, WorkspaceID: "T1", AppID: fixtureAppID,
 		Title: "fixture trigger", Type: domain.WorkflowTriggerWebhook, Config: "{}", Enabled: true,
@@ -628,6 +653,7 @@ const (
 	fixtureHuddleID        domain.CallID          = "F-huddle"
 
 	fixtureSharedInviteID   domain.SharedInviteID    = "F-invite"
+	fixtureApprovedInviteID domain.SharedInviteID    = "F-approved-invite"
 	fixtureWorkflowTriggerD domain.WorkflowTriggerID = "F-trigger"
 	fixtureWorkflowRunID    domain.WorkflowRunID     = "F-run"
 	fixtureSavedItemID      domain.SavedItemID       = "F-saved"

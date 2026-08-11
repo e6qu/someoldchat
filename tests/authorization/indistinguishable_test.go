@@ -21,6 +21,13 @@
 // operation gets one, it is named here rather than counted as covered.
 //
 // The ceiling only shrinks.
+//
+// AcceptSharedInvite and DeclineSharedInvite are a structural residue rather
+// than a fixture gap: they are the invited organization's action, refused by a
+// caller who is not in the target workspace, and every member this fixture holds
+// is in the host. Closing them needs a target-workspace member, which is the
+// same second-organization the browser suite cannot arrange either. They are
+// named here rather than driven.
 package authorization
 
 func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
@@ -44,7 +51,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"AdminSetConversationTeams":               {},
 		"AdminSetIncomingWebhookEnabled":          {},
 		"AppHome":                                 {},
-		"ApproveSharedInvite":                     {},
 		"AssignListItem":                          {},
 		"AssistantThread":                         {},
 		"CloseView":                               {},
@@ -87,7 +93,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"RemoveUserGroupChannels":                 {},
 		"RenameConversation":                      {},
 		"RestoreCanvasRevision":                   {},
-		"RevokeSharedInvite":                      {},
 		"RunWorkflow":                             {},
 		"SavedItemForMessage":                     {},
 		"SaveDraft":                               {},
@@ -120,4 +125,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 
 // indistinguishableRefusalCeiling is how many operations still answer a caller
 // who holds the authority exactly as they answer one who does not.
-const indistinguishableRefusalCeiling = 90
+const indistinguishableRefusalCeiling = 88
