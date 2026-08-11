@@ -3674,6 +3674,16 @@ func (m Messages) AdminListUsers(ctx context.Context, workspaceID domain.Workspa
 	return m.Store.ListAdminUsers(ctx, workspaceID, request)
 }
 
+// ConversationMemberCount reports how many people are in a conversation the
+// caller may read. It exists for the surfaces that print the number without
+// paging the list — Slack's channel header shows it beside the topic.
+func (m Messages) ConversationMemberCount(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (int, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return 0, err
+	}
+	return m.Store.CountConversationMembers(ctx, conversationID)
+}
+
 func (m Messages) ConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) (domain.UserPage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.UserPage{}, err

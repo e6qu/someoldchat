@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DirectoryService_Users_FullMethodName                              = "/sameoldchat.chat.v1.DirectoryService/Users"
 	DirectoryService_ConversationMembers_FullMethodName                = "/sameoldchat.chat.v1.DirectoryService/ConversationMembers"
+	DirectoryService_ConversationMemberCount_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/ConversationMemberCount"
 	DirectoryService_WorkspaceInfo_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/WorkspaceInfo"
 	DirectoryService_AuthorizedAppWorkspaces_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AuthorizedAppWorkspaces"
 	DirectoryService_TeamBillableInfo_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/TeamBillableInfo"
@@ -96,6 +97,7 @@ const (
 type DirectoryServiceClient interface {
 	Users(ctx context.Context, in *UsersRequest, opts ...grpc.CallOption) (*UserPage, error)
 	ConversationMembers(ctx context.Context, in *ConversationMembersRequest, opts ...grpc.CallOption) (*UserPage, error)
+	ConversationMemberCount(ctx context.Context, in *ConversationMembersRequest, opts ...grpc.CallOption) (*MemberCountResponse, error)
 	WorkspaceInfo(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*Workspace, error)
 	AuthorizedAppWorkspaces(ctx context.Context, in *AuthorizedAppWorkspacesRequest, opts ...grpc.CallOption) (*WorkspacePage, error)
 	TeamBillableInfo(ctx context.Context, in *BillableInfoRequest, opts ...grpc.CallOption) (*BillableInfo, error)
@@ -190,6 +192,16 @@ func (c *directoryServiceClient) ConversationMembers(ctx context.Context, in *Co
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UserPage)
 	err := c.cc.Invoke(ctx, DirectoryService_ConversationMembers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) ConversationMemberCount(ctx context.Context, in *ConversationMembersRequest, opts ...grpc.CallOption) (*MemberCountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MemberCountResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_ConversationMemberCount_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -872,6 +884,7 @@ func (c *directoryServiceClient) SynchronizeExternalUserRole(ctx context.Context
 type DirectoryServiceServer interface {
 	Users(context.Context, *UsersRequest) (*UserPage, error)
 	ConversationMembers(context.Context, *ConversationMembersRequest) (*UserPage, error)
+	ConversationMemberCount(context.Context, *ConversationMembersRequest) (*MemberCountResponse, error)
 	WorkspaceInfo(context.Context, *WorkspaceRequest) (*Workspace, error)
 	AuthorizedAppWorkspaces(context.Context, *AuthorizedAppWorkspacesRequest) (*WorkspacePage, error)
 	TeamBillableInfo(context.Context, *BillableInfoRequest) (*BillableInfo, error)
@@ -956,6 +969,9 @@ func (UnimplementedDirectoryServiceServer) Users(context.Context, *UsersRequest)
 }
 func (UnimplementedDirectoryServiceServer) ConversationMembers(context.Context, *ConversationMembersRequest) (*UserPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method ConversationMembers not implemented")
+}
+func (UnimplementedDirectoryServiceServer) ConversationMemberCount(context.Context, *ConversationMembersRequest) (*MemberCountResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConversationMemberCount not implemented")
 }
 func (UnimplementedDirectoryServiceServer) WorkspaceInfo(context.Context, *WorkspaceRequest) (*Workspace, error) {
 	return nil, status.Error(codes.Unimplemented, "method WorkspaceInfo not implemented")
@@ -1210,6 +1226,24 @@ func _DirectoryService_ConversationMembers_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).ConversationMembers(ctx, req.(*ConversationMembersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_ConversationMemberCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConversationMembersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).ConversationMemberCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_ConversationMemberCount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).ConversationMemberCount(ctx, req.(*ConversationMembersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2434,6 +2468,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConversationMembers",
 			Handler:    _DirectoryService_ConversationMembers_Handler,
+		},
+		{
+			MethodName: "ConversationMemberCount",
+			Handler:    _DirectoryService_ConversationMemberCount_Handler,
 		},
 		{
 			MethodName: "WorkspaceInfo",

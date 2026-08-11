@@ -795,6 +795,11 @@ type Store interface {
 	ListAdminUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.AdminUserPage, error)
 	ListUsersByRole(context.Context, domain.WorkspaceID, domain.WorkspaceRole, domain.PageRequest) (domain.UserPage, error)
 	ListConversationMembers(context.Context, domain.ConversationID, domain.PageRequest) (domain.UserPage, error)
+	// CountConversationMembers reports how many members ListConversationMembers
+	// would page through: people in the conversation whose accounts are not
+	// deleted. One number, so the header does not page an entire channel to
+	// print it.
+	CountConversationMembers(context.Context, domain.ConversationID) (int, error)
 	ListConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	SearchConversations(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.ConversationPage, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)

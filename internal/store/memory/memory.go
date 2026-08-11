@@ -2893,6 +2893,25 @@ func (s *Store) ListUsersByRole(_ context.Context, workspace domain.WorkspaceID,
 	return page, err
 }
 
+// CountConversationMembers counts what ListConversationMembers lists: members
+// whose accounts still exist. A deactivated account stays in the membership set
+// but is not a member anyone can see, so counting the raw set would show a
+// number the member list contradicts.
+func (s *Store) CountConversationMembers(_ context.Context, conversation domain.ConversationID) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, exists := s.conversations[conversation]; !exists {
+		return 0, store.ErrNotFound
+	}
+	count := 0
+	for userID := range s.memberships[conversation] {
+		if user, exists := s.users[userID]; exists && !user.Deleted {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (s *Store) ListConversationMembers(_ context.Context, conversation domain.ConversationID, request domain.PageRequest) (domain.UserPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.UserPage{}, err

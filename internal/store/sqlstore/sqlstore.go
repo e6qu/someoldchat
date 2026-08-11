@@ -6216,6 +6216,23 @@ func (s *Store) ListUsersByRole(ctx context.Context, workspace domain.WorkspaceI
 	return page, err
 }
 
+// CountConversationMembers counts exactly what ListConversationMembers lists —
+// the join and the deleted filter are the same — so the number and the list
+// cannot disagree.
+func (s *Store) CountConversationMembers(ctx context.Context, conversation domain.ConversationID) (int, error) {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id = ?`, conversation).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+		return 0, store.ErrNotFound
+	} else if err != nil {
+		return 0, err
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users u JOIN conversation_members m ON m.user_id = u.id WHERE m.conversation_id = ? AND u.deleted = 0`, conversation).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (s *Store) ListConversationMembers(ctx context.Context, conversation domain.ConversationID, request domain.PageRequest) (domain.UserPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.UserPage{}, err

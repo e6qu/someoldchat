@@ -276,6 +276,7 @@ type Service interface {
 	EndSnooze(context.Context, domain.WorkspaceID, domain.UserID) (domain.DoNotDisturb, error)
 	EndDND(context.Context, domain.WorkspaceID, domain.UserID) error
 	Users(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.UserPage, error)
+	ConversationMemberCount(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (int, error)
 	ConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.UserPage, error)
 	IsConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (bool, error)
 	WorkspaceInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.Workspace, error)

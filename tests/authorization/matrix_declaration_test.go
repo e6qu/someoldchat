@@ -236,6 +236,7 @@ func authorityMatrix() map[string]authority {
 		"CompleteWorkflowButton":                  authorityAnyMember,
 		"ConversationCanvas":                      authorityAnyMember,
 		"ConversationInfo":                        authorityAnyMember,
+		"ConversationMemberCount":                 authorityAnyMember,
 		"ConversationMembers":                     authorityAnyMember,
 		"ConversationNotificationPreferences":     authorityAnyMember,
 		"Conversations":                           authorityAnyMember,
