@@ -14,5 +14,9 @@ package mutation
 // group, a file, a workflow and a real app took this from 102 to 90 and that
 // list from 138 to 108 in one change, and a second batch — a shared invitation,
 // a workflow trigger and run, and a reaction, pin, star and saved item on the
-// seeded message — took them to 87 and 104.
-const survivingGuardCeiling = 87
+// seeded message — took them to 87 and 104. A third — installing the app,
+// starting a huddle, and giving the workspace an external authorization token —
+// took them to 83 and 97, and the token was the one that exposed a real hole:
+// DeleteExternalAuthToken checked nothing about its caller, and looked guarded
+// only because there was never a token for it to find.
+const survivingGuardCeiling = 83

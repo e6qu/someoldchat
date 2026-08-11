@@ -481,6 +481,28 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}, domain.OAuthClient{
 		ID: "fixture-client", AppID: fixtureAppID, SecretHash: "fixture-client-secret-hash",
 	}))
+	// The app is installed, not merely created. Three operations were recorded
+	// as unreachable because an installation was believed to need the whole
+	// OAuth redemption; CreateAppInstallation is the whole of it, and the
+	// lifecycle fixtures have been doing this since they were written.
+	seed("app installation", repository.CreateAppInstallation(ctx, domain.AppInstallation{
+		AppID: fixtureAppID, WorkspaceID: "T1", Enabled: true, CreatedAt: at,
+	}))
+	// A live huddle in the seeded conversation, started by the holder so the
+	// operations that act on "the huddle I am in" have one to find.
+	if _, _, err := repository.StartHuddle(ctx, domain.Call{
+		ID: fixtureHuddleID, WorkspaceID: "T1", Kind: domain.CallKindHuddle, ConversationID: "C1",
+		ExternalUniqueID: "fixture-huddle", JoinURL: "https://example.test/huddle", Title: "fixture huddle",
+		CreatedBy: "U-owner", Participants: []domain.UserID{"U-owner"}, StartedAt: at,
+	}, event("E-huddle", "huddle.started"), event("E-huddle-join", "huddle.joined")); err != nil {
+		t.Fatalf("seed huddle: %v", err)
+	}
+	// An external authorization token for the installed app, so an operation
+	// that revokes one has one to revoke.
+	seed("external auth token", repository.SetExternalAuthToken(ctx, domain.ExternalAuthToken{
+		ID: "F-external-token", AppID: fixtureAppID, WorkspaceID: "T1", UserID: "U-owner",
+		Provider: "fixture", Ciphertext: "fixture-ciphertext", CreatedAt: at,
+	}, event("E-external-token", "app.external_auth_token_set")))
 	seed("file", repository.CreateFile(ctx, domain.File{
 		// Uploaded by the holder rather than by the member: a file has no grant
 		// separate from its shares, so the uploader is the only thing that can
@@ -540,6 +562,10 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		Creator: "U-member", UpdatedBy: "U-member", CreatedAt: at, UpdatedAt: at, Enabled: true,
 		Users: []domain.UserID{"U-member"},
 	}, event("E-usergroup", "usergroup.created")))
+	// The seeded conversation carries the seeded user group as an access group,
+	// so an operation that adds, removes or lists them has one to act on.
+	seed("conversation access group", repository.SetConversationAccessGroups(ctx, "T1", "C1",
+		[]domain.UserGroupID{fixtureUserGroupID}, event("E-access-group", "conversation.access_groups_set")))
 }
 
 // fixtureMessageTimestamp names the one seeded message.
@@ -568,6 +594,7 @@ const (
 	fixtureFileID      domain.FileID      = "F-file"
 	fixtureWorkflowID  domain.WorkflowID  = "F-workflow"
 	fixtureAppID       domain.AppID       = "F-app"
+	fixtureHuddleID    domain.CallID      = "F-huddle"
 
 	fixtureSharedInviteID   domain.SharedInviteID    = "F-invite"
 	fixtureWorkflowTriggerD domain.WorkflowTriggerID = "F-trigger"
