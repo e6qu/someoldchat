@@ -44,6 +44,8 @@ func drivers() map[string]driver {
 		"InviteRequestStatus":  inviteRequestDriver(),
 		"ExternalUploadStatus": externalUploadDriver(),
 		"WorkflowStatus":       workflowDriver(),
+		"WorkflowRunStatus":    workflowRunDriver(),
+		"WorkflowStepStatus":   workflowStepDriver(),
 	}
 }
 
@@ -64,7 +66,7 @@ func drivers() map[string]driver {
 // reports a figure that is always zero. That is recorded in the product gap
 // audit, because it is a question about the execution model rather than a bug
 // with an obvious fix.
-const undrivenLifecycleCeiling = 2
+const undrivenLifecycleCeiling = 0
 
 func TestEveryLifecycleWithoutADriverIsCounted(t *testing.T) {
 	undriven := 0

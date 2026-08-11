@@ -2757,6 +2757,24 @@ func (m Messages) setWorkflowStepWithValues(ctx context.Context, workspaceID dom
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
+	// A step that has finished has finished. Nothing here refused a second
+	// answer, so an app could report success for a step that had already
+	// failed, fail one that had already succeeded, or overwrite one that was
+	// cancelled when its workflow was deleted underneath it — and because a
+	// run's status is driven by its steps, that rewrote the outcome of a run
+	// that was already over.
+	//
+	// The check is here rather than in WorkflowStepCompleted and
+	// WorkflowStepFailed because it is one rule about one row, and a caller
+	// that forgets it is the defect. Reading the step first also costs nothing
+	// that the write did not already cost.
+	current, err := m.Store.GetWorkflowStep(ctx, workspaceID, domain.WorkflowStepID(id))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err == nil && current.Status.Terminal() && current.Status != value.Status {
+		return ErrInvalidWorkflowStep
+	}
 	now := time.Now().UTC()
 	value.WorkspaceID = workspaceID
 	value.UserID = actor

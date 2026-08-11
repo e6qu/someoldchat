@@ -76,8 +76,27 @@ func machines() map[string]machine {
 			why:         "a run that finished, failed or was cancelled is over; nothing restarts it in place",
 		},
 		"WorkflowStepStatus": {
-			terminal:    []string{"completed", "failed", "cancelled"},
-			transitions: map[string][]string{"configured": {"executing", "cancelled"}, "executing": {"waiting", "completed", "failed", "cancelled"}, "waiting": {"executing", "completed", "failed", "cancelled"}},
+			terminal: []string{"completed", "failed", "cancelled"},
+			standing: []string{"configured"},
+			// Three edges here described a sequence that does not exist, and
+			// driving the product showed each one.
+			//
+			// "configured" is a BUILDER state, written by WorkflowUpdateStep
+			// against the step a workflow is being assembled from. Running the
+			// workflow creates a separate execution row that merely points back
+			// at it, so a configured step never becomes an executing one — the
+			// two are different rows, and the machine had them as one moving
+			// through a lifecycle.
+			//
+			// "waiting" is where a delay or form step BEGINS, created that way,
+			// not somewhere an executing step goes. Both are entry points rather
+			// than a sequence.
+			//
+			// The driver reaches executing, and through it completed, failed and
+			// cancelled. Waiting needs a delay or form step and configured needs
+			// the builder; neither is built here, so those two states are
+			// modelled and not driven.
+			transitions: map[string][]string{"executing": {"completed", "failed", "cancelled"}, "waiting": {"completed", "failed", "cancelled"}},
 			why:         "a step ends with the run that contains it, and a completed step is not executed again",
 		},
 		"SharedInviteStatus": {
