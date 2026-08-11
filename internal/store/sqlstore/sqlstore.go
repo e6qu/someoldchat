@@ -612,12 +612,12 @@ const insertOutboxStatement = `INSERT INTO outbox (id, workspace_id, actor_id, t
 // conversation being mutated, for the events whose caller does not carry it.
 const insertOutboxForConversationStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, private_payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`
 
-func insertOutbox(ctx context.Context, tx *sql.Tx, event events.Event) error {
+func insertOutbox(ctx context.Context, tx txRunner, event events.Event) error {
 	_, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt))
 	return err
 }
 
-func insertOutboxForConversation(ctx context.Context, tx *sql.Tx, event events.Event, conversation domain.ConversationID) error {
+func insertOutboxForConversation(ctx context.Context, tx txRunner, event events.Event, conversation domain.ConversationID) error {
 	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt), conversation)
 	return err
 }
@@ -625,6 +625,10 @@ func insertOutboxForConversation(ctx context.Context, tx *sql.Tx, event events.E
 type Store struct {
 	db                     *sql.DB
 	migrationLockStatement string
+	// writeQueue orders write transactions where this process owns the database
+	// outright. It is nil for PostgreSQL and dqlite, which have other writers
+	// this process cannot see. See beginWrite.
+	writeQueue chan struct{}
 	// retryableMigrationError reports whether a failed migration should be
 	// tried again. It is supplied by the driver because this package must not
 	// import one: recognising SQLSTATE 40P01 means knowing pgconn's error type,
@@ -737,6 +741,16 @@ const requiredBusyTimeout = 5000
 // It is greater than one because an IMMEDIATE transaction that loses the write
 // lock waits the whole timeout before it fails, and a retry budget equal to one
 // attempt's maximum wait is not a retry budget.
+//
+// Measured against the write queue: with the queue in place, cutting this back
+// to one attempt leaves the race-detector persistence qualification and the
+// whole sqlstore suite green — the same reduction that produced SQLITE_BUSY
+// from a Socket Mode dialer before the queue existed. So for SQLite this is now
+// a backstop that does not fire, which is what a backstop should be.
+//
+// It stays at three because underContention is not SQLite's alone. PostgreSQL
+// and dqlite have no queue and cannot have one, and there the budget is still
+// the mechanism rather than the fallback.
 const contentionAttempts = 3
 
 // sqliteDSN adds the required pragmas to a caller-supplied DSN.
@@ -829,6 +843,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	s.writeQueue = make(chan struct{}, 1)
 	return s, nil
 }
 
@@ -842,7 +857,12 @@ func FromDB(ctx context.Context, db *sql.DB) (*Store, error) {
 		return nil, errors.New("SQL store requires a database handle")
 	}
 	db.SetMaxOpenConns(1)
-	return fromDB(ctx, db, true, []string{"PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000", sqliteJournalPragma}, sqliteMigrationLockStatement)
+	s, err := fromDB(ctx, db, true, []string{"PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000", sqliteJournalPragma}, sqliteMigrationLockStatement)
+	if err != nil {
+		return nil, err
+	}
+	s.writeQueue = make(chan struct{}, 1)
+	return s, nil
 }
 
 // FromDqliteDB initializes the repository against a dqlite-managed database.
@@ -1161,6 +1181,65 @@ func underContention(ctx context.Context, attempt func() error) error {
 // Close stops the data-migration drain before it closes the handle. Closing the
 // database out from under a running drain would surface as "database is closed"
 // from a goroutine nobody is watching.
+// txRunner is the subset of *sql.Tx the statement helpers use. They take it as
+// an interface so that a transaction carrying a queue ticket can be handed to
+// them unchanged.
+type txRunner interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// writeTx is a transaction holding a place in the write queue. It releases that
+// place when it commits or rolls back, whichever happens first, and never twice.
+type writeTx struct {
+	*sql.Tx
+	once    sync.Once
+	release func()
+}
+
+func (t *writeTx) Commit() error   { defer t.done(); return t.Tx.Commit() }
+func (t *writeTx) Rollback() error { defer t.done(); return t.Tx.Rollback() }
+func (t *writeTx) done()           { t.once.Do(t.release) }
+
+// beginWrite starts a transaction, waiting its turn where this process owns the
+// database outright.
+//
+// SQLite has a wait and not a queue. busy_timeout is a sleep-and-retry handler
+// with no ordering, so when the write lock frees every waiter races for it
+// again and an unlucky one can lose repeatedly: measured, sixteen writers doing
+// forty writes each produced a median write of 193µs and a worst of 950ms —
+// nearly five thousand times the median, for the same work. Go's pool is no
+// fairer; it hands a freed connection to connRequests.TakeRandom() rather than
+// to whoever has waited longest.
+//
+// A buffered channel of one is a queue: Go serves channel operations in the
+// order they blocked. So writers take turns, and a writer's wait is bounded by
+// the writers already ahead of it rather than by luck.
+//
+// It is deliberately absent for PostgreSQL and dqlite. Both have a real server
+// and other client processes, so ordering the writers THIS process can see
+// would order a fraction of them while claiming to order all — worse than not
+// claiming it, because the engine's own contention handling is what actually
+// governs there.
+func (s *Store) beginWrite(ctx context.Context) (*writeTx, error) {
+	release := func() {}
+	if s.writeQueue != nil {
+		select {
+		case s.writeQueue <- struct{}{}:
+			release = func() { <-s.writeQueue }
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	return &writeTx{Tx: tx, release: release}, nil
+}
+
 func (s *Store) Close() error {
 	s.stopBackfills()
 	return s.db.Close()
@@ -1302,7 +1381,7 @@ func (s *Store) seedUser(ctx context.Context, value domain.User, initialRole dom
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return store.InvalidArgument("invalid user presence")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -3940,7 +4019,7 @@ func (s *Store) outboxColumns(ctx context.Context, db queryExecutor) (map[string
 // CreateMessage resolves by retrying is resolved here the same way, by
 // stepping to the next free microsecond, because a notice must never fail a
 // membership change.
-func insertConversationNotice(ctx context.Context, tx *sql.Tx, notice domain.Message) error {
+func insertConversationNotice(ctx context.Context, tx txRunner, notice domain.Message) error {
 	for attempt := 0; attempt < 1000; attempt++ {
 		stored := domain.NewStoredTime(notice.CreatedAt)
 		var owner domain.MessageID
@@ -4140,7 +4219,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, eve
 	if value.ID == "" || strings.TrimSpace(value.Domain) == "" || strings.TrimSpace(value.Name) == "" || !value.Discoverability.Valid() {
 		return store.InvalidArgument("invalid workspace")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4192,7 +4271,7 @@ const (
 const selectWorkspaceStatement = `SELECT id, domain, name, description, discoverability, icon_url, plan FROM workspaces WHERE id = ?`
 
 func (s *Store) setWorkspaceColumn(ctx context.Context, id domain.WorkspaceID, column workspaceColumn, value any, event events.Event) (domain.Workspace, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
@@ -4216,7 +4295,7 @@ func (s *Store) setWorkspaceColumn(ctx context.Context, id domain.WorkspaceID, c
 
 // commitWorkspace reads the row back inside the transaction and only then
 // commits, so the returned value is the value this call wrote.
-func (s *Store) commitWorkspace(ctx context.Context, tx *sql.Tx, id domain.WorkspaceID) (domain.Workspace, error) {
+func (s *Store) commitWorkspace(ctx context.Context, tx *writeTx, id domain.WorkspaceID) (domain.Workspace, error) {
 	var value domain.Workspace
 	if err := tx.QueryRowContext(ctx, selectWorkspaceStatement, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL, &value.Plan); err != nil {
 		return domain.Workspace{}, translateNotFound(err)
@@ -4251,7 +4330,7 @@ func (s *Store) SetWorkspaceIcon(ctx context.Context, id domain.WorkspaceID, ico
 }
 
 func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.WorkspaceID, channels []domain.ConversationID, event events.Event) (domain.Workspace, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
@@ -4307,7 +4386,7 @@ func (s *Store) GetUser(ctx context.Context, id domain.UserID) (domain.User, err
 }
 
 func (s *Store) CreateUser(ctx context.Context, user domain.User, membership domain.WorkspaceMembership, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4324,7 +4403,7 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 // createUserTx is CreateUser without its transaction, so a larger one —
 // accepting an invitation — creates the member it promised, joins the channels
 // it recorded and consumes the invitation together or not at all.
-func createUserTx(ctx context.Context, tx *sql.Tx, user domain.User, membership domain.WorkspaceMembership) error {
+func createUserTx(ctx context.Context, tx txRunner, user domain.User, membership domain.WorkspaceMembership) error {
 	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
 		return store.InvalidArgument("user and active workspace membership are required")
 	}
@@ -4361,7 +4440,7 @@ func (s *Store) AcceptInviteRequest(ctx context.Context, acceptance domain.Invit
 	if len(emitted) == 0 {
 		return store.InvalidArgument("accepting an invitation requires at least one event")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4425,7 +4504,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 	if len(changes) == 0 {
 		return domain.User{}, store.InvalidArgument("a profile change requires at least one event")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -4511,7 +4590,7 @@ func (s *Store) EarliestUserStatusExpiration(ctx context.Context, workspaceID do
 }
 
 func (s *Store) ExpireUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected time.Time, expectedScheduledID domain.ScheduledStatusID, now time.Time, event events.Event) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -4552,7 +4631,7 @@ func scanScheduledStatus(scanner interface{ Scan(...any) error }) (domain.Schedu
 }
 
 func (s *Store) CreateScheduledStatus(ctx context.Context, value domain.ScheduledStatus) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4612,7 +4691,7 @@ func (s *Store) ListScheduledStatuses(ctx context.Context, workspaceID domain.Wo
 }
 
 func (s *Store) UpdateScheduledStatus(ctx context.Context, value domain.ScheduledStatus) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4631,7 +4710,7 @@ func (s *Store) UpdateScheduledStatus(ctx context.Context, value domain.Schedule
 }
 
 func (s *Store) DeleteScheduledStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4692,7 +4771,7 @@ func (s *Store) EarliestScheduledStatusStart(ctx context.Context, workspaceID do
 }
 
 func (s *Store) ActivateScheduledStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID, expectedUpdatedAt, now time.Time, event events.Event) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -4743,7 +4822,7 @@ func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.Workspac
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return domain.User{}, store.InvalidArgument("invalid user presence")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -4780,7 +4859,7 @@ func (s *Store) SetRoleAssignments(ctx context.Context, assignments []domain.Rol
 	if len(assignments) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4802,7 +4881,7 @@ func (s *Store) DeleteRoleAssignments(ctx context.Context, assignments []domain.
 	if len(assignments) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -4970,7 +5049,7 @@ func (s *Store) SetConversationsExcludedFromAI(ctx context.Context, workspace do
 	if len(ids) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5029,7 +5108,7 @@ func (s *Store) MoveConversations(ctx context.Context, workspace domain.Workspac
 	if len(ids) == 0 || target == "" {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5122,7 +5201,7 @@ func (s *Store) LinkConversationObjects(ctx context.Context, objects []domain.Li
 	if len(objects) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5147,7 +5226,7 @@ func (s *Store) UnlinkConversationObjects(ctx context.Context, workspace domain.
 	if len(ids) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5188,7 +5267,7 @@ func (s *Store) ListConversationObjects(ctx context.Context, workspace domain.Wo
 
 // checkConversationOwner refuses a channel the workspace does not hold, so a
 // batch that names one leaves nothing behind.
-func checkConversationOwner(ctx context.Context, tx *sql.Tx, workspace domain.WorkspaceID, id domain.ConversationID) error {
+func checkConversationOwner(ctx context.Context, tx txRunner, workspace domain.WorkspaceID, id domain.ConversationID) error {
 	var owner domain.WorkspaceID
 	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, id).Scan(&owner); err != nil {
 		return translateNotFound(err)
@@ -5208,7 +5287,7 @@ func (s *Store) SetAppConfig(ctx context.Context, config domain.AppConfig, event
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5267,7 +5346,7 @@ func (s *Store) ListAppConfigs(ctx context.Context, workspace domain.WorkspaceID
 }
 
 func (s *Store) ClearAppApproval(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5306,7 +5385,7 @@ func (s *Store) writeBarrier(ctx context.Context, barrier domain.InformationBarr
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5339,7 +5418,7 @@ func (s *Store) writeBarrier(ctx context.Context, barrier domain.InformationBarr
 }
 
 func (s *Store) DeleteBarrier(ctx context.Context, workspace domain.WorkspaceID, id domain.BarrierID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5418,7 +5497,7 @@ func (s *Store) SetSessionSettings(ctx context.Context, settings []domain.Sessio
 	if len(settings) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5445,7 +5524,7 @@ func (s *Store) ClearSessionSettings(ctx context.Context, workspace domain.Works
 	if len(users) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5507,7 +5586,7 @@ func (s *Store) changeAuthPolicyEntities(ctx context.Context, entities []domain.
 	if len(entities) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5599,7 +5678,7 @@ func (s *Store) GetUserExpiration(ctx context.Context, workspace domain.Workspac
 }
 
 func (s *Store) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expiration time.Time, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5658,7 +5737,7 @@ func (s *Store) DueUserExpirations(ctx context.Context, workspaceID domain.Works
 }
 
 func (s *Store) ExpireUserAccount(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected time.Time, event events.Event) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -5706,7 +5785,7 @@ func (s *Store) ExpireUserAccount(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, deleted bool, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5740,7 +5819,7 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 }
 
 func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channels []domain.ConversationID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5786,7 +5865,7 @@ func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.Workspa
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
 		return store.InvalidArgument("invalid workspace role")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -5838,7 +5917,7 @@ func (s *Store) GetDoNotDisturb(ctx context.Context, workspaceID domain.Workspac
 }
 
 func (s *Store) SetDoNotDisturb(ctx context.Context, value domain.DoNotDisturb, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -6238,7 +6317,7 @@ func (s *Store) LookupAppToken(ctx context.Context, token string) (domain.AppTok
 }
 
 func (s *Store) RevokeToken(ctx context.Context, token string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -6456,7 +6535,7 @@ func (s *Store) RevokeOIDCSessions(ctx context.Context, workspaceID domain.Works
 	if workspaceID == "" || strings.TrimSpace(provider) == "" || (strings.TrimSpace(subject) == "" && strings.TrimSpace(sid) == "") || strings.TrimSpace(tokenID) == "" || !expiresAt.After(time.Now().UTC()) {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -6502,7 +6581,7 @@ func (s *Store) RevokeOIDCSessions(ctx context.Context, workspaceID domain.Works
 }
 
 func (s *Store) RevokeUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -6556,7 +6635,7 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	if !conversation.IsDirectOrGroup() || len(members) < 2 {
 		return store.InvalidArgument("invalid direct conversation")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -6609,7 +6688,7 @@ func (s *Store) ExpandDirectConversation(ctx context.Context, expansion domain.D
 	if !expansion.History.Valid() || len(emitted) != 3 || expansion.Target.Kind != domain.ConversationTypeMPIM || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
 		return store.InvalidArgument("invalid direct conversation expansion")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -6732,7 +6811,7 @@ type directHistoryRow struct {
 	subtype         domain.MessageSubtype
 }
 
-func directHistoryRows(ctx context.Context, tx *sql.Tx, conversation domain.ConversationID) ([]directHistoryRow, error) {
+func directHistoryRows(ctx context.Context, tx txRunner, conversation domain.ConversationID) ([]directHistoryRow, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, unfurls, text_folded, edited_at, edited_by, subtype
 		FROM messages WHERE conversation = ? AND deleted = 0 ORDER BY created_at, id`, conversation)
 	if err != nil {
@@ -6750,7 +6829,7 @@ func directHistoryRows(ctx context.Context, tx *sql.Tx, conversation domain.Conv
 	return values, rows.Err()
 }
 
-func conversationMemberSet(ctx context.Context, tx *sql.Tx, conversation domain.ConversationID) (map[domain.UserID]struct{}, error) {
+func conversationMemberSet(ctx context.Context, tx txRunner, conversation domain.ConversationID) (map[domain.UserID]struct{}, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = ?`, conversation)
 	if err != nil {
 		return nil, err
@@ -6768,7 +6847,7 @@ func conversationMemberSet(ctx context.Context, tx *sql.Tx, conversation domain.
 }
 
 func (s *Store) SetDirectConversationOpen(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, open bool, event events.Event) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -6812,7 +6891,7 @@ func (s *Store) SetDirectConversationOpen(ctx context.Context, workspace domain.
 }
 
 func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conversation, creator domain.UserID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -6844,7 +6923,7 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 }
 
 func (s *Store) RenameConversation(ctx context.Context, conversation domain.ConversationID, name string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -6882,7 +6961,7 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 }
 
 func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -6920,7 +6999,7 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 }
 
 func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -6958,7 +7037,7 @@ func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.
 }
 
 func (s *Store) SetConversationArchived(ctx context.Context, conversation domain.ConversationID, archived bool, event events.Event) (domain.Conversation, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -6995,7 +7074,7 @@ func (s *Store) SetConversationArchived(ctx context.Context, conversation domain
 }
 
 func (s *Store) DeleteConversation(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7057,7 +7136,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 }
 
 func (s *Store) SetConversationAccessGroups(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, groups []domain.UserGroupID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7111,7 +7190,7 @@ func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequ
 	if err != nil {
 		return fmt.Errorf("encode invite request channels: %w", err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7174,7 +7253,7 @@ func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.Workspace
 // be a second copy of the truth, and the two would disagree the first time a
 // message was deleted.
 func (s *Store) SetAppIcon(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID, iconURL string, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7212,7 +7291,7 @@ func (s *Store) GetExternalAuthToken(ctx context.Context, workspace domain.Works
 }
 
 func (s *Store) SetExternalAuthToken(ctx context.Context, value domain.ExternalAuthToken, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7231,7 +7310,7 @@ func (s *Store) SetExternalAuthToken(ctx context.Context, value domain.ExternalA
 }
 
 func (s *Store) DeleteExternalAuthToken(ctx context.Context, workspace domain.WorkspaceID, app domain.AppID, id string, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7293,7 +7372,7 @@ func (s *Store) SetAnomalyAllowList(ctx context.Context, value domain.AnomalyAll
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7458,7 +7537,7 @@ func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.Wor
 	if !domain.InviteRequestReviewable(from, status) {
 		return store.ErrInvalidInviteRequest
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7524,7 +7603,7 @@ func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID
 	if strings.TrimSpace(string(workspace)) == "" || strings.TrimSpace(string(appID)) == "" || !validAppApprovalStatusSQL(approvalStatus) {
 		return store.ErrInvalidAppApproval
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7615,7 +7694,7 @@ func (s *Store) SetAppBotToken(ctx context.Context, appID domain.AppID, workspac
 	if appID == "" || workspace == "" || tokenCiphertext == "" || len(written) == 0 {
 		return store.InvalidArgument("invalid app bot token")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7667,7 +7746,7 @@ func (s *Store) UninstallApp(ctx context.Context, workspaceID domain.WorkspaceID
 	if workspaceID == "" || appID == "" {
 		return store.InvalidArgument("app installation identity is required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7740,7 +7819,7 @@ func (s *Store) LookupIncomingWebhook(ctx context.Context, workspaceID domain.Wo
 }
 
 func (s *Store) SetIncomingWebhookEnabled(ctx context.Context, workspaceID domain.WorkspaceID, id domain.IncomingWebhookID, enabled bool, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7769,7 +7848,7 @@ func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.App
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7787,7 +7866,7 @@ func (s *Store) CreateView(ctx context.Context, value domain.View, event events.
 	if value.ID == "" || value.AppID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Type == "" || value.Payload == "" || value.Hash == "" || value.CreatedAt.IsZero() {
 		return store.InvalidArgument("invalid view")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -7859,7 +7938,7 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 	if value.ID == "" || value.AppID == "" || value.WorkspaceID == "" || value.Payload == "" || value.Hash == "" {
 		return domain.View{}, store.InvalidArgument("invalid view")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.View{}, err
 	}
@@ -7921,7 +8000,7 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 }
 
 func (s *Store) DeleteView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ViewID, clear bool, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8008,7 +8087,7 @@ func (s *Store) SetAssistantThread(ctx context.Context, value domain.AssistantTh
 		domain.AssistantThreadStatus:  "status = excluded.status",
 		domain.AssistantThreadPrompts: "prompts_title = excluded.prompts_title, prompts = excluded.prompts",
 	}[field]
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8130,7 +8209,7 @@ func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, 
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Status == "" || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow step")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8216,7 +8295,7 @@ func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 	if value.Version == 0 {
 		value.Version = 1
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8253,7 +8332,7 @@ func (s *Store) SetWorkflowStatus(ctx context.Context, workspace domain.Workspac
 	if id == "" || workspace == "" || status == "" {
 		return store.InvalidArgument("invalid workflow status")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8280,7 +8359,7 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || value.Version < 2 {
 		return store.InvalidArgument("invalid workflow update")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8338,7 +8417,7 @@ func (s *Store) SetWorkflowManagers(ctx context.Context, workspace domain.Worksp
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8369,7 +8448,7 @@ func (s *Store) GetWorkflow(ctx context.Context, workspace domain.WorkspaceID, i
 // cancelRunningWorkflowRuns cancels every executing step and running run of a
 // workflow inside an existing transaction. Steps are cancelled first so the
 // subquery that selects their runs still finds status = 'running' rows.
-func cancelRunningWorkflowRuns(ctx context.Context, tx *sql.Tx, workflowID domain.WorkflowID, workspace domain.WorkspaceID, now time.Time) error {
+func cancelRunningWorkflowRuns(ctx context.Context, tx txRunner, workflowID domain.WorkflowID, workspace domain.WorkspaceID, now time.Time) error {
 	completedAt := workflowTime(now)
 	if _, err := tx.ExecContext(ctx, `UPDATE workflow_steps SET status = ?, error = 'workflow_unpublished', updated_at = ?
 		WHERE status = ? AND workspace_id = ?
@@ -8392,7 +8471,7 @@ func (s *Store) DiscardWorkflowStagedChanges(ctx context.Context, workspace doma
 	if workflowID == "" || workspace == "" || expectedVersion == 0 {
 		return false, store.InvalidArgument("invalid workflow staged-changes discard")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -8449,7 +8528,7 @@ func (s *Store) DeleteWorkflow(ctx context.Context, workspace domain.WorkspaceID
 	if workflowID == "" || workspace == "" || expectedVersion == 0 {
 		return false, store.InvalidArgument("invalid workflow deletion")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -8603,7 +8682,7 @@ func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTri
 		value.Type == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow trigger")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8739,7 +8818,7 @@ func (s *Store) CompleteScheduledWorkflowTrigger(ctx context.Context, workspace 
 	if triggerID == "" || expectedNextRunAt.IsZero() || nextRunAt.IsZero() {
 		return false, store.InvalidArgument("scheduled workflow trigger completion is invalid")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -8835,7 +8914,7 @@ func (s *Store) CreateWorkflowRun(ctx context.Context, value domain.WorkflowRun,
 		value.Status == "" || value.WorkflowVersion == 0 || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow run")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -8896,7 +8975,7 @@ func (s *Store) AdvanceWorkflowRun(ctx context.Context, completed domain.Workflo
 		next.CreatedAt.IsZero() || next.UpdatedAt.IsZero()) {
 		return store.InvalidArgument("invalid next workflow step")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9104,7 +9183,7 @@ func (s *Store) SetAutomationPermission(ctx context.Context, value domain.Automa
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9159,7 +9238,7 @@ func (s *Store) SetFeaturedWorkflows(ctx context.Context, workspace domain.Works
 	if workspace == "" || conversation == "" {
 		return store.InvalidArgument("invalid featured workflow target")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9227,7 +9306,7 @@ func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event eve
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Payload == "" || value.CreatedAt.IsZero() {
 		return store.InvalidArgument("invalid dialog")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9292,7 +9371,7 @@ func (s *Store) CreateUserMigration(ctx context.Context, value domain.UserMigrat
 	if value.WorkspaceID == "" || value.OldID == "" || value.GlobalID == "" {
 		return store.InvalidArgument("invalid user migration")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9346,7 +9425,7 @@ func (s *Store) CreateSharedInvite(ctx context.Context, value domain.SharedInvit
 	if value.TargetWorkspaceID == value.WorkspaceID {
 		return store.InvalidArgument("a conversation cannot be shared with its own workspace")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9427,7 +9506,7 @@ func (s *Store) SetSharedInviteStatus(ctx context.Context, id domain.SharedInvit
 	if !domain.SharedInviteTransition(from, to) {
 		return store.InvalidArgument("a shared invitation cannot move between those states")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9466,7 +9545,7 @@ func (s *Store) AcceptSharedInvite(ctx context.Context, id domain.SharedInviteID
 	if len(emitted) == 0 {
 		return domain.Conversation{}, store.InvalidArgument("accepting a shared invitation requires at least one event")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -9537,7 +9616,7 @@ func scanConversationRow(row rowScanner) (domain.Conversation, error) {
 }
 
 func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9630,7 +9709,7 @@ func (s *Store) DisconnectExternalTeam(ctx context.Context, workspace domain.Wor
 	if team == "" || team == workspace {
 		return store.InvalidArgument("an external organization is required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9682,7 +9761,7 @@ func (s *Store) ListConversationTeams(ctx context.Context, workspace domain.Work
 }
 
 func (s *Store) DisconnectConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, leaving []domain.WorkspaceID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -9899,7 +9978,7 @@ func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, r
 }
 
 func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, code, redirect, accessToken string, token domain.OAuthToken) (domain.OAuthToken, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
@@ -10069,7 +10148,7 @@ func (s *Store) ExchangeOAuthRefreshToken(ctx context.Context, clientID, secret,
 }
 
 func (s *Store) exchangeOAuthRefreshTokenOnce(ctx context.Context, clientID, secret, oldRefreshToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
@@ -10159,7 +10238,7 @@ func (s *Store) ExchangeOAuthAccessToken(ctx context.Context, clientID, secret, 
 }
 
 func (s *Store) exchangeOAuthAccessTokenOnce(ctx context.Context, clientID, secret, oldAccessToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
@@ -10239,7 +10318,7 @@ func (s *Store) ExchangeOpenIDRefreshToken(ctx context.Context, clientID, oldTok
 }
 
 func (s *Store) exchangeOpenIDRefreshTokenOnce(ctx context.Context, clientID, oldToken, accessToken, refreshToken string, token domain.OpenIDToken) (domain.OpenIDToken, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}
@@ -10314,7 +10393,7 @@ func (s *Store) CreateRTMConnection(ctx context.Context, value domain.RTMConnect
 }
 
 func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTMConnection, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.RTMConnection{}, err
 	}
@@ -10362,7 +10441,7 @@ func (s *Store) createSocketModeConnectionOnce(ctx context.Context, value domain
 	if err := s.ensureSocketModeAdmissionRow(ctx, value.AppID); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -10434,7 +10513,7 @@ func (s *Store) consumeSocketModeConnectionOnce(ctx context.Context, id string) 
 	if err := s.ensureSocketModeAdmissionRow(ctx, appID); err != nil {
 		return domain.SocketModeConnection{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.SocketModeConnection{}, err
 	}
@@ -10632,7 +10711,7 @@ func (s *Store) AckSocketModeResponses(ctx context.Context, owner string, values
 			return store.InvalidArgument("invalid Socket Mode response key")
 		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -10665,7 +10744,7 @@ func (s *Store) RenewSocketModeResponses(ctx context.Context, owner string, valu
 	if strings.TrimSpace(owner) == "" || len(values) == 0 || lease <= 0 {
 		return store.InvalidArgument("invalid Socket Mode response renewal")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -10707,7 +10786,7 @@ func (s *Store) ReleaseSocketModeResponses(ctx context.Context, owner string, va
 			return store.InvalidArgument("invalid Socket Mode response key")
 		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -10803,7 +10882,7 @@ func (s *Store) ClaimSocketModeInteraction(ctx context.Context, appID domain.App
 	var claimed domain.SocketModeInteraction
 	var found bool
 	err := underContention(ctx, func() error {
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := s.beginWrite(ctx)
 		if err != nil {
 			return err
 		}
@@ -10919,7 +10998,7 @@ func (s *Store) SetConversationPublic(ctx context.Context, conversation domain.C
 // ErrInvalidConversationType — two compositions disagreeing about what happened
 // to a channel that plainly exists.
 func (s *Store) setConversationVisibility(ctx context.Context, conversation domain.ConversationID, private bool, event events.Event) (domain.Conversation, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -10954,7 +11033,7 @@ func (s *Store) ConvertGroupDirectToPrivate(ctx context.Context, conversion doma
 	if len(emitted) != 2 || strings.TrimSpace(conversion.Name) == "" {
 		return domain.Conversation{}, store.InvalidArgument("invalid group DM conversion")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -11033,7 +11112,7 @@ func (s *Store) SetConversationRetention(ctx context.Context, workspace domain.W
 	if days <= 0 || !domain.ValidRetentionDays(days) {
 		return store.InvalidArgument("a conversation retention override must be a positive number of days below the maximum")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11053,7 +11132,7 @@ func (s *Store) SetConversationRetention(ctx context.Context, workspace domain.W
 }
 
 func (s *Store) RemoveConversationRetention(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11072,7 +11151,7 @@ func (s *Store) RemoveConversationRetention(ctx context.Context, workspace domai
 	return tx.Commit()
 }
 
-func conversationBelongsToWorkspace(ctx context.Context, tx *sql.Tx, workspace domain.WorkspaceID, conversation domain.ConversationID) error {
+func conversationBelongsToWorkspace(ctx context.Context, tx txRunner, workspace domain.WorkspaceID, conversation domain.ConversationID) error {
 	var present int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id = ? AND workspace_id = ?`, conversation, workspace).Scan(&present); err != nil {
 		return translateNotFound(err)
@@ -11101,7 +11180,7 @@ func (s *Store) SetRetentionPolicy(ctx context.Context, workspace domain.Workspa
 	if !policy.Valid() {
 		return store.InvalidArgument("retention durations must be zero or a positive number of days below the maximum")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11171,7 +11250,7 @@ func (s *Store) SweepRetention(ctx context.Context, request domain.RetentionSwee
 		return domain.RetentionSweep{}, store.InvalidArgument("a retention sweep requires a positive limit")
 	}
 	result := domain.RetentionSweep{ConversationID: request.ConversationID, SweptAt: request.SweptAt.UTC(), Complete: true}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.RetentionSweep{}, err
 	}
@@ -11215,7 +11294,7 @@ func (s *Store) SweepRetention(ctx context.Context, request domain.RetentionSwee
 // passed the file horizon and which no other conversation still shares. A file
 // in two channels outlives the stricter of them: deleting it because one
 // channel expired would silently remove it from the other.
-func expiredFiles(ctx context.Context, tx *sql.Tx, request domain.RetentionSweepRequest) ([]domain.ExpiredBlob, error) {
+func expiredFiles(ctx context.Context, tx txRunner, request domain.RetentionSweepRequest) ([]domain.ExpiredBlob, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT f.id, f.blob_key FROM files f
 		JOIN file_shares fs ON fs.file_id = f.id
 		WHERE fs.conversation_id = ? AND f.workspace_id = ? AND f.deleted = 0 AND f.created_at < ?
@@ -11241,7 +11320,7 @@ func expiredFiles(ctx context.Context, tx *sql.Tx, request domain.RetentionSweep
 // bytes are not touched here: the caller journals one blob-delete event per
 // file and the existing blob cleanup worker reclaims them, which is the same
 // path an ordinary file deletion already takes.
-func deleteFilesTx(ctx context.Context, tx *sql.Tx, expired []domain.ExpiredBlob) error {
+func deleteFilesTx(ctx context.Context, tx txRunner, expired []domain.ExpiredBlob) error {
 	placeholders := make([]string, 0, len(expired))
 	arguments := make([]any, 0, len(expired))
 	for _, value := range expired {
@@ -11270,7 +11349,7 @@ func deleteFilesTx(ctx context.Context, tx *sql.Tx, expired []domain.ExpiredBlob
 // A thread is retained until its newest reply expires: deleting a root while
 // its replies survive would leave replies with no parent to render under, and
 // MSG-04 already says deletion does not take a whole thread unless Slack does.
-func expiredMessages(ctx context.Context, tx *sql.Tx, request domain.RetentionSweepRequest) ([]expiredMessage, bool, error) {
+func expiredMessages(ctx context.Context, tx txRunner, request domain.RetentionSweepRequest) ([]expiredMessage, bool, error) {
 	horizon := domain.NewStoredTime(request.MessageHorizon)
 	// Every thread whose newest reply is still inside the horizon. Its root
 	// and all of its replies are retained however old they are.
@@ -11346,7 +11425,7 @@ func retainedByThread(created domain.StoredTime, thread domain.MessageTimestamp,
 // saved_items (whose message_id foreign key is enforced), activity_items and
 // thread_follows. Retention is permanent, so these rows go rather than being
 // tombstoned.
-func deleteMessagesTx(ctx context.Context, tx *sql.Tx, conversation domain.ConversationID, expired []expiredMessage) error {
+func deleteMessagesTx(ctx context.Context, tx txRunner, conversation domain.ConversationID, expired []expiredMessage) error {
 	placeholders := make([]string, 0, len(expired))
 	arguments := make([]any, 0, len(expired))
 	roots := make([]any, 0, len(expired))
@@ -11414,7 +11493,7 @@ func (s *Store) AppendRetentionEvents(ctx context.Context, workspace domain.Work
 	if len(emitted) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11482,7 +11561,7 @@ func (s *Store) SetConversationPrefs(ctx context.Context, conversation domain.Co
 	if err != nil {
 		return domain.ConversationPrefs{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.ConversationPrefs{}, err
 	}
@@ -11551,7 +11630,7 @@ func userIDStrings(values []domain.UserID) []string {
 }
 
 func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11586,7 +11665,7 @@ func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([
 }
 
 func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11609,7 +11688,7 @@ func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, n
 }
 
 func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11636,7 +11715,7 @@ func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, o
 }
 
 func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11680,7 +11759,7 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 	if len(users) == 0 {
 		return store.InvalidArgument("conversation invite requires at least one user")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -11738,7 +11817,7 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 }
 
 func (s *Store) RemoveConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12170,7 +12249,7 @@ func (s *Store) SetWorkspaceNotificationPreferences(ctx context.Context, prefere
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12220,7 +12299,7 @@ func (s *Store) SetConversationNotificationPreferences(ctx context.Context, pref
 	if !preferences.Valid() {
 		return store.InvalidArgument("conversation notification preferences are invalid")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12264,7 +12343,7 @@ func (s *Store) SetThreadFollowed(ctx context.Context, workspace domain.Workspac
 	if _, err := domain.ParseMessageTimestamp(root); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12295,7 +12374,7 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12321,7 +12400,7 @@ func (s *Store) SetReadCursors(ctx context.Context, updates []store.ReadCursorUp
 		}
 		readAt[index] = parsed
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12337,7 +12416,7 @@ func (s *Store) SetReadCursors(ctx context.Context, updates []store.ReadCursorUp
 // setReadCursorTx is the body both cursor writers share. It was duplicated
 // between them for exactly one revision, which is one too many for a rule that
 // has to hold in both directions (see the activity note below).
-func setReadCursorTx(ctx context.Context, tx *sql.Tx, cursor domain.ReadCursor, readAt time.Time, event events.Event) error {
+func setReadCursorTx(ctx context.Context, tx txRunner, cursor domain.ReadCursor, readAt time.Time, event events.Event) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, domain.NewStoredTime(cursor.UpdatedAt)); err != nil {
 		return err
 	}
@@ -12618,7 +12697,7 @@ func (s *Store) RecordListAssignment(ctx context.Context, item domain.ListItem, 
 	if item.AssigneeID == "" || item.ID == "" {
 		return store.InvalidArgument("a list assignment requires an item and an assignee")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12710,7 +12789,7 @@ func (s *Store) RecordSharedInviteDecision(ctx context.Context, invite domain.Sh
 	if invite.ID == "" || invite.InvitedBy == "" {
 		return store.InvalidArgument("a shared invite decision requires an invitation and a requester")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -12812,7 +12891,7 @@ func (s *Store) MutateActivity(ctx context.Context, workspace domain.WorkspaceID
 			unique = append(unique, id)
 		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13074,7 +13153,7 @@ func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledM
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13158,7 +13237,7 @@ func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledM
 	return tx.Commit()
 }
 
-func insertMessageFiles(ctx context.Context, tx *sql.Tx, message domain.Message) error {
+func insertMessageFiles(ctx context.Context, tx txRunner, message domain.Message) error {
 	seen := make(map[domain.FileID]struct{}, len(message.Files))
 	for position, file := range message.Files {
 		if file.ID == "" {
@@ -13191,7 +13270,7 @@ func insertMessageFiles(ctx context.Context, tx *sql.Tx, message domain.Message)
 	return nil
 }
 
-func insertFileShareMessage(ctx context.Context, tx *sql.Tx, message domain.Message, event events.Event) error {
+func insertFileShareMessage(ctx context.Context, tx txRunner, message domain.Message, event events.Event) error {
 	message.CreatedAt = domain.MessageInstant(message.CreatedAt)
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
@@ -13236,7 +13315,7 @@ func insertFileShareMessage(ctx context.Context, tx *sql.Tx, message domain.Mess
 	return insertOutbox(ctx, tx, event)
 }
 
-func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Message) error {
+func insertMessageActivity(ctx context.Context, tx txRunner, message domain.Message) error {
 	var private, direct, groupDirect int
 	if err := tx.QueryRowContext(ctx, `SELECT is_private, is_direct, is_group_direct FROM conversations WHERE id = ? AND workspace_id = ?`, message.Conversation, message.WorkspaceID).Scan(&private, &direct, &groupDirect); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
@@ -13497,7 +13576,7 @@ func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.Fil
 	if len(fileIDs) == 0 || len(emitted) == 0 {
 		return store.InvalidArgument("a file share message requires a file")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13534,7 +13613,7 @@ func (s *Store) CreateEphemeralMessage(ctx context.Context, value domain.Ephemer
 	if value.ID == "" || value.WorkspaceID == "" || value.Conversation == "" || value.AuthorID == "" || value.RecipientID == "" || value.CreatedAt.IsZero() || value.Timestamp == "" {
 		return store.InvalidArgument("invalid ephemeral message")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13606,7 +13685,7 @@ func (s *Store) UpdateEphemeralMessage(ctx context.Context, value domain.Ephemer
 	if value.ID == "" || value.WorkspaceID == "" || value.Conversation == "" || value.AuthorID == "" || value.RecipientID == "" || value.CreatedAt.IsZero() || value.Timestamp == "" {
 		return store.InvalidArgument("invalid ephemeral message")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13632,7 +13711,7 @@ func (s *Store) DeleteEphemeralMessage(ctx context.Context, workspaceID domain.W
 	if workspaceID == "" || recipientID == "" || id == "" {
 		return store.InvalidArgument("invalid ephemeral message key")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13685,7 +13764,7 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 }
 
 func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13697,7 +13776,7 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 }
 
 func (s *Store) DeleteMessage(ctx context.Context, message domain.Message, event events.Event, unshares []store.FileUnshare) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13732,7 +13811,7 @@ func (s *Store) DeleteMessage(ctx context.Context, message domain.Message, event
 	return tx.Commit()
 }
 
-func updateMessageTx(ctx context.Context, tx *sql.Tx, message domain.Message, event events.Event) error {
+func updateMessageTx(ctx context.Context, tx txRunner, message domain.Message, event events.Event) error {
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
 		return err
@@ -13767,7 +13846,7 @@ func updateMessageTx(ctx context.Context, tx *sql.Tx, message domain.Message, ev
 }
 
 func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13813,7 +13892,7 @@ func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event
 }
 
 func (s *Store) RemoveReaction(ctx context.Context, reaction domain.Reaction, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13974,7 +14053,7 @@ func userReactionCursorKey(value domain.UserReaction) string {
 }
 
 func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -13997,7 +14076,7 @@ func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) 
 }
 
 func (s *Store) RemovePin(ctx context.Context, pin domain.Pin, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14077,7 +14156,7 @@ func (s *Store) ListPins(ctx context.Context, conversation domain.ConversationID
 }
 
 func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14100,7 +14179,7 @@ func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Even
 }
 
 func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14222,7 +14301,7 @@ func (s *Store) CreateSavedItem(ctx context.Context, item domain.SavedItem, even
 	}
 	item.Message = domain.Message{}
 	item.SourceAvailable = false
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.SavedItem{}, false, err
 	}
@@ -14357,7 +14436,7 @@ func (s *Store) UpdateSavedItem(ctx context.Context, item domain.SavedItem, even
 	}
 	item.Message = domain.Message{}
 	item.SourceAvailable = false
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.SavedItem{}, err
 	}
@@ -14384,7 +14463,7 @@ func (s *Store) UpdateSavedItem(ctx context.Context, item domain.SavedItem, even
 }
 
 func (s *Store) DeleteSavedItem(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14407,7 +14486,7 @@ func (s *Store) DeleteSavedItem(ctx context.Context, workspace domain.WorkspaceI
 }
 
 func (s *Store) CreateBookmark(ctx context.Context, bookmark domain.Bookmark, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14481,7 +14560,7 @@ func (s *Store) UpdateBookmark(ctx context.Context, bookmark domain.Bookmark, ev
 }
 
 func (s *Store) updateBookmarkOnce(ctx context.Context, bookmark domain.Bookmark, event events.Event) (domain.Bookmark, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Bookmark{}, err
 	}
@@ -14511,7 +14590,7 @@ func (s *Store) updateBookmarkOnce(ctx context.Context, bookmark domain.Bookmark
 }
 
 func (s *Store) DeleteBookmark(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14534,7 +14613,7 @@ func (s *Store) DeleteBookmark(ctx context.Context, workspace domain.WorkspaceID
 }
 
 func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14556,7 +14635,7 @@ func (s *Store) CreateCanvasWithAccess(ctx context.Context, canvas domain.Canvas
 	if access.CanvasID != canvas.ID || access.EntityType == "" || access.EntityID == "" || access.Access == "" {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14580,7 +14659,7 @@ func (s *Store) CreateCanvasWithAccess(ctx context.Context, canvas domain.Canvas
 }
 
 func (s *Store) CreateChannelCanvas(ctx context.Context, canvas domain.Canvas, event events.Event, channel domain.ConversationID, accessEvent events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14848,7 +14927,7 @@ func (s *Store) ListCanvases(ctx context.Context, workspace domain.WorkspaceID, 
 }
 
 func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14915,7 +14994,7 @@ func (s *Store) CreateCanvasComment(ctx context.Context, comment domain.CanvasCo
 	if !visible {
 		return store.ErrNotFound
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -14933,7 +15012,7 @@ func (s *Store) CreateCanvasComment(ctx context.Context, comment domain.CanvasCo
 // DeleteCanvasComment removes a remark. The author check is inside the
 // statement, so the permission cannot be lost between reading it and acting.
 func (s *Store) DeleteCanvasComment(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasCommentID, author domain.UserID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15062,7 +15141,7 @@ func (s *Store) ListCanvasRevisions(ctx context.Context, workspace domain.Worksp
 }
 
 func (s *Store) DeleteCanvas(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15097,7 +15176,7 @@ func (s *Store) DeleteCanvas(ctx context.Context, workspace domain.WorkspaceID, 
 }
 
 func (s *Store) SetCanvasAccess(ctx context.Context, access domain.CanvasAccess, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15139,7 +15218,7 @@ func (s *Store) SetCanvasAccess(ctx context.Context, access domain.CanvasAccess,
 }
 
 func (s *Store) DeleteCanvasAccess(ctx context.Context, access domain.CanvasAccess, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15240,7 +15319,7 @@ func (s *Store) GetCanvasAccess(ctx context.Context, canvasID domain.CanvasID, u
 }
 
 func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15319,7 +15398,7 @@ func (s *Store) CompleteReminder(ctx context.Context, workspace domain.Workspace
 }
 
 func (s *Store) updateReminderCompletion(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID, completed time.Time, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15342,7 +15421,7 @@ func (s *Store) updateReminderCompletion(ctx context.Context, workspace domain.W
 }
 
 func (s *Store) DeleteReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15429,7 +15508,7 @@ func (s *Store) DueReminders(ctx context.Context, workspace domain.WorkspaceID, 
 }
 
 func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -15496,7 +15575,7 @@ func (s *Store) CreateLaterReminder(ctx context.Context, reminder domain.LaterRe
 	if !reminder.Target.Valid() || !reminder.Recurrence.Valid() {
 		return store.InvalidArgument("later reminder target or recurrence is invalid")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15579,7 +15658,7 @@ func (s *Store) UpdateLaterReminder(ctx context.Context, reminder domain.LaterRe
 	if reminder.Target != domain.LaterReminderPersonal || !reminder.Recurrence.Valid() {
 		return domain.LaterReminder{}, store.InvalidArgument("only personal Later reminders can be edited")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.LaterReminder{}, err
 	}
@@ -15614,7 +15693,7 @@ func (s *Store) AcknowledgeLaterReminders(ctx context.Context, workspace domain.
 	if workspace == "" || user == "" || acknowledged.IsZero() {
 		return store.InvalidArgument("Later reminder acknowledgement is incomplete")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15644,7 +15723,7 @@ func (s *Store) AcknowledgeLaterReminders(ctx context.Context, workspace domain.
 }
 
 func (s *Store) CompleteLaterReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, completed time.Time, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15672,7 +15751,7 @@ func (s *Store) CompleteLaterReminder(ctx context.Context, workspace domain.Work
 }
 
 func (s *Store) DeleteLaterReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15721,7 +15800,7 @@ func (s *Store) ClaimDueLaterReminders(ctx context.Context, workspace domain.Wor
 		return nil, store.InvalidArgument("Later reminder claim requires owner, positive limit, lease, and current time")
 	}
 	now = now.UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -15799,7 +15878,7 @@ func (s *Store) MarkLaterReminderDelivered(ctx context.Context, owner string, id
 		return store.InvalidArgument("Later reminder delivery requires owner and delivery time")
 	}
 	deliveredAt = deliveredAt.UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15858,7 +15937,7 @@ func (s *Store) MarkLaterReminderFailed(ctx context.Context, owner string, id do
 		return store.InvalidArgument("Later reminder failure requires owner, code, and failure time")
 	}
 	failedAt = failedAt.UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15905,7 +15984,7 @@ func (s *Store) ReleaseLaterReminder(ctx context.Context, owner string, id domai
 	return nil
 }
 
-func insertScheduledMessageFiles(ctx context.Context, tx *sql.Tx, value domain.ScheduledMessage) error {
+func insertScheduledMessageFiles(ctx context.Context, tx txRunner, value domain.ScheduledMessage) error {
 	if len(value.FileAttachments) > 10 {
 		return store.InvalidArgument("scheduled message has too many file attachments")
 	}
@@ -15939,7 +16018,7 @@ func insertScheduledMessageFiles(ctx context.Context, tx *sql.Tx, value domain.S
 }
 
 func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.ScheduledMessage, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -15960,7 +16039,7 @@ func (s *Store) CreateScheduledMessageWithinLimit(ctx context.Context, value dom
 	if window <= 0 || limit <= 0 {
 		return store.InvalidArgument("scheduled-message window and limit must be positive")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16280,7 +16359,7 @@ func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update do
 	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
 		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message update is incomplete")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
@@ -16356,7 +16435,7 @@ func (s *Store) ClaimScheduledMessageForCredential(ctx context.Context, workspac
 	if workspace == "" || credentialHash == "" || id == "" || owner == "" || lease <= 0 {
 		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message claim is incomplete")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
@@ -16387,7 +16466,7 @@ func (s *Store) ClaimScheduledMessageForCredential(ctx context.Context, workspac
 }
 
 func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16422,7 +16501,7 @@ func (s *Store) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 	if credentialHash == "" {
 		return store.InvalidArgument("scheduled-message credential is required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16490,7 +16569,7 @@ func (s *Store) UpsertDraft(ctx context.Context, value domain.Draft, event event
 		(strings.TrimSpace(value.Text) == "" && len(value.Attachments) == 0) || len(value.Attachments) > 10 || value.UpdatedAt.IsZero() {
 		return domain.Draft{}, store.InvalidArgument("draft is incomplete")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Draft{}, err
 	}
@@ -16633,7 +16712,7 @@ func (s *Store) ListDrafts(ctx context.Context, workspace domain.WorkspaceID, us
 }
 
 func (s *Store) DeleteDraft(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16659,7 +16738,7 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	if owner == "" || limit <= 0 || lease <= 0 {
 		return nil, store.InvalidArgument("scheduled claim requires owner, positive limit, and lease")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -16743,7 +16822,7 @@ func (s *Store) MarkScheduledMessageFailed(ctx context.Context, owner string, id
 	if failureCode == "" {
 		return store.InvalidArgument("scheduled failure code is required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16783,7 +16862,7 @@ func (s *Store) ReleaseScheduledMessage(ctx context.Context, owner string, id do
 }
 
 func (s *Store) CreateUserGroup(ctx context.Context, value domain.UserGroup, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16910,7 +16989,7 @@ func (s *Store) ListUserGroups(ctx context.Context, workspace domain.WorkspaceID
 }
 
 func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, channels []domain.ConversationID, actor domain.UserID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16942,7 +17021,7 @@ func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.Works
 }
 
 func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16970,7 +17049,7 @@ func (s *Store) SetUserGroupEnabled(ctx context.Context, workspace domain.Worksp
 	if !enabled {
 		deleted = now.Unix()
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -16993,7 +17072,7 @@ func (s *Store) SetUserGroupEnabled(ctx context.Context, workspace domain.Worksp
 }
 
 func (s *Store) SetUserGroupUsers(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, users []domain.UserID, actor domain.UserID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17023,7 +17102,7 @@ func (s *Store) SetUserGroupUsers(ctx context.Context, workspace domain.Workspac
 }
 
 func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17084,7 +17163,7 @@ func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joi
 	if value.Kind != domain.CallKindHuddle || value.ConversationID == "" || value.CreatedBy == "" {
 		return domain.Call{}, false, store.InvalidArgument("a huddle requires a conversation and a creator")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Call{}, false, err
 	}
@@ -17136,7 +17215,7 @@ func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joi
 	return value, true, nil
 }
 
-func addCallParticipantTx(ctx context.Context, tx *sql.Tx, id domain.CallID, user domain.UserID, workspace domain.WorkspaceID) (bool, error) {
+func addCallParticipantTx(ctx context.Context, tx txRunner, id domain.CallID, user domain.UserID, workspace domain.WorkspaceID) (bool, error) {
 	result, err := tx.ExecContext(ctx, `INSERT INTO call_participants(call_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(call_id, user_id) DO NOTHING`, id, user, workspace)
 	if err != nil {
 		return false, classify(err)
@@ -17161,7 +17240,7 @@ func (s *Store) ActiveHuddle(ctx context.Context, workspace domain.WorkspaceID, 
 }
 
 func (s *Store) JoinCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, event events.Event) (domain.Call, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -17193,7 +17272,7 @@ func (s *Store) JoinCall(ctx context.Context, workspace domain.WorkspaceID, id d
 }
 
 func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, user domain.UserID, left, ended events.Event) (domain.Call, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -17263,7 +17342,7 @@ func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id do
 }
 
 func (s *Store) UpdateCall(ctx context.Context, value domain.Call, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17286,7 +17365,7 @@ func (s *Store) UpdateCall(ctx context.Context, value domain.Call, event events.
 }
 
 func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, duration int64, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17322,7 +17401,7 @@ func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id do
 }
 
 func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17349,7 +17428,7 @@ func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.Worksp
 }
 
 func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17450,7 +17529,7 @@ func (s *Store) SeedFileComment(ctx context.Context, value domain.FileComment) e
 }
 
 func (s *Store) DeleteFileComment(ctx context.Context, workspace domain.WorkspaceID, fileID domain.FileID, commentID domain.FileCommentID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17499,7 +17578,7 @@ func (s *Store) GetFile(ctx context.Context, id domain.FileID) (domain.File, err
 // a concurrent request from someone who was the uploader a moment ago and is
 // not now.
 func (s *Store) SetFileDescription(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID, uploader domain.UserID, description string, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17522,7 +17601,7 @@ func (s *Store) SetFileDescription(ctx context.Context, workspace domain.Workspa
 }
 
 func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17545,7 +17624,7 @@ func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.E
 }
 
 func (s *Store) ShareFilePublic(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID, token string, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17568,7 +17647,7 @@ func (s *Store) ShareFilePublic(ctx context.Context, workspace domain.WorkspaceI
 }
 
 func (s *Store) RevokeFilePublic(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17765,7 +17844,7 @@ func (s *Store) RecordSearchHistory(ctx context.Context, value domain.SearchHist
 	if value.WorkspaceID == "" || value.UserID == "" || value.Query == "" || utf8.RuneCountInString(value.Query) > 500 || value.SearchedAt.IsZero() {
 		return store.InvalidArgument("search history entry is invalid")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -17978,7 +18057,7 @@ func (s *Store) collectBlobReferences(ctx context.Context, workspace domain.Work
 }
 
 func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -18098,7 +18177,7 @@ func (s *Store) ListRemoteFiles(ctx context.Context, workspace domain.WorkspaceI
 }
 
 func (s *Store) RemoveRemoteFile(ctx context.Context, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -18127,7 +18206,7 @@ func (s *Store) RemoveRemoteFile(ctx context.Context, workspace domain.Workspace
 }
 
 func (s *Store) SetRemoteFileShares(ctx context.Context, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup, channels []domain.ConversationID, event events.Event) (domain.RemoteFile, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
@@ -18170,7 +18249,7 @@ func (s *Store) SetRemoteFileShares(ctx context.Context, workspace domain.Worksp
 }
 
 func (s *Store) UpdateRemoteFile(ctx context.Context, workspace domain.WorkspaceID, value domain.RemoteFile, event events.Event) (domain.RemoteFile, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
@@ -18341,7 +18420,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	if workspace == "" || owner == "" || limit <= 0 || lease <= 0 {
 		return nil, store.InvalidArgument("workspace, owner, positive limit, and positive lease are required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -18410,7 +18489,7 @@ func (s *Store) AckEvents(ctx context.Context, owner string, sequences []uint64)
 	if owner == "" || len(sequences) == 0 {
 		return store.InvalidArgument("owner and event sequences are required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -18433,7 +18512,7 @@ func (s *Store) RenewEvents(ctx context.Context, owner string, sequences []uint6
 	if owner == "" || len(sequences) == 0 || lease <= 0 {
 		return store.InvalidArgument("owner, event sequences, and positive lease are required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -18458,7 +18537,7 @@ func (s *Store) ReleaseEvents(ctx context.Context, owner string, sequences []uin
 	if owner == "" || len(sequences) == 0 || !retryAt.After(s.now()) {
 		return store.InvalidArgument("owner, event sequences, and a future retry time are required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -18554,7 +18633,7 @@ func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, 
 	var retryReason string
 	var found bool
 	err := underContention(ctx, func() error {
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := s.beginWrite(ctx)
 		if err != nil {
 			return err
 		}
@@ -18961,7 +19040,7 @@ func (s *Store) CreateListWithItems(ctx context.Context, value domain.List, even
 			return fmt.Errorf("%w: list item %q does not belong to the list being created", store.ErrInvalidArgument, creation.Item.ID)
 		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19071,7 +19150,7 @@ func (s *Store) ListLists(ctx context.Context, workspace domain.WorkspaceID, use
 }
 
 func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19100,7 +19179,7 @@ func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.
 }
 
 func (s *Store) CreateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19116,7 +19195,7 @@ func (s *Store) CreateListItem(ctx context.Context, value domain.ListItem, event
 
 // insertListItem is shared by the single-item creation and the bulk copy, so the
 // parent check and the column list cannot drift apart between them.
-func insertListItem(ctx context.Context, tx *sql.Tx, value domain.ListItem) error {
+func insertListItem(ctx context.Context, tx txRunner, value domain.ListItem) error {
 	if value.ParentItemID != "" {
 		var parent string
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM list_items WHERE id = ? AND list_id = ?`, value.ParentItemID, value.ListID).Scan(&parent); err != nil {
@@ -19217,7 +19296,7 @@ func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event
 // would let an item created in between keep a cell under a column that no
 // longer exists.
 func (s *Store) RemoveListColumn(ctx context.Context, value domain.List, key string, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19306,7 +19385,7 @@ func (s *Store) UpdateListItems(ctx context.Context, updates []store.ListItemUpd
 	if len(updates) == 0 {
 		return store.ErrInvalidArgument
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19353,7 +19432,7 @@ func (s *Store) DeleteListItems(ctx context.Context, workspace domain.WorkspaceI
 	if len(ids) == 0 {
 		return store.InvalidArgument("list item IDs are required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19378,7 +19457,7 @@ func (s *Store) DeleteListItems(ctx context.Context, workspace domain.WorkspaceI
 }
 
 func (s *Store) SetListAccess(ctx context.Context, value domain.ListAccess, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19393,7 +19472,7 @@ func (s *Store) SetListAccess(ctx context.Context, value domain.ListAccess, even
 }
 
 func (s *Store) DeleteListAccess(ctx context.Context, value domain.ListAccess, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19416,7 +19495,7 @@ func (s *Store) DeleteListAccess(ctx context.Context, value domain.ListAccess, e
 }
 
 func (s *Store) CreateListDownload(ctx context.Context, value domain.ListDownload, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
@@ -19657,7 +19736,7 @@ func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.
 	if scheduledID != "" && len(messages) != 1 {
 		return store.InvalidArgument("scheduled external upload completion requires one message")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
