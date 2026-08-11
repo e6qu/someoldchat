@@ -3525,7 +3525,7 @@ func (r Remote) WorkflowActivity(ctx context.Context, workspaceID domain.Workspa
 		recent = append(recent, decodeWorkflowRun(run))
 	}
 	return domain.WorkflowActivity{
-		Queued: int(out.GetQueued()), Running: int(out.GetRunning()), Completed: int(out.GetCompleted()),
+		Running: int(out.GetRunning()), Completed: int(out.GetCompleted()),
 		Failed: int(out.GetFailed()), Cancelled: int(out.GetCancelled()), RecentRuns: recent,
 	}, nil
 }
@@ -7158,7 +7158,7 @@ func (s *Server) WorkflowActivity(ctx context.Context, input *chatv1.WorkflowGet
 		recent = append(recent, encodeWorkflowRun(run))
 	}
 	return &chatv1.WorkflowActivitySummary{
-		Queued: int32(activity.Queued), Running: int32(activity.Running), Completed: int32(activity.Completed),
+		Running: int32(activity.Running), Completed: int32(activity.Completed),
 		Failed: int32(activity.Failed), Cancelled: int32(activity.Cancelled), RecentRuns: recent,
 	}, nil
 }

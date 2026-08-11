@@ -783,7 +783,6 @@ func (x *WorkflowManagePermissionResponse) GetCanManage() bool {
 
 type WorkflowActivitySummary struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Queued        int32                  `protobuf:"varint,1,opt,name=queued,proto3" json:"queued,omitempty"`
 	Running       int32                  `protobuf:"varint,2,opt,name=running,proto3" json:"running,omitempty"`
 	Completed     int32                  `protobuf:"varint,3,opt,name=completed,proto3" json:"completed,omitempty"`
 	Failed        int32                  `protobuf:"varint,4,opt,name=failed,proto3" json:"failed,omitempty"`
@@ -821,13 +820,6 @@ func (x *WorkflowActivitySummary) ProtoReflect() protoreflect.Message {
 // Deprecated: Use WorkflowActivitySummary.ProtoReflect.Descriptor instead.
 func (*WorkflowActivitySummary) Descriptor() ([]byte, []int) {
 	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *WorkflowActivitySummary) GetQueued() int32 {
-	if x != nil {
-		return x.Queued
-	}
-	return 0
 }
 
 func (x *WorkflowActivitySummary) GetRunning() int32 {
@@ -4122,15 +4114,14 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"managerIds\"A\n" +
 	" WorkflowManagePermissionResponse\x12\x1d\n" +
 	"\n" +
-	"can_manage\x18\x01 \x01(\bR\tcanManage\"\xe2\x01\n" +
-	"\x17WorkflowActivitySummary\x12\x16\n" +
-	"\x06queued\x18\x01 \x01(\x05R\x06queued\x12\x18\n" +
+	"can_manage\x18\x01 \x01(\bR\tcanManage\"\xd8\x01\n" +
+	"\x17WorkflowActivitySummary\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\x05R\arunning\x12\x1c\n" +
 	"\tcompleted\x18\x03 \x01(\x05R\tcompleted\x12\x16\n" +
 	"\x06failed\x18\x04 \x01(\x05R\x06failed\x12\x1c\n" +
 	"\tcancelled\x18\x05 \x01(\x05R\tcancelled\x12A\n" +
 	"\vrecent_runs\x18\x06 \x03(\v2 .sameoldchat.chat.v1.WorkflowRunR\n" +
-	"recentRuns\"\x9f\x01\n" +
+	"recentRunsJ\x04\b\x01\x10\x02R\x06queued\"\x9f\x01\n" +
 	"\x19WorkflowFormSubmitRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +

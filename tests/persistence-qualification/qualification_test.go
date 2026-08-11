@@ -779,7 +779,7 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.Completed != 1 || summary.Cancelled != 1 || summary.Running != 0 || summary.Failed != 0 || summary.Queued != 0 {
+	if summary.Completed != 1 || summary.Cancelled != 1 || summary.Running != 0 || summary.Failed != 0 {
 		t.Fatalf("workflow summary=%+v", summary)
 	}
 	if len(summary.RecentRuns) != 2 || summary.RecentRuns[0].ID != runID || summary.RecentRuns[1].ID != cancellableRun.ID {

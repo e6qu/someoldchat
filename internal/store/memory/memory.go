@@ -4693,8 +4693,6 @@ func (s *Store) SummarizeWorkflowRuns(_ context.Context, workspace domain.Worksp
 			continue
 		}
 		switch run.Status {
-		case domain.WorkflowRunQueued:
-			activity.Queued++
 		case domain.WorkflowRunRunning:
 			activity.Running++
 		case domain.WorkflowRunCompleted:

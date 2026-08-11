@@ -533,7 +533,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("workflow run", repository.CreateWorkflowRun(ctx, domain.WorkflowRun{
 		ID: fixtureWorkflowRunID, WorkflowID: fixtureWorkflowID, WorkflowVersion: 1,
 		TriggerID: fixtureWorkflowTriggerD, WorkspaceID: "T1", AppID: fixtureAppID, ActorID: "U-owner",
-		ConversationID: "C1", Status: domain.WorkflowRunQueued, CreatedAt: at, UpdatedAt: at,
+		ConversationID: "C1", Status: domain.WorkflowRunRunning, CreatedAt: at, UpdatedAt: at,
 	}, nil, []events.Event{event("E-run", "workflow.run_started")}))
 	// Things attached to the one seeded message, so an operation that removes one
 	// finds something to remove. They belong to the member and not to the holder:

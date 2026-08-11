@@ -851,8 +851,8 @@ func parityCases() []parityCase {
 					return ids
 				}
 				return []any{
-					before.Queued, before.Running, before.Completed, before.Failed, before.Cancelled, recentIDs(before),
-					after.Queued, after.Running, after.Completed, after.Failed, after.Cancelled, recentIDs(after),
+					before.Running, before.Completed, before.Failed, before.Cancelled, recentIDs(before),
+					after.Running, after.Completed, after.Failed, after.Cancelled, recentIDs(after),
 				}, nil
 			},
 		},

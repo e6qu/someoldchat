@@ -79,7 +79,6 @@ type WorkflowStepChange struct {
 // terminal and in-flight status plus the most recent runs, newest first.
 // Slack's builder shows the same activity view to the workflow's managers.
 type WorkflowActivity struct {
-	Queued     int
 	Running    int
 	Completed  int
 	Failed     int
@@ -223,7 +222,10 @@ type WorkflowTrigger struct {
 type WorkflowRunStatus string
 
 const (
-	WorkflowRunQueued    WorkflowRunStatus = "queued"
+	// A run is created already running: runWorkflow, the one path every
+	// interactive and automatic trigger funnels through, sets it. There is no
+	// worker that picks a queued run up, so "queued" was a status nothing could
+	// produce. It is gone rather than declared-and-unreachable.
 	WorkflowRunRunning   WorkflowRunStatus = "running"
 	WorkflowRunCompleted WorkflowRunStatus = "completed"
 	WorkflowRunFailed    WorkflowRunStatus = "failed"
