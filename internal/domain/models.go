@@ -362,6 +362,18 @@ const (
 	WorkflowStepCancelled  WorkflowStepStatus = "cancelled"
 )
 
+// Terminal reports a step that has finished. Nothing may move it afterwards:
+// completing a failed step, failing a completed one, or answering a step that
+// was cancelled when its workflow was deleted all rewrite an outcome that was
+// already recorded, and a run's own status is derived from its steps.
+func (status WorkflowStepStatus) Terminal() bool {
+	switch status {
+	case WorkflowStepCompleted, WorkflowStepFailed, WorkflowStepCancelled:
+		return true
+	}
+	return false
+}
+
 // WorkflowStepResponse is one member's answer to one interactive step, across
 // every run of the workflow. It is what
 // functions.workflows.steps.responses.export reports.
