@@ -1281,6 +1281,16 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .composer-toolbar{display:flex;align-items:center;flex:1 1 auto;flex-wrap:wrap;gap:2px;border:0;padding:0;margin:0;position:relative}
 .composer-tool,.composer-menu>summary{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;border:0;border-radius:5px;background:transparent;color:var(--muted);font-weight:700;cursor:pointer;padding:0 7px}
 .composer-tool:hover,.composer-tool:focus-visible,.composer-menu>summary:hover,.composer-menu>summary:focus-visible{background:var(--panel);color:var(--text)}
+/* Slack keeps a channel's secondary actions behind one overflow control rather
+   than spreading them across the header, so the header reads as the channel's
+   name and topic first. */
+.channel-overflow{position:relative}
+.channel-overflow>summary{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:26px;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;list-style:none;font-weight:700}
+.channel-overflow>summary::-webkit-details-marker{display:none}
+.channel-overflow>summary:hover,.channel-overflow>summary:focus-visible{background:var(--panel);color:var(--text)}
+.channel-overflow[open]>.channel-overflow-menu{position:absolute;z-index:7;right:0;top:30px;display:grid;gap:2px;min-width:200px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);padding:5px}
+.channel-overflow-menu button{width:100%;border:0;border-radius:5px;background:transparent;color:var(--text);text-align:left;padding:6px 9px;cursor:pointer}
+.channel-overflow-menu button:hover,.channel-overflow-menu button:focus-visible{background:var(--hover)}
 .composer-menu{position:relative}
 .composer-menu>summary{list-style:none}
 .composer-menu>summary::-webkit-details-marker{display:none}
@@ -1466,14 +1476,20 @@ const workspaceRefinements = `<style>
 .shortcut-list button{display:block;width:100%;padding:7px 9px;text-align:left}
 .shortcut-list small{display:block;color:var(--muted);font-weight:400}
 .composer-shortcuts{position:relative}
-/* The attach control reads as part of the composer rather than a stray
-   disclosure above it: a small labelled control on the composer's own edge.
-   It cannot move inside the composer's bottom row, where Slack puts its plus
-   button, because it carries its own multipart form and HTML forbids a form
-   inside a form. Closing that gap means either driving the upload from script
-   with a hidden input, or folding the upload into the composer's own submit —
-   a decision about how uploads are posted, not a styling change, and it is
-   recorded in the product gap audit rather than worked around here. */
+/* Attaching is a plus button at the head of the composer's own toolbar, where
+   Slack puts it.
+   
+   It was a disclosure sitting above the composer, and the reason given was that
+   the upload carries its own multipart form and HTML forbids a form inside a
+   form. That reason was about the FORM and not about the control: the form was
+   already never submitted natively when script is on, because
+   stageSelectedFiles builds FormData from it and fetches. So the form stays
+   where it is as the no-script fallback, and the button that opens it moved to
+   where it belongs, with the disclosure hidden once script takes over. Nothing
+   changed about how an upload is posted.
+   
+   The button is hidden until script reveals it, so a reader without script is
+   never offered a control that cannot work. */
 .composer-shortcuts summary{display:inline-flex;align-items:center;gap:6px;min-height:28px;width:max-content;cursor:pointer;padding:2px 8px;border-radius:6px;color:var(--muted);font-size:13px;font-weight:700}
 .composer-shortcuts summary:hover{background:var(--hover);color:var(--text)}
 .composer-shortcuts[open]>.shortcut-list{position:absolute;z-index:6;left:0;bottom:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
@@ -1959,20 +1975,24 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         <div class="channel-actions">
           <p class="action-feedback" id="action-feedback" role="alert" tabindex="-1" hidden></p>
           {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-          {{if .MarkReadURL}}
-          <form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}">
-            <button type="submit">Mark as read</button>
-          </form>
-          {{end}}
-          <form class="inline-form" id="mark-all-read" method="post" action="/app/read/all?channel={{.Channel}}">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
-          </form>
+          <details class="channel-overflow"><summary role="button" aria-label="More channel actions">⋮</summary>
+            <div class="channel-overflow-menu" aria-label="Channel actions">
+              {{if .MarkReadURL}}
+              <form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}">
+                <button type="submit">Mark as read</button>
+              </form>
+              {{end}}
+              <form class="inline-form" id="mark-all-read" method="post" action="/app/read/all?channel={{.Channel}}">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+                <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
+              </form>
+              <button type="button" id="open-keyboard-help" aria-haspopup="dialog" aria-controls="keyboard-help" {{ariaKeyshortcuts "Keyboard shortcuts"}}>Keyboard shortcuts</button>
+            </div>
+          </details>
           {{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to channel</a>{{end}}
           {{if .CanvasURL}}<a href="{{.CanvasURL}}" aria-label="Open the canvas for this conversation">Canvas</a>{{end}}
           <a href="/app?channel={{.Channel}}&amp;details=1" aria-label="Open conversation details" {{ariaKeyshortcuts "Conversation details"}}>Details</a>
-          <button type="button" id="open-keyboard-help" aria-haspopup="dialog" aria-controls="keyboard-help" {{ariaKeyshortcuts "Keyboard shortcuts"}}>Keyboard shortcuts</button>
         </div>
       </header>
       <div class="timeline-wrap">
@@ -2001,22 +2021,17 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <div class="composer-wrap">
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
         {{if .CanPost}}
-        {{if .CanUpload}}<details class="composer-shortcuts" id="upload-details"><summary>Attach a file</summary>
-          <form class="upload-form" id="upload-form" method="post" action="{{.StageUploadURL}}" enctype="multipart/form-data">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <input type="hidden" id="upload-comment" name="text" value="{{.Draft}}">
-            <input type="hidden" id="upload-draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
-            <label for="upload-file">Files<input id="upload-file" type="file" name="file" multiple required aria-describedby="upload-preview"></label>
-            <p class="upload-preview" id="upload-preview" role="status">{{if .DraftAttachments}}{{range $index, $attachment := .DraftAttachments}}{{if $index}} · {{end}}{{$attachment.Name}}{{end}}{{else}}No files selected. You can also paste or drop files into the composer.{{end}}</p>
-            <label for="upload-title">Title (optional)<input id="upload-title" type="text" name="title" maxlength="255" aria-describedby="upload-title-hint"></label>
-            <span id="upload-title-hint" class="muted">Applied when one file is staged.</span>
-            <button type="button" id="upload-clear" hidden>Remove staged files</button>
-            <button type="submit">Add to draft</button>
-          </form>
-        </details>{{end}}
+        {{if .CanUpload}}<form class="upload-form" id="upload-form" method="post" action="{{.StageUploadURL}}" enctype="multipart/form-data" hidden>
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+          <input type="hidden" id="upload-comment" name="text" value="{{.Draft}}">
+          <input type="hidden" id="upload-draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
+          <input id="upload-file" type="file" name="file" multiple aria-label="Files to attach">
+        </form>{{end}}
         <div id="typing" data-typing="/app/typing?channel={{.Channel}}" data-channel="{{.Channel}}">{{template "typing" .Typing}}</div>
         <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.LatestURL}}" data-draft-url="{{.DraftURL}}">
           <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
+          {{if .CanUpload}}<p class="upload-preview" id="upload-preview" role="status">{{if .DraftAttachments}}{{range $index, $attachment := .DraftAttachments}}{{if $index}} · {{end}}{{$attachment.Name}}{{end}}{{end}}</p>
+          <button type="button" id="upload-clear" hidden>Remove staged files</button>{{end}}
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
           <input type="hidden" name="timezone" data-browser-timezone value="UTC">
           <input type="hidden" id="draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
@@ -2036,15 +2051,20 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
           <div class="composer-footer">
           <div class="composer-toolbar" role="toolbar" aria-label="Message formatting and insertions">
+            {{if or .CanUpload .SlashCommands .GlobalShortcuts}}<details class="composer-menu composer-plus"><summary role="button" aria-label="Attach a file or browse shortcuts" aria-controls="composer-plus-menu">＋</summary>
+              <div class="composer-popover" id="composer-plus-menu" aria-label="Attach and shortcuts">
+                {{if .CanUpload}}<button type="button" id="composer-attach" aria-controls="upload-file">Upload from computer</button>{{end}}
+                {{if or .SlashCommands .GlobalShortcuts}}<button type="button" id="open-shortcut-browser" aria-label="Browse shortcuts" aria-haspopup="dialog" aria-controls="shortcut-browser">Browse shortcuts</button>{{end}}
+              </div>
+            </details>{{end}}
             <button class="composer-tool" type="button" data-wrap="*" aria-label="Bold" aria-controls="text"><strong>B</strong></button>
             <button class="composer-tool" type="button" data-wrap="_" aria-label="Italic" aria-controls="text"><em>I</em></button>
             <button class="composer-tool" type="button" data-wrap="~" aria-label="Strikethrough" aria-controls="text"><s>S</s></button>
             <button class="composer-tool" type="button" data-wrap="&#96;" aria-label="Inline code" aria-controls="text">&lt;/&gt;</button>
             <button class="composer-tool" type="button" data-insert="&lt;https://example.com|link text&gt;" data-select-offset="1" data-select-length="19" aria-label="Insert link" aria-controls="text">🔗</button>
             <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Choose an emoji" aria-haspopup="dialog" aria-controls="emoji-picker-dialog">☺</button>
-            {{if or .SlashCommands .GlobalShortcuts}}<button class="composer-tool" type="button" id="open-shortcut-browser" aria-label="Browse shortcuts" aria-haspopup="dialog" aria-controls="shortcut-browser">＋</button>{{end}}
-            {{if .CanUpload}}<button class="composer-tool" type="button" data-record-clip="audio" aria-label="Record audio clip" aria-haspopup="dialog" aria-controls="clip-recorder">◉</button>
-            <button class="composer-tool" type="button" data-record-clip="video" aria-label="Record video clip" aria-haspopup="dialog" aria-controls="clip-recorder">▣</button>{{end}}
+            {{if .CanUpload}}<button class="composer-tool" type="button" data-record-clip="audio" aria-label="Record audio clip" aria-haspopup="dialog" aria-controls="clip-recorder">🎤</button>
+            <button class="composer-tool" type="button" data-record-clip="video" aria-label="Record video clip" aria-haspopup="dialog" aria-controls="clip-recorder">🎥</button>{{end}}
             {{if or .ComposerMembers .ComposerGroups}}<details class="composer-menu"><summary role="button" aria-label="Mention a person or user group" aria-controls="mention-picker">@</summary>
               <div class="composer-popover" id="mention-picker" role="menu" aria-label="People and user groups">{{range .ComposerMembers}}
                 <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}" role="menuitem"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
@@ -2052,7 +2072,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
               </div>
             </details>{{end}}
           </div>
-            <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line</span>
+            <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line{{if .CanUpload}} · You can also paste or drop files into the composer.{{end}}</span>
             <div class="send-actions"><button class="send" type="submit">Send</button><details class="schedule-menu"><summary role="button" aria-label="Schedule message">⌄</summary><div class="schedule-popover"><label for="schedule-at">Send date and time<input id="schedule-at" type="datetime-local" name="schedule_at" value="{{.ScheduleAt}}" data-schedule-at aria-describedby="schedule-time-help"></label><input type="hidden" name="post_at"><p id="schedule-time-help">The time uses your current browser time zone and must be within 120 days.</p><button type="submit" formaction="{{.ScheduleURL}}">Schedule message</button><a href="/app/drafts?channel={{.Channel}}&amp;tab=scheduled">View scheduled messages</a></div></details></div>
           </div>
         </form>
@@ -3179,9 +3199,7 @@ var uploadForm=document.getElementById('upload-form');
 var uploadComment=document.getElementById('upload-comment');
 var uploadDraftAttachments=document.getElementById('upload-draft-attachments');
 var draftAttachmentInput=document.getElementById('draft-attachments');
-var uploadTitle=document.getElementById('upload-title');
 var uploadClear=document.getElementById('upload-clear');
-var uploadDetails=document.getElementById('upload-details');
 var clipDialog=document.getElementById('clip-recorder');
 var clipTitle=document.getElementById('clip-recorder-title');
 var clipStatus=document.getElementById('clip-recorder-status');
@@ -3774,15 +3792,19 @@ function updateUploadPreview(){
 if(!uploadFile||!uploadPreview)return;
 var files=uploadFile.files?Array.prototype.slice.call(uploadFile.files):[];
 uploadPreview.textContent='';
-if(!draftAttachments.length&&!files.length){uploadPreview.textContent='No files selected. You can also paste or drop files into the composer.';if(uploadClear)uploadClear.hidden=true;if(text)text.required=true;return}
+if(!draftAttachments.length&&!files.length){uploadPreview.textContent='';if(uploadClear)uploadClear.hidden=true;if(text)text.required=true;return}
 draftAttachments.forEach(function(file,index){
 var item=document.createElement('span');item.className='staged-file';item.appendChild(document.createTextNode((file.name||'Staged file')+' · '+formatFileSize(file.size||0)+' '));
 var remove=document.createElement('button');remove.type='button';remove.setAttribute('data-remove-draft-attachment',String(index));remove.setAttribute('aria-label','Remove '+(file.name||'staged file'));remove.textContent='Remove';item.appendChild(remove);uploadPreview.appendChild(item);
 });
 files.forEach(function(file){var item=document.createElement('span');item.className='staged-file';item.textContent=(file.name||'Pasted file')+' · '+formatFileSize(file.size)+(stagingFiles?' · uploading':'');uploadPreview.appendChild(item)});
 if(uploadClear)uploadClear.hidden=false;
-if(uploadDetails)uploadDetails.open=true;
+
 if(text)text.required=false;
+}
+function closeComposerPlus(){
+var menu=document.querySelector('.composer-plus');
+if(menu)menu.open=false;
 }
 function stageSelectedFiles(){
 if(!uploadForm||!uploadFile||!uploadFile.files||!uploadFile.files.length||stagingFiles)return Promise.resolve(false);
@@ -3796,7 +3818,7 @@ if(!response.ok)return response.text().then(function(body){throw new Error(body)
 return response.json();
 }).then(function(result){
 draftAttachments=result&&Array.isArray(result.attachments)?result.attachments:draftAttachments;
-syncDraftAttachments();uploadFile.value='';if(uploadTitle)uploadTitle.value='';stagingFiles=false;updateUploadPreview();
+syncDraftAttachments();uploadFile.value='';stagingFiles=false;updateUploadPreview();
 return persistDraftNow().then(function(){
 announce(draftAttachments.length===1?'One file is saved with this draft.':draftAttachments.length+' files are saved with this draft.');
 return true});
@@ -3887,6 +3909,10 @@ if(clipDialog)clipDialog.addEventListener('cancel',function(event){event.prevent
 if(clipDialog)clipDialog.addEventListener('click',function(event){if(event.target===clipDialog)cancelClip()});
 if(clipDialog)clipDialog.addEventListener('close',function(){if(clipTrigger&&document.contains(clipTrigger))clipTrigger.focus();clipTrigger=null});
 if(uploadFile){uploadFile.addEventListener('change',function(){updateUploadPreview();stageSelectedFiles()});syncDraftAttachments();updateUploadPreview()}
+var composerAttach=document.getElementById('composer-attach');
+if(composerAttach&&uploadFile){composerAttach.addEventListener('click',function(){closeComposerPlus();uploadFile.click()})}
+var shortcutOpener=document.getElementById('open-shortcut-browser');
+if(shortcutOpener)shortcutOpener.addEventListener('click',closeComposerPlus);
 if(uploadForm)uploadForm.addEventListener('submit',function(event){event.preventDefault();stageSelectedFiles()});
 if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';draftAttachments=[];syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce('Staged files removed from the draft.')});if(text)text.focus()});
 if(uploadPreview)uploadPreview.addEventListener('click',function(event){var remove=event.target.closest('[data-remove-draft-attachment]');if(!remove)return;var index=Number(remove.getAttribute('data-remove-draft-attachment'));if(index<0||index>=draftAttachments.length)return;var name=draftAttachments[index].name||'Staged file';draftAttachments.splice(index,1);syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce(name+' removed from the draft.')});if(text)text.focus()});

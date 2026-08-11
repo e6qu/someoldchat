@@ -26,7 +26,6 @@ package authorization
 func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 	return map[string]struct{}{
 		"AcceptSharedInvite":                      {},
-		"ActiveHuddle":                            {},
 		"AddBookmark":                             {},
 		"AddListColumn":                           {},
 		"AddReaction":                             {},
@@ -35,9 +34,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"AdminAddUserGroupTeams":                  {},
 		"AdminClearAppResolution":                 {},
 		"AdminCreateIncomingWebhook":              {},
-		"DeleteExternalAuthToken":                 {},
 		"PublishView":                             {},
-		"UpdateUserAppConnection":                 {},
 		"AdminCancelAppRequest":                   {},
 		"AdminConvertConversationToPublic":        {},
 		"AdminInviteConversationMembers":          {},
@@ -73,9 +70,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DispatchAppShortcut":                     {},
 		"DispatchSlashCommand":                    {},
 		"Draft":                                   {},
-		"DuplicateWorkflow":                       {},
 		"EditCanvas":                              {},
-		"EndHuddle":                               {},
 		"GetDeveloperApp":                         {},
 		"GetDeveloperAppDeliveryHealth":           {},
 		"GetFunctionPermission":                   {},
@@ -83,9 +78,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"GetListItem":                             {},
 		"InviteShared":                            {},
 		"IssueDeveloperAppToken":                  {},
-		"JoinHuddle":                              {},
 		"LaterReminderInfo":                       {},
-		"LeaveHuddle":                             {},
 		"ListEphemeralMessages":                   {},
 		"LookupCanvasSections":                    {},
 		"OpenAppHome":                             {},
@@ -134,4 +127,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 
 // indistinguishableRefusalCeiling is how many operations still answer a caller
 // who holds the authority exactly as they answer one who does not.
-const indistinguishableRefusalCeiling = 104
+const indistinguishableRefusalCeiling = 97

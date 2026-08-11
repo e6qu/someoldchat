@@ -3785,7 +3785,21 @@ func (m Messages) ExternalAuthToken(ctx context.Context, workspaceID domain.Work
 
 // DeleteExternalAuthToken revokes one external credential, or every one the app
 // holds when no identifier is named.
+// DeleteExternalAuthToken revokes an app's stored authorization for a provider.
+//
+// It checked nothing about the caller. Anyone who could name the workspace, the
+// app and the token could revoke it — a deactivated account and an identifier
+// belonging to nobody both succeeded — which is a stranger able to break an
+// installed app's access to an external service. Its neighbour
+// UpdateUserAppConnection already says the rule out loud: a member who is not
+// here cannot hold a connection to anything.
+//
+// It was invisible while the fixture had no token to delete: the operation
+// answered "not found" for everybody, which reads exactly like a refusal.
 func (m Messages) DeleteExternalAuthToken(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, id string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
 	if appID == "" {
 		return ErrInvalidWorkspace
 	}
