@@ -962,7 +962,7 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`role="toolbar" aria-label="Message formatting and insertions"`,
 		`aria-label="Mention a person or user group"`,
 		`data-mention-user="U1"`,
-		`id="upload-preview" role="status">No files selected. You can also paste or drop files into the composer.`,
+		`You can also paste or drop files into the composer.`,
 		`<span class="author">Ada Developer</span>`,
 		`<div class="avatar" aria-hidden="true">A</div>`,
 		`<span class="signed-in-avatar" aria-hidden="true">A</span>`,

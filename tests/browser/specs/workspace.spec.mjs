@@ -511,10 +511,15 @@ test('[SCHED-01 SCHED-02 FILE-01 A11Y-01] a staged file remains private until on
   await page.goto('/app');
 
   const stamp = Date.now();
-  const title = `Scheduled file ${stamp}`;
-  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
-  await page.getByLabel('Title (optional)').fill(title);
-  await page.locator('#upload-file').setInputFiles({
+  const title = `scheduled-${stamp}.txt`;
+  // Through the composer's own plus button, which is where Slack puts attaching
+  // and where a reader will look for it. The other upload tests set the input
+  // directly; this one proves the control that opens it exists and works.
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.locator('#composer-attach').click(),
+  ]);
+  await chooser.setFiles({
     name: `scheduled-${stamp}.txt`,
     mimeType: 'text/plain',
     buffer: Buffer.from('scheduled browser file contents'),
@@ -747,9 +752,7 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
   await signIn(context);
   await page.goto('/app');
 
-  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
-  const title = `Browser file ${Date.now()}`;
-  await page.getByLabel('Title (optional)').fill(title);
+  const title = 'browser-report.txt';
   await page.locator('#upload-file').setInputFiles({
     name: 'browser-report.txt',
     mimeType: 'text/plain',
@@ -793,12 +796,10 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await signIn(context);
   const needle = `typed-search-${Date.now()}`;
   const message = `${needle} release candidate`;
-  const fileTitle = `${needle} notes`;
+  const fileTitle = `${needle}.txt`;
   await postThroughTheAPI(request, message);
 
   await page.goto('/app');
-  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
-  await page.getByLabel('Title (optional)').fill(fileTitle);
   await page.locator('#upload-file').setInputFiles({
     name: `${needle}.txt`,
     mimeType: 'text/plain',
@@ -1397,7 +1398,6 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
 
   // Scoped to the composer's own control: the shortcuts dialog names the same
   // action, because it is the same action.
-  await page.locator('#upload-details summary').click();
   await page.locator('#upload-file').setInputFiles({
     name: 'preview.txt',
     mimeType: 'text/plain',
@@ -3139,12 +3139,10 @@ test('[SEARCH-01 NAV-03 A11Y-01] opening a search result arrives at that message
 // instead of reading a file name back to someone who gains nothing from it.
 test('[FILE-01 A11Y-01 A11Y-02] an uploaded image is shown and its uploader can describe it', async ({ page, context }) => {
   await signIn(context);
-  const title = `Diagram ${Date.now()}`;
+  const title = `diagram-${Date.now()}.png`;
   await page.goto('/app');
-  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
-  await page.getByLabel('Title (optional)').fill(title);
   await page.locator('#upload-file').setInputFiles({
-    name: 'diagram.png',
+    name: title,
     mimeType: 'image/png',
     // A real one-pixel PNG, so the browser has something to decode rather than
     // an <img> that would render broken however correct the markup is.
