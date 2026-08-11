@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 160
+const schemaVersion = 161
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3327,6 +3327,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 161 {
+		// Whether a connected team may invite further organizations into a
+		// conversation. Its own table rather than a column on conversation_teams
+		// so a missing row is unambiguously "no restriction recorded", which is
+		// what lets absence mean "may invite" without a DEFAULT a reader would
+		// then have to distinguish from an explicit true.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS conversation_team_invite_permissions (
+			conversation_id TEXT NOT NULL,
+			team_id TEXT NOT NULL,
+			can_invite INTEGER NOT NULL,
+			PRIMARY KEY (conversation_id, team_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate external invite permissions: %w", err)
 		}
 	}
 	if version < 160 {
@@ -9682,6 +9697,63 @@ func scanConversationRow(row rowScanner) (domain.Conversation, error) {
 	value.Archived = archived != 0
 	value.Kind = domain.ConversationKindFor(private != 0, direct != 0, groupDirect != 0)
 	return value, nil
+}
+
+func (s *Store) SetExternalInvitePermission(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, team domain.WorkspaceID, canInvite bool, event events.Event) error {
+	if team == "" {
+		return store.InvalidArgument("invalid team")
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var hosted, present int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations WHERE id = ? AND workspace_id = ?`, conversation, workspace).Scan(&hosted); err != nil {
+		return err
+	}
+	if hosted == 0 {
+		return store.ErrNotFound
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_teams WHERE conversation_id = ? AND team_id = ?`, conversation, team).Scan(&present); err != nil {
+		return err
+	}
+	if present == 0 {
+		return store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_team_invite_permissions(conversation_id, team_id, can_invite) VALUES (?, ?, ?)
+		ON CONFLICT(conversation_id, team_id) DO UPDATE SET can_invite = excluded.can_invite`, conversation, team, boolInt(canInvite)); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetExternalInvitePermission(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, team domain.WorkspaceID) (bool, error) {
+	var hosted, present int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations WHERE id = ? AND workspace_id = ?`, conversation, workspace).Scan(&hosted); err != nil {
+		return false, err
+	}
+	if hosted == 0 {
+		return false, store.ErrNotFound
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_teams WHERE conversation_id = ? AND team_id = ?`, conversation, team).Scan(&present); err != nil {
+		return false, err
+	}
+	if present == 0 {
+		return false, store.ErrNotFound
+	}
+	var canInvite int
+	err := s.db.QueryRowContext(ctx, `SELECT can_invite FROM conversation_team_invite_permissions WHERE conversation_id = ? AND team_id = ?`, conversation, team).Scan(&canInvite)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return canInvite != 0, nil
 }
 
 func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool, event events.Event) error {

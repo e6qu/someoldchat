@@ -33,6 +33,9 @@ import (
 var (
 	// ErrInvalidSharedInvite refuses a malformed invitation.
 	ErrInvalidSharedInvite = errors.New("shared invitation is invalid")
+	// ErrExternalInviteNotPermitted refuses a connected organization that a host
+	// has restricted from inviting further organizations into a conversation.
+	ErrExternalInviteNotPermitted = errors.New("external invitations are not permitted for this organization")
 	// ErrSharedInviteSettled refuses a decision on an invitation that already
 	// has one. It is distinct from a malformed request: the caller did nothing
 	// wrong, someone else simply got there first.
@@ -50,8 +53,40 @@ const SharedInviteLifetime = 14 * 24 * time.Hour
 // deciding that they may be are separate, and a member without the manage
 // scope may raise one for an administrator to answer.
 func (m Messages) InviteShared(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID, email string) (domain.SharedInvite, error) {
-	if err := m.requireConversationMembership(ctx, workspaceID, actorID, conversationID); err != nil {
-		return domain.SharedInvite{}, err
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return domain.SharedInvite{}, store.ErrNotFound
+	}
+	// The host of the shared channel invites through the ordinary host-scoped
+	// membership check. A connected organization may invite too — this is what
+	// makes the external-invite permission enforceable — but its members are in
+	// a different workspace, so the host-scoped check refuses them; a shared
+	// channel's membership genuinely spans workspaces, and a connected team's
+	// member is verified directly against the conversation instead.
+	if conversation.WorkspaceID == workspaceID {
+		if err := m.requireConversationMembership(ctx, workspaceID, actorID, conversationID); err != nil {
+			return domain.SharedInvite{}, err
+		}
+	} else {
+		// The caller must be a member of the shared channel, must be in the
+		// workspace it claims, and that workspace must be a participating team
+		// — GetExternalInvitePermission returns not-found when it is not, so a
+		// stranger workspace is refused without confirming the channel exists.
+		member, memberErr := m.Store.IsConversationMember(ctx, conversationID, actorID)
+		if memberErr != nil || !member {
+			return domain.SharedInvite{}, store.ErrNotFound
+		}
+		user, userErr := m.Store.GetUser(ctx, actorID)
+		if userErr != nil || user.WorkspaceID != workspaceID || user.Deleted {
+			return domain.SharedInvite{}, store.ErrNotFound
+		}
+		permitted, permErr := m.Store.GetExternalInvitePermission(ctx, conversation.WorkspaceID, conversationID, workspaceID)
+		if permErr != nil {
+			return domain.SharedInvite{}, store.ErrNotFound
+		}
+		if !permitted {
+			return domain.SharedInvite{}, ErrExternalInviteNotPermitted
+		}
 	}
 	email = strings.ToLower(strings.TrimSpace(email))
 	if target == "" && email == "" {
@@ -59,10 +94,6 @@ func (m Messages) InviteShared(ctx context.Context, workspaceID domain.Workspace
 	}
 	if email != "" && !strings.Contains(email, "@") {
 		return domain.SharedInvite{}, ErrInvalidSharedInvite
-	}
-	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return domain.SharedInvite{}, store.ErrNotFound
 	}
 	if conversation.IsDirectOrGroup() {
 		return domain.SharedInvite{}, ErrInvalidSharedInvite
@@ -75,12 +106,16 @@ func (m Messages) InviteShared(ctx context.Context, workspaceID domain.Workspace
 		return domain.SharedInvite{}, err
 	}
 	now := time.Now().UTC()
+	// The invitation lives on the shared conversation, which belongs to the
+	// host. When a connected organization raises one, the record and its event
+	// are still the host's — the inviting member is InvitedBy, and the host is
+	// where the invitation is stored and approved.
 	invite := domain.SharedInvite{
-		ID: domain.SharedInviteID(id), WorkspaceID: workspaceID, ConversationID: conversationID,
+		ID: domain.SharedInviteID(id), WorkspaceID: conversation.WorkspaceID, ConversationID: conversationID,
 		TargetWorkspaceID: target, TargetEmail: email, InvitedBy: actorID,
 		Status: domain.SharedInvitePending, CreatedAt: now, ExpiresAt: now.Add(SharedInviteLifetime),
 	}
-	event, err := sharedInviteEvent(workspaceID, actorID, "shared_invite.created", invite, now)
+	event, err := sharedInviteEvent(conversation.WorkspaceID, actorID, "shared_invite.created", invite, now)
 	if err != nil {
 		return domain.SharedInvite{}, err
 	}
@@ -260,6 +295,19 @@ func (m Messages) DisconnectExternalTeam(ctx context.Context, workspaceID domain
 // organization's ability to invite further organizations into a conversation.
 // It is expressed through the team association the conversation already
 // carries, because that is what this deployment can actually enforce.
+// ExternalInvitePermission reports whether a connected organization may invite
+// further organizations into a conversation. An organization with no recorded
+// restriction may: the permission is a restriction a host applies, not a grant.
+func (m Messages) ExternalInvitePermission(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID) (bool, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return false, err
+	}
+	if target == "" {
+		return false, ErrInvalidSharedInvite
+	}
+	return m.Store.GetExternalInvitePermission(ctx, workspaceID, conversationID, target)
+}
+
 func (m Messages) SetExternalInvitePermissions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID, canInvite bool) (domain.Conversation, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.Conversation{}, err
@@ -280,10 +328,17 @@ func (m Messages) SetExternalInvitePermissions(ctx context.Context, workspaceID 
 	if !present {
 		return domain.Conversation{}, store.ErrNotFound
 	}
+	_ = orgChannel
 	// Withdrawing the ability to invite is a downgrade of the association, not
 	// a removal of the organization: disconnecting is
 	// admin.conversations.disconnectShared, and conflating the two would let a
 	// permission change silently eject a participant.
+	//
+	// This used to re-write the team set with the same teams and announce
+	// can_invite in an event that changed no queryable state — so nothing could
+	// read the permission back and nothing enforced it. It now writes durable
+	// per-team state, which ExternalInvitePermission reads and InviteShared
+	// enforces.
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("conversation.external_invite_permissions_set",
 		events.String("channel_id", string(conversationID)),
 		events.String("team_id", string(target)),
@@ -292,7 +347,7 @@ func (m Messages) SetExternalInvitePermissions(ctx context.Context, workspaceID 
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	if err := m.Store.SetConversationTeams(ctx, workspaceID, conversationID, teams, orgChannel, event); err != nil {
+	if err := m.Store.SetExternalInvitePermission(ctx, workspaceID, conversationID, target, canInvite, event); err != nil {
 		return domain.Conversation{}, err
 	}
 	return m.ConversationInfo(ctx, workspaceID, actorID, conversationID)

@@ -3819,8 +3819,21 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				// The host decides whether the organization it let in may
-				// invite others, which is state on the conversation.
+				// invite others. That decision is durable state now, read back
+				// through the seam and compared as a value, not only announced
+				// in an event.
 				permitted, err := chat.SetExternalInvitePermissions(ctx, "T1", "U1", "C-accept", "T2", true)
+				if err != nil {
+					return nil, err
+				}
+				permittedRead, err := chat.ExternalInvitePermission(ctx, "T1", "U1", "C-accept", "T2")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetExternalInvitePermissions(ctx, "T1", "U1", "C-accept", "T2", false); err != nil {
+					return nil, err
+				}
+				restrictedRead, err := chat.ExternalInvitePermission(ctx, "T1", "U1", "C-accept", "T2")
 				if err != nil {
 					return nil, err
 				}
@@ -3870,6 +3883,7 @@ func parityCases() []parityCase {
 					// composition that invented a distinct one is caught.
 					string(refused.Status), string(withdrawn.Status), string(declined.Status),
 					string(permitted.ID), permissionEvents, revokedChannels, listed.HasMore,
+					permittedRead, restrictedRead,
 				}, nil
 			},
 		},

@@ -40,6 +40,7 @@ type enforcement struct {
 func enforced() map[string]enforcement {
 	return map[string]enforcement{
 		"GetAppApproval":                         {at: "internal/service/messages.go", why: "a decided request cannot be cancelled, and restriction uninstalls the app"},
+		"GetExternalInvitePermission":            {at: "internal/service/connect.go", why: "a connected organization a host has restricted is refused when it tries to invite another"},
 		"GetAutomationPermission":                {at: "internal/service/workflows.go", why: "who may run a workflow, a trigger and a function"},
 		"GetConversationRetention":               {at: "internal/scheduler/retention.go", why: "the sweep deletes against the conversation's own horizon"},
 		"GetRetentionPolicy":                     {at: "internal/scheduler/retention.go", why: "the sweep deletes against the workspace horizon where no override governs"},

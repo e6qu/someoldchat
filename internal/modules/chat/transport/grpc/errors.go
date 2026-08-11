@@ -104,6 +104,7 @@ var errorClasses = []errorClass{
 	// corrected argument cannot help.
 	{key: "service.invitation_expired", code: codes.FailedPrecondition, sentinel: service.ErrInvitationExpired},
 	{key: "service.huddle_not_owned", code: codes.PermissionDenied, sentinel: service.ErrHuddleNotOwned},
+	{key: "service.external_invite_not_permitted", code: codes.PermissionDenied, sentinel: service.ErrExternalInviteNotPermitted},
 	{key: "service.invalid_shared_invite", code: codes.InvalidArgument, sentinel: service.ErrInvalidSharedInvite},
 	// FailedPrecondition for both: the request is well formed and it is the
 	// state — already decided, or already full — that refuses.

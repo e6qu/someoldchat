@@ -229,7 +229,7 @@ func invoke(t *testing.T, messages service.Messages, name string, caller domain.
 			arguments[index] = reflect.ValueOf(caller)
 			callerFilled = true
 		default:
-			arguments[index] = fixtureArgument(argument, caller, chosen)
+			arguments[index] = fixtureArgument(argument, caller, chosen, name)
 		}
 	}
 	results := value.Call(arguments)
@@ -296,7 +296,7 @@ func probe(t *testing.T, name string, caller domain.UserID) (err error, decisive
 // A type the fixture has nothing for is still zeroed. That is honest — the
 // operation is then inconclusive for a reason this file can state — and it is
 // where the remaining members of the inconclusive set come from.
-func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling) reflect.Value {
+func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling, method string) reflect.Value {
 	if chosen == fillingBare {
 		return reflect.Zero(argument)
 	}
@@ -312,6 +312,17 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 			return reflect.ValueOf(domain.UserID("U-owner"))
 		}
 		return reflect.ValueOf(domain.UserID("U-member"))
+	case reflect.TypeOf(domain.WorkspaceID("")):
+		// The workspace and caller are already filled by invoke, so a
+		// WorkspaceID reaching here is a target organization. InviteShared needs
+		// a real one it has no outstanding invitation to, or it dies at its
+		// argument check for everyone and the guard-mutation gate can strip its
+		// membership guard unnoticed. Other operations that take a target
+		// organization are left zeroed, so this changes only the one it names.
+		if method == "InviteShared" {
+			return reflect.ValueOf(domain.WorkspaceID("T4"))
+		}
+		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.ConversationID("")):
 		return reflect.ValueOf(domain.ConversationID("C1"))
 	case reflect.TypeOf(domain.CanvasID("")):
@@ -532,6 +543,13 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// shared with the workspace that already holds it. The second workspace
 	// exists for that alone — the matrix asks about standing, not federation.
 	seed("second workspace", repository.SeedWorkspace(domain.Workspace{ID: "T2", Name: "other", Domain: "other"}))
+	// A fourth organization with no outstanding invitation to C1, so InviteShared
+	// can be driven to a real creation: T2 already holds one and a second to it is
+	// refused for the state. Handing InviteShared a target it can actually invite
+	// lets the holder through to success while a caller below membership is still
+	// refused for standing — the pair the guard-mutation gate needs to catch the
+	// membership check being deleted.
+	seed("fourth workspace", repository.SeedWorkspace(domain.Workspace{ID: "T4", Name: "fourth", Domain: "fourth"}))
 	seed("shared invite", repository.CreateSharedInvite(ctx, domain.SharedInvite{
 		ID: fixtureSharedInviteID, WorkspaceID: "T1", ConversationID: "C1", TargetWorkspaceID: "T2",
 		TargetEmail: "invited@example.test", InvitedBy: "U-owner", Status: domain.SharedInvitePending,

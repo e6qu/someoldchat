@@ -30,6 +30,7 @@ service.cannot_leave_default
 service.conversation_already_archived
 service.conversation_not_archived
 service.emoji_already_exists
+service.external_invite_not_permitted
 service.function_access_denied
 service.function_not_running
 service.huddle_not_owned
