@@ -379,10 +379,27 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Fetching a package index is a network call and it is retried like one.
+      # A single truncated response from the PPA — the server closing a chunked
+      # transfer early, which surfaces from add-apt-repository as
+      # "invalid literal for int() with base 16" out of Python's http client —
+      # failed this job before it reached a line of our code. Three attempts
+      # with a pause between them, and a failure that survives all three is a
+      # real one worth reading.
       - name: Install native dqlite dependencies
         run: |
-          sudo add-apt-repository -y ppa:dqlite/dev
-          sudo apt-get update
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo add-apt-repository -y ppa:dqlite/dev && sudo apt-get update; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "the dqlite package index could not be fetched in three attempts" >&2
+              exit 1
+            fi
+            echo "attempt $attempt to fetch the dqlite package index failed; retrying" >&2
+            sleep 15
+          done
           sudo apt-get install -y \
             dqlite-tools-v3=3.0.4~noble1 \
             libdqlite-dev=1.18.3~noble1 \
