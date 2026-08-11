@@ -2546,6 +2546,9 @@ test('[NAV-02 A11Y-01] the shortcuts dialog documents the keyboard layer and is 
 
   // The circular-discovery problem: a member who does not know the chord must
   // still be able to find out what the chords are.
+  // Behind the channel's overflow control, where Slack keeps secondary actions.
+  // Still reachable without knowing the shortcut, which is what this asserts.
+  await page.locator('.channel-overflow > summary').click();
   await page.getByRole('button', { name: 'Keyboard shortcuts' }).click();
   const help = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
   await expect(help).toBeVisible();

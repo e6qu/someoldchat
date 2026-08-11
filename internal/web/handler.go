@@ -1281,6 +1281,16 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .composer-toolbar{display:flex;align-items:center;flex:1 1 auto;flex-wrap:wrap;gap:2px;border:0;padding:0;margin:0;position:relative}
 .composer-tool,.composer-menu>summary{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;border:0;border-radius:5px;background:transparent;color:var(--muted);font-weight:700;cursor:pointer;padding:0 7px}
 .composer-tool:hover,.composer-tool:focus-visible,.composer-menu>summary:hover,.composer-menu>summary:focus-visible{background:var(--panel);color:var(--text)}
+/* Slack keeps a channel's secondary actions behind one overflow control rather
+   than spreading them across the header, so the header reads as the channel's
+   name and topic first. */
+.channel-overflow{position:relative}
+.channel-overflow>summary{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:26px;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;list-style:none;font-weight:700}
+.channel-overflow>summary::-webkit-details-marker{display:none}
+.channel-overflow>summary:hover,.channel-overflow>summary:focus-visible{background:var(--panel);color:var(--text)}
+.channel-overflow[open]>.channel-overflow-menu{position:absolute;z-index:7;right:0;top:30px;display:grid;gap:2px;min-width:200px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);padding:5px}
+.channel-overflow-menu button{width:100%;border:0;border-radius:5px;background:transparent;color:var(--text);text-align:left;padding:6px 9px;cursor:pointer}
+.channel-overflow-menu button:hover,.channel-overflow-menu button:focus-visible{background:var(--hover)}
 .composer-menu{position:relative}
 .composer-menu>summary{list-style:none}
 .composer-menu>summary::-webkit-details-marker{display:none}
@@ -1965,20 +1975,24 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         <div class="channel-actions">
           <p class="action-feedback" id="action-feedback" role="alert" tabindex="-1" hidden></p>
           {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-          {{if .MarkReadURL}}
-          <form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}">
-            <button type="submit">Mark as read</button>
-          </form>
-          {{end}}
-          <form class="inline-form" id="mark-all-read" method="post" action="/app/read/all?channel={{.Channel}}">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
-          </form>
+          <details class="channel-overflow"><summary role="button" aria-label="More channel actions">⋮</summary>
+            <div class="channel-overflow-menu" aria-label="Channel actions">
+              {{if .MarkReadURL}}
+              <form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}">
+                <button type="submit">Mark as read</button>
+              </form>
+              {{end}}
+              <form class="inline-form" id="mark-all-read" method="post" action="/app/read/all?channel={{.Channel}}">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+                <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
+              </form>
+              <button type="button" id="open-keyboard-help" aria-haspopup="dialog" aria-controls="keyboard-help" {{ariaKeyshortcuts "Keyboard shortcuts"}}>Keyboard shortcuts</button>
+            </div>
+          </details>
           {{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to channel</a>{{end}}
           {{if .CanvasURL}}<a href="{{.CanvasURL}}" aria-label="Open the canvas for this conversation">Canvas</a>{{end}}
           <a href="/app?channel={{.Channel}}&amp;details=1" aria-label="Open conversation details" {{ariaKeyshortcuts "Conversation details"}}>Details</a>
-          <button type="button" id="open-keyboard-help" aria-haspopup="dialog" aria-controls="keyboard-help" {{ariaKeyshortcuts "Keyboard shortcuts"}}>Keyboard shortcuts</button>
         </div>
       </header>
       <div class="timeline-wrap">
