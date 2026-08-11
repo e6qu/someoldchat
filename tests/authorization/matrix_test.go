@@ -322,6 +322,8 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureCallID)
 	case reflect.TypeOf(domain.ReminderID("")):
 		return reflect.ValueOf(fixtureReminderID)
+	case reflect.TypeOf(domain.LaterReminderID("")):
+		return reflect.ValueOf(fixtureLaterReminderID)
 	case reflect.TypeOf(domain.BookmarkID("")):
 		return reflect.ValueOf(fixtureBookmarkID)
 	case reflect.TypeOf(domain.UserGroupID("")):
@@ -455,10 +457,20 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		JoinURL: "https://example.test/call", Title: "fixture call", CreatedBy: "U-member",
 		Participants: []domain.UserID{"U-member"}, StartedAt: at,
 	}, event("E-call", "call.created")))
+	// A reminder and a Later reminder belong to the HOLDER the differential asks
+	// (U-owner), because these operations act on the caller's own reminder:
+	// owned by anyone else, the holder is refused "not found" exactly as a
+	// stranger is, which is the blindness this fixture removes rather than a
+	// refusal about standing.
 	seed("reminder", repository.CreateReminder(ctx, domain.Reminder{
-		WorkspaceID: "T1", ID: fixtureReminderID, Creator: "U-member", User: "U-member",
+		WorkspaceID: "T1", ID: fixtureReminderID, Creator: "U-owner", User: "U-owner",
 		Text: "fixture reminder", Time: at.Add(time.Hour),
 	}, event("E-reminder", "reminder.created")))
+	seed("later reminder", repository.CreateLaterReminder(ctx, domain.LaterReminder{
+		ID: fixtureLaterReminderID, WorkspaceID: "T1", Creator: "U-owner", UserID: "U-owner",
+		Text: "fixture later reminder", Target: domain.LaterReminderPersonal, Recurrence: domain.ReminderOnce,
+		DueAt: at.Add(time.Hour), CreatedAt: at,
+	}, event("E-later-reminder", "later_reminder.created")))
 	seed("bookmark", repository.CreateBookmark(ctx, domain.Bookmark{
 		ID: fixtureBookmarkID, WorkspaceID: "T1", Conversation: "C1", Title: "fixture bookmark",
 		Type: "link", Link: "https://example.test/bookmark", UpdatedBy: "U-member",
@@ -585,16 +597,17 @@ const fixtureMessageTimestamp domain.MessageTimestamp = "1700000000.000100"
 // that distinguishes "mine" from "anybody's" is asked the question it actually
 // answers.
 const (
-	fixtureCanvasID    domain.CanvasID    = "F-canvas"
-	fixtureListID      domain.ListID      = "F-list"
-	fixtureCallID      domain.CallID      = "F-call"
-	fixtureReminderID  domain.ReminderID  = "F-reminder"
-	fixtureBookmarkID  domain.BookmarkID  = "F-bookmark"
-	fixtureUserGroupID domain.UserGroupID = "F-usergroup"
-	fixtureFileID      domain.FileID      = "F-file"
-	fixtureWorkflowID  domain.WorkflowID  = "F-workflow"
-	fixtureAppID       domain.AppID       = "F-app"
-	fixtureHuddleID    domain.CallID      = "F-huddle"
+	fixtureCanvasID        domain.CanvasID        = "F-canvas"
+	fixtureListID          domain.ListID          = "F-list"
+	fixtureCallID          domain.CallID          = "F-call"
+	fixtureReminderID      domain.ReminderID      = "F-reminder"
+	fixtureLaterReminderID domain.LaterReminderID = "F-later-reminder"
+	fixtureBookmarkID      domain.BookmarkID      = "F-bookmark"
+	fixtureUserGroupID     domain.UserGroupID     = "F-usergroup"
+	fixtureFileID          domain.FileID          = "F-file"
+	fixtureWorkflowID      domain.WorkflowID      = "F-workflow"
+	fixtureAppID           domain.AppID           = "F-app"
+	fixtureHuddleID        domain.CallID          = "F-huddle"
 
 	fixtureSharedInviteID   domain.SharedInviteID    = "F-invite"
 	fixtureWorkflowTriggerD domain.WorkflowTriggerID = "F-trigger"
