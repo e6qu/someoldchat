@@ -5447,6 +5447,20 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The count must agree with the list it summarizes, and a
+				// stranger must be refused rather than told how big a channel
+				// is.
+				memberCount, err := chat.ConversationMemberCount(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				if memberCount != len(members.Users) {
+					return nil, fmt.Errorf("the member count says %d and the member list says %d", memberCount, len(members.Users))
+				}
+				_, strangerErr := chat.ConversationMemberCount(ctx, "T1", "U-absent", "C1")
+				if strangerErr == nil {
+					return nil, fmt.Errorf("a stranger was told the member count")
+				}
 				identifiers := make([]domain.UserID, 0, len(members.Users))
 				for _, member := range members.Users {
 					identifiers = append(identifiers, member.ID)
@@ -5480,7 +5494,7 @@ func parityCases() []parityCase {
 					cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore, isMember,
 					readBack.Conversation, readBack.LastRead == cursor.LastRead,
 					summary.ReplyCount, summary.Participants, !summary.LastReplyAt.IsZero(),
-					resolved.ID == message.ID, resolved.Text,
+					resolved.ID == message.ID, resolved.Text, memberCount,
 				}, nil
 			},
 		},

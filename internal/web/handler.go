@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -390,8 +391,13 @@ type pageData struct {
 	ChannelName          string
 	ChannelPrefix        string
 	ChannelMeta          string
-	WorkspaceName        string
-	CSRFToken            string
+	// MemberCount is how many people are in the conversation, shown in the
+	// header the way Slack shows it. Zero hides it: a count could not be read,
+	// or the conversation is a DM, whose header is the person rather than a
+	// population.
+	MemberCount   int
+	WorkspaceName string
+	CSRFToken     string
 	// Typing is rendered empty on first paint and filled by the live stream.
 	// Reading it here instead would put a store query on every page render to
 	// answer a question that is almost always "nobody", and the stream reads it
@@ -1284,6 +1290,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 /* Slack keeps a channel's secondary actions behind one overflow control rather
    than spreading them across the header, so the header reads as the channel's
    name and topic first. */
+.channel-meta .member-count{color:inherit;font-weight:600}
 .channel-overflow{position:relative}
 .channel-overflow>summary{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:26px;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;list-style:none;font-weight:700}
 .channel-overflow>summary::-webkit-details-marker{display:none}
@@ -1968,7 +1975,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         <div class="channel-identity">
           <div class="channel-copy">
             <h1 class="channel-title">{{if .ChannelPrefix}}{{.ChannelPrefix}} {{end}}{{.ChannelName}}</h1>
-            <p class="channel-meta">{{.ChannelMeta}}</p>
+            <p class="channel-meta">{{if .MemberCount}}<a class="member-count" href="/app?channel={{.Channel}}&amp;details=1" aria-label="{{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}} — open the member list">{{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}}</a> · {{end}}{{.ChannelMeta}}</p>
           </div>
           <span class="membership-pill{{if .IsMember}} joined{{end}}">{{if .IsMember}}Joined{{else}}Not joined{{end}}</span>
         </div>
@@ -5357,6 +5364,19 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			}
 		}
 	}
+	// The header's member count. A DM's header is the person, so no count; a
+	// failure to read one degrades to not showing it, because the header must
+	// not take the page down for a decoration — but it is logged, not
+	// swallowed, so a broken count is visible somewhere.
+	memberCount := 0
+	if !conversation.IsDirectOrGroup() || conversation.Kind == domain.ConversationTypeMPIM {
+		if count, countErr := h.Messages.ConversationMemberCount(r.Context(), principal.WorkspaceID, principal.UserID, channel); countErr == nil {
+			memberCount = count
+		} else {
+			log.Printf("web: the member count for %s could not be read: %v", channel, countErr)
+		}
+	}
+
 	draftAttachments := newDraftAttachmentViews(state.Attachments)
 	draftJSON, _ := json.Marshal(draftAttachments)
 
@@ -5370,6 +5390,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		ChannelName:      channelName,
 		ChannelPrefix:    channelPrefix,
 		ChannelMeta:      conversationMeta(conversation),
+		MemberCount:      memberCount,
 		WorkspaceName:    workspaceName,
 		CSRFToken:        csrfToken,
 		ShowProfile:      h.canShowIdentity(),

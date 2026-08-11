@@ -966,6 +966,9 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`<span class="author">Ada Developer</span>`,
 		`<div class="avatar" aria-hidden="true">A</div>`,
 		`<span class="signed-in-avatar" aria-hidden="true">A</span>`,
+		// Slack's header carries the member count beside the topic, and it is a
+		// link into the member list rather than a bare number.
+		`>1 member</a> · Everything else`,
 	)
 	requireMissing(t, "workspace shell", body, "# Cdev", "Message #Cdev", ">U1<")
 	// The machine timestamp stays in datetime= while the reader sees a short time.

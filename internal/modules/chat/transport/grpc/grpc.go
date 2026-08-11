@@ -2982,6 +2982,14 @@ func (r Remote) Users(ctx context.Context, workspaceID domain.WorkspaceID, userI
 	return decodeProtoUserPage(out)
 }
 
+func (r Remote) ConversationMemberCount(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (int, error) {
+	out, err := r.directory.ConversationMemberCount(ctx, &chatv1.ConversationMembersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetCount()), nil
+}
+
 func (r Remote) ConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) (domain.UserPage, error) {
 	in := &chatv1.ConversationMembersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(request.Limit), Cursor: string(request.Cursor)}
 	out, err := r.directory.ConversationMembers(ctx, in)
@@ -6889,6 +6897,14 @@ func (s *Server) Conversations(ctx context.Context, input *chatv1.ConversationsR
 
 func (s *Server) Users(ctx context.Context, input *chatv1.UsersRequest) (*chatv1.UserPage, error) {
 	return s.usersProto(ctx, input)
+}
+
+func (s *Server) ConversationMemberCount(ctx context.Context, input *chatv1.ConversationMembersRequest) (*chatv1.MemberCountResponse, error) {
+	count, err := s.implementation.ConversationMemberCount(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MemberCountResponse{Count: int32(count)}, nil
 }
 
 func (s *Server) ConversationMembers(ctx context.Context, input *chatv1.ConversationMembersRequest) (*chatv1.UserPage, error) {
