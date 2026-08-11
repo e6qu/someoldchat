@@ -72,7 +72,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"GetFunctionPermission":                   {},
 		"GetListDownload":                         {},
 		"GetListItem":                             {},
-		"InviteShared":                            {},
 		"IssueDeveloperAppToken":                  {},
 		"ListEphemeralMessages":                   {},
 		"LookupCanvasSections":                    {},
@@ -121,4 +120,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 
 // indistinguishableRefusalCeiling is how many operations still answer a caller
 // who holds the authority exactly as they answer one who does not.
-const indistinguishableRefusalCeiling = 91
+const indistinguishableRefusalCeiling = 90
