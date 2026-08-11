@@ -251,6 +251,29 @@ message WorkflowRun {
   int64 completed_at_unix_nano = 17;
 }
 
+message WorkflowStep {
+  string id = 1;
+  string workflow_run_id = 2;
+  string workspace_id = 3;
+  string app_id = 4;
+  string user_id = 5;
+  string function_id = 6;
+  string edit_id = 7;
+  string status = 8;
+  string inputs = 9;
+  string outputs = 10;
+  string error = 11;
+  string step_name = 12;
+  string image_url = 13;
+  int64 resume_at_unix_nano = 14;
+  int64 created_at_unix_nano = 15;
+  int64 updated_at_unix_nano = 16;
+}
+
+message WorkflowRunStepsResponse {
+  repeated WorkflowStep steps = 1;
+}
+
 message WorkflowRunRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -457,6 +480,7 @@ service WorkflowsService {
   rpc WebhookTriggerURL(WebhookTriggerURLRequest) returns (WebhookTriggerURLResponse);
   rpc DispatchWorkflowEventTriggers(WorkflowEventDispatchRequest) returns (WorkflowEventDispatchResponse);
   rpc GetWorkflowRun(WorkflowRunGetRequest) returns (WorkflowRun);
+  rpc WorkflowRunSteps(WorkflowRunGetRequest) returns (WorkflowRunStepsResponse);
   rpc CompleteFunction(FunctionCompletionRequest) returns (WorkflowStepMutationResponse);
   rpc GetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);
   rpc WorkflowStepResponses(WorkflowStepResponsesRequest) returns (WorkflowStepResponsesResponse);

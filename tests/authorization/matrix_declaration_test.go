@@ -300,6 +300,7 @@ func authorityMatrix() map[string]authority {
 		"GetTriggerPermission":                    authorityAnyMember,
 		"GetWorkflow":                             authorityAnyMember,
 		"GetWorkflowPermission":                   authorityAnyMember,
+		"WorkflowRunSteps":                        authorityAnyMember,
 		"GetWorkflowRun":                          authorityAnyMember,
 		"History":                                 authorityAnyMember,
 		"InviteConversationMembers":               authorityAnyMember,

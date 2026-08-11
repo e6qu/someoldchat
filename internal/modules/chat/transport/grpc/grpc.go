@@ -3343,6 +3343,32 @@ func encodeWorkflowRun(value domain.WorkflowRun) *chatv1.WorkflowRun {
 	}
 }
 
+func encodeWorkflowStep(value domain.WorkflowStep) *chatv1.WorkflowStep {
+	return &chatv1.WorkflowStep{
+		Id: string(value.ID), WorkflowRunId: string(value.WorkflowRunID), WorkspaceId: string(value.WorkspaceID),
+		AppId: string(value.AppID), UserId: string(value.UserID), FunctionId: value.FunctionID, EditId: value.EditID,
+		Status: string(value.Status), Inputs: value.Inputs, Outputs: value.Outputs, Error: value.Error,
+		StepName: value.StepName, ImageUrl: value.ImageURL, ResumeAtUnixNano: optionalUnixNano(value.ResumeAt),
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
+	}
+}
+
+func decodeWorkflowStep(value *chatv1.WorkflowStep) domain.WorkflowStep {
+	if value == nil {
+		return domain.WorkflowStep{}
+	}
+	return domain.WorkflowStep{
+		ID: domain.WorkflowStepID(value.GetId()), WorkflowRunID: domain.WorkflowRunID(value.GetWorkflowRunId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()),
+		UserID: domain.UserID(value.GetUserId()), FunctionID: value.GetFunctionId(), EditID: value.GetEditId(),
+		Status: domain.WorkflowStepStatus(value.GetStatus()), Inputs: value.GetInputs(), Outputs: value.GetOutputs(),
+		Error: value.GetError(), StepName: value.GetStepName(), ImageURL: value.GetImageUrl(),
+		ResumeAt:  optionalTimeFromUnixNano(value.GetResumeAtUnixNano()),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
+	}
+}
+
 func decodeWorkflowRun(value *chatv1.WorkflowRun) domain.WorkflowRun {
 	if value == nil {
 		return domain.WorkflowRun{}
@@ -3684,6 +3710,20 @@ func (r Remote) GetWorkflowRun(ctx context.Context, workspaceID domain.Workspace
 		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowRunId: string(runID),
 	})
 	return decodeWorkflowRun(out), err
+}
+
+func (r Remote) WorkflowRunSteps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, runID domain.WorkflowRunID) ([]domain.WorkflowStep, error) {
+	out, err := r.workflows.WorkflowRunSteps(ctx, &chatv1.WorkflowRunGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowRunId: string(runID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	steps := make([]domain.WorkflowStep, 0, len(out.GetSteps()))
+	for _, encoded := range out.GetSteps() {
+		steps = append(steps, decodeWorkflowStep(encoded))
+	}
+	return steps, nil
 }
 
 func (r Remote) CompleteFunction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, executionID domain.WorkflowStepID, outputs, failure string) error {
@@ -7406,6 +7446,20 @@ func (s *Server) DispatchWorkflowEventTriggers(ctx context.Context, input *chatv
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowEventDispatchResponse{Started: int32(started)}, nil
+}
+
+func (s *Server) WorkflowRunSteps(ctx context.Context, input *chatv1.WorkflowRunGetRequest) (*chatv1.WorkflowRunStepsResponse, error) {
+	steps, err := s.implementation.WorkflowRunSteps(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.WorkflowRunID(input.GetWorkflowRunId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.WorkflowStep, 0, len(steps))
+	for _, step := range steps {
+		encoded = append(encoded, encodeWorkflowStep(step))
+	}
+	return &chatv1.WorkflowRunStepsResponse{Steps: encoded}, nil
 }
 
 func (s *Server) GetWorkflowRun(ctx context.Context, input *chatv1.WorkflowRunGetRequest) (*chatv1.WorkflowRun, error) {

@@ -2520,6 +2520,19 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The step payload was written by running the workflow and is
+				// read back here: its inputs and status are compared as values,
+				// so a composition that dropped or garbled the payload diverges
+				// rather than passing on the call being accepted. A stranger is
+				// refused the read.
+				runSteps, err := chat.WorkflowRunSteps(ctx, "T1", "U1", run.ID)
+				if err != nil {
+					return nil, err
+				}
+				_, stepStranger := chat.WorkflowRunSteps(ctx, "T1", "U-absent", run.ID)
+				if stepStranger == nil {
+					return nil, fmt.Errorf("a stranger read a run's steps")
+				}
 				sum := sha256.Sum256([]byte("A1\x00triage"))
 				functionID := fmt.Sprintf("Fn%X", sum[:8])
 				initialFunction, err := chat.GetFunctionPermission(ctx, "T1", "U1", "A1", functionID, "")
@@ -2595,6 +2608,7 @@ func parityCases() []parityCase {
 					storedCopy.PermissionType, len(storedCopy.UserIDs), storedCopy.ResourceType,
 					len(featured), featured[0].Title,
 					len(steps), steps[0].Title, steps[0].StepID,
+					len(runSteps), runSteps[0].Inputs, string(runSteps[0].Status), runSteps[0].FunctionID,
 				}, nil
 			},
 		},
