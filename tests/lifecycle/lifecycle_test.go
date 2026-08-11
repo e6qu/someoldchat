@@ -49,12 +49,29 @@ type machine struct {
 func machines() map[string]machine {
 	return map[string]machine{
 		"WorkflowStatus": {
-			terminal:    []string{},
-			transitions: map[string][]string{"draft": {"published"}, "published": {"disabled", "draft"}, "disabled": {"published", "draft"}},
-			why:         "a workflow has no dead end: a disabled workflow is published again, and a published one is edited back to draft",
+			terminal: []string{},
+			// Two edges here were wrong, and UpdateWorkflow's own comments say
+			// so. A published workflow is NOT edited back to draft: "a staged
+			// edit to a published workflow keeps the published revision live",
+			// so the edit is accepted and the status stays published — which is
+			// why the driver had to check that a transition arrives rather than
+			// that it was accepted. And a draft CAN be taken offline: unpublish
+			// is the caller's explicit action and does not ask what the status
+			// was, because "every other edit leaves a draft or published head
+			// exactly as the caller's action says".
+			transitions: map[string][]string{"draft": {"published", "disabled"}, "published": {"disabled"}, "disabled": {"published", "draft"}},
+			why:         "a workflow has no dead end: a disabled workflow is published again or edited back to draft",
 		},
 		"WorkflowRunStatus": {
-			terminal:    []string{"completed", "failed", "cancelled"},
+			terminal: []string{"completed", "failed", "cancelled"},
+			// "queued" is declared, counted, and never produced. runWorkflow
+			// creates a run already running, and the only other mentions of
+			// queued in the tree are the two stores counting it for the Workflow
+			// Activity summary — so that view reports a Queued figure which is
+			// structurally always zero. It is left in the machine because the
+			// domain declares it and the activity view reads it; what to do
+			// about a state nothing can reach is recorded in the product gap
+			// audit rather than decided by deleting the constant here.
 			transitions: map[string][]string{"queued": {"running", "cancelled", "failed"}, "running": {"completed", "failed", "cancelled"}},
 			why:         "a run that finished, failed or was cancelled is over; nothing restarts it in place",
 		},
@@ -64,8 +81,16 @@ func machines() map[string]machine {
 			why:         "a step ends with the run that contains it, and a completed step is not executed again",
 		},
 		"SharedInviteStatus": {
-			terminal:    []string{"accepted", "declined", "revoked"},
-			transitions: map[string][]string{"pending": {"approved", "declined", "revoked"}, "approved": {"accepted", "declined", "revoked"}},
+			terminal: []string{"accepted", "declined", "revoked"},
+			// Pending does NOT lead to declined, and this said it did until a
+			// driver asked the product. Declining is the invited organization's
+			// answer, and it has nothing to answer until the host has approved
+			// the invitation and it has reached them; DeclineSharedInvite is
+			// approved-to-declined and there is no operation anywhere that
+			// declines a pending one. The host refusing at that stage is denying,
+			// which lands on revoked — the same state revoking reaches from
+			// approved, by a different operation and a different event.
+			transitions: map[string][]string{"pending": {"approved", "revoked"}, "approved": {"accepted", "declined", "revoked"}},
 			why:         "acceptance creates the shared channel and is not undone by this machine; declining and revoking end the invitation. Expiry is a deadline read against the clock rather than a stored state, which is why fourteen days is enforced at approval and acceptance instead of appearing here",
 		},
 		"SavedItemState": {
@@ -74,8 +99,20 @@ func machines() map[string]machine {
 			why:         "a member's own saved item moves freely; marking something done is not a promise it stays done",
 		},
 		"InviteRequestStatus": {
-			terminal:    []string{"accepted", "denied", "revoked"},
-			transitions: map[string][]string{"pending": {"approved", "denied", "revoked"}, "approved": {"accepted", "denied", "revoked"}},
+			terminal: []string{"accepted", "denied", "revoked"},
+			// Denied and revoked are not interchangeable, and this machine had
+			// them both reachable from both states. The service says which is
+			// which: "denied is the answer to a request, revoked is the
+			// withdrawal of an answer already given". So a pending request is
+			// denied and never revoked, and an approved one is revoked and
+			// never denied — one operation, AdminDenyInviteRequest, and the
+			// state it lands on depends on where it started.
+			//
+			// The driver reported both edges, but only after it was made to
+			// check that an accepted transition ARRIVES: while it required no
+			// more than the absence of an error, denying a pending request
+			// satisfied "pending may become revoked" by landing on denied.
+			transitions: map[string][]string{"pending": {"approved", "denied"}, "approved": {"accepted", "revoked"}},
 			why:         "an accepted invitation has produced an account; a denied or revoked one is over",
 		},
 		"AppApprovalStatus": {
