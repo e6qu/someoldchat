@@ -9189,8 +9189,6 @@ func (s *Store) SummarizeWorkflowRuns(ctx context.Context, workspace domain.Work
 			return domain.WorkflowActivity{}, err
 		}
 		switch status {
-		case domain.WorkflowRunQueued:
-			activity.Queued = count
 		case domain.WorkflowRunRunning:
 			activity.Running = count
 		case domain.WorkflowRunCompleted:

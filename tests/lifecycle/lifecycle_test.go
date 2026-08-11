@@ -64,15 +64,11 @@ func machines() map[string]machine {
 		},
 		"WorkflowRunStatus": {
 			terminal: []string{"completed", "failed", "cancelled"},
-			// "queued" is declared, counted, and never produced. runWorkflow
-			// creates a run already running, and the only other mentions of
-			// queued in the tree are the two stores counting it for the Workflow
-			// Activity summary — so that view reports a Queued figure which is
-			// structurally always zero. It is left in the machine because the
-			// domain declares it and the activity view reads it; what to do
-			// about a state nothing can reach is recorded in the product gap
-			// audit rather than decided by deleting the constant here.
-			transitions: map[string][]string{"queued": {"running", "cancelled", "failed"}, "running": {"completed", "failed", "cancelled"}},
+			// A run is created already running and nothing queues one, so there
+			// is no "queued" state: the domain constant, its always-zero Workflow
+			// Activity counter, and this machine's edge for it were removed
+			// together rather than left as a state nothing can reach.
+			transitions: map[string][]string{"running": {"completed", "failed", "cancelled"}},
 			why:         "a run that finished, failed or was cancelled is over; nothing restarts it in place",
 		},
 		"WorkflowStepStatus": {

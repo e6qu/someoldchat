@@ -85,7 +85,11 @@ message WorkflowManagePermissionResponse {
 }
 
 message WorkflowActivitySummary {
-  int32 queued = 1;
+  // Field 1 was "queued". A run is created already running and nothing queues
+  // one, so the count was structurally always zero; the field is reserved
+  // rather than reused so an old client cannot misread a new field as a queue.
+  reserved 1;
+  reserved "queued";
   int32 running = 2;
   int32 completed = 3;
   int32 failed = 4;
