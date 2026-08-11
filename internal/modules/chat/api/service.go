@@ -113,6 +113,7 @@ type Service interface {
 	ExternalTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ExternalTeamPage, error)
 	DisconnectExternalTeam(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceID) error
 	SetExternalInvitePermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, bool) (domain.Conversation, error)
+	ExternalInvitePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID) (bool, error)
 	IntegrationLogs(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int, int) (domain.IntegrationLogPage, error)
 	Permalink(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (string, error)
 	Update(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) (domain.Message, error)

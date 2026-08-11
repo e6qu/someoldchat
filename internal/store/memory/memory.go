@@ -30,7 +30,10 @@ type Store struct {
 	conversationPrefs  map[domain.ConversationID]domain.ConversationPrefs
 	conversationAccess map[domain.ConversationID][]domain.UserGroupID
 	conversationTeams  map[domain.ConversationID]map[domain.WorkspaceID]struct{}
-	sharedInvites      map[domain.SharedInviteID]domain.SharedInvite
+	// externalInvitePermissions[conversation][team] records a stored restriction.
+	// A team absent from the inner map has none and may invite.
+	externalInvitePermissions map[domain.ConversationID]map[domain.WorkspaceID]bool
+	sharedInvites             map[domain.SharedInviteID]domain.SharedInvite
 
 	conversationOrg               map[domain.ConversationID]bool
 	closedDirects                 map[string]struct{}
@@ -260,6 +263,7 @@ func New() *Store {
 		conversationPrefs:             make(map[domain.ConversationID]domain.ConversationPrefs),
 		conversationAccess:            make(map[domain.ConversationID][]domain.UserGroupID),
 		conversationTeams:             make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}),
+		externalInvitePermissions:     make(map[domain.ConversationID]map[domain.WorkspaceID]bool),
 		sharedInvites:                 make(map[domain.SharedInviteID]domain.SharedInvite),
 		conversationOrg:               make(map[domain.ConversationID]bool),
 		closedDirects:                 make(map[string]struct{}),
@@ -5028,6 +5032,44 @@ func (s *Store) AcceptSharedInvite(_ context.Context, id domain.SharedInviteID, 
 	s.sharedInvites[id] = invite
 	s.outbox = append(s.outbox, emitted...)
 	return conversation, nil
+}
+
+func (s *Store) SetExternalInvitePermission(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, team domain.WorkspaceID, canInvite bool, event events.Event) error {
+	if team == "" {
+		return store.InvalidArgument("invalid team")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.conversations[conversation]
+	if !exists || value.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	if _, present := s.conversationTeams[conversation][team]; !present {
+		return store.ErrNotFound
+	}
+	if s.externalInvitePermissions[conversation] == nil {
+		s.externalInvitePermissions[conversation] = map[domain.WorkspaceID]bool{}
+	}
+	s.externalInvitePermissions[conversation][team] = canInvite
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetExternalInvitePermission(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, team domain.WorkspaceID) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.conversations[conversation]
+	if !exists || value.WorkspaceID != workspace {
+		return false, store.ErrNotFound
+	}
+	if _, present := s.conversationTeams[conversation][team]; !present {
+		return false, store.ErrNotFound
+	}
+	if permission, recorded := s.externalInvitePermissions[conversation][team]; recorded {
+		return permission, nil
+	}
+	// No restriction recorded: the team may invite.
+	return true, nil
 }
 
 func (s *Store) SetConversationTeams(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool, event events.Event) error {

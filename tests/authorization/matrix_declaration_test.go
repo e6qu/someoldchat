@@ -155,6 +155,7 @@ func authorityMatrix() map[string]authority {
 		"ResetUserSessions":                   authorityAdmin,
 		"ResetUserSessionsBulk":               authorityAdmin,
 		"SetAppIcon":                          authorityAdmin,
+		"ExternalInvitePermission":            authorityAdmin,
 		"SetExternalInvitePermissions":        authorityAdmin,
 		"SetUserExpiration":                   authorityAdmin,
 		"SetUserGroupEnabled":                 authorityAdmin,

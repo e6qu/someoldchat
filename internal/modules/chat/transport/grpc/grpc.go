@@ -2725,6 +2725,14 @@ func (r Remote) SetExternalInvitePermissions(ctx context.Context, workspaceID do
 	return decodeProtoConversation(out)
 }
 
+func (r Remote) ExternalInvitePermission(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID) (bool, error) {
+	out, err := r.conversations.ExternalInvitePermission(ctx, &chatv1.ExternalInvitePermissionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), TargetWorkspaceId: string(target)})
+	if err != nil {
+		return false, err
+	}
+	return out.GetCanInvite(), nil
+}
+
 func (r Remote) UserWorkspaces(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.WorkspaceMembershipSummary, error) {
 	out, err := r.directory.UserWorkspaces(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -6674,6 +6682,14 @@ func (s *Server) SetExternalInvitePermissions(ctx context.Context, input *chatv1
 		return nil, mapError(err)
 	}
 	return encodeProtoConversation(value), nil
+}
+
+func (s *Server) ExternalInvitePermission(ctx context.Context, input *chatv1.ExternalInvitePermissionRequest) (*chatv1.ExternalInvitePermissionResponse, error) {
+	permitted, err := s.implementation.ExternalInvitePermission(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.WorkspaceID(input.GetTargetWorkspaceId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ExternalInvitePermissionResponse{CanInvite: permitted}, nil
 }
 
 func sharedInviteResponse(value domain.SharedInvite, err error) (*chatv1.SharedInvite, error) {

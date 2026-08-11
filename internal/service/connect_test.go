@@ -193,3 +193,68 @@ func TestALapsedInvitationCannotBeApprovedButCanBeWithdrawn(t *testing.T) {
 		}
 	})
 }
+
+// TestExternalInvitePermissionIsStoredReadableAndEnforced closes the gap where
+// SetExternalInvitePermissions wrote an event and changed no queryable state:
+// the permission is durable now, read back through the service, and enforced
+// when a connected organization tries to invite another.
+func TestExternalInvitePermissionIsStoredReadableAndEnforced(t *testing.T) {
+	store := memory.New()
+	ctx := context.Background()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "host"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "host-admin"})
+	if err := store.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "shared"})
+	store.SeedConversationMember("C1", "U1")
+
+	// A connected organization, and a member of it who is in the shared channel.
+	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "guest-org"})
+	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T2", Name: "guest-admin"})
+	if err := store.SeedWorkspaceRole("T2", "U2", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	store.SeedConversationMember("C1", "U2")
+	if err := store.SetConversationTeams(ctx, "T1", "C1", []domain.WorkspaceID{"T2"}, false, events.Event{
+		ID: "E-teams", WorkspaceID: "T1", Topic: "conversation.connected", Payload: `{"type":"conversation.connected"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A third organization the connected team might invite.
+	store.SeedWorkspace(domain.Workspace{ID: "T3", Name: "third-org"})
+	store.SeedWorkspace(domain.Workspace{ID: "T4", Name: "fourth-org"})
+	messages := Messages{Store: store}
+
+	// With no restriction recorded, the permission reads as allowed and the
+	// connected team may invite.
+	allowed, err := messages.ExternalInvitePermission(ctx, "T1", "U1", "C1", "T2")
+	if err != nil || !allowed {
+		t.Fatalf("default permission = %v err = %v, want may-invite", allowed, err)
+	}
+	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", "T3", ""); err != nil {
+		t.Fatalf("a permitted connected team was refused: %v", err)
+	}
+
+	// Restrict it. The stored decision is read back, not merely announced.
+	if _, err := messages.SetExternalInvitePermissions(ctx, "T1", "U1", "C1", "T2", false); err != nil {
+		t.Fatal(err)
+	}
+	restricted, err := messages.ExternalInvitePermission(ctx, "T1", "U1", "C1", "T2")
+	if err != nil || restricted {
+		t.Fatalf("restricted permission = %v err = %v, want denied", restricted, err)
+	}
+
+	// Now the connected team is refused when it tries to invite, and with the
+	// classified sentinel rather than a not-found.
+	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", "T3", ""); !errors.Is(err, ErrExternalInviteNotPermitted) {
+		t.Fatalf("a restricted connected team's invite = %v, want ErrExternalInviteNotPermitted", err)
+	}
+
+	// The host is never restricted by this: it owns the channel. A distinct
+	// target, because T3 was already invited above and inviting it twice is a
+	// separate refusal.
+	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T4", ""); err != nil {
+		t.Fatalf("the host was refused its own channel's invite: %v", err)
+	}
+}

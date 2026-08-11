@@ -601,6 +601,13 @@ type Store interface {
 	FindUserMigration(context.Context, domain.WorkspaceID, domain.UserID) (domain.UserMigration, error)
 	SetConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, bool, events.Event) error
 	ListConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.WorkspaceID, bool, error)
+	// SetExternalInvitePermission records whether one connected team may invite
+	// further organizations into a conversation. Absence means it may: the
+	// permission is a restriction a host applies, not a grant it withholds.
+	SetExternalInvitePermission(context.Context, domain.WorkspaceID, domain.ConversationID, domain.WorkspaceID, bool, events.Event) error
+	// GetExternalInvitePermission reports that stored decision. A team with no
+	// recorded restriction may invite.
+	GetExternalInvitePermission(context.Context, domain.WorkspaceID, domain.ConversationID, domain.WorkspaceID) (bool, error)
 	DisconnectConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, events.Event) error
 	// ListExternalTeams reports the organizations this workspace shares
 	// channels with, derived from the channels themselves so there is one

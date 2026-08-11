@@ -10888,6 +10888,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, service.ErrSharedInviteSettled) {
 		return "already_resolved"
 	}
+	// A connected organization the host has restricted from inviting further
+	// organizations. Slack answers external invitation refusals with a
+	// permission code rather than a not-found.
+	if errors.Is(err, service.ErrExternalInviteNotPermitted) {
+		return "not_allowed"
+	}
 	// The channel is full. Slack documents this as a hard capacity, so it is
 	// reported as one rather than as a temporary failure to retry.
 	if errors.Is(err, service.ErrSlackConnectFull) {
