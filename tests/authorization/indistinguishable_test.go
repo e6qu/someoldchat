@@ -50,8 +50,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"CloseView":                               {},
 		"CommentOnCanvas":                         {},
 		"CompleteFunction":                        {},
-		"CompleteLaterReminder":                   {},
-		"CompleteReminder":                        {},
 		"CompleteWorkflowButton":                  {},
 		"ConversationCanvas":                      {},
 		"ConvertGroupDirectToPrivate":             {},
@@ -60,10 +58,8 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DeleteCanvas":                            {},
 		"DeleteCanvasAccess":                      {},
 		"DeleteCanvasComment":                     {},
-		"DeleteLaterReminder":                     {},
 		"DeleteListAccess":                        {},
 		"DeleteListItems":                         {},
-		"DeleteReminder":                          {},
 		"DeleteScheduledUserStatus":               {},
 		"DeleteWorkflow":                          {},
 		"DiscardWorkflowStagedChanges":            {},
@@ -78,14 +74,12 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"GetListItem":                             {},
 		"InviteShared":                            {},
 		"IssueDeveloperAppToken":                  {},
-		"LaterReminderInfo":                       {},
 		"ListEphemeralMessages":                   {},
 		"LookupCanvasSections":                    {},
 		"OpenAppHome":                             {},
 		"PostEphemeral":                           {},
 		"PostEphemeralWithBlocks":                 {},
 		"PostEphemeralWithBlocksAndAttachments":   {},
-		"ReminderInfo":                            {},
 		"RemoveListColumn":                        {},
 		"RemovePin":                               {},
 		"RemoveReaction":                          {},
@@ -127,4 +121,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 
 // indistinguishableRefusalCeiling is how many operations still answer a caller
 // who holds the authority exactly as they answer one who does not.
-const indistinguishableRefusalCeiling = 97
+const indistinguishableRefusalCeiling = 91
