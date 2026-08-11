@@ -46,6 +46,16 @@ type huddleView struct {
 	SelfID    string
 	PeerIDs   []string
 	SignalURL string
+	// InviteURL and Invitable exist while the reader is in the huddle: the
+	// people they may pull in are the conversation's members who are not
+	// already here. Empty when there is nobody left to invite.
+	InviteURL string
+	Invitable []huddleInvitee
+}
+
+type huddleInvitee struct {
+	ID   string
+	Name string
 }
 
 func huddleActionURL(action, channel string) string {
@@ -89,6 +99,22 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 	}
 	for _, participant := range call.Participants {
 		view.Participants = append(view.Participants, names.name(participant))
+	}
+	if view.Joined {
+		view.InviteURL = huddleActionURL("invite", string(conversation.ID))
+		inHuddle := make(map[domain.UserID]bool, len(call.Participants))
+		for _, participant := range call.Participants {
+			inHuddle[participant] = true
+		}
+		members, err := h.Messages.ConversationMembers(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 100})
+		if err == nil {
+			for _, member := range members.Users {
+				if inHuddle[member.ID] {
+					continue
+				}
+				view.Invitable = append(view.Invitable, huddleInvitee{ID: string(member.ID), Name: names.name(member.ID)})
+			}
+		}
 	}
 	return view
 }
@@ -159,6 +185,32 @@ func (h Handler) huddleMutation(name string, apply func(context.Context, domain.
 // helper, and a whole rendered HTML error page from the shared form decoder,
 // because that decoder is built for a form post and this is not one. A caller
 // cannot rely on a body whose shape depends on which guard rejected it.
+// huddleInvite pulls a specific member into the huddle in this conversation.
+// It names a target, so it is its own route rather than the parameterless
+// huddleMutation the other actions share.
+func (h Handler) huddleInvite(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the page and try again.")
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(r.URL.Query().Get("channel")))
+	invitee := domain.UserID(strings.TrimSpace(fields["invitee"]))
+	if channel == "" || invitee == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Nobody was invited", "Choose a member and try again.")
+		return
+	}
+	if err := h.Messages.InviteToHuddle(r.Context(), principal.WorkspaceID, principal.UserID, invitee, channel); err != nil {
+		h.writeHuddleError(w, r, err, "invited")
+		return
+	}
+	h.redirectMutation(w, r, "/app?channel="+url.QueryEscape(string(channel))+"&notice="+url.QueryEscape("Invitation sent"))
+}
+
 func (h Handler) huddleSignal(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {

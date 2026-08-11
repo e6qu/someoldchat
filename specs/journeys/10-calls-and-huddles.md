@@ -27,10 +27,25 @@ session rather than an optimistic button alone.
 
 ## HUDDLE-03 — Invite and notify participants
 
-Slack-supported invitations target eligible workspace/external participants,
-respect notification policy and DND, and identify the source conversation.
-Unauthorized/private conversation membership is not disclosed. Accept, decline,
-expired invitation, already joined, and revoked access have distinct outcomes.
+A member already in a huddle can pull in a specific person who has not looked.
+The invitee must be a member of the conversation the huddle belongs to — the
+same eligibility joining enforces — so an invitation never offers a door the
+invitee could not already have opened, and never discloses a private
+conversation to somebody outside it. Inviting yourself, somebody already in the
+huddle, or a member who is not in the huddle inviting on its behalf are refused
+rather than sending a notification about nothing.
+
+The invitation is a notification and not an admission: the invitee still joins
+through the ordinary join, so nothing about it bypasses the membership the join
+checks. It reaches them two ways from one durable write — the recipient-scoped
+event stream, so a client can surface it live, and an Activity invitation item,
+so a member who was not looking finds it later. It carries no media; the invitee
+opens their own connection when they join.
+
+External participants and DND/notification-policy routing are not implemented and
+are named here rather than approximated: this deployment's huddle is inside one
+workspace, and the notification policy that would gate an invitation is the same
+unimplemented surface recorded under Notifications and presence.
 
 ## HUDDLE-04 — Leave and end
 
@@ -88,8 +103,15 @@ compositions by the seam parity suite instead.
 - Real browser/media qualification uses synthetic devices in Chromium,
   Firefox, and WebKit where supported and records explicit unsupported
   boundaries.
-- Multi-client tests prove join/leave/reconnect/invite/end state and
-  accessible mute/video/share announcements.
+- Multi-client tests prove join/leave/reconnect/end state and accessible
+  mute/video/share announcements. Inviting a specific member (HUDDLE-03) is
+  proven at the seam and the service rather than in the browser suite, for the
+  same reason the peer-to-peer handshake is: the harness authenticates one
+  session and cannot arrange the second member an invitation needs. The seam
+  parity suite drives the invitation across both compositions with every
+  refusal — self, already-joined, an outsider to the conversation, and a
+  non-participant inviting — and a service test reads the invitation back
+  through the invitee's Activity and confirms nobody else is told.
 - Official SDKs exercise `calls.*` with app ownership and error variants.
 - A live Slack sandbox records conversation events and metadata behavior;
   media quality comparison is separately bounded and MUST not be inferred from

@@ -2468,7 +2468,7 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
 // with workers: 1 and a test per control would cost more wall-clock than the
 // coverage is worth.
 
-test('[HUDDLE-01][HUDDLE-03] a huddle runs its lifecycle and offers the media it promises', async ({ page, context }) => {
+test('[HUDDLE-01] a huddle runs its lifecycle and offers the media it promises', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 

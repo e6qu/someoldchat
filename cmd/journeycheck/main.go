@@ -30,18 +30,24 @@ var (
 // enumerated gap with its reasons written in prose somewhere else and nothing
 // stopping it growing.
 //
-// The eight are structural rather than unwritten tests, and each says so in its
+// The nine are structural rather than unwritten tests, and each says so in its
 // own journey's Evidence section: APP-04 and APP-06 are observable only at an
 // app endpoint the harness does not host, REMIND-04 needs a worker beside a
 // server sharing a durable store, REMIND-API-01 restricts itself to SDK
 // evidence, and AUTH-02, AUTH-05, CONNECT-02 and HUDDLE-04 need an identity
 // provider or media transport.
 //
+// HUDDLE-03 is the ninth: inviting a specific member into a live huddle needs a
+// second signed-in member, which the browser suite cannot arrange — the same
+// single-session limit that keeps the peer-to-peer handshake at the seam. It is
+// proven by the seam parity suite and a service Activity read-back instead, and
+// its journey Evidence says so.
+//
 // HUDDLE-02 was the ninth until the huddle carried real media: joining now
 // opens the microphone, and the journey is cited by the test that presses the
 // controls. The ceiling moved and this list did not, which is the same failure
 // it exists to prevent, one level up.
-const browserGapCeiling = 8
+const browserGapCeiling = 9
 
 func main() {
 	if err := verifyCatalog(

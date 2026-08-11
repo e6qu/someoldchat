@@ -247,6 +247,9 @@ func CheckAscendingPage(request domain.PageRequest) error {
 
 type Store interface {
 	AppendEvent(context.Context, events.Event) error
+	// InviteToHuddle journals a huddle invitation and lands it in the invitee's
+	// Activity in one write, so the notification and the durable record agree.
+	InviteToHuddle(context.Context, events.Event) error
 	RecordAccess(context.Context, domain.AccessLog) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) ([]domain.AccessLog, bool, error)
 	LookupToken(context.Context, string) (domain.TokenRecord, error)

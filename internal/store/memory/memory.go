@@ -151,6 +151,31 @@ func (s *Store) AppendEvent(_ context.Context, event events.Event) error {
 	return nil
 }
 
+// InviteToHuddle journals the invitation and lands it in the invitee's Activity,
+// under the same lock, so a client that sees the event and a member who opens
+// Activity later cannot disagree about whether the invitation happened.
+func (s *Store) InviteToHuddle(_ context.Context, event events.Event) error {
+	delivered, err := events.Broadcastable(event)
+	if err != nil {
+		return err
+	}
+	invitee, _ := delivered.Field("user_id")
+	channel, _ := delivered.Field("channel_id")
+	if invitee == "" {
+		return store.InvalidArgument("a huddle invitation names no invitee")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := domain.ActivityIDFor(domain.UserID(invitee), "huddle_invite:"+string(event.ID))
+	s.activityItems[id] = domain.ActivityItem{
+		ID: id, WorkspaceID: event.WorkspaceID, UserID: domain.UserID(invitee),
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, ActorID: event.ActorID,
+		Conversation: domain.ConversationID(channel), OccurredAt: event.CreatedAt.UTC(),
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) RecordAccess(_ context.Context, value domain.AccessLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

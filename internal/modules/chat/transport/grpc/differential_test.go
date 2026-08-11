@@ -1731,7 +1731,15 @@ func parityCases() []parityCase {
 			// WebRTC between two browsers. The refusals matter most: a signal
 			// is how one member reaches another's machine, so both compositions
 			// must refuse the same senders and recipients.
-			name: "a huddle starts, signals, empties, and ends identically",
+			name: "a huddle starts, signals, invites, empties, and ends identically",
+			// The baseline plus U3, a C1 member who is the huddle invitation's
+			// legitimate target. Setting seed replaces the baseline rather than
+			// adding to it, so it is called explicitly.
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, target.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", Email: "carol@example.com"}))
+				requireSeed(t, target.SeedConversationMember("C1", "U3"))
+			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				started, err := chat.StartHuddle(ctx, "T1", "U1", "C1", "Standup")
 				if err != nil {
@@ -1755,6 +1763,18 @@ func parityCases() []parityCase {
 				oversized := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, strings.Repeat("s", domain.CallSignalCeiling+1))
 				missingCall := chat.SendCallSignal(ctx, "T1", "U1", "call-nobody", "U2", domain.CallSignalOffer, "v=0")
 
+				// Inviting a specific member into the live huddle. U1 and U2 are
+				// in it; U3 is a workspace member who is not, and inviting them
+				// is the one that must succeed. Every refusal beside it: self,
+				// somebody already in the huddle, an outsider to the
+				// conversation (UA is a workspace admin but not a C1 member),
+				// and an invite from a non-participant.
+				inviteMember := chat.InviteToHuddle(ctx, "T1", "U1", "U3", "C1")
+				inviteSelf := chat.InviteToHuddle(ctx, "T1", "U1", "U1", "C1")
+				inviteJoined := chat.InviteToHuddle(ctx, "T1", "U1", "U2", "C1")
+				inviteOutsider := chat.InviteToHuddle(ctx, "T1", "U1", "UA", "C1")
+				inviteFromNonParticipant := chat.InviteToHuddle(ctx, "T1", "UA", "U3", "C1")
+
 				active, err := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
 				if err != nil {
 					return nil, err
@@ -1777,6 +1797,8 @@ func parityCases() []parityCase {
 					self != nil, outsider != nil, stranger != nil, unknownKind != nil,
 					empty != nil, oversized != nil, missingCall != nil,
 					afterLeaving != nil, afterEnding != nil,
+					inviteMember == nil, inviteSelf != nil, inviteJoined != nil,
+					inviteOutsider != nil, inviteFromNonParticipant != nil,
 				}, nil
 			},
 		},

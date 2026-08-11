@@ -2333,6 +2333,12 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
   {{if .Joined}}<form method="post" action="{{.LeaveURL}}" hx-post="{{.LeaveURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Leave huddle</button></form>
   {{else}}<form method="post" action="{{.JoinURL}}" hx-post="{{.JoinURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Join huddle</button></form>{{end}}
   {{if .CanEnd}}<form method="post" action="{{.EndURL}}" hx-post="{{.EndURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-end" type="submit">End for everyone</button></form>{{end}}
+  {{if and .Joined .Invitable}}<details class="huddle-invite"><summary role="button" aria-label="Invite someone to the huddle">Invite</summary>
+    <form class="huddle-invite-form" method="post" action="{{.InviteURL}}" hx-post="{{.InviteURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+      <label for="huddle-invitee">Invite to the huddle<select id="huddle-invitee" name="invitee" required>{{range .Invitable}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+      <button type="submit">Invite</button>
+    </form>
+  </details>{{end}}
 </div>
 {{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-peers="{{range $index, $peer := .PeerIDs}}{{if $index}},{{end}}{{$peer}}{{end}}" data-huddle-signal="{{.SignalURL}}" data-huddle-csrf="{{.CSRFToken}}">
   <div class="huddle-controls">
@@ -4401,6 +4407,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/huddle/join", h.huddleMutation("joined", h.joinHuddle, "You joined the huddle"))
 	mux.HandleFunc("POST /app/huddle/leave", h.huddleMutation("left", h.leaveHuddle, "You left the huddle"))
 	mux.HandleFunc("POST /app/huddle/end", h.huddleMutation("ended", h.endHuddle, "Huddle ended"))
+	mux.HandleFunc("POST /app/huddle/invite", h.huddleInvite)
 	mux.HandleFunc("POST /app/huddle/signal", h.huddleSignal)
 	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
 	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)

@@ -7717,6 +7717,64 @@ func (m Messages) activeHuddleFor(ctx context.Context, workspaceID domain.Worksp
 	return m.Store.ActiveHuddle(ctx, workspaceID, conversationID)
 }
 
+// InviteToHuddle asks a specific member to join a huddle already in progress.
+//
+// HUDDLE-03. Starting and joining are how a member enters a huddle they can see;
+// this is how one already inside pulls somebody in who has not looked. It is a
+// notification and not an admission: the invitee still joins through JoinHuddle,
+// so nothing here bypasses the membership the join itself checks.
+//
+// The inviter must be in the huddle right now — inviting into a huddle you are
+// not in is either stale or a way to generate a notification about a
+// conversation you have left. The invitee must be a member of the conversation
+// the huddle belongs to, which is the same eligibility JoinHuddle enforces, so
+// an invitation never offers a door the invitee could not already have opened,
+// and never discloses a private conversation to somebody outside it. Inviting
+// yourself, or somebody already in the huddle, is refused rather than sending a
+// notification about nothing.
+//
+// The event both notifies — through the recipient-scoped stream, so a client
+// can surface it and ring — and lands an Activity invitation item, so a member
+// who was not looking finds it later. It carries no media: the invitee opens
+// their own connection when they join.
+func (m Messages) InviteToHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor, invitee domain.UserID, conversationID domain.ConversationID) error {
+	call, err := m.activeHuddleFor(ctx, workspaceID, actor, conversationID)
+	if err != nil {
+		return err
+	}
+	if invitee == "" || invitee == actor {
+		return ErrInvalidCall
+	}
+	if !slices.Contains(call.Participants, actor) {
+		return ErrInvalidCall
+	}
+	if slices.Contains(call.Participants, invitee) {
+		return ErrInvalidCall
+	}
+	// The invitee has to be able to reach the huddle themselves, which is
+	// conversation membership. activeWorkspaceMembership first, so a
+	// deactivated or absent account is "not found" rather than reaching the
+	// conversation check with an identity that no longer exists.
+	if _, err := m.activeWorkspaceMembership(ctx, workspaceID, invitee); err != nil {
+		return store.ErrNotFound
+	}
+	if err := m.requireConversationMembership(ctx, workspaceID, invitee, conversationID); err != nil {
+		return err
+	}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("huddle.invited",
+		events.String("call_id", string(call.ID)),
+		events.String("channel_id", string(conversationID)),
+		// user_id is the invitee: the stream filters a recipient-scoped topic
+		// on it, and the Activity item is theirs.
+		events.String("user_id", string(invitee)),
+		events.String("from_user_id", string(actor)),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.InviteToHuddle(ctx, event)
+}
+
 // SendCallSignal carries one peer's half of the WebRTC handshake to another.
 // The server never reads the payload: it is an SDP description or an ICE
 // candidate that means something to the two browsers and nothing here.
