@@ -246,6 +246,29 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if err != nil || completed.Status != domain.WorkflowRunCompleted || completed.Outputs != `{"priority":1}` {
 		t.Fatalf("completed=%+v err=%v", completed, err)
 	}
+
+	// The step's stored payload is readable through the seam now, not only
+	// through the store. An app that completed a step with outputs reads back
+	// exactly what it stored, which nothing could do before: the outputs the app
+	// wrote, the inputs the run dispatched, and the terminal status.
+	steps, err := messages.WorkflowRunSteps(ctx, "T1", "U1", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("run steps = %+v, want one", steps)
+	}
+	step := steps[0]
+	if step.Outputs != `{"priority":1}` || step.Status != domain.WorkflowStepCompleted {
+		t.Fatalf("step outputs=%q status=%q, want the payload the app stored", step.Outputs, step.Status)
+	}
+	if step.Inputs == "" || step.FunctionID == "" {
+		t.Fatalf("step = %+v, want its dispatched inputs and function", step)
+	}
+	// A member outside the workspace cannot read the run's steps.
+	if _, err := messages.WorkflowRunSteps(ctx, "T1", "U-absent", run.ID); err == nil {
+		t.Fatal("a stranger read the run steps")
+	}
 	if err := messages.CompleteFunction(ctx, "T1", "UB", "A1", domain.WorkflowStepID(executionID), `{}`, ""); !errors.Is(err, ErrFunctionNotRunning) {
 		t.Fatalf("duplicate completion error=%v", err)
 	}

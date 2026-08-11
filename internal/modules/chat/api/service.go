@@ -205,6 +205,7 @@ type Service interface {
 	WebhookTriggerURL(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerID) (string, error)
 	DispatchWorkflowEventTriggers(context.Context, domain.WorkspaceID, int) (int, error)
 	GetWorkflowRun(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID) (domain.WorkflowRun, error)
+	WorkflowRunSteps(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID) ([]domain.WorkflowStep, error)
 	CompleteFunction(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowStepID, string, string) error
 	GetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.AutomationPermission, error)
 	SetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, domain.AutomationPermission) (domain.AutomationPermission, error)

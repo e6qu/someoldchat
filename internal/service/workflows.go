@@ -2501,6 +2501,28 @@ func (m Messages) GetWorkflowRun(ctx context.Context, workspaceID domain.Workspa
 	return run, nil
 }
 
+// WorkflowRunSteps reports the step executions of one run, with the inputs,
+// outputs and failure each step recorded.
+//
+// updateStep, stepCompleted and stepFailed WRITE a step's payload, and until now
+// nothing read it back: domain.WorkflowStep crossed no seam, so an app that
+// completed a step with outputs could not read what it had stored, and a
+// differential could compare only whether the call was accepted. This is the
+// reader — the same workspace-membership authority a run itself is read under,
+// because a step belongs to its run and Slack's run view is shareable across
+// the workspace.
+func (m Messages) WorkflowRunSteps(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, runID domain.WorkflowRunID) ([]domain.WorkflowStep, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return nil, err
+	}
+	// The run is read first so an unknown run is "not found" rather than an
+	// empty list a caller could misread as a run with no steps.
+	if _, err := m.Store.GetWorkflowRun(ctx, workspaceID, runID); err != nil {
+		return nil, err
+	}
+	return m.Store.ListWorkflowRunSteps(ctx, workspaceID, runID)
+}
+
 func (m Messages) resolveWorkflowFunction(ctx context.Context, appID domain.AppID, functionID, callbackID string) (slackFunctionSnapshot, error) {
 	functionID = strings.TrimSpace(functionID)
 	callbackID = strings.TrimSpace(callbackID)

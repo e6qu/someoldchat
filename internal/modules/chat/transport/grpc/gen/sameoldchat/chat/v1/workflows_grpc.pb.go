@@ -49,6 +49,7 @@ const (
 	WorkflowsService_WebhookTriggerURL_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/WebhookTriggerURL"
 	WorkflowsService_DispatchWorkflowEventTriggers_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/DispatchWorkflowEventTriggers"
 	WorkflowsService_GetWorkflowRun_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflowRun"
+	WorkflowsService_WorkflowRunSteps_FullMethodName              = "/sameoldchat.chat.v1.WorkflowsService/WorkflowRunSteps"
 	WorkflowsService_CompleteFunction_FullMethodName              = "/sameoldchat.chat.v1.WorkflowsService/CompleteFunction"
 	WorkflowsService_GetFunctionPermission_FullMethodName         = "/sameoldchat.chat.v1.WorkflowsService/GetFunctionPermission"
 	WorkflowsService_WorkflowStepResponses_FullMethodName         = "/sameoldchat.chat.v1.WorkflowsService/WorkflowStepResponses"
@@ -101,6 +102,7 @@ type WorkflowsServiceClient interface {
 	WebhookTriggerURL(ctx context.Context, in *WebhookTriggerURLRequest, opts ...grpc.CallOption) (*WebhookTriggerURLResponse, error)
 	DispatchWorkflowEventTriggers(ctx context.Context, in *WorkflowEventDispatchRequest, opts ...grpc.CallOption) (*WorkflowEventDispatchResponse, error)
 	GetWorkflowRun(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
+	WorkflowRunSteps(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRunStepsResponse, error)
 	CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	GetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
 	WorkflowStepResponses(ctx context.Context, in *WorkflowStepResponsesRequest, opts ...grpc.CallOption) (*WorkflowStepResponsesResponse, error)
@@ -427,6 +429,16 @@ func (c *workflowsServiceClient) GetWorkflowRun(ctx context.Context, in *Workflo
 	return out, nil
 }
 
+func (c *workflowsServiceClient) WorkflowRunSteps(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRunStepsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowRunStepsResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_WorkflowRunSteps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *workflowsServiceClient) CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkflowStepMutationResponse)
@@ -621,6 +633,7 @@ type WorkflowsServiceServer interface {
 	WebhookTriggerURL(context.Context, *WebhookTriggerURLRequest) (*WebhookTriggerURLResponse, error)
 	DispatchWorkflowEventTriggers(context.Context, *WorkflowEventDispatchRequest) (*WorkflowEventDispatchResponse, error)
 	GetWorkflowRun(context.Context, *WorkflowRunGetRequest) (*WorkflowRun, error)
+	WorkflowRunSteps(context.Context, *WorkflowRunGetRequest) (*WorkflowRunStepsResponse, error)
 	CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error)
 	GetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error)
 	WorkflowStepResponses(context.Context, *WorkflowStepResponsesRequest) (*WorkflowStepResponsesResponse, error)
@@ -735,6 +748,9 @@ func (UnimplementedWorkflowsServiceServer) DispatchWorkflowEventTriggers(context
 }
 func (UnimplementedWorkflowsServiceServer) GetWorkflowRun(context.Context, *WorkflowRunGetRequest) (*WorkflowRun, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkflowRun not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) WorkflowRunSteps(context.Context, *WorkflowRunGetRequest) (*WorkflowRunStepsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WorkflowRunSteps not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteFunction not implemented")
@@ -1344,6 +1360,24 @@ func _WorkflowsService_GetWorkflowRun_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkflowsService_WorkflowRunSteps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowRunGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).WorkflowRunSteps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_WorkflowRunSteps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).WorkflowRunSteps(ctx, req.(*WorkflowRunGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorkflowsService_CompleteFunction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FunctionCompletionRequest)
 	if err := dec(in); err != nil {
@@ -1758,6 +1792,10 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkflowRun",
 			Handler:    _WorkflowsService_GetWorkflowRun_Handler,
+		},
+		{
+			MethodName: "WorkflowRunSteps",
+			Handler:    _WorkflowsService_WorkflowRunSteps_Handler,
 		},
 		{
 			MethodName: "CompleteFunction",
