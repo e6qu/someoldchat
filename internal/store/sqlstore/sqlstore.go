@@ -733,6 +733,12 @@ const sqliteJournalPragma = "PRAGMA journal_mode = WAL"
 // floor, so an operator may raise it.
 const requiredBusyTimeout = 5000
 
+// contentionAttempts is how many full busy timeouts underContention may spend.
+// It is greater than one because an IMMEDIATE transaction that loses the write
+// lock waits the whole timeout before it fails, and a retry budget equal to one
+// attempt's maximum wait is not a retry budget.
+const contentionAttempts = 3
+
 // sqliteDSN adds the required pragmas to a caller-supplied DSN.
 //
 // The previous version appended unconditionally and assumed the driver resolves
@@ -1108,17 +1114,30 @@ func contended(err error) bool {
 // would simply have waited on one profile failed on another. That is the same
 // operation answering differently per deployment.
 //
-// The budget is deliberately the SAME as the busy timeout the SQLite profiles
-// are configured with, so the two profiles wait equally long before giving up.
-// An earlier version of this used a handful of short retries, which is not the
-// behaviour SQLite has: it exhausted roughly a twenty-fifth of the timeout and
-// then reported contention that SQLite would have waited out.
+// The budget is a MULTIPLE of the busy timeout the SQLite profiles are
+// configured with, and it used to be exactly one of them, so that the two
+// profiles waited equally long before giving up. That was right while a losing
+// attempt failed instantly: SQLite refuses a deferred transaction's read-to-write
+// upgrade with no wait at all, so a budget of one timeout bought many attempts.
+//
+// Beginning every transaction IMMEDIATE changed what an attempt costs. A loser
+// now waits inside the driver for as long as busy_timeout allows, so a single
+// attempt can consume the entire budget and the retry above it becomes
+// decorative — which is what a queue of concurrent Socket Mode dialers found
+// under the race detector, surfacing SQLITE_BUSY to a caller that should only
+// ever have been told the connection limit was reached.
+//
+// The budget is therefore several timeouts, so that an attempt which waited the
+// full timeout and lost is still followed by another. An earlier version used a
+// handful of short retries instead, which is not the behaviour SQLite has: it
+// exhausted roughly a twenty-fifth of the timeout and then reported contention
+// SQLite would have waited out.
 //
 // The budget is bounded rather than unlimited because contention is transient by
 // definition: an operation still losing after the full timeout is reporting
 // something other than contention and must surface rather than spin.
 func underContention(ctx context.Context, attempt func() error) error {
-	deadline := time.Now().Add(requiredBusyTimeout * time.Millisecond)
+	deadline := time.Now().Add(contentionAttempts * requiredBusyTimeout * time.Millisecond)
 	delay := time.Millisecond
 	var err error
 	for {
