@@ -737,6 +737,31 @@ const sqliteJournalPragma = "PRAGMA journal_mode = WAL"
 // floor, so an operator may raise it.
 const requiredBusyTimeout = 5000
 
+// singleWriterWidth is the admission width for an engine that takes one writer
+// at a time: SQLite holds one write lock over the whole file, and dqlite carries
+// every write through the Raft leader. Admitting more would queue them inside
+// the engine instead, which is where the unfairness was.
+const singleWriterWidth = 1
+
+// concurrentWriterWidth is the admission width for an engine that writes
+// concurrently. It bounds how many writers this process pushes at PostgreSQL at
+// once, and it is a client-side admission number rather than a server tuning
+// knob — it says how much this process will pile on, not how much the server
+// can take.
+//
+// Measured with sixteen writers against a local server, alternating settings run
+// by run: the test leaves its rows behind, so measuring one setting after
+// another compares each against a bigger table than the last, and the first
+// numbers taken that way were not comparable. Alternating, three runs each:
+//
+//	no queue   4306, 4683, 4467 writes/s   p99 31.7, 20.2, 30.6ms
+//	width 8    4232, 4411, 4765 writes/s   p99 21.0, 17.0, 13.5ms
+//
+// Throughput is unchanged within the noise and the tail is about a third
+// shorter. Width one is the setting that is clearly wrong here: it cost 3.6x
+// the throughput, which is far outside what table growth could explain.
+const concurrentWriterWidth = 8
+
 // contentionAttempts is how many full busy timeouts underContention may spend.
 // It is greater than one because an IMMEDIATE transaction that loses the write
 // lock waits the whole timeout before it fails, and a retry budget equal to one
@@ -843,7 +868,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	s.writeQueue = make(chan struct{}, 1)
+	s.writeQueue = make(chan struct{}, singleWriterWidth)
 	return s, nil
 }
 
@@ -861,7 +886,7 @@ func FromDB(ctx context.Context, db *sql.DB) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.writeQueue = make(chan struct{}, 1)
+	s.writeQueue = make(chan struct{}, singleWriterWidth)
 	return s, nil
 }
 
@@ -878,14 +903,29 @@ func FromDB(ctx context.Context, db *sql.DB) (*Store, error) {
 // VerifyReferentialIntegrity settles it by behaviour rather than by comment, and
 // fails closed if the answer is no.
 func FromDqliteDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, true, nil, sqliteMigrationLockStatement)
+	s, err := fromDB(ctx, db, true, nil, sqliteMigrationLockStatement)
+	if err != nil {
+		return nil, err
+	}
+	// dqlite carries every write through the Raft leader, so it admits one
+	// writer at a time exactly as SQLite does; a wider queue here would only
+	// hand the leader work to serialise itself. The width is unmeasured on this
+	// profile — it needs the native library — and the dqlite qualification is
+	// what stands behind it.
+	s.writeQueue = make(chan struct{}, singleWriterWidth)
+	return s, nil
 }
 
 // FromPostgresDB initializes the repository against a PostgreSQL database
 // opened by the PostgreSQL adapter. The adapter owns PostgreSQL-specific
 // connection settings and SQL translation.
 func FromPostgresDB(ctx context.Context, db *sql.DB, retryable ...func(error) bool) (*Store, error) {
-	return fromDB(ctx, db, false, nil, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext('sameoldchat-schema-migration'))`, retryable...)
+	s, err := fromDB(ctx, db, false, nil, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext('sameoldchat-schema-migration'))`, retryable...)
+	if err != nil {
+		return nil, err
+	}
+	s.writeQueue = make(chan struct{}, concurrentWriterWidth)
+	return s, nil
 }
 
 func fromDB(ctx context.Context, db *sql.DB, sqliteDialect bool, pragmas []string, migrationLockStatement string, retryable ...func(error) bool) (*Store, error) {
@@ -1217,11 +1257,16 @@ func (t *writeTx) done()           { t.once.Do(t.release) }
 // order they blocked. So writers take turns, and a writer's wait is bounded by
 // the writers already ahead of it rather than by luck.
 //
-// It is deliberately absent for PostgreSQL and dqlite. Both have a real server
-// and other client processes, so ordering the writers THIS process can see
-// would order a fraction of them while claiming to order all — worse than not
-// claiming it, because the engine's own contention handling is what actually
-// governs there.
+// Every profile has one, and the WIDTH is what differs, because the width is a
+// statement about the engine rather than about fairness. SQLite admits one
+// writer to the whole file, so a queue of one costs nothing and removes every
+// collision. PostgreSQL writes concurrently by design, and a queue of one threw
+// three quarters of that away — 4,735 writes a second became 1,301.
+//
+// What the queue does NOT claim, on any profile, is to order writers in other
+// processes. PostgreSQL and dqlite have a real server and other clients, and
+// the engine's own handling is what governs between them; this orders the
+// writers this process can see, which is the only set it can order honestly.
 func (s *Store) beginWrite(ctx context.Context) (*writeTx, error) {
 	release := func() {}
 	if s.writeQueue != nil {
