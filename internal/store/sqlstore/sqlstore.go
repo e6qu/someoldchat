@@ -12856,6 +12856,38 @@ func (s *Store) listGrants(ctx context.Context, scope accessScope, workspace dom
 // RecordSharedInviteDecision writes the news that a request this member made
 // has been decided. One row per invitation, so a decision that is later changed
 // replaces the news rather than stacking a contradictory second copy.
+// InviteToHuddle journals the invitation and lands its Activity item in one
+// transaction, the way conversation invitations do, so the event and the
+// Activity row are never half-written relative to each other.
+func (s *Store) InviteToHuddle(ctx context.Context, event events.Event) error {
+	delivered, err := events.Broadcastable(event)
+	if err != nil {
+		return err
+	}
+	invitee, _ := delivered.Field("user_id")
+	channel, _ := delivered.Field("channel_id")
+	if invitee == "" {
+		return store.InvalidArgument("a huddle invitation names no invitee")
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	id := domain.ActivityIDFor(domain.UserID(invitee), "huddle_invite:"+string(event.ID))
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+		id, event.WorkspaceID, invitee, event.ActorID, channel, event.CreatedAt.UTC().UnixNano()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) RecordSharedInviteDecision(ctx context.Context, invite domain.SharedInvite, actor domain.UserID, occurredAt time.Time) error {
 	if invite.ID == "" || invite.InvitedBy == "" {
 		return store.InvalidArgument("a shared invite decision requires an invitation and a requester")
