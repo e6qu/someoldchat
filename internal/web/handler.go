@@ -2037,16 +2037,20 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
           <div class="composer-footer">
           <div class="composer-toolbar" role="toolbar" aria-label="Message formatting and insertions">
-            {{if .CanUpload}}<button class="composer-tool composer-attach" type="button" id="composer-attach" aria-label="Attach a file" aria-controls="upload-file">＋</button>{{end}}
+            {{if or .CanUpload .SlashCommands .GlobalShortcuts}}<details class="composer-menu composer-plus"><summary role="button" aria-label="Attach a file or browse shortcuts" aria-controls="composer-plus-menu">＋</summary>
+              <div class="composer-popover" id="composer-plus-menu" aria-label="Attach and shortcuts">
+                {{if .CanUpload}}<button type="button" id="composer-attach" aria-controls="upload-file">Upload from computer</button>{{end}}
+                {{if or .SlashCommands .GlobalShortcuts}}<button type="button" id="open-shortcut-browser" aria-label="Browse shortcuts" aria-haspopup="dialog" aria-controls="shortcut-browser">Browse shortcuts</button>{{end}}
+              </div>
+            </details>{{end}}
             <button class="composer-tool" type="button" data-wrap="*" aria-label="Bold" aria-controls="text"><strong>B</strong></button>
             <button class="composer-tool" type="button" data-wrap="_" aria-label="Italic" aria-controls="text"><em>I</em></button>
             <button class="composer-tool" type="button" data-wrap="~" aria-label="Strikethrough" aria-controls="text"><s>S</s></button>
             <button class="composer-tool" type="button" data-wrap="&#96;" aria-label="Inline code" aria-controls="text">&lt;/&gt;</button>
             <button class="composer-tool" type="button" data-insert="&lt;https://example.com|link text&gt;" data-select-offset="1" data-select-length="19" aria-label="Insert link" aria-controls="text">🔗</button>
             <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Choose an emoji" aria-haspopup="dialog" aria-controls="emoji-picker-dialog">☺</button>
-            {{if or .SlashCommands .GlobalShortcuts}}<button class="composer-tool" type="button" id="open-shortcut-browser" aria-label="Browse shortcuts" aria-haspopup="dialog" aria-controls="shortcut-browser">＋</button>{{end}}
-            {{if .CanUpload}}<button class="composer-tool" type="button" data-record-clip="audio" aria-label="Record audio clip" aria-haspopup="dialog" aria-controls="clip-recorder">◉</button>
-            <button class="composer-tool" type="button" data-record-clip="video" aria-label="Record video clip" aria-haspopup="dialog" aria-controls="clip-recorder">▣</button>{{end}}
+            {{if .CanUpload}}<button class="composer-tool" type="button" data-record-clip="audio" aria-label="Record audio clip" aria-haspopup="dialog" aria-controls="clip-recorder">🎤</button>
+            <button class="composer-tool" type="button" data-record-clip="video" aria-label="Record video clip" aria-haspopup="dialog" aria-controls="clip-recorder">🎥</button>{{end}}
             {{if or .ComposerMembers .ComposerGroups}}<details class="composer-menu"><summary role="button" aria-label="Mention a person or user group" aria-controls="mention-picker">@</summary>
               <div class="composer-popover" id="mention-picker" role="menu" aria-label="People and user groups">{{range .ComposerMembers}}
                 <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}" role="menuitem"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
@@ -3784,6 +3788,10 @@ if(uploadClear)uploadClear.hidden=false;
 
 if(text)text.required=false;
 }
+function closeComposerPlus(){
+var menu=document.querySelector('.composer-plus');
+if(menu)menu.open=false;
+}
 function stageSelectedFiles(){
 if(!uploadForm||!uploadFile||!uploadFile.files||!uploadFile.files.length||stagingFiles)return Promise.resolve(false);
 if(draftAttachments.length+uploadFile.files.length>10){showError('A draft can contain up to ten staged files.',composer);return Promise.resolve(false)}
@@ -3888,7 +3896,9 @@ if(clipDialog)clipDialog.addEventListener('click',function(event){if(event.targe
 if(clipDialog)clipDialog.addEventListener('close',function(){if(clipTrigger&&document.contains(clipTrigger))clipTrigger.focus();clipTrigger=null});
 if(uploadFile){uploadFile.addEventListener('change',function(){updateUploadPreview();stageSelectedFiles()});syncDraftAttachments();updateUploadPreview()}
 var composerAttach=document.getElementById('composer-attach');
-if(composerAttach&&uploadFile){composerAttach.addEventListener('click',function(){uploadFile.click()})}
+if(composerAttach&&uploadFile){composerAttach.addEventListener('click',function(){closeComposerPlus();uploadFile.click()})}
+var shortcutOpener=document.getElementById('open-shortcut-browser');
+if(shortcutOpener)shortcutOpener.addEventListener('click',closeComposerPlus);
 if(uploadForm)uploadForm.addEventListener('submit',function(event){event.preventDefault();stageSelectedFiles()});
 if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';draftAttachments=[];syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce('Staged files removed from the draft.')});if(text)text.focus()});
 if(uploadPreview)uploadPreview.addEventListener('click',function(event){var remove=event.target.closest('[data-remove-draft-attachment]');if(!remove)return;var index=Number(remove.getAttribute('data-remove-draft-attachment'));if(index<0||index>=draftAttachments.length)return;var name=draftAttachments[index].name||'Staged file';draftAttachments.splice(index,1);syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce(name+' removed from the draft.')});if(text)text.focus()});

@@ -515,9 +515,12 @@ test('[SCHED-01 SCHED-02 FILE-01 A11Y-01] a staged file remains private until on
   // Through the composer's own plus button, which is where Slack puts attaching
   // and where a reader will look for it. The other upload tests set the input
   // directly; this one proves the control that opens it exists and works.
+  // Through the plus menu, which is where Slack keeps uploading and shortcuts
+  // together rather than as two identical glyphs in the toolbar.
+  await page.locator('.composer-plus > summary').click();
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.locator('#composer-attach').click(),
+    page.getByRole('button', { name: 'Upload from computer' }).click(),
   ]);
   await chooser.setFiles({
     name: `scheduled-${stamp}.txt`,
