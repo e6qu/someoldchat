@@ -5660,6 +5660,18 @@ func validEmojiName(value string) bool {
 	return true
 }
 
+// nameShadowsBuiltInEmoji reports whether a proposed custom-emoji name would
+// shadow a built-in one. Slack refuses a custom emoji that takes the name of a
+// default emoji, and the default set is the catalog this product already ships
+// and renders, so the check enforces a known dataset rather than a guessed
+// vocabulary. slackemoji.Lookup matches a primary name or any alias and applies
+// the same normalization the callers already did, so the argument is passed
+// through as-is.
+func nameShadowsBuiltInEmoji(name string) bool {
+	_, found := slackemoji.Lookup(name)
+	return found
+}
+
 func (m Messages) Emojis(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.CustomEmoji, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return nil, err
@@ -5676,6 +5688,9 @@ func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.Workspac
 	if !validEmojiName(name) || imageURL == "" || len(imageURL) > 2048 || urlErr != nil ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
 		return ErrInvalidEmoji
+	}
+	if nameShadowsBuiltInEmoji(name) {
+		return ErrEmojiAlreadyExists
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name), events.String("value", imageURL)), time.Now().UTC())
 	if err != nil {
@@ -5695,6 +5710,9 @@ func (m Messages) AdminAddEmojiAlias(ctx context.Context, workspaceID domain.Wor
 	name, target = normalizeEmojiName(name), normalizeEmojiName(target)
 	if !validEmojiName(name) || !validEmojiName(target) || name == target {
 		return ErrInvalidEmoji
+	}
+	if nameShadowsBuiltInEmoji(name) {
+		return ErrEmojiAlreadyExists
 	}
 	emojis, err := m.Store.ListEmojis(ctx, workspaceID)
 	if err != nil {
@@ -5743,6 +5761,9 @@ func (m Messages) AdminRenameEmoji(ctx context.Context, workspaceID domain.Works
 	oldName, newName = normalizeEmojiName(oldName), normalizeEmojiName(newName)
 	if oldName == "" || newName == "" || oldName == newName || len(oldName) > 255 || len(newName) > 255 {
 		return ErrInvalidEmoji
+	}
+	if nameShadowsBuiltInEmoji(newName) {
+		return ErrEmojiAlreadyExists
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.renamed", events.String("old_name", oldName), events.String("new_name", newName)), time.Now().UTC())
 	if err != nil {

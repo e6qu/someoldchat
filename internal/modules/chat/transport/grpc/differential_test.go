@@ -1559,8 +1559,8 @@ func parityCases() []parityCase {
 				if err := chat.AdminAddEmojiAlias(ctx, "T1", "UA", "celebrate", "party"); err != nil {
 					return nil, err
 				}
-				aliasOfNothing := chat.AdminAddEmojiAlias(ctx, "T1", "UA", "ghost", "nobody")
-				if err := chat.AdminRenameEmoji(ctx, "T1", "UA", "party", "parrot"); err != nil {
+				aliasOfNothing := chat.AdminAddEmojiAlias(ctx, "T1", "UA", "phantomcat", "nobody")
+				if err := chat.AdminRenameEmoji(ctx, "T1", "UA", "party", "partyparrot"); err != nil {
 					return nil, err
 				}
 				renameMissing := chat.AdminRenameEmoji(ctx, "T1", "UA", "nobody", "somebody")
@@ -1574,10 +1574,10 @@ func parityCases() []parityCase {
 					names = append(names, emoji.Name+"="+emoji.AliasFor)
 				}
 				sort.Strings(names)
-				if err := chat.AdminRemoveEmoji(ctx, "T1", "UA", "parrot"); err != nil {
+				if err := chat.AdminRemoveEmoji(ctx, "T1", "UA", "partyparrot"); err != nil {
 					return nil, err
 				}
-				removeMissing := chat.AdminRemoveEmoji(ctx, "T1", "UA", "parrot")
+				removeMissing := chat.AdminRemoveEmoji(ctx, "T1", "UA", "partyparrot")
 				after, err := chat.Emojis(ctx, "T1", "U1")
 				if err != nil {
 					return nil, err
