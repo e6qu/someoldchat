@@ -6967,7 +6967,8 @@ func (m Messages) CreateLaterReminder(ctx context.Context, workspaceID domain.Wo
 		ID: id, WorkspaceID: workspaceID, Creator: userID, Target: normalized.Target,
 		Channel: normalized.Channel, Text: normalized.Text, DueAt: normalized.DueAt,
 		TimeZone: normalized.TimeZone, Recurrence: normalized.Recurrence,
-		CreatedAt: now, UpdatedAt: now,
+		RecurrenceAnchor: normalized.DueAt,
+		CreatedAt:        now, UpdatedAt: now,
 	}
 	if normalized.Target == domain.LaterReminderPersonal {
 		reminder.UserID = userID
@@ -7025,6 +7026,10 @@ func (m Messages) UpdateLaterReminder(ctx context.Context, workspaceID domain.Wo
 	}
 	current.Text = normalized.Text
 	current.DueAt = normalized.DueAt
+	// An edit chooses a fresh due instant, so it becomes the new recurrence
+	// anchor: a reminder moved to the 30th recurs on the 30th, not on whatever
+	// day it began life on.
+	current.RecurrenceAnchor = normalized.DueAt
 	current.TimeZone = normalized.TimeZone
 	current.Recurrence = normalized.Recurrence
 	current.UpdatedAt = time.Now().UTC()

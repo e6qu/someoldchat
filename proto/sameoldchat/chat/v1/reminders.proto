@@ -65,6 +65,7 @@ message LaterReminder {
   string failure_code = 18;
   string source_timestamp = 19;
   int64 acknowledged_at = 20;
+  int64 recurrence_anchor = 21;
 }
 
 message CreateLaterReminderRequest {

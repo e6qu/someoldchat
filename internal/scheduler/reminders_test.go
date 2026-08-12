@@ -46,6 +46,41 @@ func TestReminderWorkerDeliversPersonalReminderPrivately(t *testing.T) {
 	}
 }
 
+func TestReminderWorkerAdvancesMonthEndRecurrenceToTheClampedDay(t *testing.T) {
+	ctx := context.Background()
+	source := reminderStore(t)
+	anchor := time.Date(2026, time.January, 31, 9, 0, 0, 0, time.UTC)
+	seedLaterReminder(t, source, domain.LaterReminder{
+		ID: "later_reminder_monthly", WorkspaceID: "T1", Creator: "U1", UserID: "U1",
+		Target: domain.LaterReminderPersonal, Text: "rent", DueAt: anchor, RecurrenceAnchor: anchor,
+		Recurrence: domain.ReminderMonthly, TimeZone: "UTC", CreatedAt: anchor.Add(-time.Hour), UpdatedAt: anchor.Add(-time.Hour),
+	})
+	now := anchor.Add(time.Minute)
+	worker, err := NewReminderWorker(source, service.Messages{Store: source}, "reminder-worker", 10, time.Minute, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 1 {
+		t.Fatalf("deliver monthly reminder count=%d err=%v", count, err)
+	}
+	delivered, err := source.GetLaterReminder(ctx, "T1", "U1", "later_reminder_monthly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// February has no 31st, so the next occurrence clamps to the 28th rather than
+	// overflowing to March 3rd, and the reminder stays recurring rather than
+	// completing. The anchor survived the store round-trip to make that possible.
+	if want := time.Date(2026, time.February, 28, 9, 0, 0, 0, time.UTC); !delivered.DueAt.Equal(want) {
+		t.Fatalf("next due = %s, want %s", delivered.DueAt.UTC(), want)
+	}
+	if !delivered.CompletedAt.IsZero() {
+		t.Fatalf("recurring reminder was completed instead of rescheduled: %+v", delivered)
+	}
+	if !delivered.RecurrenceAnchor.Equal(anchor) {
+		t.Fatalf("anchor changed on delivery: got %s, want %s", delivered.RecurrenceAnchor.UTC(), anchor)
+	}
+}
+
 func TestReminderWorkerChannelRetryUsesOneMessageForTheOccurrence(t *testing.T) {
 	ctx := context.Background()
 	base := reminderStore(t)
@@ -117,6 +152,70 @@ func TestNextReminderDuePreservesLocalWallClockAcrossDST(t *testing.T) {
 	local := next.In(bucharest)
 	if local.Day() != 29 || local.Hour() != 9 || local.Minute() != 30 {
 		t.Fatalf("next local delivery = %s, want 2026-03-29 09:30", local)
+	}
+}
+
+func TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting(t *testing.T) {
+	anchor := time.Date(2026, time.January, 31, 9, 0, 0, 0, time.UTC)
+	// Each step feeds the prior result back as the current due instant, exactly
+	// as delivery does, and asserts the month advances without the day drifting
+	// off the anchored 31st once a short month has clamped it.
+	want := []time.Time{
+		time.Date(2026, time.February, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.March, 31, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.April, 30, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.May, 31, 9, 0, 0, 0, time.UTC),
+	}
+	due := anchor
+	for i, expected := range want {
+		next, err := NextReminderDue(domain.LaterReminder{
+			DueAt: due.UTC(), RecurrenceAnchor: anchor.UTC(), TimeZone: "UTC", Recurrence: domain.ReminderMonthly,
+		}, due)
+		if err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+		if !next.Equal(expected) {
+			t.Fatalf("step %d: next = %s, want %s", i, next.UTC(), expected)
+		}
+		due = next
+	}
+}
+
+func TestNextReminderDueYearlyKeepsLeapDayAnchor(t *testing.T) {
+	anchor := time.Date(2024, time.February, 29, 9, 0, 0, 0, time.UTC)
+	want := []time.Time{
+		time.Date(2025, time.February, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.February, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2027, time.February, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2028, time.February, 29, 9, 0, 0, 0, time.UTC), // leap year restores the 29th
+	}
+	due := anchor
+	for i, expected := range want {
+		next, err := NextReminderDue(domain.LaterReminder{
+			DueAt: due.UTC(), RecurrenceAnchor: anchor.UTC(), TimeZone: "UTC", Recurrence: domain.ReminderYearly,
+		}, due)
+		if err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+		if !next.Equal(expected) {
+			t.Fatalf("step %d: next = %s, want %s", i, next.UTC(), expected)
+		}
+		due = next
+	}
+}
+
+// A reminder written before the anchor column existed carries a zero anchor;
+// recurrence must still advance, falling back to the due instant.
+func TestNextReminderDueWithoutAnchorFallsBackToDueInstant(t *testing.T) {
+	due := time.Date(2026, time.January, 15, 9, 0, 0, 0, time.UTC)
+	next, err := NextReminderDue(domain.LaterReminder{
+		DueAt: due.UTC(), TimeZone: "UTC", Recurrence: domain.ReminderMonthly,
+	}, due)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.February, 15, 9, 0, 0, 0, time.UTC); !next.Equal(want) {
+		t.Fatalf("next = %s, want %s", next.UTC(), want)
 	}
 }
 

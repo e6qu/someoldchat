@@ -431,7 +431,7 @@ CREATE TABLE IF NOT EXISTS later_reminders (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), creator_id TEXT NOT NULL REFERENCES users(id),
  user_id TEXT NOT NULL DEFAULT '', channel_id TEXT NOT NULL DEFAULT '', source_message_id TEXT NOT NULL DEFAULT '',
  source_conversation_id TEXT NOT NULL DEFAULT '', source_timestamp TEXT NOT NULL DEFAULT '', target TEXT NOT NULL, text TEXT NOT NULL, due_at INTEGER NOT NULL,
- timezone TEXT NOT NULL, recurrence TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+ timezone TEXT NOT NULL, recurrence TEXT NOT NULL DEFAULT '', recurrence_anchor INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
  completed_at INTEGER NOT NULL DEFAULT 0, last_delivered_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, failed_at INTEGER NOT NULL DEFAULT 0,
  failure_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0,
  next_attempt_at INTEGER NOT NULL DEFAULT 0
@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 161
+const schemaVersion = 162
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3327,6 +3327,24 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 162 {
+		// A recurring Later reminder's immutable anchor. Existing rows never had
+		// one, so seed it from the current due instant — the best anchor available
+		// for a reminder already in flight — for the recurring ones; one-time
+		// reminders never consult it. New rows carry it from creation.
+		columns, err := s.tableColumns(ctx, db, "later_reminders")
+		if err != nil {
+			return err
+		}
+		if !columns["recurrence_anchor"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE later_reminders ADD COLUMN recurrence_anchor INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate Later reminder recurrence anchor: %w", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE later_reminders SET recurrence_anchor = due_at WHERE recurrence != '' AND recurrence_anchor = 0`); err != nil {
+				return fmt.Errorf("seed Later reminder recurrence anchor: %w", err)
+			}
 		}
 	}
 	if version < 161 {
@@ -15616,15 +15634,15 @@ func (s *Store) DeleteReminder(ctx context.Context, workspace domain.WorkspaceID
 	return tx.Commit()
 }
 
-const laterReminderColumns = `id, workspace_id, creator_id, user_id, channel_id, source_message_id, source_conversation_id, source_timestamp, target, text, due_at, timezone, recurrence, created_at, updated_at, completed_at, last_delivered_at, acknowledged_at, failed_at, failure_code`
+const laterReminderColumns = `id, workspace_id, creator_id, user_id, channel_id, source_message_id, source_conversation_id, source_timestamp, target, text, due_at, timezone, recurrence, recurrence_anchor, created_at, updated_at, completed_at, last_delivered_at, acknowledged_at, failed_at, failure_code`
 
 func scanLaterReminder(scanner interface{ Scan(...any) error }) (domain.LaterReminder, error) {
 	var value domain.LaterReminder
-	var due, created, updated, completed, delivered, acknowledged, failed int64
+	var due, anchor, created, updated, completed, delivered, acknowledged, failed int64
 	if err := scanner.Scan(
 		&value.ID, &value.WorkspaceID, &value.Creator, &value.UserID, &value.Channel,
 		&value.SourceMessageID, &value.SourceConversation, &value.SourceTimestamp, &value.Target, &value.Text,
-		&due, &value.TimeZone, &value.Recurrence, &created, &updated, &completed,
+		&due, &value.TimeZone, &value.Recurrence, &anchor, &created, &updated, &completed,
 		&delivered, &acknowledged, &failed, &value.FailureCode,
 	); err != nil {
 		return domain.LaterReminder{}, err
@@ -15633,6 +15651,9 @@ func scanLaterReminder(scanner interface{ Scan(...any) error }) (domain.LaterRem
 		return domain.LaterReminder{}, errors.New("stored Later reminder has invalid target or recurrence")
 	}
 	value.DueAt = time.Unix(due, 0).UTC()
+	if anchor != 0 {
+		value.RecurrenceAnchor = time.Unix(anchor, 0).UTC()
+	}
 	value.CreatedAt = time.Unix(created, 0).UTC()
 	value.UpdatedAt = time.Unix(updated, 0).UTC()
 	if completed != 0 {
@@ -15755,12 +15776,12 @@ func (s *Store) CreateLaterReminder(ctx context.Context, reminder domain.LaterRe
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO later_reminders(
 		id, workspace_id, creator_id, user_id, channel_id, source_message_id, source_conversation_id, source_timestamp,
-		target, text, due_at, timezone, recurrence, created_at, updated_at,
+		target, text, due_at, timezone, recurrence, recurrence_anchor, created_at, updated_at,
 		completed_at, last_delivered_at, acknowledged_at, failed_at, failure_code
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.UserID, reminder.Channel,
 		reminder.SourceMessageID, reminder.SourceConversation, reminder.SourceTimestamp, reminder.Target, reminder.Text,
-		reminder.DueAt.Unix(), reminder.TimeZone, reminder.Recurrence, reminder.CreatedAt.Unix(),
+		reminder.DueAt.Unix(), reminder.TimeZone, reminder.Recurrence, unixSeconds(reminder.RecurrenceAnchor), reminder.CreatedAt.Unix(),
 		reminder.UpdatedAt.Unix(), unixSeconds(reminder.CompletedAt), unixSeconds(reminder.LastDeliveredAt), unixSeconds(reminder.AcknowledgedAt),
 		unixSeconds(reminder.FailedAt), reminder.FailureCode,
 	); err != nil {
@@ -15837,10 +15858,10 @@ func (s *Store) UpdateLaterReminder(ctx context.Context, reminder domain.LaterRe
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE later_reminders
-		SET text = ?, due_at = ?, timezone = ?, recurrence = ?, updated_at = ?,
+		SET text = ?, due_at = ?, timezone = ?, recurrence = ?, recurrence_anchor = ?, updated_at = ?,
 		    last_delivered_at = 0, acknowledged_at = 0, failed_at = 0, failure_code = '', lease_owner = '', lease_until = 0, next_attempt_at = 0
 		WHERE id = ? AND workspace_id = ? AND target = ? AND user_id = ? AND (lease_until = 0 OR lease_until <= ?)`,
-		reminder.Text, reminder.DueAt.Unix(), reminder.TimeZone, reminder.Recurrence,
+		reminder.Text, reminder.DueAt.Unix(), reminder.TimeZone, reminder.Recurrence, unixSeconds(reminder.RecurrenceAnchor),
 		reminder.UpdatedAt.Unix(), reminder.ID, reminder.WorkspaceID, domain.LaterReminderPersonal, reminder.Creator, s.now().Unix(),
 	)
 	if err != nil {

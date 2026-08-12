@@ -2054,13 +2054,19 @@ type LaterReminder struct {
 	DueAt              time.Time
 	TimeZone           string
 	Recurrence         ReminderRecurrence
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	CompletedAt        time.Time
-	LastDeliveredAt    time.Time
-	AcknowledgedAt     time.Time
-	FailedAt           time.Time
-	FailureCode        string
+	// RecurrenceAnchor is the reminder's original due instant, fixed at creation
+	// and never advanced. Recurrence is computed from it rather than from the
+	// last DueAt so a monthly reminder on the 31st clamps to each short month's
+	// last day and returns to the 31st afterwards, instead of drifting earlier
+	// every time it meets a February. For one-time reminders it equals DueAt.
+	RecurrenceAnchor time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	CompletedAt      time.Time
+	LastDeliveredAt  time.Time
+	AcknowledgedAt   time.Time
+	FailedAt         time.Time
+	FailureCode      string
 }
 
 type LaterReminderPage struct {
