@@ -3963,23 +3963,23 @@ func TestAdminEmojiLifecycle(t *testing.T) {
 		handler.ServeHTTP(res, req)
 		return res
 	}
-	if res := call("admin.emoji.add", "name=wave&url=https%3A%2F%2Fcdn.example%2Fwave.png"); res.Code != http.StatusOK {
+	if res := call("admin.emoji.add", "name=shipit&url=https%3A%2F%2Fcdn.example%2Fshipit.png"); res.Code != http.StatusOK {
 		t.Fatalf("add status=%d body=%s", res.Code, res.Body)
 	}
-	if res := call("admin.emoji.addAlias", "name=hello&alias_for=wave"); res.Code != http.StatusOK {
+	if res := call("admin.emoji.addAlias", "name=hello&alias_for=shipit"); res.Code != http.StatusOK {
 		t.Fatalf("alias status=%d body=%s", res.Code, res.Body)
 	}
 	list := httptest.NewRequest(http.MethodGet, "/api/admin.emoji.list", nil)
 	list.Header.Set("Authorization", "Bearer token")
 	listed := httptest.NewRecorder()
 	handler.ServeHTTP(listed, list)
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"hello":"alias:wave"`) {
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"hello":"alias:shipit"`) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body)
 	}
 	if res := call("admin.emoji.rename", "name=hello&new_name=greeting"); res.Code != http.StatusOK {
 		t.Fatalf("rename status=%d body=%s", res.Code, res.Body)
 	}
-	if res := call("admin.emoji.remove", "name=wave"); res.Code != http.StatusOK {
+	if res := call("admin.emoji.remove", "name=shipit"); res.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", res.Code, res.Body)
 	}
 }

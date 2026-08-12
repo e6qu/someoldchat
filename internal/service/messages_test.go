@@ -1072,20 +1072,33 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 			t.Fatalf("AdminAddEmoji(%q, %q) error=%v", invalid.name, invalid.url, err)
 		}
 	}
-	if err := messages.AdminAddEmoji(ctx, "T1", "U1", " Wave ", "https://cdn.example/wave.png"); err != nil {
+	// A custom emoji may not shadow a built-in one: Slack refuses a custom
+	// ":smile:", and the built-in set is the catalog this product already ships.
+	// The refusal reports the name as taken, on every write path — creation, an
+	// alias, and a rename onto the shadowed name.
+	if err := messages.AdminAddEmoji(ctx, "T1", "U1", "smile", "https://cdn.example/smile.png"); !errors.Is(err, ErrEmojiAlreadyExists) {
+		t.Fatalf("AdminAddEmoji(smile) error=%v, want ErrEmojiAlreadyExists", err)
+	}
+	if err := messages.AdminAddEmoji(ctx, "T1", "U1", " Shipit ", "https://cdn.example/shipit.png"); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "hello", "WAVE"); err != nil {
+	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "joy", "SHIPIT"); !errors.Is(err, ErrEmojiAlreadyExists) {
+		t.Fatalf("AdminAddEmojiAlias(joy) error=%v, want ErrEmojiAlreadyExists", err)
+	}
+	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "hello", "SHIPIT"); err != nil {
 		t.Fatal(err)
 	}
 	values, err := messages.Emojis(ctx, "T1", "U1")
 	if err != nil || len(values) != 2 {
 		t.Fatalf("values=%+v err=%v", values, err)
 	}
+	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "grin"); !errors.Is(err, ErrEmojiAlreadyExists) {
+		t.Fatalf("AdminRenameEmoji(hello->grin) error=%v, want ErrEmojiAlreadyExists", err)
+	}
 	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "greeting"); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.AdminRemoveEmoji(ctx, "T1", "U1", "wave"); err != nil {
+	if err := messages.AdminRemoveEmoji(ctx, "T1", "U1", "shipit"); err != nil {
 		t.Fatal(err)
 	}
 	values, err = messages.Emojis(ctx, "T1", "U1")
