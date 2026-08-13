@@ -1972,6 +1972,12 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 	}{
 		{expression: "stand-up tomorrow at 9am", text: "stand-up", hour: 9},
 		{expression: "stand-up in 20 minutes", text: "stand-up", hour: 8},
+		{expression: "stand-up in an hour", text: "stand-up", hour: 9},
+		{expression: "stand-up in a minute", text: "stand-up", hour: 8},
+		{expression: "stand-up in a week", text: "stand-up", hour: 8},
+		{expression: "stand-up in 2 weeks", text: "stand-up", hour: 8},
+		{expression: "stand-up on Friday at 9am", text: "stand-up", hour: 9},
+		{expression: "stand-up on Friday", text: "stand-up", hour: 9},
 		{expression: "stand-up every Thursday at 9am", text: "stand-up", recurrence: domain.ReminderWeekly, hour: 9},
 		{expression: "stand-up every week at 10:30", text: "stand-up", recurrence: domain.ReminderWeekly, hour: 10},
 		{expression: "stand-up sometime soon", wantError: service.ErrInvalidLaterReminder},
