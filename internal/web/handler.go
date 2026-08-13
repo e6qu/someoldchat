@@ -1108,14 +1108,34 @@ type errorData struct {
 type oauthConsentData struct {
 	Action              string
 	AppName             string
-	BotScopes           []string
-	UserScopes          []string
+	BotScopes           []scopeConsentView
+	UserScopes          []scopeConsentView
 	CSRFToken           string
 	ClientID            string
 	RedirectURI         string
 	State               string
 	CodeChallenge       string
 	CodeChallengeMethod string
+}
+
+// scopeConsentView is one requested scope on the install-consent screen: the
+// human sentence a person reads and the raw token that is actually granted. The
+// token stays visible beside the sentence — it is what the app receives and what
+// the hidden form submits — but it is no longer the only thing shown.
+type scopeConsentView struct {
+	Name        string
+	Description string
+}
+
+// scopeConsentViews pairs each granted scope token with its description. An
+// unknown scope keeps an empty description, and the template shows its token
+// alone rather than inventing a meaning.
+func scopeConsentViews(scopes []string) []scopeConsentView {
+	views := make([]scopeConsentView, 0, len(scopes))
+	for _, scope := range scopes {
+		views = append(views, scopeConsentView{Name: scope, Description: auth.Scope(scope).Description()})
+	}
+	return views
 }
 
 // ---------------------------------------------------------------------------
@@ -2579,20 +2599,20 @@ const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldC
 .oauth-shell{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--panel)}
 .oauth-card{width:min(560px,100%);background:var(--panel-strong);border:1px solid var(--line);border-radius:14px;padding:28px;box-shadow:var(--shadow)}
 .oauth-card h1{margin:0 0 8px;font-size:26px}.oauth-card h2{font-size:15px;margin:22px 0 8px}.oauth-card p{color:var(--muted)}
-.scope-list{margin:0;padding:0;list-style:none;display:grid;gap:7px}.scope-list li{border:1px solid var(--line);border-radius:7px;padding:9px 11px;background:var(--panel)}
+.scope-list{margin:0;padding:0;list-style:none;display:grid;gap:7px}.scope-list li{border:1px solid var(--line);border-radius:7px;padding:9px 11px;background:var(--panel);display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}.scope-token{font-size:12px;color:var(--muted)}
 .oauth-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}.oauth-actions button{border-radius:6px;padding:9px 15px;font-weight:800}
 .deny{border:1px solid var(--field-line);background:var(--panel-strong);color:var(--text)}.approve{border:0;background:var(--ok);color:var(--on-strong)}
 </style>{{end}}
 {{define "content"}}<main class="oauth-shell"><section class="oauth-card" aria-labelledby="oauth-title">
 <h1 id="oauth-title">Authorize {{.AppName}}</h1><p>This app is asking to access your SameOldChat workspace. Review every permission before continuing.</p>
-{{if .BotScopes}}<h2>What the app’s bot can do</h2><ul class="scope-list">{{range .BotScopes}}<li><strong>{{.}}</strong></li>{{end}}</ul>{{end}}
-{{if .UserScopes}}<h2>What the app can do as you</h2><ul class="scope-list">{{range .UserScopes}}<li><strong>{{.}}</strong></li>{{end}}</ul>{{end}}
+{{if .BotScopes}}<h2>What the app’s bot can do</h2><ul class="scope-list">{{range .BotScopes}}<li>{{if .Description}}<strong>{{.Description}}</strong> {{end}}<code class="scope-token">{{.Name}}</code></li>{{end}}</ul>{{end}}
+{{if .UserScopes}}<h2>What the app can do as you</h2><ul class="scope-list">{{range .UserScopes}}<li>{{if .Description}}<strong>{{.Description}}</strong> {{end}}<code class="scope-token">{{.Name}}</code></li>{{end}}</ul>{{end}}
 <form method="post" action="{{.Action}}">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
 <input type="hidden" name="client_id" value="{{.ClientID}}">
 <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
-<input type="hidden" name="scope" value="{{range $i,$v := .BotScopes}}{{if $i}},{{end}}{{$v}}{{end}}">
-<input type="hidden" name="user_scope" value="{{range $i,$v := .UserScopes}}{{if $i}},{{end}}{{$v}}{{end}}">
+<input type="hidden" name="scope" value="{{range $i,$v := .BotScopes}}{{if $i}},{{end}}{{$v.Name}}{{end}}">
+<input type="hidden" name="user_scope" value="{{range $i,$v := .UserScopes}}{{if $i}},{{end}}{{$v.Name}}{{end}}">
 <input type="hidden" name="state" value="{{.State}}">
 <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
 <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
@@ -4919,8 +4939,8 @@ func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 	h.writeHTML(w, oauthConsentTemplate, oauthConsentData{
 		Action:              r.URL.Path,
 		AppName:             value.AppName,
-		BotScopes:           value.BotScopes,
-		UserScopes:          value.UserScopes,
+		BotScopes:           scopeConsentViews(value.BotScopes),
+		UserScopes:          scopeConsentViews(value.UserScopes),
 		CSRFToken:           auth.CSRFToken(sessionCookie.Value),
 		ClientID:            value.ClientID,
 		RedirectURI:         value.RedirectURI,

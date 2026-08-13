@@ -56,6 +56,11 @@ func TestOAuthAuthorizationConsentCreatesRedeemableBotGrant(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Authorize OAuth App") || !strings.Contains(response.Body.String(), "chat:write") {
 		t.Fatalf("consent status=%d body=%s", response.Code, response.Body.String())
 	}
+	// The consent screen explains the scope, not just names it: the person
+	// reads "Send messages" beside the raw chat:write token they are granting.
+	if body := response.Body.String(); !strings.Contains(body, "Send messages") || !strings.Contains(body, `<code class="scope-token">chat:write</code>`) {
+		t.Fatalf("consent screen did not explain the requested scope: %s", body)
+	}
 
 	form := url.Values{
 		"_csrf":        {auth.CSRFToken(session)},
