@@ -88,7 +88,7 @@ func TestSQLiteAppEventDeliveryCursorSurvivesRestart(t *testing.T) {
 
 func TestSQLiteAppDeliveryAttemptsAreNewestFirstAndBounded(t *testing.T) {
 	ctx := context.Background()
-	repository, err := Open(ctx, "file:app-attempts?mode=memory&cache=shared")
+	repository, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

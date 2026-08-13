@@ -176,7 +176,7 @@ func TestVersion118MigrationCreatesScheduledFileStorage(t *testing.T) {
 
 func TestSQLiteDraftAttachmentOutlivesExternalUploadTicket(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:draft-ticket-window?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestSQLiteDraftAttachmentOutlivesExternalUploadTicket(t *testing.T) {
 
 func TestSQLiteScheduledFileDeliveryRollsBackAndRetriesAsOneTransaction(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:scheduled-file-atomicity?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

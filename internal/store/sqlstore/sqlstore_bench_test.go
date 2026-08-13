@@ -20,7 +20,7 @@ import (
 func benchStore(b *testing.B, name string) *Store {
 	b.Helper()
 	ctx := context.Background()
-	store, err := Open(ctx, fmt.Sprintf("file:bench-%s-%d?mode=memory&cache=shared", name, time.Now().UnixNano()))
+	store, err := Open(ctx, memoryDSN(b))
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 
 func TestSQLiteBookmarkLifecycleSurvivesStoreOpen(t *testing.T) {
 	ctx := context.Background()
-	dsn := "file:bookmark-lifecycle?mode=memory&cache=shared"
+	dsn := memoryDSN(t)
 	s, err := Open(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)

@@ -107,7 +107,7 @@ func TestSQLiteActivitySurvivesReopenWithFiltersAndTriage(t *testing.T) {
 
 func TestSQLiteActivityReactionReadCursorAndReminderDeliveryAreAtomic(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:activity-atomic?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
