@@ -70,6 +70,7 @@ type Store struct {
 	socketInteractions            map[string]domain.SocketModeInteraction
 	socketCursors                 map[domain.AppID]uint64
 	appEventCursors               map[string]memoryAppEventCursor
+	appDeliveryAttempts           map[string][]domain.AppDeliveryAttempt
 	memberships                   map[domain.ConversationID]map[domain.UserID]struct{}
 	tokens                        map[string]domain.TokenRecord
 	appTokens                     map[string]domain.AppTokenRecord
@@ -292,6 +293,7 @@ func New() *Store {
 		socketInteractions:            make(map[string]domain.SocketModeInteraction),
 		socketCursors:                 make(map[domain.AppID]uint64),
 		appEventCursors:               make(map[string]memoryAppEventCursor),
+		appDeliveryAttempts:           make(map[string][]domain.AppDeliveryAttempt),
 		memberships:                   make(map[domain.ConversationID]map[domain.UserID]struct{}),
 		tokens:                        make(map[string]domain.TokenRecord),
 		appTokens:                     make(map[string]domain.AppTokenRecord),
@@ -10233,6 +10235,7 @@ func (s *Store) AckAppEvent(_ context.Context, appID domain.AppID, surface, owne
 	if !cursor.LeaseUntil.After(now) {
 		return store.ErrLeaseConflict
 	}
+	attempt := cursor.RetryCount + 1
 	cursor.Sequence = sequence
 	cursor.LeasedSequence = 0
 	cursor.LeaseOwner = ""
@@ -10241,7 +10244,38 @@ func (s *Store) AckAppEvent(_ context.Context, appID domain.AppID, surface, owne
 	cursor.RetryCount = 0
 	cursor.RetryReason = ""
 	s.appEventCursors[key] = cursor
+	s.recordAppDeliveryAttemptLocked(key, domain.AppDeliveryAttempt{
+		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: true, AttemptedAt: now,
+	})
 	return nil
+}
+
+// recordAppDeliveryAttemptLocked appends one outcome and keeps only the newest
+// store.AppDeliveryAttemptRetention, matching the SQL profile's bounded window.
+func (s *Store) recordAppDeliveryAttemptLocked(key string, attempt domain.AppDeliveryAttempt) {
+	list := append(s.appDeliveryAttempts[key], attempt)
+	if len(list) > store.AppDeliveryAttemptRetention {
+		list = list[len(list)-store.AppDeliveryAttemptRetention:]
+	}
+	s.appDeliveryAttempts[key] = list
+}
+
+func (s *Store) ListAppDeliveryAttempts(_ context.Context, appID domain.AppID, surface string, limit int) ([]domain.AppDeliveryAttempt, error) {
+	if appID == "" || !validAppEventSurface(surface) {
+		return nil, store.InvalidArgument("app ID and event surface are required")
+	}
+	if limit <= 0 {
+		limit = store.AppDeliveryAttemptRetention
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	stored := s.appDeliveryAttempts[appEventCursorKey(appID, surface)]
+	attempts := make([]domain.AppDeliveryAttempt, 0, limit)
+	// Newest first, mirroring the SQL ORDER BY id DESC.
+	for i := len(stored) - 1; i >= 0 && len(attempts) < limit; i-- {
+		attempts = append(attempts, stored[i])
+	}
+	return attempts, nil
 }
 
 func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
@@ -10259,6 +10293,7 @@ func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, 
 	if !cursor.LeaseUntil.After(now) {
 		return store.ErrLeaseConflict
 	}
+	attempt := cursor.RetryCount + 1
 	cursor.LeasedSequence = 0
 	cursor.LeaseOwner = ""
 	cursor.LeaseUntil = time.Time{}
@@ -10266,6 +10301,9 @@ func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, 
 	cursor.RetryCount++
 	cursor.RetryReason = strings.TrimSpace(reason)
 	s.appEventCursors[key] = cursor
+	s.recordAppDeliveryAttemptLocked(key, domain.AppDeliveryAttempt{
+		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: false, Reason: strings.TrimSpace(reason), AttemptedAt: now,
+	})
 	return nil
 }
 
