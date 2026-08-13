@@ -748,6 +748,7 @@ type searchData struct {
 	Files                []searchFileView
 	People               []memberView
 	Canvases             []searchCanvasView
+	Lists                []searchListView
 	Conversations        []conversationView
 	Tabs                 []searchTabView
 	ConversationOptions  []conversationView
@@ -818,6 +819,16 @@ type searchHistoryView struct {
 // results; a snippet around nothing in particular is still enough to recognise
 // the canvas you meant.
 type searchCanvasView struct {
+	ID          string
+	Title       template.HTML
+	Snippet     template.HTML
+	Owner       string
+	DisplayTime string
+	MachineTime string
+	URL         string
+}
+
+type searchListView struct {
 	ID          string
 	Title       template.HTML
 	Snippet     template.HTML
@@ -2625,6 +2636,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 {{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.DisplayText}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
 {{else if eq .Type "files"}}{{range .Files}}<a class="result file-result" href="{{.DownloadURL}}"><span><span class="author">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</span><span class="result-kind">{{.MIMEType}} · {{.Size}}</span><p class="text">Uploaded by {{.Uploader}}</p></span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching files.</p>{{end}}
 {{else if eq .Type "canvases"}}{{range .Canvases}}<a class="result canvas-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">Canvas · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching canvases.</p>{{end}}
+{{else if eq .Type "lists"}}{{range .Lists}}<a class="result list-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">List · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching lists.</p>{{end}}
 {{else if eq .Type "people"}}{{range .People}}<a class="result" href="/app/members?user={{.ID}}"><span class="author">{{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span>{{if .RealName}}<p class="text">{{.RealName}}</p>{{end}}</a>{{else}}<p class="empty">No matching people.</p>{{end}}
 {{else}}{{range .Conversations}}<a class="result" href="/app?channel={{.ID}}"><span class="author"># {{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span></a>{{else}}<p class="empty">No matching channels.</p>{{end}}{{end}}
 </section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
@@ -7491,7 +7503,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	switch resultType {
 	case "", "messages":
 		resultType = "messages"
-	case "files", "canvases", "people", "channels":
+	case "files", "canvases", "lists", "people", "channels":
 	default:
 		resultType = "messages"
 	}
@@ -7527,7 +7539,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "Search filters are temporarily unavailable.")
 		return
 	}
-	for _, tab := range []struct{ value, label string }{{"messages", "Messages"}, {"files", "Files"}, {"canvases", "Canvases"}, {"people", "People"}, {"channels", "Channels"}} {
+	for _, tab := range []struct{ value, label string }{{"messages", "Messages"}, {"files", "Files"}, {"canvases", "Canvases"}, {"lists", "Lists"}, {"people", "People"}, {"channels", "Channels"}} {
 		values := cloneURLValues(r.URL.Query())
 		values.Set("type", tab.value)
 		values.Del("cursor")
@@ -7649,6 +7661,32 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			values.Set("cursor", string(results.NextCursor))
 			data.MoreURL = "/app/search?" + values.Encode()
 		}
+	case "lists":
+		results, searchErr := h.Messages.SearchLists(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListSearchRequest{
+			Query: effectiveQuery, Sort: sortOrder, Direction: direction,
+			Page: domain.PageRequest{Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))},
+		})
+		if searchErr != nil {
+			h.writeSearchError(w, data, searchErr)
+			return
+		}
+		names := h.newUserNames(r.Context(), principal)
+		for _, list := range results.Lists {
+			data.Lists = append(data.Lists, searchListView{
+				ID: string(list.ID), Title: markedText(list.Name, terms),
+				Snippet:     markedText(listSearchSnippet(list, terms), terms),
+				Owner:       names.name(list.OwnerID),
+				DisplayTime: list.UpdatedAt.Format("Jan 2, 15:04"),
+				MachineTime: list.UpdatedAt.UTC().Format(time.RFC3339),
+				URL:         "/app/lists/" + url.PathEscape(string(list.ID)),
+			})
+		}
+		data.ResultCount = len(data.Lists)
+		if results.HasMore && results.NextCursor != "" {
+			values := cloneURLValues(r.URL.Query())
+			values.Set("cursor", string(results.NextCursor))
+			data.MoreURL = "/app/search?" + values.Encode()
+		}
 	case "channels":
 		page, searchErr := h.Messages.SearchChannels(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{
 			Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor"))),
@@ -7690,6 +7728,36 @@ func canvasSearchSnippet(canvas domain.Canvas, terms []string) string {
 	if spans := matchedSpans(strings.ToLower(text), terms); len(spans) > 0 && len(strings.ToLower(text)) == len(text) {
 		// Half the window before the match, so the hit sits in the middle
 		// rather than against an edge where it reads as truncated.
+		start = len([]rune(text[:spans[0].start])) - canvasSnippetRunes/2
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start+canvasSnippetRunes > len(runes) {
+		start = len(runes) - canvasSnippetRunes
+	}
+	snippet := strings.TrimSpace(string(runes[start : start+canvasSnippetRunes]))
+	if start > 0 {
+		snippet = "…" + snippet
+	}
+	return snippet + "…"
+}
+
+// listSearchSnippet is canvasSearchSnippet for a list: the description prose past
+// the name, windowed around the first match. An empty description yields an empty
+// snippet, so a list matched by name alone shows its name and nothing else.
+func listSearchSnippet(list domain.List, terms []string) string {
+	text := strings.TrimSpace(strings.TrimPrefix(domain.ListSearchText(list.Name, list.DescriptionBlocks), list.Name))
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= canvasSnippetRunes {
+		return text
+	}
+	start := 0
+	if spans := matchedSpans(strings.ToLower(text), terms); len(spans) > 0 && len(strings.ToLower(text)) == len(text) {
 		start = len([]rune(text[:spans[0].start])) - canvasSnippetRunes/2
 	}
 	if start < 0 {

@@ -1975,6 +1975,50 @@ func CanvasSearchText(title, content string) string {
 	return strings.Join(parts, "\n")
 }
 
+// ListSearchText is the prose a Lists-tab query matches against: the list's name
+// and any text carried by its description blocks. Like CanvasSearchText it reads
+// prose rather than JSON structure, so a member searching for a word in the
+// description finds the list while "text" or "rich_text" — the block-format keys
+// — match nothing. A description this version cannot decode contributes the name
+// alone rather than failing, because a list should still be findable by name.
+func ListSearchText(name, descriptionBlocks string) string {
+	parts := make([]string, 0, 4)
+	if strings.TrimSpace(name) != "" {
+		parts = append(parts, name)
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(descriptionBlocks), &decoded); err == nil {
+		collectBlockProse(decoded, &parts)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// collectBlockProse walks a decoded block tree and appends the string value of
+// every "text" field it finds, in a deterministic order so the folded result a
+// write stores does not depend on Go's map iteration.
+func collectBlockProse(node any, out *[]string) {
+	switch value := node.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if key == "text" {
+				if text, ok := value[key].(string); ok && strings.TrimSpace(text) != "" {
+					*out = append(*out, text)
+				}
+			}
+			collectBlockProse(value[key], out)
+		}
+	case []any:
+		for _, item := range value {
+			collectBlockProse(item, out)
+		}
+	}
+}
+
 type FileComment struct {
 	ID          FileCommentID
 	File        FileID

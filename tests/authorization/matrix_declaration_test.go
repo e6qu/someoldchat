@@ -335,6 +335,7 @@ func authorityMatrix() map[string]authority {
 		"ListWorkflows":                           authorityAnyMember,
 		"ListWorkspaceApps":                       authorityAnyMember,
 		"Lists":                                   authorityAnyMember,
+		"SearchLists":                             authorityAnyMember,
 		"LoadAppOptions":                          authorityAnyMember,
 		"LookupCanvasSections":                    authorityAnyMember,
 		"MarkAllRead":                             authorityAnyMember,

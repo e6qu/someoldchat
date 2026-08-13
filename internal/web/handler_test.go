@@ -4865,6 +4865,26 @@ func TestCanvasSearchTabFindsProseAndNotStoredSyntax(t *testing.T) {
 	requireContains(t, "canvas search for stored syntax", syntax.Body.String(), "No matching canvases.")
 }
 
+func TestListSearchTabFindsProseAndNotStoredSyntax(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	description := `[{"type":"rich_text","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":"roll back the previous revision"}]}]}]`
+	list, err := service.Messages{Store: s}.CreateList(context.Background(), "T1", "U1", "Deployment runbook", description, "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := get(t, mux, "/app/search?q=runbook&type=lists&channel=Cdev")
+	if byName.Code != http.StatusOK {
+		t.Fatalf("list search status=%d body=%s", byName.Code, byName.Body)
+	}
+	requireContains(t, "list search by name", byName.Body.String(), "Lists", "Deployment <mark>runbook</mark>", string(list.ID))
+
+	byBody := get(t, mux, "/app/search?q=roll+back&type=lists&channel=Cdev")
+	requireContains(t, "list search by body", byBody.Body.String(), "Deployment runbook", "<mark>roll</mark> <mark>back</mark>")
+
+	syntax := get(t, mux, "/app/search?q=rich_text&type=lists&channel=Cdev")
+	requireContains(t, "list search for stored syntax", syntax.Body.String(), "No matching lists.")
+}
+
 // TestADeliveredReminderIsVisibleWithItsText holds what REMIND-04 asks for at
 // the surface: at the due instant the member is shown the reminder, and shown
 // what it says.

@@ -1094,6 +1094,7 @@ type Store interface {
 	CreateListWithItems(context.Context, domain.List, events.Event, []ListItemCreation) error
 	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
 	ListLists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
+	SearchLists(context.Context, domain.WorkspaceID, domain.UserID, domain.ListSearch) (domain.ListPage, error)
 	UpdateList(context.Context, domain.List, events.Event) error
 	// RemoveListColumn drops one column from a list and the cells under it, in
 	// one transaction. A schema that no longer declares a column while items
