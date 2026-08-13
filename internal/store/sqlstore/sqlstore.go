@@ -505,7 +505,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 CREATE TABLE IF NOT EXISTS lists (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
  name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0,
- version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+ version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, search_folded TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS list_items (
  id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -555,7 +555,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 162
+const schemaVersion = 163
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3327,6 +3327,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 163 {
+		// A list is findable by its prose. The folded text is stored rather than
+		// computed per query for the same reason canvases store it: the searchable
+		// text lives inside a JSON description, and decoding every list in the
+		// workspace on each keystroke is the alternative. Backfill in Go so the
+		// one extractor the write path uses is the one the migration uses.
+		columns, err := s.tableColumns(ctx, db, "lists")
+		if err != nil {
+			return err
+		}
+		if !columns["search_folded"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE lists ADD COLUMN search_folded TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate list search text: %w", err)
+			}
+			if err := backfillListSearchText(ctx, db); err != nil {
+				return fmt.Errorf("backfill list search text: %w", err)
+			}
 		}
 	}
 	if version < 162 {
@@ -19259,7 +19278,7 @@ func (s *Store) CreateListWithItems(ctx context.Context, value domain.List, even
 	if value.Version == 0 {
 		value.Version = 1
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt))
+	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, version, created_at, updated_at, search_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), listSearchFolded(value))
 	if err != nil {
 		return classify(err)
 	}
@@ -19360,13 +19379,120 @@ func (s *Store) ListLists(ctx context.Context, workspace domain.WorkspaceID, use
 	return page, err
 }
 
+// SearchLists answers the Lists tab, mirroring SearchCanvases: it applies the
+// same visible-list rule the directory applies and matches against the stored
+// folded index rather than decoding every list's description on each keystroke.
+func (s *Store) SearchLists(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, search domain.ListSearch) (domain.ListPage, error) {
+	if err := store.CheckAscendingPage(search.Page); err != nil {
+		return domain.ListPage{}, err
+	}
+	after, err := domain.DecodeListCursor(search.Page.Cursor)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	where := `d.workspace_id = ? AND d.id > ? AND ` + visibleListPredicate
+	args := []any{workspace, after, userID, userID, userID, userID}
+	for _, term := range search.Terms {
+		where += ` AND d.search_folded LIKE ? ESCAPE '\'`
+		args = append(args, "%"+escapeLikeTerm(domain.FoldSearchText(term))+"%")
+	}
+	for _, term := range search.ExcludedTerms {
+		where += ` AND d.search_folded NOT LIKE ? ESCAPE '\'`
+		args = append(args, "%"+escapeLikeTerm(domain.FoldSearchText(term))+"%")
+	}
+	if search.Owner != "" {
+		where += ` AND d.owner_id = ?`
+		args = append(args, search.Owner)
+	}
+	if search.ExcludedOwner != "" {
+		where += ` AND d.owner_id <> ?`
+		args = append(args, search.ExcludedOwner)
+	}
+	if !search.After.IsZero() {
+		where += ` AND d.updated_at >= ?`
+		args = append(args, domain.NewStoredTime(search.After))
+	}
+	if !search.Before.IsZero() {
+		where += ` AND d.updated_at < ?`
+		args = append(args, domain.NewStoredTime(search.Before))
+	}
+	args = append(args, search.Page.Limit+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+listColumns+` FROM lists d WHERE `+where+` ORDER BY d.id LIMIT ?`, args...)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.List, 0, search.Page.Limit+1)
+	for rows.Next() {
+		var value domain.List
+		var todo int
+		var created, updated string
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todo, &value.Version, &created, &updated); err != nil {
+			return domain.ListPage{}, err
+		}
+		value.TodoMode = todo != 0
+		if value.CreatedAt, err = domain.ParseStoredTime(created); err != nil {
+			return domain.ListPage{}, err
+		}
+		if value.UpdatedAt, err = domain.ParseStoredTime(updated); err != nil {
+			return domain.ListPage{}, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ListPage{}, err
+	}
+	hasMore := len(values) > search.Page.Limit
+	if hasMore {
+		values = values[:search.Page.Limit]
+	}
+	page := domain.ListPage{Lists: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
+// listSearchFolded is the only place a list's stored index is built, so a write
+// path that forgets it forgets to call this rather than forgets a column — a
+// compile error rather than a list that silently cannot be found.
+func listSearchFolded(value domain.List) string {
+	return domain.FoldSearchText(domain.ListSearchText(value.Name, value.DescriptionBlocks))
+}
+
+func backfillListSearchText(ctx context.Context, db queryExecutor) error {
+	rows, err := db.QueryContext(ctx, `SELECT id, name, description_blocks FROM lists`)
+	if err != nil {
+		return err
+	}
+	type row struct{ id, folded string }
+	updates := make([]row, 0, 64)
+	for rows.Next() {
+		var id, name, description string
+		if err := rows.Scan(&id, &name, &description); err != nil {
+			rows.Close()
+			return err
+		}
+		updates = append(updates, row{id: id, folded: domain.FoldSearchText(domain.ListSearchText(name, description))})
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if _, err := db.ExecContext(ctx, `UPDATE lists SET search_folded = ? WHERE id = ?`, update.folded, update.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.UpdatedAt), value.ID, value.WorkspaceID, value.Version-1)
+	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, version = ?, updated_at = ?, search_folded = ? WHERE id = ? AND workspace_id = ? AND version = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.UpdatedAt), listSearchFolded(value), value.ID, value.WorkspaceID, value.Version-1)
 	if err != nil {
 		return err
 	}

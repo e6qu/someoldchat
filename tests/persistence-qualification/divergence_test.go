@@ -2658,6 +2658,79 @@ func canvasSearchFoldsTextAndStopsAtAccess(t *testing.T, open opener) {
 	}
 }
 
+// listSearchFoldsTextAndStopsAtAccess is canvasSearchFoldsTextAndStopsAtAccess
+// for lists: the same Go-side fold and stored column keep SQLite's ASCII LOWER()
+// and PostgreSQL's locale-aware one from returning two different result sets, and
+// the search obeys the same visibility rule the directory does.
+func listSearchFoldsTextAndStopsAtAccess(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	stranger := domain.UserID("U-list-stranger-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: stranger, WorkspaceID: f.workspaceID, Email: "list-stranger-" + f.suffix + "@example.com", Name: "stranger"}); err != nil {
+		t.Fatal(err)
+	}
+	list := domain.List{
+		ID: domain.ListID("Ls-" + f.suffix), WorkspaceID: f.workspaceID, OwnerID: f.userID,
+		Name: "Deployment Runbook", Version: 1, Schema: "[]",
+		DescriptionBlocks: `[{"type":"rich_text","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":"Roll back with the previous revision"}]}]}]`,
+		CreatedAt:         time.Unix(1700000000, 0).UTC(), UpdatedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	if err := f.repository.CreateList(ctx, list, f.event("list", "list.created", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	page := domain.PageRequest{Limit: 10}
+	for name, search := range map[string]domain.ListSearch{
+		"name in another case": {Terms: []string{"runbook"}, Page: page},
+		"body in another case": {Terms: []string{"ROLL BACK"}, Page: page},
+		"owner modifier":       {Terms: []string{"runbook"}, Owner: f.userID, Page: page},
+	} {
+		found, err := f.repository.SearchLists(ctx, f.workspaceID, f.userID, search)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(found.Lists) != 1 || found.Lists[0].ID != list.ID {
+			t.Fatalf("%s found %+v, want the list", name, found.Lists)
+		}
+	}
+
+	// The description is stored as JSON blocks. An index built from the raw bytes
+	// would match a block type, so every list would answer to "rich_text".
+	for name, search := range map[string]domain.ListSearch{
+		"block type":       {Terms: []string{"rich_text"}, Page: page},
+		"excluded term":    {Terms: []string{"runbook"}, ExcludedTerms: []string{"deployment"}, Page: page},
+		"excluded owner":   {Terms: []string{"runbook"}, ExcludedOwner: f.userID, Page: page},
+		"absent term":      {Terms: []string{"unrelated"}, Page: page},
+		"term and a miss":  {Terms: []string{"runbook", "unrelated"}, Page: page},
+		"updated after it": {Terms: []string{"runbook"}, After: time.Unix(1800000000, 0).UTC(), Page: page},
+	} {
+		found, err := f.repository.SearchLists(ctx, f.workspaceID, f.userID, search)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(found.Lists) != 0 {
+			t.Fatalf("%s found %+v, want nothing", name, found.Lists)
+		}
+	}
+
+	blind, err := f.repository.SearchLists(ctx, f.workspaceID, stranger, domain.ListSearch{Terms: []string{"runbook"}, Page: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blind.Lists) != 0 {
+		t.Fatalf("a member with no grant found %+v", blind.Lists)
+	}
+	listed, err := f.repository.ListLists(ctx, f.workspaceID, stranger, page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Lists) != len(blind.Lists) {
+		t.Fatalf("search and directory disagree for a stranger: %d listed, %d found", len(listed.Lists), len(blind.Lists))
+	}
+}
+
 // Directory search folds in Go and stores the result, because SQL LOWER() is
 // ASCII-only on SQLite and locale-aware on PostgreSQL — one query would return
 // two different result sets, which is precisely the divergence this suite

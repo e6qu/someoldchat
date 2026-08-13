@@ -1149,6 +1149,18 @@ func (r Remote) Lists(ctx context.Context, workspaceID domain.WorkspaceID, userI
 	return decodeProtoListPage(out)
 }
 
+func (r Remote) SearchLists(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ListSearchRequest) (domain.ListPage, error) {
+	out, err := r.lists.SearchLists(ctx, &chatv1.SearchListsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Query: request.Query,
+		Limit: int32(request.Page.Limit), Cursor: string(request.Page.Cursor),
+		Sort: string(request.Sort), Direction: string(request.Direction),
+	})
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	return decodeProtoListPage(out)
+}
+
 func (r Remote) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, name, descriptionBlocks string, todoMode, todoModeSet bool) (domain.List, error) {
 	out, err := r.lists.UpdateList(ctx, &chatv1.UpdateListRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id), Name: name, DescriptionBlocks: descriptionBlocks, TodoMode: todoMode, TodoModeSet: todoModeSet})
 	if err != nil {
@@ -8171,6 +8183,19 @@ func (s *Server) ListLists(ctx context.Context, input *chatv1.ListsRequest) (*ch
 	request := protoPageRequest(input.GetLimit(), input.GetCursor())
 	request.Descending = input.GetDescending()
 	value, err := s.implementation.Lists(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoListPage(value), nil
+}
+
+func (s *Server) SearchLists(ctx context.Context, input *chatv1.SearchListsRequest) (*chatv1.ListPage, error) {
+	value, err := s.implementation.SearchLists(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListSearchRequest{
+		Query:     input.GetQuery(),
+		Sort:      domain.SearchSort(input.GetSort()),
+		Direction: domain.SearchDirection(input.GetDirection()),
+		Page:      protoPageRequest(input.GetLimit(), input.GetCursor()),
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}

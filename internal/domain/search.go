@@ -169,6 +169,29 @@ type CanvasSearchRequest struct {
 	Page      PageRequest
 }
 
+// ListSearch is the parsed form of a Lists-tab query. Like CanvasSearch it
+// carries no conversation modifier: a list is reached through a grant or its
+// channel, never by being posted in a conversation, so `in:` would ask a
+// question the object model does not answer.
+type ListSearch struct {
+	Terms         []string
+	ExcludedTerms []string
+	Owner         UserID
+	ExcludedOwner UserID
+	After         time.Time
+	Before        time.Time
+	Sort          SearchSort
+	Direction     SearchDirection
+	Page          PageRequest
+}
+
+type ListSearchRequest struct {
+	Query     string
+	Sort      SearchSort
+	Direction SearchDirection
+	Page      PageRequest
+}
+
 // TextCarriesLink reports whether a message body contains a URL, which is what
 // Slack's `has:link` asks. It looks for a scheme rather than parsing: Slack
 // wraps links in angle brackets on the way in, so the stored text carries the

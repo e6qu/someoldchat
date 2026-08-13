@@ -5317,6 +5317,47 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "list search matches prose and stops at the reader's access",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				description := `[{"type":"rich_text","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":"roll back with the previous revision"}]}]}]`
+				list, err := chat.CreateList(ctx, "T1", "U1", "Deployment runbook", description, "[]", "", false, false)
+				if err != nil {
+					return nil, err
+				}
+				page := domain.PageRequest{Limit: 10}
+				byName, err := chat.SearchLists(ctx, "T1", "U1", domain.ListSearchRequest{Query: "runbook", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				// Folding is the product's one fold: a different case must still
+				// match, in both compositions.
+				byBody, err := chat.SearchLists(ctx, "T1", "U1", domain.ListSearchRequest{Query: "ROLL BACK", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				// The description is stored as JSON blocks. Searching for a block
+				// type must find nothing, or the index is the structure rather
+				// than the prose.
+				bySyntax, err := chat.SearchLists(ctx, "T1", "U1", domain.ListSearchRequest{Query: "rich_text", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				excluded, err := chat.SearchLists(ctx, "T1", "U1", domain.ListSearchRequest{Query: "runbook -deployment", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				stranger, err := chat.SearchLists(ctx, "T1", "U2", domain.ListSearchRequest{Query: "runbook", Page: page})
+				if err != nil {
+					return nil, err
+				}
+				// A conversation modifier has no meaning for a list either, and is
+				// refused rather than dropped.
+				_, scopedErr := chat.SearchLists(ctx, "T1", "U1", domain.ListSearchRequest{Query: "runbook in:#general", Page: page})
+				found := len(byName.Lists) == 1 && byName.Lists[0].ID == list.ID
+				return []any{found, len(byBody.Lists), len(bySyntax.Lists), len(excluded.Lists), len(stranger.Lists), scopedErr != nil}, nil
+			},
+		},
+		{
 			// Typing signals are the one piece of state that crosses the seam
 			// without an event behind it, so nothing else in this suite would
 			// notice if one composition quietly journalled them. What the two

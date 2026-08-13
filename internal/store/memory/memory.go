@@ -10782,6 +10782,68 @@ func (s *Store) ListLists(_ context.Context, workspace domain.WorkspaceID, userI
 	return page, err
 }
 
+func (s *Store) SearchLists(_ context.Context, workspace domain.WorkspaceID, userID domain.UserID, search domain.ListSearch) (domain.ListPage, error) {
+	if err := store.CheckAscendingPage(search.Page); err != nil {
+		return domain.ListPage{}, err
+	}
+	after, err := domain.DecodeListCursor(search.Page.Cursor)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	terms := make([]string, 0, len(search.Terms))
+	for _, term := range search.Terms {
+		terms = append(terms, domain.FoldSearchText(term))
+	}
+	excluded := make([]string, 0, len(search.ExcludedTerms))
+	for _, term := range search.ExcludedTerms {
+		excluded = append(excluded, domain.FoldSearchText(term))
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.List, 0, search.Page.Limit+1)
+	for _, list := range s.lists {
+		if list.WorkspaceID != workspace || (after != "" && string(list.ID) <= after) {
+			continue
+		}
+		if search.Owner != "" && list.OwnerID != search.Owner {
+			continue
+		}
+		if search.ExcludedOwner != "" && list.OwnerID == search.ExcludedOwner {
+			continue
+		}
+		if !search.After.IsZero() && list.UpdatedAt.Before(search.After) {
+			continue
+		}
+		if !search.Before.IsZero() && !list.UpdatedAt.Before(search.Before) {
+			continue
+		}
+		folded := domain.FoldSearchText(domain.ListSearchText(list.Name, list.DescriptionBlocks))
+		if !containsEveryTerm(folded, terms) || containsAnyTerm(folded, excluded) {
+			continue
+		}
+		_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, userID, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
+			for _, grant := range s.listAccess {
+				if grant.ListID == list.ID {
+					visit(grant.EntityType, grant.EntityID, grant.Access)
+				}
+			}
+		})
+		if allowed {
+			values = append(values, list)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > search.Page.Limit
+	if hasMore {
+		values = values[:search.Page.Limit]
+	}
+	page := domain.ListPage{Lists: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateList(_ context.Context, value domain.List, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

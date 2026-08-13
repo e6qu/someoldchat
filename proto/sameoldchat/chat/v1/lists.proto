@@ -78,6 +78,16 @@ message ListPage {
   bool has_more = 3;
 }
 
+message SearchListsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 limit = 4;
+  string cursor = 5;
+  string sort = 6;
+  string direction = 7;
+}
+
 message ListDownload {
   string id = 1;
   string list_id = 2;
@@ -210,6 +220,7 @@ service ListsService {
   rpc GetListAccess(ListItemRequest) returns (ListAccessResponse);
   rpc ListGrants(ListItemRequest) returns (ListGrantsResponse);
   rpc ListLists(ListsRequest) returns (ListPage);
+  rpc SearchLists(SearchListsRequest) returns (ListPage);
   rpc UpdateList(UpdateListRequest) returns (ListResponse);
   rpc CreateListItem(CreateListItemRequest) returns (ListItemResponse);
   rpc GetListItem(ListItemRequest) returns (ListItemResponse);

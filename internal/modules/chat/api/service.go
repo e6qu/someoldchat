@@ -493,6 +493,7 @@ type Service interface {
 	List(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) (domain.List, error)
 	ListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) (domain.ListAccess, error)
 	Lists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
+	SearchLists(context.Context, domain.WorkspaceID, domain.UserID, domain.ListSearchRequest) (domain.ListPage, error)
 	UpdateList(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string, string, bool, bool) (domain.List, error)
 	CreateListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string) (domain.ListItem, error)
 	GetListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID) (domain.ListItem, error)

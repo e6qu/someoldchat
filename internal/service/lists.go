@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -183,6 +184,47 @@ func (m Messages) Lists(ctx context.Context, workspaceID domain.WorkspaceID, use
 		return domain.ListPage{}, err
 	}
 	return m.Store.ListLists(ctx, workspaceID, userID, page)
+}
+
+// SearchLists answers the Lists tab. Like SearchCanvases it reuses the one query
+// parser every search shares, so `from:@ada`, `-word` and quoted phrases mean
+// here what they mean elsewhere, and it refuses a conversation modifier rather
+// than ignoring it: a list is reached through a grant or its channel, never by
+// being posted in a conversation, so `in:#general` has no meaning to answer.
+func (m Messages) SearchLists(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ListSearchRequest) (domain.ListPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ListPage{}, err
+	}
+	request.Query = strings.TrimSpace(request.Query)
+	if request.Query == "" || utf8.RuneCountInString(request.Query) > 500 {
+		return domain.ListPage{}, ErrInvalidSearch
+	}
+	if err := store.CheckAscendingPage(request.Page); err != nil {
+		return domain.ListPage{}, err
+	}
+	sortOrder, direction, err := domain.NormalizeSearchOrder(string(request.Sort), string(request.Direction))
+	if err != nil {
+		return domain.ListPage{}, ErrInvalidSearch
+	}
+	parsed, err := parseSearchQuery(request.Query)
+	if err != nil {
+		return domain.ListPage{}, ErrInvalidSearch
+	}
+	if parsed.conversation != "" || parsed.excludedConversation != "" {
+		return domain.ListPage{}, ErrInvalidSearch
+	}
+	search := domain.ListSearch{
+		Terms: parsed.terms, ExcludedTerms: parsed.excludedTerms,
+		After: parsed.after, Before: parsed.before,
+		Sort: sortOrder, Direction: direction, Page: request.Page,
+	}
+	if parsed.author != "" {
+		search.Owner = m.resolveSearchUser(ctx, workspaceID, userID, parsed.author)
+	}
+	if parsed.excludedAuthor != "" {
+		search.ExcludedOwner = m.resolveSearchUser(ctx, workspaceID, userID, parsed.excludedAuthor)
+	}
+	return m.Store.SearchLists(ctx, workspaceID, userID, search)
 }
 
 // maxCopiedListRecords bounds lists.create with copy_from. A copy larger than
