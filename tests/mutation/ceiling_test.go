@@ -19,4 +19,12 @@ package mutation
 // took them to 83 and 97, and the token was the one that exposed a real hole:
 // DeleteExternalAuthToken checked nothing about its caller, and looked guarded
 // only because there was never a token for it to find.
-const survivingGuardCeiling = 83
+//
+// 83 to 82: adding RevokeDeveloperAppTokens would have raised this, because an
+// owner-scoped operation's workspace-membership guard is shadowed by its
+// ownership check for every caller the matrix drives — the guard's one distinct
+// job is refusing a deactivated OWNER, whom the ownership check still recognises.
+// A service test that deactivates the owner and asserts the refusal makes that
+// job load-bearing, and it does so for the pre-existing IssueDeveloperAppToken
+// too, so the pair left the set together rather than one joining it.
+const survivingGuardCeiling = 82

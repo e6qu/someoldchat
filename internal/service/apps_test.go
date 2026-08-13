@@ -335,6 +335,20 @@ func TestRevokingAppTokensRefusesNonOwnerAndMarksThemRevoked(t *testing.T) {
 	if record, err := repository.LookupAppToken(ctx, credentials.Token); err != nil || !record.Revoked {
 		t.Fatalf("token after the owner revoked: record=%+v err=%v", record, err)
 	}
+	// A deactivated owner is refused by the workspace-membership guard, not by the
+	// ownership check — the check still sees them as the owner. This is the one
+	// caller for whom that guard is the only thing standing in the way, so it is
+	// what proves the guard on both operations is load-bearing rather than
+	// shadowed by the ownership check.
+	if err := repository.SetUserDeleted(ctx, "T1", "U1", true, events.Event{ID: "gone", WorkspaceID: "T1", Topic: "user.removed", Payload: "U1", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.RevokeDeveloperAppTokens(ctx, "T1", "U1", "A1"); err == nil {
+		t.Fatal("a deactivated owner revoked the app's tokens")
+	}
+	if _, err := messages.IssueDeveloperAppToken(ctx, "T1", "U1", "A1", nil); err == nil {
+		t.Fatal("a deactivated owner issued an app token")
+	}
 }
 
 func TestAnAppCanBeRestrictedBeforeItIsInstalled(t *testing.T) {
