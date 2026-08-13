@@ -1563,7 +1563,7 @@ const workspaceRefinements = `<style>
 .conversation-settings{display:grid;gap:10px}.conversation-setting{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px}.conversation-setting label{display:grid;gap:4px;font-size:12px;font-weight:700}
 .conversation-setting input,.conversation-setting textarea,.conversation-setting select{width:100%;min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 9px;font:inherit}.conversation-setting textarea{min-height:70px;resize:vertical}
 .conversation-setting button,.conversation-danger button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:8px 12px;font-weight:800}.conversation-setting button:hover{background:var(--hover)}
-.conversation-members{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px;margin:0;padding:0;list-style:none}.conversation-member{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);border-radius:7px}.conversation-member-avatar{width:26px;height:26px;display:grid;place-items:center;border-radius:5px;background:var(--hover);font-size:11px;font-weight:800}.conversation-member-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conversation-members{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px;margin:0;padding:0;list-style:none}.conversation-member{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);border-radius:7px}.conversation-member-avatar{width:26px;height:26px;display:grid;place-items:center;border-radius:5px;background:var(--hover);font-size:11px;font-weight:800}.conversation-member-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.conversation-member-status{display:inline-flex;align-items:center}.conversation-member-status .standard-emoji,.conversation-member-status .custom-emoji{width:16px;height:16px;font-size:15px;line-height:16px}
 .conversation-danger{display:flex;flex-wrap:wrap;gap:8px;padding-top:16px;border-top:1px solid var(--line)}.conversation-danger form{display:inline-flex}.conversation-danger button{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 50%,var(--line))}
 .conversation-details-note{margin:0;color:var(--muted);font-size:13px}
 .modal-backdrop{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:24px;background:#0009}
@@ -2188,7 +2188,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       {{end}}
       <section class="conversation-details-section" aria-labelledby="conversation-members-heading">
         <h3 id="conversation-members-heading">Members ({{len .Details.Members}})</h3>
-        <ul class="conversation-members">{{range .Details.Members}}<li class="conversation-member"><span class="conversation-member-avatar" aria-hidden="true">{{.AuthorInitial}}</span><span class="conversation-member-name">{{.Name}}</span></li>{{end}}</ul>
+        <ul class="conversation-members">{{range .Details.Members}}<li class="conversation-member"><span class="presence {{.Presence}}" aria-hidden="true"></span><span class="conversation-member-avatar" aria-hidden="true">{{.AuthorInitial}}</span><span class="conversation-member-name">{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></span>{{if .StatusDisplay}}<span class="conversation-member-status"{{if .Profile.StatusText}} title="{{.Profile.StatusText}}"{{end}}>{{.StatusDisplay}}</span>{{end}}</li>{{end}}</ul>
         {{if .Details.Truncated}}<p class="conversation-details-note">This workspace has more than 1,000 members. Use the member directory to find people outside this list.</p>{{end}}
         {{if .Details.CanInvite}}
           {{if .Details.Invitees}}
@@ -6310,6 +6310,12 @@ func (h Handler) workspaceName(ctx context.Context, principal auth.Principal, id
 func (h Handler) newConversationDetails(ctx context.Context, principal auth.Principal, workspace domain.Workspace, conversation domain.Conversation, isMember bool) (*conversationDetailsView, error) {
 	const maxDirectoryPages = 10
 
+	// The member panel shows each member's presence and status the way the People
+	// directory does; a status emoji is a shortcode resolved to a glyph here.
+	emojiImages := map[string]string{}
+	if customEmoji, err := h.Messages.Emojis(ctx, principal.WorkspaceID, principal.UserID); err == nil {
+		emojiImages = customEmojiImages(customEmoji)
+	}
 	membersByID := make(map[domain.UserID]struct{})
 	members := make([]memberView, 0)
 	cursor := domain.Cursor("")
@@ -6324,8 +6330,9 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 				continue
 			}
 			name := displayName(user)
+			isSelf := user.ID == principal.UserID
 			membersByID[user.ID] = struct{}{}
-			members = append(members, memberView{ID: string(user.ID), Name: name, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
+			members = append(members, memberView{ID: string(user.ID), Name: name, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: webPresence(user.Presence, isSelf), AuthorInitial: initial(name), IsSelf: isSelf})
 		}
 		if !page.HasMore || page.NextCursor == "" {
 			break

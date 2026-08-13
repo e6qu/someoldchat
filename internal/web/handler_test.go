@@ -1025,6 +1025,25 @@ func TestPeopleDirectoryRendersStatusEmojiAsAGlyph(t *testing.T) {
 	requireMissing(t, "status shortcode is resolved, not shown raw", body, ":tada: Shipping")
 }
 
+// TestConversationMemberPanelShowsPresenceAndStatus covers the channel member
+// drawer, a projection surface the timeline change left open: each member row
+// carries a presence dot and their status emoji, resolved to a glyph.
+func TestConversationMemberPanelShowsPresenceAndStatus(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "builder", RealName: "Bob Builder",
+		Profile: domain.UserProfile{StatusEmoji: ":tada:", StatusText: "Shipping"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev&details=1").Body.String()
+	requireContains(t, "member panel projects status", body,
+		`<span class="conversation-member-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`)
+	requireContains(t, "member panel carries a presence dot", body,
+		`<li class="conversation-member"><span class="presence `)
+}
+
 func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	if err := s.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "helper-bot", RealName: "Helper Bot"}); err != nil {
