@@ -214,5 +214,9 @@ func TestDeveloperAppDeliveryHealthShowsDurableRetryWithoutExposingPayload(t *te
 		"Event delivery health", "Retry scheduled", "Socket Mode", "connection_closed",
 		"Next journal record awaiting evaluation", "message.created",
 	)
+	// The failed release is now shown as a retained delivery attempt with metrics.
+	requireContains(t, "delivery attempt history", page.Body.String(),
+		"Recent delivery attempts", "Success rate", "0%", "attempt 1", "failed",
+	)
 	requireMissing(t, "delivery payload redaction", page.Body.String(), privatePayload, "must-not-render", "test-worker")
 }

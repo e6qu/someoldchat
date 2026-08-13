@@ -119,6 +119,19 @@ message AppDeliveryHealth {
   bool pending_evaluation = 12;
   string next_event_topic = 13;
   string next_event_at = 14;
+  repeated AppDeliveryAttempt recent_attempts = 15;
+  int32 delivered_count = 16;
+  int32 failed_count = 17;
+}
+
+message AppDeliveryAttempt {
+  string app_id = 1;
+  string surface = 2;
+  uint64 sequence = 3;
+  int32 attempt = 4;
+  bool delivered = 5;
+  string reason = 6;
+  string attempted_at = 7;
 }
 
 message AppListResponse {

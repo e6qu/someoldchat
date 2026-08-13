@@ -544,6 +544,10 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoAppDeliveryHealth, decodeProtoAppDeliveryHealth),
 		},
+		"AppDeliveryAttempt": {
+			sample:  &domain.AppDeliveryAttempt{},
+			through: through(encodeProtoAppDeliveryAttempt, decodeProtoAppDeliveryAttempt),
+		},
 		"DoNotDisturb":               {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
 		"UserGroup":                  {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
 		"Call":                       {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},

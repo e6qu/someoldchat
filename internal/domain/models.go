@@ -2423,6 +2423,26 @@ type AppDeliveryHealth struct {
 	PendingEvaluation    bool
 	NextEventTopic       string
 	NextEventAt          time.Time
+	// RecentAttempts is a bounded, newest-first history of delivery outcomes, and
+	// DeliveredCount/FailedCount summarise the retained window. They are honest
+	// about being a window: they count what is still retained, not all time.
+	RecentAttempts []AppDeliveryAttempt
+	DeliveredCount int
+	FailedCount    int
+}
+
+// AppDeliveryAttempt is one recorded outcome of handing an event to an app:
+// delivered when the app acknowledged it, or failed when it was released back for
+// retry with a reason. It is retained as a bounded, best-effort audit history so
+// an app owner sees what happened rather than only the current cursor.
+type AppDeliveryAttempt struct {
+	AppID       AppID
+	Surface     string
+	Sequence    uint64
+	Attempt     int
+	Delivered   bool
+	Reason      string
+	AttemptedAt time.Time
 }
 
 // App is the durable developer-owned Slack application. Installation records

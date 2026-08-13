@@ -6057,13 +6057,29 @@ func parityCases() []parityCase {
 				if err := chat.AckAppEvent(ctx, "A1", "socket", "connection-2", second.Sequence); err != nil {
 					return nil, err
 				}
+				afterAck, err := chat.GetDeveloperAppDeliveryHealth(ctx, "T1", "U1", "A1")
+				if err != nil {
+					return nil, err
+				}
+				// After the release then the ack, the retained history is a failed
+				// attempt and then a delivered one; both compositions must agree on
+				// the counts and on the newest outcome. Timestamps are wall-clock and
+				// so are compared by presence, not value.
+				newestDelivered, newestReason, newestHasTime := false, "", false
+				if len(afterAck.RecentAttempts) != 0 {
+					newest := afterAck.RecentAttempts[0]
+					newestDelivered, newestReason, newestHasTime = newest.Delivered, newest.Reason, !newest.AttemptedAt.IsZero()
+				}
 				return []any{
 					first.Sequence, first.Event.ID, first.Event.WorkspaceID, first.Event.ActorID, first.Event.Topic, first.Event.Payload,
 					firstAttempt, firstReason,
 					health.AppID, health.Surface, health.Endpoint, health.Configured, health.Installed,
 					health.AcknowledgedSequence, health.InFlightSequence, health.RetryCount, health.RetryReason,
 					health.PendingEvaluation, health.NextEventTopic, health.NextEventAt,
+					health.FailedCount, health.DeliveredCount, len(health.RecentAttempts),
 					second.Sequence, secondAttempt, secondReason,
+					afterAck.DeliveredCount, afterAck.FailedCount, len(afterAck.RecentAttempts),
+					newestDelivered, newestReason, newestHasTime,
 					authorizations,
 				}, nil
 			},

@@ -602,6 +602,18 @@ func (m Messages) GetDeveloperAppDeliveryHealth(ctx context.Context, workspaceID
 		health.NextEventTopic = pending[0].Event.Topic
 		health.NextEventAt = pending[0].Event.CreatedAt
 	}
+	attempts, err := m.Store.ListAppDeliveryAttempts(ctx, app.ID, health.Surface, store.AppDeliveryAttemptRetention)
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	health.RecentAttempts = attempts
+	for _, attempt := range attempts {
+		if attempt.Delivered {
+			health.DeliveredCount++
+		} else {
+			health.FailedCount++
+		}
+	}
 	return health, nil
 }
 

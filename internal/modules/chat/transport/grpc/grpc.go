@@ -13465,6 +13465,10 @@ func encodeProtoAppDeliveryHealth(value domain.AppDeliveryHealth) *chatv1.AppDel
 		AcknowledgedSequence: value.AcknowledgedSequence, InFlightSequence: value.InFlightSequence,
 		RetryCount: int32(value.RetryCount), RetryReason: value.RetryReason,
 		PendingEvaluation: value.PendingEvaluation, NextEventTopic: value.NextEventTopic,
+		DeliveredCount: int32(value.DeliveredCount), FailedCount: int32(value.FailedCount),
+	}
+	for _, attempt := range value.RecentAttempts {
+		result.RecentAttempts = append(result.RecentAttempts, encodeProtoAppDeliveryAttempt(attempt))
 	}
 	if !value.InFlightUntil.IsZero() {
 		result.InFlightUntil = value.InFlightUntil.UTC().Format(time.RFC3339Nano)
@@ -13476,6 +13480,28 @@ func encodeProtoAppDeliveryHealth(value domain.AppDeliveryHealth) *chatv1.AppDel
 		result.NextEventAt = value.NextEventAt.UTC().Format(time.RFC3339Nano)
 	}
 	return result
+}
+
+func encodeProtoAppDeliveryAttempt(value domain.AppDeliveryAttempt) *chatv1.AppDeliveryAttempt {
+	result := &chatv1.AppDeliveryAttempt{
+		AppId: string(value.AppID), Surface: value.Surface, Sequence: value.Sequence,
+		Attempt: int32(value.Attempt), Delivered: value.Delivered, Reason: value.Reason,
+	}
+	if !value.AttemptedAt.IsZero() {
+		result.AttemptedAt = value.AttemptedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return result
+}
+
+func decodeProtoAppDeliveryAttempt(value *chatv1.AppDeliveryAttempt) (domain.AppDeliveryAttempt, error) {
+	attemptedAt, err := decodeOptionalProtoTime(value.GetAttemptedAt())
+	if err != nil {
+		return domain.AppDeliveryAttempt{}, err
+	}
+	return domain.AppDeliveryAttempt{
+		AppID: domain.AppID(value.GetAppId()), Surface: value.GetSurface(), Sequence: value.GetSequence(),
+		Attempt: int(value.GetAttempt()), Delivered: value.GetDelivered(), Reason: value.GetReason(), AttemptedAt: attemptedAt,
+	}, nil
 }
 
 func decodeProtoAppDeliveryHealth(value *chatv1.AppDeliveryHealth) (domain.AppDeliveryHealth, error) {
@@ -13494,13 +13520,22 @@ func decodeProtoAppDeliveryHealth(value *chatv1.AppDeliveryHealth) (domain.AppDe
 	if err != nil {
 		return domain.AppDeliveryHealth{}, err
 	}
-	return domain.AppDeliveryHealth{
+	health := domain.AppDeliveryHealth{
 		AppID: domain.AppID(value.GetAppId()), Surface: value.GetSurface(), Endpoint: value.GetEndpoint(),
 		Configured: value.GetConfigured(), Installed: value.GetInstalled(),
 		AcknowledgedSequence: value.GetAcknowledgedSequence(), InFlightSequence: value.GetInFlightSequence(),
 		InFlightUntil: inFlightUntil, RetryAt: retryAt, RetryCount: int(value.GetRetryCount()), RetryReason: value.GetRetryReason(),
 		PendingEvaluation: value.GetPendingEvaluation(), NextEventTopic: value.GetNextEventTopic(), NextEventAt: nextEventAt,
-	}, nil
+		DeliveredCount: int(value.GetDeliveredCount()), FailedCount: int(value.GetFailedCount()),
+	}
+	for _, attempt := range value.GetRecentAttempts() {
+		decoded, err := decodeProtoAppDeliveryAttempt(attempt)
+		if err != nil {
+			return domain.AppDeliveryHealth{}, err
+		}
+		health.RecentAttempts = append(health.RecentAttempts, decoded)
+	}
+	return health, nil
 }
 
 func encodeProtoInstalledApp(value domain.InstalledApp) *chatv1.InstalledApp {

@@ -80,6 +80,11 @@ const OAuthCodeLifetime = 10 * time.Minute
 // history for useful matching without allowing an unbounded query log.
 const MaxSearchHistoryEntries = 50
 
+// AppDeliveryAttemptRetention bounds how many app-event delivery outcomes each
+// (app, surface) keeps. Both store profiles honour it so their histories, and
+// the metrics computed over them, match.
+const AppDeliveryAttemptRetention = 50
+
 // The access levels a list or canvas grant can carry. They are the values the
 // service layer already writes through SetListAccess and SetCanvasAccess; naming
 // them here keeps the readers, the writers and the authorization decision that
@@ -830,6 +835,10 @@ type Store interface {
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
 	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
 	GetAppEventCursor(context.Context, domain.AppID, string) (domain.AppEventCursor, error)
+	// ListAppDeliveryAttempts returns the retained delivery outcomes for an app's
+	// surface, newest first. It is the history behind AppDeliveryHealth, bounded to
+	// AppDeliveryAttemptRetention per surface so both profiles keep the same window.
+	ListAppDeliveryAttempts(context.Context, domain.AppID, string, int) ([]domain.AppDeliveryAttempt, error)
 	ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error)
 	ClaimEventsForTopic(context.Context, domain.WorkspaceID, string, string, int, time.Duration) ([]events.Record, error)
 	RenewEvents(context.Context, string, []uint64, time.Duration) error
