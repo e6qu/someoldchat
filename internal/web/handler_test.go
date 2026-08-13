@@ -975,6 +975,56 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 	requireContains(t, "message time", body, `datetime="2023-11-14T22:13:20Z">Nov 14, 22:13 UTC<`)
 }
 
+// TestTimelineProjectsAuthorStatusBesideTheName covers status projection outside
+// People and profile: Slack shows an author's current status emoji next to their
+// name on every message, resolved to a glyph rather than the raw shortcode, with
+// the status prose as its tooltip.
+func TestTimelineProjectsAuthorStatusBesideTheName(t *testing.T) {
+	s, mux := browserWorkspace(t, []string{string(auth.ScopeChannelsHistory)})
+	if _, err := s.UpdateUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusEmoji: ":tada:", StatusText: "Shipping"},
+		events.Event{ID: "EP1", WorkspaceID: "T1", Topic: "user_change", Payload: "U1", CreatedAt: time.Unix(1700000000, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "author status projection", body,
+		`<span class="author">Ada Developer</span><span class="author-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`,
+	)
+}
+
+// TestAppMessageDoesNotProjectAHumanStatus guards the human-author boundary: a
+// message posted by an app is not a person, so the author's status must not leak
+// onto it even when the recorded author id carries one.
+func TestAppMessageDoesNotProjectAHumanStatus(t *testing.T) {
+	s, mux := browserWorkspace(t, []string{string(auth.ScopeChannelsHistory)})
+	if _, err := s.UpdateUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusEmoji: ":tada:", StatusText: "Shipping"},
+		events.Event{ID: "EP1", WorkspaceID: "T1", Topic: "user_change", Payload: "U1", CreatedAt: time.Unix(1700000000, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", AppID: "A1", Text: "deploy done", CreatedAt: time.Unix(1700000000, 0).UTC()}
+	event := events.Event{ID: "EM1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: message.CreatedAt}
+	if err := s.CreateMessage(context.Background(), message, event, ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "app message renders", body, "deploy done")
+	requireMissing(t, "no human status on an app message", body, `class="author-status"`)
+}
+
+// TestPeopleDirectoryRendersStatusEmojiAsAGlyph covers the Boy Scout fix: the
+// People card stored a shortcode and rendered it raw, so members saw the colons.
+func TestPeopleDirectoryRendersStatusEmojiAsAGlyph(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if _, err := s.UpdateUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusEmoji: ":tada:", StatusText: "Shipping"},
+		events.Event{ID: "EP1", WorkspaceID: "T1", Topic: "user_change", Payload: "U1", CreatedAt: time.Unix(1700000000, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app/members").Body.String()
+	requireContains(t, "member status glyph", body,
+		`<span class="standard-emoji" role="img" aria-label=":tada:">`, "Shipping")
+	requireMissing(t, "status shortcode is resolved, not shown raw", body, ":tada: Shipping")
+}
+
 func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	if err := s.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "helper-bot", RealName: "Helper Bot"}); err != nil {
@@ -1223,7 +1273,7 @@ func TestComposerUserGroupSuggestionsPageThroughTheWorkspaceCatalog(t *testing.T
 
 func TestResolveSlackReferenceJSONLeavesOpaqueValuesAndPlainTextLiteral(t *testing.T) {
 	names := &userNames{
-		cache: map[domain.UserID]string{"U1": "Ada"},
+		cache: map[domain.UserID]userNameEntry{"U1": {name: "Ada"}},
 		groups: map[domain.UserGroupID]string{
 			"SSUPPORT": "support",
 		},
