@@ -43,11 +43,12 @@ type Handler struct {
 
 var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
 var immutableCommitRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
-var remindInPattern = regexp.MustCompile(`(?i)^(.*?)\s+in\s+([1-9][0-9]*)\s+(minute|minutes|hour|hours|day|days)$`)
+var remindInPattern = regexp.MustCompile(`(?i)^(.*?)\s+in\s+(a|an|[1-9][0-9]*)\s+(minute|minutes|hour|hours|day|days|week|weeks)$`)
 var remindTomorrowPattern = regexp.MustCompile(`(?i)^(.*?)\s+tomorrow(?:\s+at\s+(.+))?$`)
 var remindDatePattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\s+at\s+(.+))?$`)
 var remindWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
 var remindRecurringPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(day|week|month|year)(?:\s+at\s+(.+))?$`)
+var remindOnWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
 var remindTodayPattern = regexp.MustCompile(`(?i)^(.*?)\s+at\s+(.+)$`)
 
 // ValidateReleaseRevision decides, without constructing anything, whether a
@@ -10434,13 +10435,20 @@ func (h Handler) joinedChannelByName(ctx context.Context, principal auth.Princip
 func parseChannelReminderExpression(expression string, now time.Time, location *time.Location) (string, time.Time, domain.ReminderRecurrence, error) {
 	localNow := now.In(location)
 	if match := remindInPattern.FindStringSubmatch(expression); match != nil {
-		count, _ := strconv.Atoi(match[2])
+		// "a" and "an" are the spoken form of one: "in an hour" means "in 1 hour".
+		count := 1
+		if quantity := strings.ToLower(match[2]); quantity != "a" && quantity != "an" {
+			count, _ = strconv.Atoi(quantity)
+		}
 		unit := strings.ToLower(match[3])
 		duration := time.Duration(count) * time.Minute
-		if strings.HasPrefix(unit, "hour") {
+		switch {
+		case strings.HasPrefix(unit, "hour"):
 			duration = time.Duration(count) * time.Hour
-		} else if strings.HasPrefix(unit, "day") {
+		case strings.HasPrefix(unit, "day"):
 			duration = time.Duration(count) * 24 * time.Hour
+		case strings.HasPrefix(unit, "week"):
+			duration = time.Duration(count) * 7 * 24 * time.Hour
 		}
 		return strings.TrimSpace(match[1]), now.Add(duration), domain.ReminderOnce, nil
 	}
@@ -10470,23 +10478,9 @@ func parseChannelReminderExpression(expression string, now time.Time, location *
 		if err != nil {
 			return "", time.Time{}, "", service.ErrInvalidLaterReminder
 		}
-		weekday := map[string]time.Weekday{
-			"sunday": time.Sunday, "monday": time.Monday, "tuesday": time.Tuesday,
-			"wednesday": time.Wednesday, "thursday": time.Thursday,
-			"friday": time.Friday, "saturday": time.Saturday,
-		}[strings.ToLower(match[2])]
-		days := (int(weekday) - int(localNow.Weekday()) + 7) % 7
-		date := localNow.AddDate(0, 0, days)
-		due, err := reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
+		due, err := comingWeekday(match[2], hour, minute, localNow, now, location)
 		if err != nil {
 			return "", time.Time{}, "", err
-		}
-		if !due.After(now) {
-			date = date.AddDate(0, 0, 7)
-			due, err = reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
-			if err != nil {
-				return "", time.Time{}, "", err
-			}
 		}
 		return strings.TrimSpace(match[1]), due, domain.ReminderWeekly, nil
 	}
@@ -10517,6 +10511,20 @@ func parseChannelReminderExpression(expression string, now time.Time, location *
 		}
 		return strings.TrimSpace(match[1]), due, recurrence, nil
 	}
+	if match := remindOnWeekdayPattern.FindStringSubmatch(expression); match != nil {
+		// "on friday" is a single occurrence on the coming Friday, distinct from
+		// "every friday". It shares the coming-weekday resolution with the
+		// recurring form but records no recurrence.
+		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		if err != nil {
+			return "", time.Time{}, "", service.ErrInvalidLaterReminder
+		}
+		due, err := comingWeekday(match[2], hour, minute, localNow, now, location)
+		if err != nil {
+			return "", time.Time{}, "", err
+		}
+		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, nil
+	}
 	if match := remindTodayPattern.FindStringSubmatch(expression); match != nil {
 		hour, minute, err := parseReminderClock(match[2], 0, 0)
 		if err != nil {
@@ -10529,6 +10537,29 @@ func parseChannelReminderExpression(expression string, now time.Time, location *
 		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, nil
 	}
 	return "", time.Time{}, "", service.ErrInvalidLaterReminder
+}
+
+// comingWeekday resolves the next occurrence of a named weekday at the given
+// clock time, rolling to the following week when this week's time has already
+// passed. Both "every <weekday>" and "on <weekday>" position their first
+// delivery this way.
+func comingWeekday(name string, hour, minute int, localNow, now time.Time, location *time.Location) (time.Time, error) {
+	weekday := map[string]time.Weekday{
+		"sunday": time.Sunday, "monday": time.Monday, "tuesday": time.Tuesday,
+		"wednesday": time.Wednesday, "thursday": time.Thursday,
+		"friday": time.Friday, "saturday": time.Saturday,
+	}[strings.ToLower(name)]
+	days := (int(weekday) - int(localNow.Weekday()) + 7) % 7
+	date := localNow.AddDate(0, 0, days)
+	due, err := reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !due.After(now) {
+		date = date.AddDate(0, 0, 7)
+		due, err = reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
+	}
+	return due, err
 }
 
 func parseReminderClock(value string, defaultHour, defaultMinute int) (int, int, error) {
