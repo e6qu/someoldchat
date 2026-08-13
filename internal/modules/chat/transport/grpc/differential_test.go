@@ -6224,6 +6224,15 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// Revoking the app's tokens marks the one just issued revoked, which
+				// LookupAppToken — the check every authenticated request runs — reports.
+				if err := chat.RevokeDeveloperAppTokens(ctx, "T1", "U1", app.ID); err != nil {
+					return nil, err
+				}
+				revoked, revokedErr := chat.LookupAppToken(ctx, appToken.Token)
+				if revokedErr != nil {
+					return nil, revokedErr
+				}
 				// The app declares user scopes as well as bot ones, because the v1
 				// exchange and Sign in with Slack both mint user tokens and a
 				// scope the manifest does not declare is not granted.
@@ -6295,7 +6304,7 @@ func parityCases() []parityCase {
 				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
 					v1Token.AccessToken != "", string(v1Token.TokenType), len(v1Token.Scopes) > 0,
 					openID.IDToken != "", openID.AccessToken != "",
-					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName}, nil
+					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName, revoked.Revoked}, nil
 			},
 		},
 	}

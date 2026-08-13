@@ -1167,6 +1167,21 @@ func (s *Store) CreateAppToken(_ context.Context, token string, record domain.Ap
 	return nil
 }
 
+func (s *Store) RevokeAppTokens(_ context.Context, appID domain.AppID) error {
+	if appID == "" {
+		return store.InvalidArgument("an app token revocation must name an app")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, record := range s.appTokens {
+		if record.AppID == appID && !record.Revoked {
+			record.Revoked = true
+			s.appTokens[key] = record
+		}
+	}
+	return nil
+}
+
 func (s *Store) LookupAppToken(_ context.Context, token string) (domain.AppTokenRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -92,6 +92,12 @@ message AppTokenIssueRequest {
   repeated string scopes = 4;
 }
 
+message AppTokenRevokeRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
 message AppTokenCredentials {
   string token = 1;
   string app_id = 2;
@@ -341,6 +347,7 @@ service AppsService {
   rpc GetDeveloperApp(AppGetRequest) returns (AppExportResponse);
   rpc GetDeveloperAppDeliveryHealth(AppGetRequest) returns (AppDeliveryHealth);
   rpc IssueDeveloperAppToken(AppTokenIssueRequest) returns (AppTokenCredentials);
+  rpc RevokeDeveloperAppTokens(AppTokenRevokeRequest) returns (AppMutationResponse);
   rpc InspectOAuthAuthorization(OAuthAuthorizationRequest) returns (OAuthAuthorization);
   rpc AuthorizeOAuth(OAuthAuthorizationRequest) returns (OAuthAuthorization);
 }

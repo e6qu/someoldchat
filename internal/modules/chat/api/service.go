@@ -38,6 +38,7 @@ type Service interface {
 	GetDeveloperApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.App, string, error)
 	GetDeveloperAppDeliveryHealth(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.AppDeliveryHealth, error)
 	IssueDeveloperAppToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, []string) (domain.AppTokenCredentials, error)
+	RevokeDeveloperAppTokens(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
 	InspectOAuthAuthorization(context.Context, domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error)
 	AuthorizeOAuth(context.Context, domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error)
 	UninstallApp(context.Context, string, string, domain.WorkspaceID, domain.AppID) error

@@ -79,6 +79,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"GetListDownload":                         {},
 		"GetListItem":                             {},
 		"IssueDeveloperAppToken":                  {},
+		"RevokeDeveloperAppTokens":                {},
 		"ListEphemeralMessages":                   {},
 		"LookupCanvasSections":                    {},
 		"OpenAppHome":                             {},
@@ -125,4 +126,10 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 
 // indistinguishableRefusalCeiling is how many operations still answer a caller
 // who holds the authority exactly as they answer one who does not.
-const indistinguishableRefusalCeiling = 88
+// RevokeDeveloperAppTokens joins its sibling IssueDeveloperAppToken here for the
+// same structural reason: the fixture's one app is owned by U-member, and the
+// matrix's holder is U-owner, so the owner-only operation refuses the holder and
+// a stranger alike with not-found. Driving it would mean re-owning the fixture
+// app, which several other cases depend on. This is a new operation joining the
+// set, not existing ground lost.
+const indistinguishableRefusalCeiling = 89

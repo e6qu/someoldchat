@@ -99,7 +99,7 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
         <label class="field" for="manifest">App manifest (JSON)<textarea id="manifest" name="manifest" maxlength="1048576" spellcheck="false" required>{{.Manifest}}</textarea></label>
         <div class="actions"><button class="button" type="submit">{{if .Selected}}Save manifest{{else}}Create app{{end}}</button>{{if .InstallURL}}<a href="{{.InstallURL}}">Open install flow</a>{{end}}{{if .DatastoreURL}}<a href="{{.DatastoreURL}}">Manage hosted datastores</a>{{end}}{{if .DeliveryURL}}<a href="{{.DeliveryURL}}">View event delivery health</a>{{end}}</div>
       </form>
-      {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form>{{end}}<form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
+      {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form><form method="post" action="/app/developer/apps/app-token/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Revoke app-level tokens</button></form>{{end}}<form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
     </section>
   </div>
 </main>
@@ -235,6 +235,23 @@ func (h Handler) issueDeveloperAppToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.renderDeveloperAppsWithToken(w, r, principal, csrf, appID, token)
+}
+
+func (h Handler) revokeDeveloperAppTokens(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.developerPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The app-level tokens were not revoked.")
+	if !ok {
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if err := h.Messages.RevokeDeveloperAppTokens(r.Context(), principal.WorkspaceID, principal.UserID, appID); err != nil {
+		h.writeMutationError(w, r, developerAppStatus(err), "The app-level tokens were not revoked", developerAppError(err))
+		return
+	}
+	http.Redirect(w, r, "/app/developer/apps?app="+url.QueryEscape(string(appID)), http.StatusSeeOther)
 }
 
 func (h Handler) renderDeveloperAppsWithToken(w http.ResponseWriter, r *http.Request, principal auth.Principal, csrf string, appID domain.AppID, token domain.AppTokenCredentials) {

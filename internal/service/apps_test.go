@@ -294,6 +294,49 @@ func TestRestrictingAnAppStopsItActing(t *testing.T) {
 
 // Restricting an app the workspace never installed is a legitimate pre-emptive
 // decision and must not fail for want of something to uninstall.
+func TestRevokingAppTokensRefusesNonOwnerAndMarksThemRevoked(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "owner"})
+	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "member"})
+	now := time.Now().UTC()
+	manifest := `{"display_information":{"name":"Sockets"},"settings":{"socket_mode_enabled":true}}`
+	if err := repository.CreateApp(ctx, domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Sockets", ClientID: "client",
+		SigningSecretHash: "hash", SigningSecretCiphertext: "cipher",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "cipher",
+		SocketModeEnabled: true, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "client", SecretHash: "secret", AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: repository}
+	credentials, err := messages.IssueDeveloperAppToken(ctx, "T1", "U1", "A1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record, err := repository.LookupAppToken(ctx, credentials.Token); err != nil || record.Revoked {
+		t.Fatalf("freshly issued token: record=%+v err=%v", record, err)
+	}
+	// The authority to withdraw is the authority to mint: a member who does not
+	// own the app cannot revoke its tokens, and is told nothing about it.
+	if err := messages.RevokeDeveloperAppTokens(ctx, "T1", "U2", "A1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("non-owner revoke = %v, want not found", err)
+	}
+	if record, err := repository.LookupAppToken(ctx, credentials.Token); err != nil || record.Revoked {
+		t.Fatalf("token revoked by a non-owner: record=%+v err=%v", record, err)
+	}
+	if err := messages.RevokeDeveloperAppTokens(ctx, "T1", "U1", "A1"); err != nil {
+		t.Fatal(err)
+	}
+	// Lookup is the check every authenticated request runs; it now reports the
+	// token revoked, which the auth layer refuses.
+	if record, err := repository.LookupAppToken(ctx, credentials.Token); err != nil || !record.Revoked {
+		t.Fatalf("token after the owner revoked: record=%+v err=%v", record, err)
+	}
+}
+
 func TestAnAppCanBeRestrictedBeforeItIsInstalled(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()

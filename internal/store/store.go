@@ -255,6 +255,11 @@ type Store interface {
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppToken(context.Context, string, domain.AppTokenRecord) error
+	// RevokeAppTokens marks every token issued for an app revoked. Lookup already
+	// refuses a revoked token, so this is the write the enforcement was waiting
+	// for. It is idempotent: revoking again, or an app that never issued one,
+	// is not an error.
+	RevokeAppTokens(context.Context, domain.AppID) error
 	LookupSession(context.Context, string) (domain.SessionRecord, error)
 	CreateSession(context.Context, string, domain.SessionRecord) error
 	// GetAuthMethod reports the persisted ADMINISTRATIVE OVERRIDE for one

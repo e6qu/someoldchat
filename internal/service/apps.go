@@ -639,6 +639,25 @@ func (m Messages) IssueDeveloperAppToken(ctx context.Context, workspaceID domain
 	return domain.AppTokenCredentials{Token: token, AppID: appID, Scopes: scopes}, nil
 }
 
+// RevokeDeveloperAppTokens invalidates every app-level token an app has issued.
+// The authority is the same as issuing one — the app's owner in its development
+// workspace — because the ability to mint a credential and the ability to
+// withdraw it belong together. Lookup already refuses a revoked token, so this
+// is the write that makes the app's tokens revocable at all.
+func (m Messages) RevokeDeveloperAppTokens(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	app, _, err := m.Store.GetApp(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if app.DevelopmentWorkspaceID != workspaceID || app.OwnerID != userID {
+		return store.ErrNotFound
+	}
+	return m.Store.RevokeAppTokens(ctx, appID)
+}
+
 func (m Messages) InspectOAuthAuthorization(ctx context.Context, request domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error) {
 	request.ClientID = strings.TrimSpace(request.ClientID)
 	request.RedirectURI = strings.TrimSpace(request.RedirectURI)
