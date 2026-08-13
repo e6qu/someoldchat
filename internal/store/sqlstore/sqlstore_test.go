@@ -20,6 +20,23 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
+// memoryDSN is a DSN for a throwaway, file-backed SQLite database in the test's
+// own temp directory, auto-removed when the test ends. Tests once used
+// memoryDSN(t) — an in-memory shared-cache database.
+// In-memory cannot run WAL, so shared cache falls back to table-level locks, and
+// a read on one pool connection colliding with a write on another (the store's
+// background backfill goroutine is a ready second connection) reports
+// SQLITE_LOCKED (262, "database table is locked"), which busy_timeout cannot
+// wait out. That surfaced as a rare, load-dependent CI failure. A file database
+// runs WAL — the production path, where readers never block the writer — so the
+// collision cannot happen. Pinning the pool to one connection would remove it
+// too, but the backfill goroutine then deadlocks against the foreground work
+// over the single connection, which is worse.
+func memoryDSN(tb testing.TB) string {
+	tb.Helper()
+	return filepath.Join(tb.TempDir(), "store.db")
+}
+
 func TestConversationNameMigrationRepairsDuplicatesBeforeAddingConstraint(t *testing.T) {
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "conversation-names.sqlite")
@@ -260,7 +277,7 @@ func TestSplitSchemaIndexesSeparatesEveryIndexStatement(t *testing.T) {
 }
 
 func TestSQLiteFindUserByEmailIsCaseInsensitiveAndMigrated(t *testing.T) {
-	s, err := Open(context.Background(), "file:email_lookup?mode=memory&cache=shared")
+	s, err := Open(context.Background(), memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +296,7 @@ func TestSQLiteFindUserByEmailIsCaseInsensitiveAndMigrated(t *testing.T) {
 
 func TestSQLiteCreateUserIsTransactionalAndWorkspaceScoped(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:create-user?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +374,7 @@ func TestGuestMembershipPersistsAndCannotBePromoted(t *testing.T) {
 
 func TestSQLiteUserRemovalRevokesCredentialsAtomically(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:remove-user-credentials?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +406,7 @@ func TestSQLiteUserRemovalRevokesCredentialsAtomically(t *testing.T) {
 
 func TestSQLiteSessionPreservesOIDCLogoutMetadata(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:oidc-session-metadata?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +435,7 @@ func TestSQLiteSessionPreservesOIDCLogoutMetadata(t *testing.T) {
 
 func TestSQLiteOIDCLogoutRevokesOnlyTheCorrelatedProviderSessionAndRejectsReplay(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:oidc-provider-logout?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +475,7 @@ func TestSQLiteOIDCLogoutRevokesOnlyTheCorrelatedProviderSessionAndRejectsReplay
 
 func TestSQLiteViewLifecycleIsDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:view-lifecycle?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +509,7 @@ func TestSQLiteViewLifecycleIsDurable(t *testing.T) {
 
 func TestSQLiteWorkflowStepLifecycleIsDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:workflow-step-lifecycle?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +646,7 @@ func TestSQLiteWorkflowAutomationLifecycleIsDurableAndVersioned(t *testing.T) {
 
 func TestSQLiteDialogIsDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:dialog-lifecycle?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,7 +670,7 @@ func TestSQLiteDialogIsDurable(t *testing.T) {
 
 func TestSQLiteBotRegistryIsDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:bot-registry?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -676,7 +693,7 @@ func TestSQLiteBotRegistryIsDurable(t *testing.T) {
 
 func TestSQLiteUserMigrationMappingIsDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:user-migration?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,7 +714,7 @@ func TestSQLiteUserMigrationMappingIsDurable(t *testing.T) {
 
 func TestSQLiteRemoteFileLifecycle(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:remote-file-lifecycle?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -733,7 +750,7 @@ func TestSQLiteRemoteFileLifecycle(t *testing.T) {
 
 func TestSQLiteUserPresenceIsDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:user-presence?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +914,7 @@ func TestVersion113MigrationAddsScheduledStatusStorageAndFence(t *testing.T) {
 
 func TestSQLiteUserExpirationInvalidatesTokenAndCanBeCleared(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:user-expiration?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -930,7 +947,7 @@ func TestSQLiteUserExpirationInvalidatesTokenAndCanBeCleared(t *testing.T) {
 
 func TestSQLiteDeleteConversationRemovesChannelAndDependents(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:delete-conversation?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1247,7 +1264,7 @@ func TestSQLiteDoNotDisturbIsDurable(t *testing.T) {
 
 func TestSQLiteStarsAreDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:stars?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1280,7 +1297,7 @@ func TestSQLiteStarsAreDurable(t *testing.T) {
 
 func TestSQLiteRemindersAreDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:reminders?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1308,7 +1325,7 @@ func TestSQLiteRemindersAreDurable(t *testing.T) {
 
 func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:scheduled-messages?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,7 +1379,7 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 
 func TestSQLiteScheduledMessageQuotaCommitsTheCountAndInsertTogether(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:scheduled-quota?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1400,7 +1417,7 @@ func TestSQLiteScheduledMessageQuotaCommitsTheCountAndInsertTogether(t *testing.
 
 func TestSQLiteScheduledMessageShortLeaseRemainsUsable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:scheduled-short-lease?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1430,7 +1447,7 @@ func TestSQLiteScheduledMessageShortLeaseRemainsUsable(t *testing.T) {
 
 func TestSQLiteEarliestScheduledMessage(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:scheduled-deadline?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1462,7 +1479,7 @@ func TestSQLiteEarliestScheduledMessage(t *testing.T) {
 
 func TestSQLiteScheduledMessagePaginationContinues(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:scheduled-pagination?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1495,7 +1512,7 @@ func TestSQLiteScheduledMessagePaginationContinues(t *testing.T) {
 
 func TestSQLiteConversationListFiltersBeforePagination(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:conversation-filters?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1526,7 +1543,7 @@ func TestSQLiteConversationListFiltersBeforePagination(t *testing.T) {
 }
 
 func TestSQLiteRoundTrip(t *testing.T) {
-	s, err := Open(context.Background(), "file:roundtrip?mode=memory&cache=shared")
+	s, err := Open(context.Background(), memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1728,7 +1745,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 
 func TestSQLiteConversationUnreadCountFollowsReadCursor(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:conversation-unread?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1812,7 +1829,7 @@ func TestSQLiteSearchPersistsFoldedFilesAndViewerVisibilityAcrossReopen(t *testi
 
 func TestSQLiteSessionScopeMigrationPreservesLegacyAccess(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite", "file:legacy-session?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1881,7 +1898,7 @@ func TestSQLiteConcurrentOpenSerializesMigration(t *testing.T) {
 
 func TestSQLiteLegacyConversationMigrationAddsDirectKeyAfterColumn(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite", "file:legacy-conversation?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1921,7 +1938,7 @@ func containsScope(scopes []string, wanted string) bool {
 
 func TestSQLiteInviteRequestRetainsInviteParameters(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:invite-parameters?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1948,7 +1965,7 @@ func TestSQLiteInviteRequestRetainsInviteParameters(t *testing.T) {
 
 func TestSQLiteMessageUnfurlsRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:message-unfurls?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2195,7 +2212,7 @@ func TestSQLiteReadCursorSurvivesRestart(t *testing.T) {
 
 func TestSQLiteOutboxLeaseAndAck(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:outbox-lease?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2247,7 +2264,7 @@ func TestSQLiteOutboxLeaseAndAck(t *testing.T) {
 
 func TestSQLiteAuthSeedingDoesNotOverwriteDurableState(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:auth-seed?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2290,7 +2307,7 @@ func TestSQLiteAuthSeedingDoesNotOverwriteDurableState(t *testing.T) {
 
 func TestSQLiteBlobCleanupTopicHasSeparateLeaseStream(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:blob-topic?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2327,7 +2344,7 @@ func TestSQLiteBlobCleanupTopicHasSeparateLeaseStream(t *testing.T) {
 
 func TestSQLiteWalkBlobReferencesStreamsLiveFilesAndPhotos(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:blob-references?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2478,7 +2495,7 @@ func TestSQLiteLifecycleWakeDeadlineMigration(t *testing.T) {
 
 func TestSQLiteIdempotencyReturnsCommittedMessage(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:idempotency?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2512,7 +2529,7 @@ func TestSQLiteIdempotencyReturnsCommittedMessage(t *testing.T) {
 
 func TestSQLiteIncomingWebhookSecretIsHashedAndRevocable(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(ctx, "file:incoming-webhook?mode=memory&cache=shared")
+	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
