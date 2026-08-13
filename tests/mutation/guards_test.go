@@ -374,7 +374,15 @@ func runKiller(root, overlay, killer string) (verdict, string, bool) {
 	var text string
 	var runErr error
 	for attempt := 0; attempt < mutantAttempts; attempt++ {
-		command := exec.Command("go", "test", "-count=1", "-overlay="+overlay, killer)
+		// -p 1 keeps each killer to one build action at a time. The sweep already
+		// runs one worker per core; without this each worker's `go test` also fans
+		// its compiles across every core, so N workers demanded N×N compile threads
+		// on N cores and spent the difference thrashing — most of the wall-clock on
+		// a small CI runner. One build action per invocation makes the N workers add
+		// up to N, not N². -vet=off drops the per-invocation vet pass, which is not
+		// this gate's job — the vet gate covers it — and, more than speed, keeps a
+		// vet complaint on a mutant from being counted as a test that killed it.
+		command := exec.Command("go", "test", "-count=1", "-p", "1", "-vet=off", "-overlay="+overlay, killer)
 		command.Dir = root
 		// The repository's own cache, which is what the Makefile builds
 		// through. Sharing the developer's default cache means the sweep
