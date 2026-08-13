@@ -49,6 +49,9 @@ func FuzzParseSlackTimestampNeverPanics(f *testing.F) {
 	f.Add("")
 	f.Add("-1.5")
 	f.Add("9223372036854775807.999999")
+	// The fuzzer found this: seconds just under MaxInt64/1000000 whose fraction
+	// tipped the microsecond scaling past MaxInt64 into a negative instant.
+	f.Add("9223372036854.8")
 	f.Fuzz(func(t *testing.T, value string) {
 		micros, ok := parseSlackTimestamp(value)
 		if ok && micros < 0 {

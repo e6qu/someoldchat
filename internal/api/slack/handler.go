@@ -12063,8 +12063,13 @@ func reminderTime(raw string, now time.Time) (time.Time, error) {
 
 const secondsPerDay = 24 * 60 * 60
 
-// maxTimestampSeconds is the largest `ts` whose microsecond scaling fits in int64.
-const maxTimestampSeconds = math.MaxInt64 / 1000000
+// maxTimestampSeconds is the largest `ts` whose microsecond scaling fits in int64
+// WITH its fractional microseconds added. Bounding seconds*1e6 alone was not
+// enough: a value one below MaxInt64/1000000 leaves under a million microseconds
+// of headroom, so a six-digit fraction still overflowed to a negative instant —
+// `9223372036854.8` did. Reserving the largest possible fraction (999999) keeps
+// seconds*1e6 + micros inside int64 for everything accepted.
+const maxTimestampSeconds = (math.MaxInt64 - 999999) / 1000000
 
 func (h Handler) presentEntityDetails(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, "")

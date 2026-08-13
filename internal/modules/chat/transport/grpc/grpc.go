@@ -13064,6 +13064,17 @@ func (r Remote) IssueDeveloperAppToken(ctx context.Context, workspaceID domain.W
 	return domain.AppTokenCredentials{Token: out.GetToken(), AppID: domain.AppID(out.GetAppId()), Scopes: append([]string(nil), out.GetScopes()...)}, nil
 }
 
+func (r Remote) RevokeDeveloperAppTokens(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) error {
+	out, err := r.apps.RevokeDeveloperAppTokens(ctx, &chatv1.AppTokenRevokeRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app token revocation was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) InspectOAuthAuthorization(ctx context.Context, request domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error) {
 	out, err := r.apps.InspectOAuthAuthorization(ctx, encodeProtoOAuthAuthorizationRequest(request))
 	if err != nil {
@@ -13351,6 +13362,13 @@ func (s *Server) IssueDeveloperAppToken(ctx context.Context, input *chatv1.AppTo
 		return nil, mapError(err)
 	}
 	return &chatv1.AppTokenCredentials{Token: value.Token, AppId: string(value.AppID), Scopes: value.Scopes}, nil
+}
+
+func (s *Server) RevokeDeveloperAppTokens(ctx context.Context, input *chatv1.AppTokenRevokeRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.RevokeDeveloperAppTokens(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
 }
 
 func (s *Server) InspectOAuthAuthorization(ctx context.Context, input *chatv1.OAuthAuthorizationRequest) (*chatv1.OAuthAuthorization, error) {

@@ -6420,6 +6420,23 @@ func (s *Store) LookupAppToken(ctx context.Context, token string) (domain.AppTok
 	return record, nil
 }
 
+func (s *Store) RevokeAppTokens(ctx context.Context, appID domain.AppID) error {
+	if appID == "" {
+		return store.InvalidArgument("an app token revocation must name an app")
+	}
+	return underContention(ctx, func() error {
+		tx, err := s.beginWrite(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, `UPDATE app_tokens SET revoked = 1 WHERE app_id = ?`, appID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+}
+
 func (s *Store) RevokeToken(ctx context.Context, token string) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {

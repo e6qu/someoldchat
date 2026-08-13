@@ -309,6 +309,7 @@ func authorityMatrix() map[string]authority {
 		"IsConversationMember":                    authorityAnyMember,
 		"IssueAppConfigurationToken":              authorityAnyMember,
 		"IssueDeveloperAppToken":                  authorityAnyMember,
+		"RevokeDeveloperAppTokens":                authorityAnyMember,
 		"InviteToHuddle":                          authorityAnyMember,
 		"JoinHuddle":                              authorityAnyMember,
 		"KickConversationMember":                  authorityAnyMember,
