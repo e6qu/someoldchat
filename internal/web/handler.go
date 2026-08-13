@@ -193,31 +193,38 @@ type messageView struct {
 	AuthorInitial string
 	AvatarURL     string
 	AvatarEmoji   string
-	IsApp         bool
-	Text          string
-	DisplayText   template.HTML
-	Blocks        []messageBlockView
-	Attachments   []messageAttachmentView
-	Unfurls       []messageAttachmentView
-	MachineTime   string
-	DisplayTime   string
-	Pinned        bool
-	Saved         bool
-	SavedItemID   string
-	Reactions     []reactionView
-	ReplyURL      string
-	ReactionURL   string
-	UnreactURL    string
-	PinURL        string
-	UnpinURL      string
-	SaveURL       string
-	UnsaveURL     string
-	RemindURL     string
-	UpdateURL     string
-	DeleteURL     string
-	CanEdit       bool
-	CanDelete     bool
-	Permalink     string
+	// AuthorStatus is the author's current status emoji, resolved to a glyph,
+	// projected beside their name the way Slack shows it on every message. It is
+	// set only for a human author posting as themselves — an app message or one
+	// carrying a custom username is not a person and has no status to show.
+	// AuthorStatusText is the accompanying prose, shown as the emoji's tooltip.
+	AuthorStatus     template.HTML
+	AuthorStatusText string
+	IsApp            bool
+	Text             string
+	DisplayText      template.HTML
+	Blocks           []messageBlockView
+	Attachments      []messageAttachmentView
+	Unfurls          []messageAttachmentView
+	MachineTime      string
+	DisplayTime      string
+	Pinned           bool
+	Saved            bool
+	SavedItemID      string
+	Reactions        []reactionView
+	ReplyURL         string
+	ReactionURL      string
+	UnreactURL       string
+	PinURL           string
+	UnpinURL         string
+	SaveURL          string
+	UnsaveURL        string
+	RemindURL        string
+	UpdateURL        string
+	DeleteURL        string
+	CanEdit          bool
+	CanDelete        bool
+	Permalink        string
 	// Edited, ReplyCount and their neighbours are the fittings Slack shows
 	// around a message: whether it was edited, what its thread has
 	// accumulated, whether it was also sent to the channel, and whether it is
@@ -476,9 +483,12 @@ type memberView struct {
 	// field rather than a marked Name because this view is also a picker option
 	// and a sidebar entry, where there is nothing to mark and an HTML-typed name
 	// would invite a caller to render it somewhere it does not belong.
-	MarkedName    template.HTML
-	RealName      string
-	Profile       domain.UserProfile
+	MarkedName template.HTML
+	RealName   string
+	Profile    domain.UserProfile
+	// StatusDisplay is Profile.StatusEmoji resolved to a rendered glyph. The
+	// stored value is a shortcode (":wave:"); rendering it raw showed the colons.
+	StatusDisplay template.HTML
 	Presence      string
 	AvatarURL     string
 	AuthorInitial string
@@ -496,6 +506,7 @@ type userGroupView struct {
 type membersData struct {
 	Members        []memberView
 	Profile        domain.UserProfile
+	StatusDisplay  template.HTML
 	Presence       string
 	StatusExpires  int64
 	AvatarURL      string
@@ -1240,7 +1251,7 @@ const pageStyle = `<style>
 .avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}.avatar img{width:100%;height:100%;object-fit:cover}.avatar.avatar-emoji{font-size:10px;text-transform:none;overflow-wrap:anywhere}
 .message-body{min-width:0}
 .message-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
-.author{font-weight:800}
+.author{font-weight:800}.author-status{display:inline-flex;align-items:center;margin-left:-4px}.author-status .standard-emoji,.author-status .custom-emoji{width:16px;height:16px;font-size:15px;line-height:16px}
 a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;margin:0 -4px;border-radius:5px}a.time:hover{background:var(--hover)}
 .time{color:var(--muted);font-size:12px}
 .pinned{color:var(--muted);font-size:12px;font-weight:700}
@@ -1657,7 +1668,7 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
   <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
   <div class="message-body">
     <div class="message-head">
-      <span class="author">{{$message.AuthorName}}</span>{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
+      <span class="author">{{$message.AuthorName}}</span>{{if $message.AuthorStatus}}<span class="author-status"{{if $message.AuthorStatusText}} title="{{$message.AuthorStatusText}}"{{end}}>{{$message.AuthorStatus}}</span>{{end}}{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
       {{if $message.Permalink}}<a class="time" href="{{$message.Permalink}}"><time datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></a>{{else}}<time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{end}}{{if $message.Edited}}<span class="edited-label" title="Edited {{$message.EditedTime}}">(edited)</span>{{end}}{{if $message.Broadcast}}<span class="broadcast-label">Also sent to the channel</span>{{end}}{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
       {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
       {{if $message.Ephemeral}}<span class="ephemeral-label">Only visible to you</span>{{end}}
@@ -2420,7 +2431,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
       <h2 id="profile-heading">Your profile</h2>
       <div class="profile-summary">
         <span class="profile-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.UserInitial}}{{end}}</span>
-        <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong><p class="muted"><span class="presence {{.Presence}}" aria-hidden="true"></span>{{if eq .Presence "active"}}Active{{else if eq .Presence "away"}}Away{{else}}Automatic{{end}}</p>{{if .Profile.StatusText}}<p class="muted">{{if .Profile.StatusEmoji}}{{.Profile.StatusEmoji}}{{else}}💬{{end}} {{.Profile.StatusText}}{{if .StatusExpires}} · clears <time data-status-expires="{{.StatusExpires}}"></time>{{end}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
+        <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong><p class="muted"><span class="presence {{.Presence}}" aria-hidden="true"></span>{{if eq .Presence "active"}}Active{{else if eq .Presence "away"}}Away{{else}}Automatic{{end}}</p>{{if .Profile.StatusText}}<p class="muted">{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}{{if .StatusExpires}} · clears <time data-status-expires="{{.StatusExpires}}"></time>{{end}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
       </div>
       {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
       {{if .CanEditProfile}}<form class="availability-form" method="post" action="/app/presence">
@@ -2467,7 +2478,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
         {{range .Members}}
         <article class="person">
           <span class="person-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span>
-          <div class="person-copy"><h3><span class="presence {{.Presence}}" aria-hidden="true"></span>{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{if .Profile.StatusEmoji}}{{.Profile.StatusEmoji}}{{else}}💬{{end}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}</div>
+          <div class="person-copy"><h3><span class="presence {{.Presence}}" aria-hidden="true"></span>{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}</div>
         </article>
         {{else}}<p class="muted">No members available.</p>{{end}}
       </div>
@@ -5962,6 +5973,14 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			System:      message.Subtype.System(),
 			Broadcast:   decodeMessageBroadcast(message.StreamState),
 		}
+		// A human posting as themselves carries their current status beside their
+		// name; an app message or one wearing a custom username is not a person.
+		if message.AppID == "" && presentation.Username == "" && message.AuthorID != "" {
+			if emoji := names.statusEmoji(message.AuthorID); emoji != "" {
+				view.AuthorStatus = renderReactionEmoji(emoji, emojiImages)
+				view.AuthorStatusText = names.statusText(message.AuthorID)
+			}
+		}
 		if !message.EditedAt.IsZero() {
 			view.Edited = true
 			view.EditedTime = formatTime(message.EditedAt)
@@ -6179,6 +6198,16 @@ func renderReactionEmoji(name string, customEmoji map[string]string) template.HT
 		return template.HTML(`<span class="standard-emoji" role="img" aria-label=":` + template.HTMLEscapeString(name) + `:">` + template.HTMLEscapeString(rendered) + `</span>`) // #nosec G203 -- every dynamic value is escaped.
 	}
 	return template.HTML(template.HTMLEscapeString(":" + name + ":")) // #nosec G203 -- the value is escaped immediately above.
+}
+
+// statusEmojiDisplay renders a member's status emoji shortcode as a glyph, or
+// nothing at all when there is no status. A caller renders the result behind an
+// {{if}}, so an empty status contributes no markup rather than an empty span.
+func statusEmojiDisplay(shortcode string, customEmoji map[string]string) template.HTML {
+	if strings.TrimSpace(shortcode) == "" {
+		return ""
+	}
+	return renderReactionEmoji(shortcode, customEmoji)
 }
 
 // sidebarView is the conversation list plus the one fact the page outside it
@@ -9314,6 +9343,13 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
 		return
 	}
+	// A member's status emoji is a shortcode; resolve it to a glyph the same way
+	// the timeline resolves reactions, so the directory shows an emoji rather
+	// than raw colons. Custom emoji fall back to their shortcode when unavailable.
+	emojiImages := map[string]string{}
+	if customEmoji, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID); err == nil {
+		emojiImages = customEmojiImages(customEmoji)
+	}
 	members := make([]memberView, 0, len(page.Users))
 	for _, user := range page.Users {
 		// A deactivated account is not a person to message: UserInfo already
@@ -9324,7 +9360,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		}
 		name := displayName(user)
 		isSelf := user.ID == principal.UserID
-		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, Presence: webPresence(user.Presence, isSelf), AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf})
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: webPresence(user.Presence, isSelf), AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf})
 	}
 	profile := current.Profile
 	if submitted != nil {
@@ -9333,6 +9369,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	data := membersData{
 		Members:        members,
 		Profile:        profile,
+		StatusDisplay:  statusEmojiDisplay(profile.StatusEmoji, emojiImages),
 		Presence:       current.Presence.CurrentAt(current.LastActiveAt, time.Now().UTC()),
 		StatusExpires:  webUnixSeconds(profile.StatusExpiration),
 		AvatarURL:      profileImageURL(profile),
@@ -12079,16 +12116,27 @@ type userNames struct {
 	handler      Handler
 	ctx          context.Context
 	principal    auth.Principal
-	cache        map[domain.UserID]string
+	cache        map[domain.UserID]userNameEntry
 	channels     map[domain.ConversationID]string
 	groups       map[domain.UserGroupID]string
 	groupsLoaded bool
 }
 
+// userNameEntry is everything a caller resolves about a member from the single
+// UserInfo lookup: the display name every caller needs, and the status a caller
+// projecting a member's presence next to their name needs. Caching the whole
+// entry means the status projection costs no extra store round-trip beyond the
+// name resolution the timeline already does.
+type userNameEntry struct {
+	name        string
+	statusEmoji string
+	statusText  string
+}
+
 func (h Handler) newUserNames(ctx context.Context, principal auth.Principal) *userNames {
 	return &userNames{
 		handler: h, ctx: ctx, principal: principal,
-		cache: map[domain.UserID]string{}, channels: map[domain.ConversationID]string{}, groups: map[domain.UserGroupID]string{},
+		cache: map[domain.UserID]userNameEntry{}, channels: map[domain.ConversationID]string{}, groups: map[domain.UserGroupID]string{},
 	}
 }
 
@@ -12105,18 +12153,31 @@ func (n *userNames) channelName(id domain.ConversationID) string {
 }
 
 func (n *userNames) name(id domain.UserID) string {
+	return n.entry(id).name
+}
+
+// statusEmoji is the member's status emoji shortcode (":wave:") or empty, and
+// statusText its accompanying prose. Both come from the same cached lookup name
+// resolution uses, so projecting a member's status beside their name is free
+// once their name has been resolved.
+func (n *userNames) statusEmoji(id domain.UserID) string { return n.entry(id).statusEmoji }
+func (n *userNames) statusText(id domain.UserID) string  { return n.entry(id).statusText }
+
+func (n *userNames) entry(id domain.UserID) userNameEntry {
 	if id == "" {
-		return "Unknown member"
+		return userNameEntry{name: "Unknown member"}
 	}
 	if cached, ok := n.cache[id]; ok {
 		return cached
 	}
-	resolved := string(id)
+	entry := userNameEntry{name: string(id)}
 	if user, err := n.handler.Messages.UserInfo(n.ctx, n.principal.WorkspaceID, n.principal.UserID, id); err == nil {
-		resolved = displayName(user)
+		entry.name = displayName(user)
+		entry.statusEmoji = user.Profile.StatusEmoji
+		entry.statusText = user.Profile.StatusText
 	}
-	n.cache[id] = resolved
-	return resolved
+	n.cache[id] = entry
+	return entry
 }
 
 func (n *userNames) groupHandle(id domain.UserGroupID) string {
