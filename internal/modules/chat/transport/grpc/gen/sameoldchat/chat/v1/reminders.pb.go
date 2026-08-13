@@ -407,6 +407,7 @@ type LaterReminder struct {
 	FailureCode          string                 `protobuf:"bytes,18,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
 	SourceTimestamp      string                 `protobuf:"bytes,19,opt,name=source_timestamp,json=sourceTimestamp,proto3" json:"source_timestamp,omitempty"`
 	AcknowledgedAt       int64                  `protobuf:"varint,20,opt,name=acknowledged_at,json=acknowledgedAt,proto3" json:"acknowledged_at,omitempty"`
+	RecurrenceAnchor     int64                  `protobuf:"varint,21,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -577,6 +578,13 @@ func (x *LaterReminder) GetSourceTimestamp() string {
 func (x *LaterReminder) GetAcknowledgedAt() int64 {
 	if x != nil {
 		return x.AcknowledgedAt
+	}
+	return 0
+}
+
+func (x *LaterReminder) GetRecurrenceAnchor() int64 {
+	if x != nil {
+		return x.RecurrenceAnchor
 	}
 	return 0
 }
@@ -1097,7 +1105,7 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\treminders\x18\x01 \x03(\v2\x1d.sameoldchat.chat.v1.ReminderR\treminders\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x9b\x05\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xc8\x05\n" +
 	"\rLaterReminder\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1d\n" +
@@ -1125,7 +1133,8 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\tfailed_at\x18\x11 \x01(\x03R\bfailedAt\x12!\n" +
 	"\ffailure_code\x18\x12 \x01(\tR\vfailureCode\x12)\n" +
 	"\x10source_timestamp\x18\x13 \x01(\tR\x0fsourceTimestamp\x12'\n" +
-	"\x0facknowledged_at\x18\x14 \x01(\x03R\x0eacknowledgedAt\"\xcd\x02\n" +
+	"\x0facknowledged_at\x18\x14 \x01(\x03R\x0eacknowledgedAt\x12+\n" +
+	"\x11recurrence_anchor\x18\x15 \x01(\x03R\x10recurrenceAnchor\"\xcd\x02\n" +
 	"\x1aCreateLaterReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +

@@ -136,6 +136,16 @@ func (w ReminderWorker) postChannelReminder(ctx context.Context, reminder domain
 // NextReminderDue returns the first recurrence after the delivery instant while
 // preserving the reminder's local wall-clock time across daylight-saving
 // changes. One-time reminders return the zero time.
+//
+// Monthly and yearly recurrences are computed from the anchor's calendar
+// position — its day-of-month, and for yearly its month — rather than by adding
+// to the last DueAt. time.AddDate normalises an impossible date forward, so
+// adding a month to January 31st yields March 3rd, skipping February and then
+// permanently landing on the 3rd. Clamping the anchor day to each period's
+// length instead keeps a "monthly on the 31st" reminder on the last day of the
+// short months and back on the 31st when the month has one, which is how every
+// calendar recurrence behaves. Daily and weekly have no month-length to clamp,
+// so they still advance by a fixed span.
 func NextReminderDue(reminder domain.LaterReminder, after time.Time) (time.Time, error) {
 	if reminder.Recurrence == domain.ReminderOnce {
 		return time.Time{}, nil
@@ -144,28 +154,61 @@ func NextReminderDue(reminder domain.LaterReminder, after time.Time) (time.Time,
 	if err != nil {
 		return time.Time{}, err
 	}
-	next := reminder.DueAt.In(location)
-	advance := func(value time.Time) time.Time {
-		switch reminder.Recurrence {
-		case domain.ReminderDaily:
-			return value.AddDate(0, 0, 1)
-		case domain.ReminderWeekly:
-			return value.AddDate(0, 0, 7)
-		case domain.ReminderMonthly:
-			return value.AddDate(0, 1, 0)
-		case domain.ReminderYearly:
-			return value.AddDate(1, 0, 0)
-		default:
-			return time.Time{}
-		}
+	anchor := reminder.RecurrenceAnchor
+	if anchor.IsZero() {
+		// A reminder stored before the anchor existed carries none; its current
+		// due instant is the best anchor available and is at least self-consistent.
+		anchor = reminder.DueAt
 	}
-	for !next.After(after.In(location)) {
-		next = advance(next)
+	anchorLocal := anchor.In(location)
+	afterLocal := after.In(location)
+	next := reminder.DueAt.In(location)
+	for !next.After(afterLocal) {
+		next = advanceReminder(reminder.Recurrence, anchorLocal, next, location)
 		if next.IsZero() {
 			return time.Time{}, store.InvalidArgument("Later reminder recurrence is invalid")
 		}
 	}
 	return next.UTC(), nil
+}
+
+// advanceReminder returns the next occurrence strictly after value, positioned
+// by the anchor's calendar fields and clamped so an impossible day-of-month
+// becomes that month's last day rather than overflowing into the next month.
+func advanceReminder(recurrence domain.ReminderRecurrence, anchor, value time.Time, location *time.Location) time.Time {
+	hour, minute := anchor.Hour(), anchor.Minute()
+	switch recurrence {
+	case domain.ReminderDaily:
+		return value.AddDate(0, 0, 1)
+	case domain.ReminderWeekly:
+		return value.AddDate(0, 0, 7)
+	case domain.ReminderMonthly:
+		year, month := value.Year(), value.Month()
+		if month == time.December {
+			year, month = year+1, time.January
+		} else {
+			month++
+		}
+		day := clampDay(anchor.Day(), year, month)
+		return time.Date(year, month, day, hour, minute, 0, 0, location)
+	case domain.ReminderYearly:
+		year := value.Year() + 1
+		month := anchor.Month()
+		day := clampDay(anchor.Day(), year, month)
+		return time.Date(year, month, day, hour, minute, 0, 0, location)
+	default:
+		return time.Time{}
+	}
+}
+
+// clampDay bounds a day-of-month to the number of days the given month has, so
+// the 31st becomes the 28th, 29th or 30th where the month is shorter.
+func clampDay(day int, year int, month time.Month) int {
+	last := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	if day > last {
+		return last
+	}
+	return day
 }
 
 func laterReminderEvent(reminder domain.LaterReminder, topic string, at, nextDue time.Time, failureCode string) (events.Event, error) {

@@ -11557,7 +11557,8 @@ func encodeProtoLaterReminder(value domain.LaterReminder) *chatv1.LaterReminder 
 		SourceConversationId: string(value.SourceConversation), SourceTimestamp: string(value.SourceTimestamp),
 		Target: string(value.Target), Text: value.Text,
 		DueAt: unixOrZero(value.DueAt), Timezone: value.TimeZone, Recurrence: string(value.Recurrence),
-		CreatedAt: unixOrZero(value.CreatedAt), UpdatedAt: unixOrZero(value.UpdatedAt),
+		RecurrenceAnchor: unixOrZero(value.RecurrenceAnchor),
+		CreatedAt:        unixOrZero(value.CreatedAt), UpdatedAt: unixOrZero(value.UpdatedAt),
 		CompletedAt: unixOrZero(value.CompletedAt), LastDeliveredAt: unixOrZero(value.LastDeliveredAt),
 		AcknowledgedAt: unixOrZero(value.AcknowledgedAt), FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
 	}
@@ -11585,7 +11586,8 @@ func decodeProtoLaterReminder(value *chatv1.LaterReminder) (domain.LaterReminder
 		SourceConversation: domain.ConversationID(value.GetSourceConversationId()), SourceTimestamp: domain.MessageTimestamp(value.GetSourceTimestamp()),
 		Target: target, Text: value.GetText(),
 		DueAt: timeFromUnix(value.GetDueAt()), TimeZone: value.GetTimezone(), Recurrence: recurrence,
-		CreatedAt: timeFromUnix(value.GetCreatedAt()), UpdatedAt: timeFromUnix(value.GetUpdatedAt()),
+		RecurrenceAnchor: timeFromUnix(value.GetRecurrenceAnchor()),
+		CreatedAt:        timeFromUnix(value.GetCreatedAt()), UpdatedAt: timeFromUnix(value.GetUpdatedAt()),
 		CompletedAt: timeFromUnix(value.GetCompletedAt()), LastDeliveredAt: timeFromUnix(value.GetLastDeliveredAt()),
 		AcknowledgedAt: timeFromUnix(value.GetAcknowledgedAt()), FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
 	}, nil
