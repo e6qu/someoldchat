@@ -49,6 +49,7 @@ var remindDatePattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+([0-9]{4}-[0-9]{2}
 var remindWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
 var remindRecurringPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(day|week|month|year)(?:\s+at\s+(.+))?$`)
 var remindOnWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
+var remindOnMonthDayPattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\s+([0-9]{1,2})(?:\s+at\s+(.+))?$`)
 var remindTodayPattern = regexp.MustCompile(`(?i)^(.*?)\s+at\s+(.+)$`)
 
 // ValidateReleaseRevision decides, without constructing anything, whether a
@@ -10526,6 +10527,28 @@ func parseChannelReminderExpression(expression string, now time.Time, location *
 		}
 		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, nil
 	}
+	if match := remindOnMonthDayPattern.FindStringSubmatch(expression); match != nil {
+		// "on July 4" is a single occurrence on the next such date: this year if it
+		// is still ahead, otherwise the next. An impossible day for the month —
+		// "on February 30" — is rejected rather than rolled into March.
+		month := monthByName(match[2])
+		day, _ := strconv.Atoi(match[3])
+		hour, minute, err := parseReminderClock(match[4], 9, 0)
+		if err != nil {
+			return "", time.Time{}, "", service.ErrInvalidLaterReminder
+		}
+		due, err := reminderLocalTime(localNow.Year(), month, day, hour, minute, location)
+		if err != nil {
+			return "", time.Time{}, "", service.ErrInvalidLaterReminder
+		}
+		if !due.After(now) {
+			due, err = reminderLocalTime(localNow.Year()+1, month, day, hour, minute, location)
+			if err != nil {
+				return "", time.Time{}, "", service.ErrInvalidLaterReminder
+			}
+		}
+		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, nil
+	}
 	if match := remindTodayPattern.FindStringSubmatch(expression); match != nil {
 		hour, minute, err := parseReminderClock(match[2], 0, 0)
 		if err != nil {
@@ -10561,6 +10584,39 @@ func comingWeekday(name string, hour, minute int, localNow, now time.Time, locat
 		due, err = reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
 	}
 	return due, err
+}
+
+// monthByName maps a full or abbreviated month name to its time.Month. The
+// pattern only hands it a name it already matched, so the zero return is
+// unreachable and exists to keep the switch total.
+func monthByName(name string) time.Month {
+	switch strings.ToLower(name) {
+	case "january", "jan":
+		return time.January
+	case "february", "feb":
+		return time.February
+	case "march", "mar":
+		return time.March
+	case "april", "apr":
+		return time.April
+	case "may":
+		return time.May
+	case "june", "jun":
+		return time.June
+	case "july", "jul":
+		return time.July
+	case "august", "aug":
+		return time.August
+	case "september", "sep", "sept":
+		return time.September
+	case "october", "oct":
+		return time.October
+	case "november", "nov":
+		return time.November
+	case "december", "dec":
+		return time.December
+	}
+	return time.Month(0)
 }
 
 func parseReminderClock(value string, defaultHour, defaultMinute int) (int, int, error) {
