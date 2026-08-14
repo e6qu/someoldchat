@@ -3650,6 +3650,14 @@ test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', a
   await expect(cells.nth(1)).toHaveText('open');
   await expect(cells.nth(2)).toHaveText('2026-09-01');
   await expectNoSeriousAccessibilityViolations(page);
+
+  // The board layout groups items into lanes by the select column, is reached
+  // from the view switcher, and is itself keyboard and screen-reader usable.
+  await page.getByRole('link', { name: 'Board' }).click();
+  await expect(page).toHaveURL(/\/app\/lists\/.*view=board/);
+  await expect(page.getByRole('heading', { name: /open\s+1/ })).toBeVisible();
+  await expect(page.getByText('ship it')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it asked for', async ({ page, context, request }) => {

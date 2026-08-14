@@ -713,6 +713,24 @@ type listData struct {
 	CSRFToken string
 	CanWrite  bool
 	Notice    string
+	// View is the layout the reader chose: "list" (a single ordered list, the
+	// default) or "board" (items grouped into lanes). BoardActive is View ==
+	// "board" resolved against availability — a board needs a groupable column,
+	// and asking for one on a list without one falls back to the list.
+	View        string
+	BoardActive bool
+	ListViewURL string
+	// BoardViewURL is empty when no column can group the list into lanes, which
+	// is how the template knows not to offer a board that would have one lane.
+	BoardViewURL string
+	// GroupChoices are the columns the board can group by, each with the link
+	// that regroups by it; GroupName is the one in effect. Lanes are the grouped
+	// items; BoardTruncated says the list ran past boardItemCap and the lanes
+	// stop short.
+	GroupChoices   []groupChoiceView
+	GroupName      string
+	Lanes          []listLaneView
+	BoardTruncated bool
 	// Grants, ShareTargets, CanShare, SharePath and ShareNoun drive the sharing
 	// section this page shares with the canvas, by the same two rules: anyone
 	// who may open the list sees who else may, and only its owner changes that.
@@ -737,6 +755,15 @@ type listItemView struct {
 	AssigneeName string
 	DueDate      string
 	Overdue      bool
+	// ListID, CanWrite, CSRFToken and Members carry the page context each row
+	// needs to render its own action forms, so the same row markup serves both
+	// the list and every board lane without the template reaching for a page root
+	// a {{define}} block does not have. Members is the shared assignee slice —
+	// assigning it copies a slice header, not the people.
+	ListID    string
+	CanWrite  bool
+	CSRFToken string
+	Members   []memberView
 }
 
 type directExpansionReviewData struct {
@@ -3017,9 +3044,20 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 .layout{width:min(940px,calc(100% - 28px));margin:26px auto 56px}.heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.heading h2{margin:0}.new-item{display:flex;gap:8px;margin:18px 0}.new-item input{flex:1;min-width:0;padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:0;border-radius:7px;padding:9px 13px;background:var(--action);color:var(--on-strong);font-weight:800}
 .items{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item.archived .title{text-decoration:line-through;color:var(--muted)}.item form{margin:0}.item button{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}.empty{padding:30px;text-align:center;color:var(--muted)}.mode{color:var(--muted);font-size:13px}
 .remove-column{margin:10px 0 16px}.remove-column summary{cursor:pointer;font-weight:800}.column-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}.column-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:8px}.column-name{font-weight:700}.column-type,.column-reason{color:var(--muted);font-size:12px}.column-row form{margin-left:auto}.column-row button{border:1px solid var(--line);border-radius:7px;padding:6px 10px;background:transparent;color:var(--text);font-weight:700}
+.list-views{display:flex;gap:6px;margin:14px 0 4px}.list-views a{padding:6px 12px;border:1px solid var(--line);border-radius:7px;text-decoration:none;color:var(--text);font-weight:700}.list-views a.current{background:var(--action);color:var(--on-strong);border-color:var(--action)}
+.list-groups{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 4px;font-size:13px}.list-groups .group-label{color:var(--muted);font-weight:700}.list-groups a{padding:4px 9px;border:1px solid var(--line);border-radius:6px;text-decoration:none;color:var(--text)}.list-groups a.current{background:var(--panel-strong);font-weight:800}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:12px}.lane{background:var(--panel-strong);border:1px solid var(--line);border-radius:10px;padding:10px}.lane-head{margin:2px 4px 10px;font-size:14px;display:flex;align-items:center;gap:8px}.lane-count{color:var(--muted);font-weight:700;font-size:12px}.lane-items{border:0;border-radius:0;background:transparent;overflow:visible}.lane-items .item{display:flex;flex-direction:column;align-items:flex-start;gap:6px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px}.lane-items .item:last-child{margin-bottom:0}.lane-items .empty{padding:12px}
 ` + sharingStyle + `
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>
+{{define "listRow"}}{{$row := .}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span>{{if .Cells}}<span class="cells">{{range .Cells}}<span class="cell"><span class="cell-name">{{.ColumnName}}</span><span class="cell-value">{{if .Value}}{{.Value}}{{else}}—{{end}}</span></span>{{end}}</span>{{else}}<span class="title">{{.Title}}</span>{{end}}{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}{{if .CanWrite}}<form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
+<details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $row.Members}}<option value="{{.ID}}"{{if eq .ID $row.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+<label for="due-{{.ID}}">Due</label><input id="due-{{.ID}}" type="date" name="due" value="{{.DueDate}}">
+<button type="submit">Save assignment</button></form></details>
+<details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<p class="read-only">Deleting removes this item and everything on it for good. Completing it instead keeps it and can be undone.</p>
+<button type="submit">Delete this item</button></form></details>{{end}}</li>{{end}}
+{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div><nav class="list-views" aria-label="List view"><a href="{{.ListViewURL}}"{{if not .BoardActive}} class="current" aria-current="page"{{end}}>List</a>{{if .BoardViewURL}}<a href="{{.BoardViewURL}}"{{if .BoardActive}} class="current" aria-current="page"{{end}}>Board</a>{{end}}</nav>{{if .BoardActive}}<nav class="list-groups" aria-label="Group by"><span class="group-label">Group by</span>{{range .GroupChoices}}<a href="{{.URL}}"{{if .Selected}} class="current" aria-current="true"{{end}}>{{.Name}}</a>{{end}}</nav>{{end}}{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>
 {{if .CanWrite}}<details class="remove-column"><summary>Remove a column</summary>
 <p class="read-only">Removing a column deletes what every item recorded under it, for good. The first column names the item and stays.</p>
 <ul class="column-list">{{range .Columns}}<li class="column-row"><span class="column-name">{{.Name}}</span><span class="column-type">{{.Type}}</span>{{if .Primary}}<span class="column-reason">names the item</span>{{else}}<form method="post" action="/app/lists/{{$.ID}}/columns/remove"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="key" value="{{.Key}}"><button type="submit">Remove {{.Name}}</button></form>{{end}}</li>{{end}}</ul>
@@ -3032,14 +3070,7 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 <button type="submit">Add column</button></form>
 <p class="read-only">A column is added to the end. Removing one is not offered here: it would have to remove that value from every item, which is a deletion worth asking for deliberately.</p>
 </details>{{end}}
-<ul class="items">{{range $item := .Items}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span>{{if .Cells}}<span class="cells">{{range .Cells}}<span class="cell"><span class="cell-name">{{.ColumnName}}</span><span class="cell-value">{{if .Value}}{{.Value}}{{else}}—{{end}}</span></span>{{end}}</span>{{else}}<span class="title">{{.Title}}</span>{{end}}{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}{{if $.CanWrite}}<form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
-<details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-<label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $.Members}}<option value="{{.ID}}"{{if eq .ID $item.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
-<label for="due-{{.ID}}">Due</label><input id="due-{{.ID}}" type="date" name="due" value="{{.DueDate}}">
-<button type="submit">Save assignment</button></form></details>
-<details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-<p class="read-only">Deleting removes this item and everything on it for good. Completing it instead keeps it and can be undone.</p>
-<button type="submit">Delete this item</button></form></details>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}
+{{if .BoardActive}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the board groups the first 1,000.</p>{{end}}<div class="board">{{range .Lanes}}<section class="lane" aria-label="{{.Label}} ({{.Count}} item{{if ne .Count 1}}s{{end}})"><h3 class="lane-head">{{.Label}} <span class="lane-count">{{.Count}}</span></h3><ul class="items lane-items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">None</li>{{end}}</ul></section>{{end}}</div>{{else}}<ul class="items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}{{end}}
 ` + sharingSection + `</main>{{end}}`
 
 var listTemplate = mustPage(listMarkup)
@@ -9025,16 +9056,12 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "That list is not available.")
 		return
 	}
-	page, err := h.Messages.ListItems(r.Context(), principal.WorkspaceID, principal.UserID, id, domain.PageRequest{Limit: 100, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))}, true)
-	if err != nil {
-		h.writeStoreError(w, err, "The list items are temporarily unavailable.")
-		return
-	}
 	csrf, err := pageCSRFToken(r)
 	if err != nil {
 		h.writeAuthError(w, r, err)
 		return
 	}
+	canWrite := (access.Access == domain.AccessWrite || access.Access == domain.AccessOwner) && principal.HasScope(auth.ScopeListsWrite)
 	names := h.newUserNames(r.Context(), principal)
 	// The picker offers only members who can open this list, because assigning
 	// to anyone else is refused by the service — a control that always fails is
@@ -9065,29 +9092,81 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 			columnViews = append(columnViews, listColumnView{Key: column.Key, Name: column.Name, Type: string(column.Type), Primary: column.Primary, Options: column.Options})
 		}
 	}
-	items := make([]listItemView, 0, len(page.Items))
-	for _, item := range page.Items {
-		view := listItemView{ID: string(item.ID), Title: listItemTitle(columns, item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID)}
+	// Resolve the layout. A board needs a column whose values a lane can stand
+	// for; without one, "view=board" falls back to the list rather than drawing a
+	// board of a single lane.
+	groupable := listGroupableColumns(columns)
+	listPath := "/app/lists/" + url.PathEscape(string(id))
+	board := strings.TrimSpace(r.URL.Query().Get("view")) == "board" && len(groupable) > 0
+	group := domain.ListColumn{}
+	if board {
+		requested := strings.TrimSpace(r.URL.Query().Get("group"))
+		group = groupable[0]
+		for _, candidate := range groupable {
+			if candidate.Key == requested {
+				group = candidate
+				break
+			}
+		}
+	}
+	// A board groups the whole list, so it reads every item; the list keeps its
+	// one cursor page and its "more" link.
+	var rawItems []domain.ListItem
+	var more string
+	var truncated bool
+	if board {
+		rawItems, truncated, err = h.loadListItemsForBoard(r.Context(), principal.WorkspaceID, principal.UserID, id)
+	} else {
+		var page domain.ListItemPage
+		if page, err = h.Messages.ListItems(r.Context(), principal.WorkspaceID, principal.UserID, id, domain.PageRequest{Limit: 100, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))}, true); err == nil {
+			rawItems = page.Items
+			if page.HasMore {
+				more = listPath + "?cursor=" + url.QueryEscape(string(page.NextCursor))
+			}
+		}
+	}
+	if err != nil {
+		h.writeStoreError(w, err, "The list items are temporarily unavailable.")
+		return
+	}
+	items := make([]listItemView, 0, len(rawItems))
+	groupValues := make([]string, 0, len(rawItems))
+	for _, item := range rawItems {
+		row := listItemView{ID: string(item.ID), Title: listItemTitle(columns, item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID), ListID: string(id), CanWrite: canWrite, CSRFToken: csrf, Members: assignable}
 		if structured {
-			view.Cells = listCellViews(columns, item.Fields)
+			row.Cells = listCellViews(columns, item.Fields)
 		}
 		if item.AssigneeID != "" {
-			view.AssigneeName = names.name(item.AssigneeID)
+			row.AssigneeName = names.name(item.AssigneeID)
 		}
 		if !item.DueAt.IsZero() {
-			view.DueDate = item.DueAt.UTC().Format("2006-01-02")
-			view.Overdue = item.Overdue(time.Now())
+			row.DueDate = item.DueAt.UTC().Format("2006-01-02")
+			row.Overdue = item.Overdue(time.Now())
 		}
-		items = append(items, view)
+		items = append(items, row)
+		if board {
+			groupValues = append(groupValues, listItemGroupValue(item.Fields, group.Key))
+		}
 	}
-	more := ""
-	if page.HasMore {
-		more = "/app/lists/" + url.PathEscape(string(id)) + "?cursor=" + url.QueryEscape(string(page.NextCursor))
+	viewName := "list"
+	boardViewURL := ""
+	if len(groupable) > 0 {
+		boardViewURL = listPath + "?view=board"
 	}
-	canWrite := access.Access == domain.AccessWrite || access.Access == domain.AccessOwner
+	var lanes []listLaneView
+	var groupChoices []groupChoiceView
+	groupName := ""
+	if board {
+		viewName = "board"
+		lanes = buildListLanes(group, items, groupValues)
+		groupName = group.Name
+		for _, candidate := range groupable {
+			groupChoices = append(groupChoices, groupChoiceView{Name: candidate.Name, URL: listPath + "?view=board&group=" + url.QueryEscape(candidate.Key), Selected: candidate.Key == group.Key})
+		}
+	}
 	owner := value.OwnerID == principal.UserID
 	grants, shareTargets := h.listSharing(r.Context(), principal, value, owner)
-	h.writeHTML(w, listTemplate, listData{Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeListsWrite), SharePath: "/app/lists/" + url.PathEscape(string(id)), ShareNoun: "list", ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+	h.writeHTML(w, listTemplate, listData{Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeListsWrite), SharePath: listPath, ShareNoun: "list", ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite, Notice: strings.TrimSpace(r.URL.Query().Get("notice")), View: viewName, BoardActive: board, ListViewURL: listPath, BoardViewURL: boardViewURL, GroupChoices: groupChoices, GroupName: groupName, Lanes: lanes, BoardTruncated: truncated}, http.StatusOK, "list rendering unavailable")
 }
 
 func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
