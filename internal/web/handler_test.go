@@ -705,6 +705,24 @@ func requireMissing(t *testing.T, what, body string, unexpected ...string) {
 	}
 }
 
+// requireOrdered asserts each value is present and that they appear in the given
+// order — the check a sorted view needs, where presence alone would pass on any
+// order.
+func requireOrdered(t *testing.T, what, body string, ordered ...string) {
+	t.Helper()
+	previous := -1
+	for _, value := range ordered {
+		at := strings.Index(body, value)
+		if at < 0 {
+			t.Fatalf("%s is missing %q: %s", what, value, body)
+		}
+		if at < previous {
+			t.Fatalf("%s: %q appears before an earlier value: %s", what, value, body)
+		}
+		previous = at
+	}
+}
+
 // TestThreadViewRendersTheThreadAndItsComposer covers the defect that made
 // every "Reply in thread" link answer 503: the message partial was invoked with
 // one type for the timeline and another for the thread pane, so the pane could
@@ -1090,6 +1108,48 @@ func TestPeopleDirectoryRendersStatusEmojiAsAGlyph(t *testing.T) {
 	requireContains(t, "member status glyph", body,
 		`<span class="standard-emoji" role="img" aria-label=":tada:">`, "Shipping")
 	requireMissing(t, "status shortcode is resolved, not shown raw", body, ":tada: Shipping")
+}
+
+// TestListTableViewSortsByColumn covers the table layout: a real table whose
+// column headers sort the rows, ascending and then descending on the next click,
+// by the column's own kind — here a number column sorted numerically.
+func TestListTableViewSortsByColumn(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Backlog", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Priority", domain.ListColumnNumber, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, fields := range []string{
+		`[{"column_id":"task","value":"low"},{"column_id":"priority","value":1}]`,
+		`[{"column_id":"task","value":"high"},{"column_id":"priority","value":3}]`,
+		`[{"column_id":"task","value":"mid"},{"column_id":"priority","value":2}]`,
+	} {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := "/app/lists/" + string(value.ID)
+
+	// The list view offers the table, since it has declared columns to head.
+	requireContains(t, "list offers a table", get(t, mux, target).Body.String(),
+		`<a href="`+target+`?view=table"`, `>Table</a>`)
+
+	// Ascending by Priority: 1 (low), 2 (mid), 3 (high) — numeric, not "1,2,3" as text.
+	asc := get(t, mux, target+"?view=table&sort=priority&dir=asc").Body.String()
+	requireContains(t, "table renders", asc, `<table class="list-table">`, "Priority")
+	requireOrdered(t, "ascending by priority", asc, "<td>low</td>", "<td>mid</td>", "<td>high</td>")
+
+	// The Priority header now links to descending, and desc reverses the rows.
+	desc := get(t, mux, target+"?view=table&sort=priority&dir=desc").Body.String()
+	requireOrdered(t, "descending by priority", desc, "<td>high</td>", "<td>mid</td>", "<td>low</td>")
 }
 
 // TestConversationMemberPanelShowsPresenceAndStatus covers the channel member

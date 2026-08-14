@@ -2,17 +2,125 @@ package web
 
 import (
 	"context"
+	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
-// boardItemCap bounds how many items a board view groups into lanes. A board has
+// tableHeaderView is one column header of the table view: its name, the link
+// that sorts by it, and whether the table is currently sorted by it and which
+// way, so the header can show a direction arrow and toggle on the next click.
+type tableHeaderView struct {
+	Name   string
+	URL    string
+	Sorted string // "asc", "desc", or ""
+}
+
+// listSortColumn resolves which column a table is sorted by: the requested one
+// when it names a real column, otherwise the primary column that names each
+// item, so an absent or stale sort key falls back to the list's own spine rather
+// than to nothing.
+func listSortColumn(columns []domain.ListColumn, requested string) domain.ListColumn {
+	for _, column := range columns {
+		if column.Key == requested {
+			return column
+		}
+	}
+	for _, column := range columns {
+		if column.Primary {
+			return column
+		}
+	}
+	if len(columns) > 0 {
+		return columns[0]
+	}
+	return domain.ListColumn{}
+}
+
+// buildTableHeaders builds the sortable column headers. The header for the
+// column in effect links to the opposite direction so a click reverses it;
+// every other header links to ascending, the way a fresh sort starts.
+func buildTableHeaders(columns []domain.ListColumn, listPath, sortKey string, desc bool) []tableHeaderView {
+	headers := make([]tableHeaderView, 0, len(columns))
+	for _, column := range columns {
+		nextDir := "asc"
+		sorted := ""
+		if column.Key == sortKey {
+			if desc {
+				sorted = "desc"
+			} else {
+				sorted = "asc"
+				nextDir = "desc"
+			}
+		}
+		headers = append(headers, tableHeaderView{
+			Name:   column.Name,
+			URL:    listPath + "?view=table&sort=" + url.QueryEscape(column.Key) + "&dir=" + nextDir,
+			Sorted: sorted,
+		})
+	}
+	return headers
+}
+
+// sortListItemsByColumn orders items by their value under the sort column,
+// keeping the list's own order for ties (a stable sort) and always sinking items
+// with no value to the bottom, in both directions — an empty cell is not a value
+// that should sort ahead of a real one just because the order reversed.
+// values[i] is the sort value of items[i].
+func sortListItemsByColumn(items []listItemView, values []string, column domain.ListColumn, desc bool) {
+	type pair struct {
+		item  listItemView
+		value string
+	}
+	pairs := make([]pair, len(items))
+	for i := range items {
+		pairs[i] = pair{item: items[i], value: values[i]}
+	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		a, b := pairs[i].value, pairs[j].value
+		if (a == "") != (b == "") {
+			return b == "" // the empty one sinks
+		}
+		if a == "" {
+			return false
+		}
+		if desc {
+			a, b = b, a
+		}
+		return listValueLess(a, b, column.Type)
+	})
+	for i := range pairs {
+		items[i] = pairs[i].item
+	}
+}
+
+// listValueLess compares two non-empty cell values the way their column reads:
+// numbers numerically, a checkbox unchecked-before-checked, and everything else
+// (text, select, person, and ISO dates whose lexical order is chronological) as
+// case-folded text.
+func listValueLess(a, b string, columnType domain.ListColumnType) bool {
+	if columnType == domain.ListColumnNumber {
+		fa, ea := strconv.ParseFloat(a, 64)
+		fb, eb := strconv.ParseFloat(b, 64)
+		if ea == nil && eb == nil {
+			return fa < fb
+		}
+	}
+	if columnType == domain.ListColumnCheckbox {
+		return a == "false" && b == "true"
+	}
+	return strings.ToLower(a) < strings.ToLower(b)
+}
+
+// listViewItemCap bounds how many items a whole-list view (board or table) reads. A board has
 // to group the whole list to be honest — a lane that stops at a cursor-page
 // boundary hides work — so the page loads up to this many items rather than one
 // page. Real lists sit far below it; a list larger than this reports itself
 // truncated rather than pretending its lanes are complete.
-const boardItemCap = 1000
+const listViewItemCap = 1000
 
 // listLaneView is one column of a board: a group value and the items that carry
 // it, kept in the list's own row order.
@@ -94,11 +202,11 @@ func buildListLanes(group domain.ListColumn, items []listItemView, values []stri
 	return lanes
 }
 
-// loadListItemsForBoard reads every item of a list up to boardItemCap, paging
+// loadAllListItems reads every item of a list up to listViewItemCap, paging
 // the cursor the ordinary list view turns into a "more" link. It returns whether
 // the list ran past the cap so the board can say its lanes stop short rather than
 // look complete.
-func (h Handler) loadListItemsForBoard(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ListID) ([]domain.ListItem, bool, error) {
+func (h Handler) loadAllListItems(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ListID) ([]domain.ListItem, bool, error) {
 	items := make([]domain.ListItem, 0, 128)
 	cursor := domain.Cursor("")
 	for {
@@ -107,8 +215,8 @@ func (h Handler) loadListItemsForBoard(ctx context.Context, workspace domain.Wor
 			return nil, false, err
 		}
 		items = append(items, page.Items...)
-		if len(items) >= boardItemCap {
-			return items[:boardItemCap], true, nil
+		if len(items) >= listViewItemCap {
+			return items[:listViewItemCap], true, nil
 		}
 		if !page.HasMore || page.NextCursor == "" {
 			return items, false, nil
