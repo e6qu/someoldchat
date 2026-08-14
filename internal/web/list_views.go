@@ -19,6 +19,75 @@ type tableHeaderView struct {
 	Sorted string // "asc", "desc", or ""
 }
 
+// filterOptionView is one choice in the list's filter control: the token it
+// selects ("colKey:cellValue"), the human label a reader picks it by, and
+// whether it is the one in effect.
+type filterOptionView struct {
+	Value    string
+	Label    string
+	Selected bool
+}
+
+// listURL joins a list path and query values, omitting the "?" when there is
+// nothing to carry, so a plain list view stays a clean path.
+func listURL(listPath string, params url.Values) string {
+	if encoded := params.Encode(); encoded != "" {
+		return listPath + "?" + encoded
+	}
+	return listPath
+}
+
+// listFilterColumns are the columns a list can filter by — the same closed-value
+// select and checkbox columns a board groups by, because an open text, number,
+// date, or person column has no small set of values a filter control could
+// offer as a menu.
+func listFilterColumns(columns []domain.ListColumn) []domain.ListColumn {
+	return listGroupableColumns(columns)
+}
+
+// parseListFilter reads a "colKey:value" token against the list's columns,
+// returning the column and value when the key names a real filterable column. A
+// stale or malformed token reports not-ok and is ignored rather than hiding every
+// item behind a filter nobody can see to clear.
+func parseListFilter(token string, columns []domain.ListColumn) (domain.ListColumn, string, bool) {
+	key, value, found := strings.Cut(token, ":")
+	if !found {
+		return domain.ListColumn{}, "", false
+	}
+	for _, column := range listFilterColumns(columns) {
+		if column.Key == key {
+			return column, value, true
+		}
+	}
+	return domain.ListColumn{}, "", false
+}
+
+// buildFilterOptions lists every value the filter can select — each option of a
+// select column, and a checkbox's checked and unchecked — labelled by column and
+// value, with the active one marked.
+func buildFilterOptions(columns []domain.ListColumn, active string) []filterOptionView {
+	options := make([]filterOptionView, 0)
+	for _, column := range listFilterColumns(columns) {
+		values := column.Options
+		if column.Type == domain.ListColumnCheckbox {
+			values = []string{"true", "false"}
+		}
+		for _, value := range values {
+			token := column.Key + ":" + value
+			label := column.Name + ": " + value
+			if column.Type == domain.ListColumnCheckbox {
+				if value == "true" {
+					label = column.Name + ": checked"
+				} else {
+					label = column.Name + ": unchecked"
+				}
+			}
+			options = append(options, filterOptionView{Value: token, Label: label, Selected: token == active})
+		}
+	}
+	return options
+}
+
 // listSortColumn resolves which column a table is sorted by: the requested one
 // when it names a real column, otherwise the primary column that names each
 // item, so an absent or stale sort key falls back to the list's own spine rather
@@ -43,7 +112,7 @@ func listSortColumn(columns []domain.ListColumn, requested string) domain.ListCo
 // buildTableHeaders builds the sortable column headers. The header for the
 // column in effect links to the opposite direction so a click reverses it;
 // every other header links to ascending, the way a fresh sort starts.
-func buildTableHeaders(columns []domain.ListColumn, listPath, sortKey string, desc bool) []tableHeaderView {
+func buildTableHeaders(columns []domain.ListColumn, listPath, sortKey string, desc bool, filter string) []tableHeaderView {
 	headers := make([]tableHeaderView, 0, len(columns))
 	for _, column := range columns {
 		nextDir := "asc"
@@ -56,9 +125,13 @@ func buildTableHeaders(columns []domain.ListColumn, listPath, sortKey string, de
 				nextDir = "desc"
 			}
 		}
+		params := url.Values{"view": {"table"}, "sort": {column.Key}, "dir": {nextDir}}
+		if filter != "" {
+			params.Set("filter", filter)
+		}
 		headers = append(headers, tableHeaderView{
 			Name:   column.Name,
-			URL:    listPath + "?view=table&sort=" + url.QueryEscape(column.Key) + "&dir=" + nextDir,
+			URL:    listURL(listPath, params),
 			Sorted: sorted,
 		})
 	}

@@ -260,10 +260,14 @@ groups items into lanes by a select or checkbox column; and a table that heads t
 columns and sorts the rows by any of them, ascending then descending on the next
 click, each column kind sorted the way it reads (numbers numerically, a checkbox
 unchecked-before-checked, dates chronologically) with empty cells sinking to the
-bottom. The board and table render over the whole list up to a bound. Templates,
-filters, a calendar layout, comments, attachments, and full notification/workflow
-effects remain gaps; an item action taken from a board lane or table row returns
-to the list layout for now.
+bottom. A filter narrows the whole list to the rows matching one select or
+checkbox column's value; it composes with every layout and rides each view's own
+links, so switching between list, board, and table keeps it, and one control
+clears it without also discarding the grouping or the sort. The board, table, and
+any filtered view render over the whole list up to a bound. Templates, a calendar
+layout, comments, attachments, and full notification/workflow effects remain gaps;
+an item action taken from a board lane or table row returns to the list layout for
+now.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered

@@ -3666,7 +3666,18 @@ test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', a
   await expect(page.getByRole('columnheader', { name: /Status/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'ship it' })).toBeVisible();
   await page.getByRole('link', { name: /Status/ }).click();
-  await expect(page).toHaveURL(/view=table.*sort=status/);
+  await expect(page).toHaveURL(/[?&]sort=status\b/);
+  await expect(page).toHaveURL(/[?&]view=table\b/);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Filtering narrows every layout to the matching rows and clears in one click.
+  await page.goto(`/app/lists/${encodeURIComponent(listID)}`);
+  await page.getByLabel('Filter', { exact: true }).selectOption({ label: 'Status: done' });
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page).toHaveURL(/filter=status%3Adone/);
+  await expect(page.getByText('ship it')).toHaveCount(0); // the only item is open
+  await page.getByRole('link', { name: 'Clear filter' }).click();
+  await expect(page.getByText('ship it')).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 });
 
