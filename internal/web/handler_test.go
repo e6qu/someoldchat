@@ -538,6 +538,73 @@ func TestListItemCanBeDeletedForGoodAndCompletionStillCannot(t *testing.T) {
 	}
 }
 
+// TestListBoardViewGroupsItemsIntoLanes covers the board layout: a select column
+// groups items into a lane per option, with a trailing lane for items that have
+// no value, and the list offers the board only because it has a groupable column.
+func TestListBoardViewGroupsItemsIntoLanes(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Launch", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Status", domain.ListColumnSelect, []string{"open", "done"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, fields := range []string{
+		`[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`,
+		`[{"column_id":"task","value":"fix bug"},{"column_id":"status","value":"done"}]`,
+		`[{"column_id":"task","value":"triage later"}]`, // no status → the empty lane
+	} {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := "/app/lists/" + string(value.ID)
+
+	// The list view offers the board, since a select column can group it.
+	list := get(t, mux, target).Body.String()
+	requireContains(t, "list view offers a board", list,
+		`<a href="`+target+`?view=board"`, `>Board</a>`)
+
+	board := get(t, mux, target+"?view=board").Body.String()
+	requireContains(t, "board lanes", board,
+		`class="lane-head">open <span class="lane-count">1</span>`,
+		`class="lane-head">done <span class="lane-count">1</span>`,
+		`class="lane-head">No Status <span class="lane-count">1</span>`,
+		"Group by", "ship it", "fix bug", "triage later")
+}
+
+// TestListWithoutAGroupableColumnOffersNoBoard covers the fallback: a list whose
+// only column is free text has nothing a lane can stand for, so no board is
+// offered and asking for one by URL falls back to the list rather than drawing a
+// board of a single lane.
+func TestListWithoutAGroupableColumnOffersNoBoard(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Notes", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Note", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"note","value":"remember this"}]`); err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/lists/" + string(value.ID)
+	requireMissing(t, "no board link", get(t, mux, target).Body.String(), ">Board</a>")
+	// Asking for the board anyway falls back to the list, which still shows items.
+	fallback := get(t, mux, target+"?view=board").Body.String()
+	requireContains(t, "board falls back to list", fallback, `<ul class="items">`, "remember this")
+	requireMissing(t, "board falls back to list", fallback, `class="board"`)
+}
+
 func TestChannelCanvasIsOfferedToMembersAndCreatedOnPurpose(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 
