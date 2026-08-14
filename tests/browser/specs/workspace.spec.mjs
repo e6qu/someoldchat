@@ -3658,6 +3658,16 @@ test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', a
   await expect(page.getByRole('heading', { name: /open\s+1/ })).toBeVisible();
   await expect(page.getByText('ship it')).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
+
+  // The table layout heads the columns and sorts the rows; its headers are
+  // links a keyboard reaches and the table stays screen-reader usable.
+  await page.getByRole('link', { name: 'Table' }).click();
+  await expect(page).toHaveURL(/\/app\/lists\/.*view=table/);
+  await expect(page.getByRole('columnheader', { name: /Status/ })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'ship it' })).toBeVisible();
+  await page.getByRole('link', { name: /Status/ }).click();
+  await expect(page).toHaveURL(/view=table.*sort=status/);
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it asked for', async ({ page, context, request }) => {

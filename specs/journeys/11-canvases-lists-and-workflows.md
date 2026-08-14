@@ -254,13 +254,16 @@ LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,
 assignments, due dates, and sharing review are now built — a list carries the
 same grants a canvas does, so it reaches the same sharing surface. An item can be deleted for good, which
-completing it deliberately does not do. A list now offers a second layout beside
-the default single ordered list: a board that groups items into lanes by a select
-or checkbox column, with a view switcher and a group-by chooser, rendered over the
-whole list up to a bound. Templates, filters, sorting, more layouts (table with
-sortable headers, calendar), comments, attachments, and full notification/workflow
-effects remain gaps; an item action taken from a board lane returns to the list
-layout for now.
+completing it deliberately does not do. A list now offers three layouts beside
+each other through a view switcher: the default single ordered list; a board that
+groups items into lanes by a select or checkbox column; and a table that heads the
+columns and sorts the rows by any of them, ascending then descending on the next
+click, each column kind sorted the way it reads (numbers numerically, a checkbox
+unchecked-before-checked, dates chronologically) with empty cells sinking to the
+bottom. The board and table render over the whole list up to a bound. Templates,
+filters, a calendar layout, comments, attachments, and full notification/workflow
+effects remain gaps; an item action taken from a board lane or table row returns
+to the list layout for now.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered
