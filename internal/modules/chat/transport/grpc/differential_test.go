@@ -5280,6 +5280,61 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name:  "a list item file is attached by an editor and readable by every list reader",
+			blobs: true,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				list, err := chat.CreateList(ctx, "T1", "U1", "Assets", "[]",
+					`[{"key":"title","name":"Title","type":"text"}]`, "", false, false)
+				if err != nil {
+					return nil, err
+				}
+				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the logo"}]`)
+				if err != nil {
+					return nil, err
+				}
+				// U2 may read the list; U3 is a member with no grant.
+				if err := chat.SetListAccess(ctx, "T1", "U1", list.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				file, err := chat.UploadFile(ctx, "T1", "U1", "logo.png", "The logo", "image/png", 4, bytes.NewReader([]byte("data")))
+				if err != nil {
+					return nil, err
+				}
+				// A reader may not attach — attaching is an edit of the row.
+				_, readerAttachErr := chat.AttachFileToListItem(ctx, "T1", "U2", list.ID, item.ID, file.ID)
+				link, err := chat.AttachFileToListItem(ctx, "T1", "U1", list.ID, item.ID, file.ID)
+				if err != nil {
+					return nil, err
+				}
+				// A reader sees the attachment and can open the file although it
+				// was shared into no conversation — the whole point of the join.
+				seen, err := chat.ListItemFiles(ctx, "T1", "U2", list.ID, item.ID)
+				if err != nil {
+					return nil, err
+				}
+				_, readerFileErr := chat.FileInfo(ctx, "T1", "U2", file.ID)
+				// A member with no grant sees neither the list nor the file.
+				_, strangerListErr := chat.ListItemFiles(ctx, "T1", "U3", list.ID, item.ID)
+				_, strangerFileErr := chat.FileInfo(ctx, "T1", "U3", file.ID)
+				if err := chat.DetachFileFromListItem(ctx, "T1", "U1", list.ID, item.ID, file.ID); err != nil {
+					return nil, err
+				}
+				after, err := chat.ListItemFiles(ctx, "T1", "U2", list.ID, item.ID)
+				if err != nil {
+					return nil, err
+				}
+				// Detaching revokes the reader's access again; the uploader keeps it.
+				_, afterReaderErr := chat.FileInfo(ctx, "T1", "U2", file.ID)
+				_, afterUploaderErr := chat.FileInfo(ctx, "T1", "U1", file.ID)
+				return []any{
+					len(seen), seen[0].ID == file.ID, seen[0].Title,
+					link.ItemID == item.ID, link.FileID == file.ID,
+					readerAttachErr != nil, readerFileErr == nil, strangerListErr != nil,
+					strangerFileErr != nil, len(after), afterReaderErr != nil, afterUploaderErr == nil,
+				}, nil
+			},
+		},
+		{
 			// A history is only useful if both compositions agree on what it
 			// says and on which way round it reads: a revision records the
 			// state it *replaced*, so the newest row is what the canvas said

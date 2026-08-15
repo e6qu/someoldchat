@@ -512,6 +512,9 @@ type Service interface {
 	CommentOnListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string) (domain.ListItemComment, error)
 	ListItemComments(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, domain.PageRequest) (domain.ListItemCommentPage, error)
 	DeleteListItemComment(context.Context, domain.WorkspaceID, domain.UserID, domain.ListItemCommentID) error
+	AttachFileToListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, domain.FileID) (domain.ListItemFile, error)
+	ListItemFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID) ([]domain.File, error)
+	DetachFileFromListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, domain.FileID) error
 	PresentEntityDetails(context.Context, domain.WorkspaceID, domain.UserID, string, string, bool, string, string) error
 	PresentEntityComments(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool, string, bool, string, string) error
 	AcknowledgeEntityCommentAction(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) error

@@ -690,6 +690,16 @@ func (m Messages) authorizeFileAccess(ctx context.Context, userID domain.UserID,
 			return nil
 		}
 	}
+	// A file attached to a list item carries no conversation share, so the loop
+	// above never grants it. Its readers are the list's readers: resolve that
+	// through the store join rather than duplicating list-grant logic here.
+	readable, err := m.Store.FileReadableViaListItem(ctx, file.WorkspaceID, userID, file.ID)
+	if err != nil {
+		return err
+	}
+	if readable {
+		return nil
+	}
 	return store.ErrNotFound
 }
 

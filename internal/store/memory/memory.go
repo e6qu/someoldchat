@@ -125,6 +125,7 @@ type Store struct {
 	canvasRevisions               map[domain.CanvasID][]domain.CanvasRevision
 	canvasComments                map[domain.CanvasCommentID]domain.CanvasComment
 	listItemComments              map[domain.ListItemCommentID]domain.ListItemComment
+	listItemFiles                 map[domain.ListItemFileID]domain.ListItemFile
 	roleAssignments               map[string]domain.RoleAssignment
 	authPolicyEntities            map[string]domain.AuthPolicyEntity
 	sessionSettings               map[string]domain.SessionSettings
@@ -346,6 +347,7 @@ func New() *Store {
 		canvasRevisions:               make(map[domain.CanvasID][]domain.CanvasRevision),
 		canvasComments:                make(map[domain.CanvasCommentID]domain.CanvasComment),
 		listItemComments:              make(map[domain.ListItemCommentID]domain.ListItemComment),
+		listItemFiles:                 make(map[domain.ListItemFileID]domain.ListItemFile),
 		roleAssignments:               make(map[string]domain.RoleAssignment),
 		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
 		sessionSettings:               make(map[string]domain.SessionSettings),
@@ -804,6 +806,90 @@ func (s *Store) ListListItemComments(_ context.Context, workspace domain.Workspa
 		}
 	}
 	return page, nil
+}
+
+func (s *Store) AttachListItemFile(_ context.Context, link domain.ListItemFile, event events.Event) error {
+	if link.ID == "" || link.ListID == "" || link.ItemID == "" || link.FileID == "" {
+		return store.InvalidArgument("a list item file requires an identifier, a list, an item and a file")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := s.files[link.FileID]
+	if !ok || file.Deleted || file.WorkspaceID != link.WorkspaceID {
+		return store.ErrNotFound
+	}
+	// The list-write authority is the service's alone; the store enforces only
+	// data integrity so that guard stays load-bearing rather than doubled here.
+	for _, existing := range s.listItemFiles {
+		if existing.ID == link.ID {
+			return store.ErrAlreadyExists
+		}
+		// Attaching the same file to the same item twice is a no-op, matching the
+		// SQL profile's (list_id, item_id, file_id) uniqueness.
+		if existing.WorkspaceID == link.WorkspaceID && existing.ListID == link.ListID &&
+			existing.ItemID == link.ItemID && existing.FileID == link.FileID {
+			return store.ErrAlreadyExists
+		}
+	}
+	s.listItemFiles[link.ID] = link
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DetachListItemFile(_ context.Context, workspace domain.WorkspaceID, listID domain.ListID, itemID domain.ListItemID, fileID domain.FileID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, link := range s.listItemFiles {
+		if link.WorkspaceID == workspace && link.ListID == listID && link.ItemID == itemID && link.FileID == fileID {
+			delete(s.listItemFiles, id)
+			s.outbox = append(s.outbox, event)
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+
+func (s *Store) ListItemFiles(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, listID domain.ListID, itemID domain.ListItemID) ([]domain.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Read authority is the service's requireListAccess; the store returns the
+	// attachments as data. The user argument is kept for signature parity with
+	// the SQL profile and future per-user filtering.
+	_ = user
+	links := make([]domain.ListItemFile, 0)
+	for _, link := range s.listItemFiles {
+		if link.WorkspaceID != workspace || link.ListID != listID || link.ItemID != itemID {
+			continue
+		}
+		links = append(links, link)
+	}
+	sort.Slice(links, func(left, right int) bool { return links[left].ID < links[right].ID })
+	files := make([]domain.File, 0, len(links))
+	for _, link := range links {
+		file, ok := s.files[link.FileID]
+		if !ok || file.Deleted {
+			continue
+		}
+		file.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[file.ID]...)
+		files = append(files, file)
+	}
+	return files, nil
+}
+
+// FileReadableViaListItem mirrors the SQL join: a file is readable this way if
+// it is attached to any list item on a list the user can read.
+func (s *Store) FileReadableViaListItem(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, fileID domain.FileID) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, link := range s.listItemFiles {
+		if link.WorkspaceID != workspace || link.FileID != fileID {
+			continue
+		}
+		if s.listReadableLocked(workspace, user, link.ListID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Store) ListCanvasComments(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {

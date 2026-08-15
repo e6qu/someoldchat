@@ -4,6 +4,8 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/files.proto";
+
 message List {
   string id = 1;
   string workspace_id = 2;
@@ -254,6 +256,42 @@ message DeleteListItemCommentRequest {
   string comment_id = 3;
 }
 
+message ListItemFile {
+  string id = 1;
+  string list_id = 2;
+  string item_id = 3;
+  string workspace_id = 4;
+  string file_id = 5;
+  int64 created_at_unix_nano = 6;
+}
+
+message AttachFileToListItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+  string file_id = 5;
+}
+
+message ListItemFilesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+}
+
+message ListItemFilesResponse {
+  repeated File files = 1;
+}
+
+message DetachFileFromListItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+  string file_id = 5;
+}
+
 service ListsService {
   rpc CreateList(CreateListRequest) returns (ListResponse);
   rpc GetList(ListItemRequest) returns (ListResponse);
@@ -278,4 +316,7 @@ service ListsService {
   rpc CommentOnListItem(CommentOnListItemRequest) returns (ListItemComment);
   rpc ListItemComments(ListItemCommentsRequest) returns (ListItemCommentPage);
   rpc DeleteListItemComment(DeleteListItemCommentRequest) returns (ListOKResponse);
+  rpc AttachFileToListItem(AttachFileToListItemRequest) returns (ListItemFile);
+  rpc ListItemFiles(ListItemFilesRequest) returns (ListItemFilesResponse);
+  rpc DetachFileFromListItem(DetachFileFromListItemRequest) returns (ListOKResponse);
 }
