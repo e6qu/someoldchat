@@ -399,6 +399,12 @@ type pageData struct {
 	Channel              string
 	ChannelName          string
 	ChannelPrefix        string
+	// ChannelStatusDisplay is the other person's current status emoji resolved
+	// to a glyph, shown beside a one-to-one DM's title the way it is shown beside
+	// their name everywhere else. Empty for a channel or a group DM, which are
+	// not a single person. ChannelStatusText is its tooltip prose.
+	ChannelStatusDisplay template.HTML
+	ChannelStatusText    string
 	ChannelMeta          string
 	// MemberCount is how many people are in the conversation, shown in the
 	// header the way Slack shows it. Zero hides it: a count could not be read,
@@ -1325,6 +1331,7 @@ const pageStyle = `<style>
 .message-body{min-width:0}
 .message-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
 .author{font-weight:800}.author-status{display:inline-flex;align-items:center;margin-left:-4px}.author-status .standard-emoji,.author-status .custom-emoji{width:16px;height:16px;font-size:15px;line-height:16px}
+.channel-title-status{display:inline-flex;align-items:center;vertical-align:middle;margin-left:6px}.channel-title-status .standard-emoji,.channel-title-status .custom-emoji{width:18px;height:18px;font-size:16px;line-height:18px}
 a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;margin:0 -4px;border-radius:5px}a.time:hover{background:var(--hover)}
 .time{color:var(--muted);font-size:12px}
 .pinned{color:var(--muted);font-size:12px;font-weight:700}
@@ -2071,7 +2078,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <header class="channel-header">
         <div class="channel-identity">
           <div class="channel-copy">
-            <h1 class="channel-title">{{if .ChannelPrefix}}{{.ChannelPrefix}} {{end}}{{.ChannelName}}</h1>
+            <h1 class="channel-title">{{if .ChannelPrefix}}{{.ChannelPrefix}} {{end}}{{.ChannelName}}{{if .ChannelStatusDisplay}}<span class="channel-title-status"{{if .ChannelStatusText}} title="{{.ChannelStatusText}}"{{end}}>{{.ChannelStatusDisplay}}</span>{{end}}</h1>
             <p class="channel-meta">{{if .MemberCount}}<a class="member-count" href="/app?channel={{.Channel}}&amp;details=1" aria-label="{{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}} — open the member list">{{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}}</a> · {{end}}{{.ChannelMeta}}</p>
           </div>
           <span class="membership-pill{{if .IsMember}} joined{{end}}">{{if .IsMember}}Joined{{else}}Not joined{{end}}</span>
@@ -2717,7 +2724,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 <label>Sort<select name="order"><option value="relevant"{{if eq .Sort "score"}} selected{{end}}>Most relevant</option><option value="newest"{{if and (eq .Sort "timestamp") (eq .Direction "desc")}} selected{{end}}>Newest</option><option value="oldest"{{if eq .Direction "asc"}} selected{{end}}>Oldest</option></select></label><button type="submit">Apply filters</button>
 {{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form>{{end}}{{end}}
 <section class="results" aria-label="{{.Type}} search results">
-{{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.DisplayText}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
+{{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span>{{if .AuthorStatus}}<span class="author-status"{{if .AuthorStatusText}} title="{{.AuthorStatusText}}"{{end}}>{{.AuthorStatus}}</span>{{end}}<time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.DisplayText}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
 {{else if eq .Type "files"}}{{range .Files}}<a class="result file-result" href="{{.DownloadURL}}"><span><span class="author">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</span><span class="result-kind">{{.MIMEType}} · {{.Size}}</span><p class="text">Uploaded by {{.Uploader}}</p></span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching files.</p>{{end}}
 {{else if eq .Type "canvases"}}{{range .Canvases}}<a class="result canvas-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">Canvas · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching canvases.</p>{{end}}
 {{else if eq .Type "lists"}}{{range .Lists}}<a class="result list-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">List · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching lists.</p>{{end}}
@@ -5325,9 +5332,28 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	channelPrefix := "#"
 	channelName := conversationName(conversation)
+	var channelStatusDisplay template.HTML
+	var channelStatusText string
 	if conversation.IsDirectOrGroup() {
 		channelPrefix = ""
-		if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+		// A one-to-one DM's header is a person: resolve that person once so the
+		// title and their current status come from the same read. A group DM is
+		// several people and keeps the joined-names title with no single status.
+		if conversation.Kind == domain.ConversationTypeIM {
+			if other, ok := h.otherDirectMember(r.Context(), principal, conversation.ID); ok {
+				channelName = displayName(other)
+				if strings.TrimSpace(other.Profile.StatusEmoji) != "" {
+					emojiImages := map[string]string{}
+					if customEmoji, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID); err == nil {
+						emojiImages = customEmojiImages(customEmoji)
+					}
+					channelStatusDisplay = statusEmojiDisplay(other.Profile.StatusEmoji, emojiImages)
+					channelStatusText = other.Profile.StatusText
+				}
+			} else if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+				channelName = participants
+			}
+		} else if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
 			channelName = participants
 		}
 	}
@@ -5500,55 +5526,57 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	draftJSON, _ := json.Marshal(draftAttachments)
 
 	data := pageData{
-		Timeline:         timeline,
-		Thread:           thread,
-		ThreadTimestamp:  threadTimestamp,
-		Channels:         conversations.Channels,
-		Directs:          conversations.Directs,
-		Channel:          string(channel),
-		ChannelName:      channelName,
-		ChannelPrefix:    channelPrefix,
-		ChannelMeta:      conversationMeta(conversation),
-		MemberCount:      memberCount,
-		WorkspaceName:    workspaceName,
-		CSRFToken:        csrfToken,
-		ShowProfile:      h.canShowIdentity(),
-		ShowAdmin:        h.canShowWorkspaceAdmin(r.Context(), principal),
-		ShowAuthAdmin:    h.Login != nil && h.canShowWorkspaceAdmin(r.Context(), principal),
-		Keyboard:         keyboardHelp(),
-		Assistant:        h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp)),
-		ReminderUnread:   reminderUnread,
-		CanvasURL:        channelCanvasURL(principal, conversation, isMember),
-		IsMember:         isMember,
-		CanPost:          canPost,
-		CanSchedule:      principal.HasScope(auth.ScopeChatWrite),
-		CanUpload:        isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite) && principal.HasScope(auth.ScopeFilesWrite),
-		CanJoin:          canJoin,
-		CanCreate:        principal.HasScope(auth.ScopeChannelsManage),
-		Username:         username,
-		UserInitial:      initial(username),
-		AtLatest:         history.AtLatest,
-		Notice:           strings.Join(notices, " "),
-		Error:            state.Message,
-		Draft:            state.Draft,
-		DraftAttachments: draftAttachments,
-		DraftJSON:        string(draftJSON),
-		ScheduleAt:       state.ScheduleAt,
-		ComposeURL:       mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
-		DraftURL:         mutationURL("/app/draft", string(channel), "", threadTimestamp, ""),
-		ScheduleURL:      mutationURL("/app/message/schedule", string(channel), "", threadTimestamp, ""),
-		UploadURL:        mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
-		StageUploadURL:   mutationURL("/app/file/stage", string(channel), "", threadTimestamp, ""),
-		TimelineURL:      fragmentURL(string(channel), "", string(before)),
-		ThreadURL:        fragmentURL(string(channel), threadTimestamp, ""),
-		GlobalShortcuts:  globalShortcuts,
-		SlashCommands:    slashCommands,
-		ComposerMembers:  composerMembers,
-		ComposerGroups:   composerGroups,
-		ComposerChannels: composerChannels,
-		Apps:             workspaceApps,
-		Modal:            modal,
-		Details:          details,
+		Timeline:             timeline,
+		Thread:               thread,
+		ThreadTimestamp:      threadTimestamp,
+		Channels:             conversations.Channels,
+		Directs:              conversations.Directs,
+		Channel:              string(channel),
+		ChannelName:          channelName,
+		ChannelPrefix:        channelPrefix,
+		ChannelStatusDisplay: channelStatusDisplay,
+		ChannelStatusText:    channelStatusText,
+		ChannelMeta:          conversationMeta(conversation),
+		MemberCount:          memberCount,
+		WorkspaceName:        workspaceName,
+		CSRFToken:            csrfToken,
+		ShowProfile:          h.canShowIdentity(),
+		ShowAdmin:            h.canShowWorkspaceAdmin(r.Context(), principal),
+		ShowAuthAdmin:        h.Login != nil && h.canShowWorkspaceAdmin(r.Context(), principal),
+		Keyboard:             keyboardHelp(),
+		Assistant:            h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp)),
+		ReminderUnread:       reminderUnread,
+		CanvasURL:            channelCanvasURL(principal, conversation, isMember),
+		IsMember:             isMember,
+		CanPost:              canPost,
+		CanSchedule:          principal.HasScope(auth.ScopeChatWrite),
+		CanUpload:            isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite) && principal.HasScope(auth.ScopeFilesWrite),
+		CanJoin:              canJoin,
+		CanCreate:            principal.HasScope(auth.ScopeChannelsManage),
+		Username:             username,
+		UserInitial:          initial(username),
+		AtLatest:             history.AtLatest,
+		Notice:               strings.Join(notices, " "),
+		Error:                state.Message,
+		Draft:                state.Draft,
+		DraftAttachments:     draftAttachments,
+		DraftJSON:            string(draftJSON),
+		ScheduleAt:           state.ScheduleAt,
+		ComposeURL:           mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
+		DraftURL:             mutationURL("/app/draft", string(channel), "", threadTimestamp, ""),
+		ScheduleURL:          mutationURL("/app/message/schedule", string(channel), "", threadTimestamp, ""),
+		UploadURL:            mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
+		StageUploadURL:       mutationURL("/app/file/stage", string(channel), "", threadTimestamp, ""),
+		TimelineURL:          fragmentURL(string(channel), "", string(before)),
+		ThreadURL:            fragmentURL(string(channel), threadTimestamp, ""),
+		GlobalShortcuts:      globalShortcuts,
+		SlashCommands:        slashCommands,
+		ComposerMembers:      composerMembers,
+		ComposerGroups:       composerGroups,
+		ComposerChannels:     composerChannels,
+		Apps:                 workspaceApps,
+		Modal:                modal,
+		Details:              details,
 	}
 	if canJoin {
 		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
@@ -6365,6 +6393,22 @@ func (h Handler) participantNames(ctx context.Context, principal auth.Principal,
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
+}
+
+// otherDirectMember returns the member of a one-to-one DM who is not the reader,
+// so the header can name whose conversation it is and show their current status.
+// It reports false for a self-DM or when the members cannot be read.
+func (h Handler) otherDirectMember(ctx context.Context, principal auth.Principal, conversation domain.ConversationID) (domain.User, bool) {
+	page, err := h.Messages.ConversationMembers(ctx, principal.WorkspaceID, principal.UserID, conversation, domain.PageRequest{Limit: 10})
+	if err != nil {
+		return domain.User{}, false
+	}
+	for _, user := range page.Users {
+		if user.ID != principal.UserID {
+			return user, true
+		}
+	}
+	return domain.User{}, false
 }
 
 // newConversationDetails loads the channel drawer only when a reader opens it.
@@ -8320,6 +8364,10 @@ func cloneURLValues(source url.Values) url.Values {
 // emphasise words at random.
 func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, messages []domain.Message, names *userNames, terms ...string) []messageView {
 	views := make([]messageView, 0, len(messages))
+	emojiImages := map[string]string{}
+	if customEmoji, err := h.Messages.Emojis(ctx, principal.WorkspaceID, principal.UserID); err == nil {
+		emojiImages = customEmojiImages(customEmoji)
+	}
 	for _, message := range messages {
 		author := names.name(message.AuthorID)
 		channelName := string(message.Conversation)
@@ -8347,7 +8395,7 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 		}
 		displayMessage := message
 		displayMessage.Text = resolveSlackUserMentions(message.Text, names)
-		views = append(views, messageView{
+		view := messageView{
 			ID:            string(message.ID),
 			Anchor:        messageAnchor(message.ID),
 			AuthorName:    author,
@@ -8360,7 +8408,16 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 			ChannelName:   channelName,
 			ChannelPrefix: channelPrefix,
 			Permalink:     appURL(string(message.Conversation), string(message.ThreadTimestamp), before, messageAnchor(message.ID), ""),
-		})
+		}
+		// A search hit shows its author's current status beside their name, the
+		// same projection the timeline makes and only for a human author.
+		if message.AppID == "" && message.AuthorID != "" {
+			if emoji := names.statusEmoji(message.AuthorID); emoji != "" {
+				view.AuthorStatus = renderReactionEmoji(emoji, emojiImages)
+				view.AuthorStatusText = names.statusText(message.AuthorID)
+			}
+		}
+		views = append(views, view)
 	}
 	return views
 }
