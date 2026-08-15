@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 166
+const schemaVersion = 167
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3334,6 +3334,24 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 167 {
+		// App-level tokens gain an issue time so their app's owner can tell them
+		// apart in an inventory. Existing rows keep the default 0, which reads as
+		// "issued before this was recorded" rather than a fabricated time — the
+		// same honesty a session's created_at carries. The token_hash already
+		// serves as the non-secret id the inventory names each token by, so no id
+		// column is needed. The column-exists guard keeps the step idempotent when
+		// a rewound schema replays it over a table that already carries the column.
+		columns, err := s.tableColumns(ctx, db, "app_tokens")
+		if err != nil {
+			return err
+		}
+		if !columns["issued_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE app_tokens ADD COLUMN issued_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate app token issue time: %w", err)
+			}
+		}
+	}
 	if version < 166 {
 		// Files attached to a list item — the product's first file-to-non-message
 		// association. The foreign key to files(id) keeps an attachment honest, but
@@ -4276,6 +4294,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 // caller's input.
 var migratableTables = []string{
 	"activity_items",
+	"app_tokens",
 	"calls",
 	"canvases",
 	"conversations",
@@ -6473,7 +6492,11 @@ func (s *Store) CreateAppToken(ctx context.Context, token string, record domain.
 	if strings.TrimSpace(token) == "" || record.AppID == "" || len(record.Scopes) == 0 || record.Revoked {
 		return store.InvalidArgument("invalid app token")
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO app_tokens(token_hash, app_id, scopes, revoked) SELECT ?, ?, ?, 0 WHERE EXISTS (SELECT 1 FROM slack_apps WHERE id = ? AND deleted = 0)`, domain.HashToken(token), record.AppID, strings.Join(record.Scopes, " "), record.AppID)
+	var issued int64
+	if !record.IssuedAt.IsZero() {
+		issued = record.IssuedAt.UTC().UnixNano()
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO app_tokens(token_hash, app_id, scopes, revoked, issued_at) SELECT ?, ?, ?, 0, ? WHERE EXISTS (SELECT 1 FROM slack_apps WHERE id = ? AND deleted = 0)`, domain.HashToken(token), record.AppID, strings.Join(record.Scopes, " "), issued, record.AppID)
 	if err != nil {
 		return classify(err)
 	}
@@ -6512,6 +6535,55 @@ func (s *Store) RevokeAppTokens(ctx context.Context, appID domain.AppID) error {
 		defer tx.Rollback()
 		if _, err := tx.ExecContext(ctx, `UPDATE app_tokens SET revoked = 1 WHERE app_id = ?`, appID); err != nil {
 			return err
+		}
+		return tx.Commit()
+	})
+}
+
+func (s *Store) ListAppTokens(ctx context.Context, appID domain.AppID) ([]domain.AppTokenSummary, error) {
+	if appID == "" {
+		return nil, store.InvalidArgument("an app token listing must name an app")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT token_hash, issued_at, scopes, revoked FROM app_tokens WHERE app_id = ? ORDER BY issued_at DESC, token_hash`, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	summaries := make([]domain.AppTokenSummary, 0)
+	for rows.Next() {
+		var summary domain.AppTokenSummary
+		var issued int64
+		var scopes string
+		if err := rows.Scan(&summary.ID, &issued, &scopes, &summary.Revoked); err != nil {
+			return nil, err
+		}
+		summary.IssuedAt = timeFromUnixNanoOrZero(issued)
+		summary.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
+}
+
+func (s *Store) RevokeAppTokenByID(ctx context.Context, appID domain.AppID, id string) error {
+	if appID == "" || strings.TrimSpace(id) == "" {
+		return store.InvalidArgument("an app token revocation must name an app and a token")
+	}
+	return underContention(ctx, func() error {
+		tx, err := s.beginWrite(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		result, err := tx.ExecContext(ctx, `UPDATE app_tokens SET revoked = 1 WHERE app_id = ? AND token_hash = ?`, appID, id)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 0 {
+			return store.ErrNotFound
 		}
 		return tx.Commit()
 	})

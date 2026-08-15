@@ -55,10 +55,49 @@ type developerAppsData struct {
 	Credentials     *domain.AppCredentials
 	Configuration   *domain.AppConfigurationCredentials
 	AppToken        *domain.AppTokenCredentials
+	AppTokens       []appTokenView
 	StarterManifest string
 	InstallURL      string
 	DatastoreURL    string
 	DeliveryURL     string
+}
+
+// appTokenView is one issued app-level token in the inventory. It is named by a
+// short prefix of the stored hash — never the token, which is shown once at
+// issuance and never again — with its issue time and whether it is still live.
+type appTokenView struct {
+	ID       string
+	ShortID  string
+	IssuedAt string
+	Scopes   string
+	Revoked  bool
+}
+
+func developerAppTokenViews(summaries []domain.AppTokenSummary) []appTokenView {
+	views := make([]appTokenView, 0, len(summaries))
+	for _, summary := range summaries {
+		short := summary.ID
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		issued := "Issue time not recorded"
+		if !summary.IssuedAt.IsZero() {
+			issued = summary.IssuedAt.UTC().Format("Jan 2, 2006 15:04 UTC")
+		}
+		views = append(views, appTokenView{
+			ID: summary.ID, ShortID: short, IssuedAt: issued,
+			Scopes: strings.Join(summary.Scopes, ", "), Revoked: summary.Revoked,
+		})
+	}
+	return views
+}
+
+func (h Handler) loadDeveloperAppTokens(r *http.Request, principal auth.Principal, appID domain.AppID) []appTokenView {
+	summaries, err := h.Messages.ListDeveloperAppTokens(r.Context(), principal.WorkspaceID, principal.UserID, appID)
+	if err != nil {
+		return nil
+	}
+	return developerAppTokenViews(summaries)
 }
 
 const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{end}}
@@ -76,7 +115,9 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
 .secret{margin:0 0 18px;padding:16px;border:2px solid var(--ok);border-radius:8px;background:var(--bg)}.secret h2{margin:0 0 4px}.secret dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:7px 14px}.secret dt{font-weight:700}.secret dd{margin:0;min-width:0}.secret code{overflow-wrap:anywhere;user-select:all}
 .problems{margin:0 0 14px;padding:12px 16px 12px 34px;border:1px solid var(--danger);border-radius:7px;background:var(--danger-bg);color:var(--danger)}
 .meta{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}.pill{border:1px solid var(--line);border-radius:99px;padding:3px 8px;font-size:12px;color:var(--muted)}
-.inline{display:inline}.empty{color:var(--muted)}@media(max-width:760px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}.field textarea{min-height:320px}.secret dl{grid-template-columns:1fr}}
+.inline{display:inline}.empty{color:var(--muted)}
+.app-tokens{margin-top:16px}.app-tokens h3{margin:0 0 8px}.app-token-table{width:100%;border-collapse:collapse;font-size:13px}.app-token-table th,.app-token-table td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}.app-token-table th{color:var(--muted);font-weight:700}.app-token-table code{overflow-wrap:anywhere}.app-token-table tr.token-revoked td{color:var(--muted)}.app-token-table .button{padding:5px 10px}
+@media(max-width:760px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}.field textarea{min-height:320px}.secret dl{grid-template-columns:1fr}.app-token-table{display:block;overflow-x:auto}}
 </style>{{end}}
 {{define "content"}}
 <header class="bar"><a href="/app">← Back to chat</a><span>Developer apps</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
@@ -99,7 +140,7 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
         <label class="field" for="manifest">App manifest (JSON)<textarea id="manifest" name="manifest" maxlength="1048576" spellcheck="false" required>{{.Manifest}}</textarea></label>
         <div class="actions"><button class="button" type="submit">{{if .Selected}}Save manifest{{else}}Create app{{end}}</button>{{if .InstallURL}}<a href="{{.InstallURL}}">Open install flow</a>{{end}}{{if .DatastoreURL}}<a href="{{.DatastoreURL}}">Manage hosted datastores</a>{{end}}{{if .DeliveryURL}}<a href="{{.DeliveryURL}}">View event delivery health</a>{{end}}</div>
       </form>
-      {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form><form method="post" action="/app/developer/apps/app-token/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Revoke app-level tokens</button></form>{{end}}<form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
+      {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form><form method="post" action="/app/developer/apps/app-token/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Revoke app-level tokens</button></form>{{if .AppTokens}}<div class="app-tokens"><h3 id="app-tokens-heading">Issued app-level tokens</h3><table class="app-token-table" aria-labelledby="app-tokens-heading"><thead><tr><th scope="col">Token</th><th scope="col">Issued</th><th scope="col">Scopes</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>{{range .AppTokens}}<tr{{if .Revoked}} class="token-revoked"{{end}}><td><code>{{.ShortID}}…</code></td><td>{{.IssuedAt}}</td><td>{{if .Scopes}}{{.Scopes}}{{else}}—{{end}}</td><td>{{if .Revoked}}Revoked{{else}}Active{{end}}</td><td>{{if not .Revoked}}<form class="inline" method="post" action="/app/developer/apps/app-token/revoke-one"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{$.Selected.ID}}"><input type="hidden" name="token_id" value="{{.ID}}"><button class="button secondary" type="submit">Revoke</button></form>{{end}}</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}<form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
     </section>
   </div>
 </main>
@@ -254,6 +295,24 @@ func (h Handler) revokeDeveloperAppTokens(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/app/developer/apps?app="+url.QueryEscape(string(appID)), http.StatusSeeOther)
 }
 
+func (h Handler) revokeDeveloperAppToken(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.developerPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The app-level token was not revoked.")
+	if !ok {
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	tokenID := strings.TrimSpace(fields["token_id"])
+	if err := h.Messages.RevokeDeveloperAppToken(r.Context(), principal.WorkspaceID, principal.UserID, appID, tokenID); err != nil {
+		h.writeMutationError(w, r, developerAppStatus(err), "The app-level token was not revoked", developerAppError(err))
+		return
+	}
+	http.Redirect(w, r, "/app/developer/apps?app="+url.QueryEscape(string(appID)), http.StatusSeeOther)
+}
+
 func (h Handler) renderDeveloperAppsWithToken(w http.ResponseWriter, r *http.Request, principal auth.Principal, csrf string, appID domain.AppID, token domain.AppTokenCredentials) {
 	apps, err := h.Messages.ListDeveloperApps(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
@@ -267,6 +326,7 @@ func (h Handler) renderDeveloperAppsWithToken(w http.ResponseWriter, r *http.Req
 	}
 	data := developerAppsData{Apps: apps, Selected: &app, Manifest: manifest, CSRFToken: csrf, Notice: "App-level token generated.", AppToken: &token}
 	setDeveloperAppLinks(&data, app, manifest)
+	data.AppTokens = h.loadDeveloperAppTokens(r, principal, app.ID)
 	h.writeHTML(w, developerAppsTemplate, data, http.StatusCreated, "app console rendering unavailable")
 }
 
@@ -307,6 +367,7 @@ func (h Handler) renderDeveloperApps(w http.ResponseWriter, r *http.Request, pri
 			data.Selected = &app
 			data.Manifest = manifest
 			setDeveloperAppLinks(&data, app, manifest)
+			data.AppTokens = h.loadDeveloperAppTokens(r, principal, app.ID)
 		}
 	}
 	if submittedManifest != "" {

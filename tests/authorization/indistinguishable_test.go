@@ -84,6 +84,8 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"GetListItem":                             {},
 		"IssueDeveloperAppToken":                  {},
 		"RevokeDeveloperAppTokens":                {},
+		"ListDeveloperAppTokens":                  {},
+		"RevokeDeveloperAppToken":                 {},
 		"ListEphemeralMessages":                   {},
 		"LookupCanvasSections":                    {},
 		"OpenAppHome":                             {},
@@ -150,4 +152,12 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // stranger with the same not-found, since the missing object is reached before
 // any standing check. ListItemFiles is not here — like ListItemComments a holder
 // reads an empty list where a stranger is refused, so its refusal distinguishes.
-const indistinguishableRefusalCeiling = 93
+//
+// ListDeveloperAppTokens and RevokeDeveloperAppToken join their siblings
+// IssueDeveloperAppToken and RevokeDeveloperAppTokens: the fixture's app is owned
+// by U-member while the matrix holder is U-owner, so an owner-only developer-app
+// operation refuses the holder and a stranger alike with not-found. Unlike the
+// bulk sibling that lists distinguish here — a holder listing an app they do not
+// own is refused, not shown an empty list — because the not-found is reached at
+// the ownership check, before any token is read.
+const indistinguishableRefusalCeiling = 95

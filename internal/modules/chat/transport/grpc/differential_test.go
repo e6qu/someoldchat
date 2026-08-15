@@ -6384,6 +6384,35 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The inventory lists every token the app issued, named by its hash
+				// rather than the secret. Issue a second so a single revoke can be
+				// seen to leave the other alone. The id is minted per composition, so
+				// compare counts and revoked-flags, not the id's bytes.
+				secondToken, err := chat.IssueDeveloperAppToken(ctx, "T1", "U1", app.ID, []string{"connections:write"})
+				if err != nil {
+					return nil, err
+				}
+				_ = secondToken
+				listed, err := chat.ListDeveloperAppTokens(ctx, "T1", "U1", app.ID)
+				if err != nil {
+					return nil, err
+				}
+				var revokeOneErr error
+				if len(listed) > 0 {
+					revokeOneErr = chat.RevokeDeveloperAppToken(ctx, "T1", "U1", app.ID, listed[0].ID)
+				}
+				afterOne, err := chat.ListDeveloperAppTokens(ctx, "T1", "U1", app.ID)
+				if err != nil {
+					return nil, err
+				}
+				revokedCount := 0
+				for _, summary := range afterOne {
+					if summary.Revoked {
+						revokedCount++
+					}
+				}
+				// An id that names no token of this app is refused like a missing one.
+				strangerRevoke := chat.RevokeDeveloperAppToken(ctx, "T1", "U1", app.ID, "not-a-real-token-id")
 				// Revoking the app's tokens marks the one just issued revoked, which
 				// LookupAppToken — the check every authenticated request runs — reports.
 				if err := chat.RevokeDeveloperAppTokens(ctx, "T1", "U1", app.ID); err != nil {
@@ -6461,7 +6490,7 @@ func parityCases() []parityCase {
 				if err := chat.DeleteDeveloperApp(ctx, rotated.Token, app.ID); err != nil {
 					return nil, err
 				}
-				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
+				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), len(listed), revokeOneErr == nil, revokedCount, strangerRevoke != nil, updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
 					v1Token.AccessToken != "", string(v1Token.TokenType), len(v1Token.Scopes) > 0,
 					openID.IDToken != "", openID.AccessToken != "",
 					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName, revoked.Revoked}, nil

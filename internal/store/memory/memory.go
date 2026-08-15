@@ -1408,6 +1408,47 @@ func (s *Store) RevokeAppToken(_ context.Context, token string) error {
 	return nil
 }
 
+func (s *Store) ListAppTokens(_ context.Context, appID domain.AppID) ([]domain.AppTokenSummary, error) {
+	if appID == "" {
+		return nil, store.InvalidArgument("an app token listing must name an app")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	summaries := make([]domain.AppTokenSummary, 0)
+	for key, record := range s.appTokens {
+		if record.AppID != appID {
+			continue
+		}
+		summaries = append(summaries, domain.AppTokenSummary{
+			ID: key, IssuedAt: record.IssuedAt,
+			Scopes: append([]string(nil), record.Scopes...), Revoked: record.Revoked,
+		})
+	}
+	// Newest first, ties broken by id, matching the SQL profile's ORDER BY.
+	sort.Slice(summaries, func(left, right int) bool {
+		if !summaries[left].IssuedAt.Equal(summaries[right].IssuedAt) {
+			return summaries[left].IssuedAt.After(summaries[right].IssuedAt)
+		}
+		return summaries[left].ID < summaries[right].ID
+	})
+	return summaries, nil
+}
+
+func (s *Store) RevokeAppTokenByID(_ context.Context, appID domain.AppID, id string) error {
+	if appID == "" || strings.TrimSpace(id) == "" {
+		return store.InvalidArgument("an app token revocation must name an app and a token")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.appTokens[id]
+	if !ok || record.AppID != appID {
+		return store.ErrNotFound
+	}
+	record.Revoked = true
+	s.appTokens[id] = record
+	return nil
+}
+
 func (s *Store) SeedSession(_ context.Context, token string, record domain.SessionRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

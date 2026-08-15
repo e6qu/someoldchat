@@ -351,6 +351,92 @@ func TestRevokingAppTokensRefusesNonOwnerAndMarksThemRevoked(t *testing.T) {
 	}
 }
 
+// TestListingAndRevokingASingleAppToken covers the token inventory: an owner
+// lists what their app issued, named by hash and carrying an issue time, and
+// revokes one token without touching the others.
+func TestListingAndRevokingASingleAppToken(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "owner"})
+	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "member"})
+	now := time.Now().UTC()
+	manifest := `{"display_information":{"name":"Sockets"},"settings":{"socket_mode_enabled":true}}`
+	if err := repository.CreateApp(ctx, domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Sockets", ClientID: "client",
+		SigningSecretHash: "hash", SigningSecretCiphertext: "cipher",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "cipher",
+		SocketModeEnabled: true, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "client", SecretHash: "secret", AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: repository}
+	first, err := messages.IssueDeveloperAppToken(ctx, "T1", "U1", "A1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := messages.IssueDeveloperAppToken(ctx, "T1", "U1", "A1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := messages.ListDeveloperAppTokens(ctx, "T1", "U1", "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 2 {
+		t.Fatalf("listed %d tokens, want 2", len(tokens))
+	}
+	for _, summary := range tokens {
+		if summary.Revoked {
+			t.Fatalf("a freshly issued token listed as revoked: %+v", summary)
+		}
+		if summary.IssuedAt.IsZero() {
+			t.Fatalf("a token issued in this test has no issue time: %+v", summary)
+		}
+		// The id is the token's hash, never the secret it lets a client present.
+		if summary.ID == first.Token || summary.ID == second.Token {
+			t.Fatalf("the inventory handed back a token secret as an id: %+v", summary)
+		}
+	}
+	// A member who does not own the app sees nothing and learns nothing.
+	if _, err := messages.ListDeveloperAppTokens(ctx, "T1", "U2", "A1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("non-owner list = %v, want not found", err)
+	}
+	// Revoke exactly the first token by its id; the second stays live.
+	if err := messages.RevokeDeveloperAppToken(ctx, "T1", "U1", "A1", domain.HashToken(first.Token)); err != nil {
+		t.Fatal(err)
+	}
+	if record, err := repository.LookupAppToken(ctx, first.Token); err != nil || !record.Revoked {
+		t.Fatalf("first token after a single revoke: record=%+v err=%v", record, err)
+	}
+	if record, err := repository.LookupAppToken(ctx, second.Token); err != nil || record.Revoked {
+		t.Fatalf("second token revoked by a single revoke of the first: record=%+v err=%v", record, err)
+	}
+	// A non-owner cannot revoke a single token, and a bogus id is refused.
+	if err := messages.RevokeDeveloperAppToken(ctx, "T1", "U2", "A1", domain.HashToken(second.Token)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("non-owner single revoke = %v, want not found", err)
+	}
+	if record, err := repository.LookupAppToken(ctx, second.Token); err != nil || record.Revoked {
+		t.Fatalf("second token revoked by a non-owner: record=%+v err=%v", record, err)
+	}
+	if err := messages.RevokeDeveloperAppToken(ctx, "T1", "U1", "A1", "not-a-real-id"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("bogus id revoke = %v, want not found", err)
+	}
+	// Guard-mutation: a deactivated owner is refused on both list and single
+	// revoke by the workspace-membership guard, not the ownership check, which
+	// still sees them as the owner.
+	if err := repository.SetUserDeleted(ctx, "T1", "U1", true, events.Event{ID: "gone", WorkspaceID: "T1", Topic: "user.removed", Payload: "U1", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.ListDeveloperAppTokens(ctx, "T1", "U1", "A1"); err == nil {
+		t.Fatal("a deactivated owner listed the app's tokens")
+	}
+	if err := messages.RevokeDeveloperAppToken(ctx, "T1", "U1", "A1", domain.HashToken(second.Token)); err == nil {
+		t.Fatal("a deactivated owner revoked a single app token")
+	}
+}
+
 func TestAnAppCanBeRestrictedBeforeItIsInstalled(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()

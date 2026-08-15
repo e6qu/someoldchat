@@ -13282,6 +13282,46 @@ func (r Remote) RevokeDeveloperAppTokens(ctx context.Context, workspaceID domain
 	return nil
 }
 
+func (r Remote) ListDeveloperAppTokens(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) ([]domain.AppTokenSummary, error) {
+	out, err := r.apps.ListDeveloperAppTokens(ctx, &chatv1.AppTokenListRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]domain.AppTokenSummary, 0, len(out.GetTokens()))
+	for _, token := range out.GetTokens() {
+		summaries = append(summaries, decodeProtoAppTokenSummary(token))
+	}
+	return summaries, nil
+}
+
+func (r Remote) RevokeDeveloperAppToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, id string) error {
+	out, err := r.apps.RevokeDeveloperAppToken(ctx, &chatv1.AppTokenRevokeOneRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TokenId: id})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app token revocation was not acknowledged")
+	}
+	return nil
+}
+
+func encodeProtoAppTokenSummary(value domain.AppTokenSummary) *chatv1.AppTokenSummary {
+	return &chatv1.AppTokenSummary{
+		Id: value.ID, IssuedAtUnixNano: unixNanoOrZero(value.IssuedAt),
+		Scopes: append([]string(nil), value.Scopes...), Revoked: value.Revoked,
+	}
+}
+
+func decodeProtoAppTokenSummary(value *chatv1.AppTokenSummary) domain.AppTokenSummary {
+	if value == nil {
+		return domain.AppTokenSummary{}
+	}
+	return domain.AppTokenSummary{
+		ID: value.GetId(), IssuedAt: optionalTimeFromUnixNano(value.GetIssuedAtUnixNano()),
+		Scopes: append([]string(nil), value.GetScopes()...), Revoked: value.GetRevoked(),
+	}
+}
+
 func (r Remote) InspectOAuthAuthorization(ctx context.Context, request domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error) {
 	out, err := r.apps.InspectOAuthAuthorization(ctx, encodeProtoOAuthAuthorizationRequest(request))
 	if err != nil {
@@ -13573,6 +13613,25 @@ func (s *Server) IssueDeveloperAppToken(ctx context.Context, input *chatv1.AppTo
 
 func (s *Server) RevokeDeveloperAppTokens(ctx context.Context, input *chatv1.AppTokenRevokeRequest) (*chatv1.AppMutationResponse, error) {
 	if err := s.implementation.RevokeDeveloperAppTokens(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ListDeveloperAppTokens(ctx context.Context, input *chatv1.AppTokenListRequest) (*chatv1.AppTokenListResponse, error) {
+	values, err := s.implementation.ListDeveloperAppTokens(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	tokens := make([]*chatv1.AppTokenSummary, 0, len(values))
+	for _, value := range values {
+		tokens = append(tokens, encodeProtoAppTokenSummary(value))
+	}
+	return &chatv1.AppTokenListResponse{Tokens: tokens}, nil
+}
+
+func (s *Server) RevokeDeveloperAppToken(ctx context.Context, input *chatv1.AppTokenRevokeOneRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.RevokeDeveloperAppToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTokenId()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.AppMutationResponse{Ok: true}, nil
