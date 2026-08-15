@@ -43,7 +43,7 @@ type Handler struct {
 
 var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
 var immutableCommitRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
-var remindInPattern = regexp.MustCompile(`(?i)^(.*?)\s+in\s+(a|an|[1-9][0-9]*)\s+(minute|minutes|hour|hours|day|days|week|weeks)$`)
+var remindInPattern = regexp.MustCompile(`(?i)^(.*?)\s+in\s+(a|an|[1-9][0-9]*)\s+(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)$`)
 var remindTomorrowPattern = regexp.MustCompile(`(?i)^(.*?)\s+tomorrow(?:\s+at\s+(.+))?$`)
 var remindDatePattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\s+at\s+(.+))?$`)
 var remindWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
@@ -10874,6 +10874,17 @@ func parseChannelReminderExpression(expression string, now time.Time, location *
 			count, _ = strconv.Atoi(quantity)
 		}
 		unit := strings.ToLower(match[3])
+		// A month and a year are calendar steps, not fixed spans: "in 2 months"
+		// keeps the wall-clock time of day and lands on the same day-of-month two
+		// months on, the way AddDate resolves a short month (Jan 31 + 1 month is
+		// early March, matching how "every month" already steps here). The fixed
+		// units stay an absolute duration, as they were.
+		switch {
+		case strings.HasPrefix(unit, "month"):
+			return strings.TrimSpace(match[1]), localNow.AddDate(0, count, 0), domain.ReminderOnce, nil
+		case strings.HasPrefix(unit, "year"):
+			return strings.TrimSpace(match[1]), localNow.AddDate(count, 0, 0), domain.ReminderOnce, nil
+		}
 		duration := time.Duration(count) * time.Minute
 		switch {
 		case strings.HasPrefix(unit, "hour"):
