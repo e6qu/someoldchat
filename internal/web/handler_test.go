@@ -1152,6 +1152,58 @@ func TestListTableViewSortsByColumn(t *testing.T) {
 	requireOrdered(t, "descending by priority", desc, "<td>high</td>", "<td>mid</td>", "<td>low</td>")
 }
 
+// TestListFilterNarrowsItemsAndSurvivesViewSwitch covers filtering: a filter by a
+// select column's value narrows every layout to the matching rows, and it rides
+// each view's own links so switching layout keeps the filter.
+func TestListFilterNarrowsItemsAndSurvivesViewSwitch(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Work", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Status", domain.ListColumnSelect, []string{"open", "done"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, fields := range []string{
+		`[{"column_id":"task","value":"alpha"},{"column_id":"status","value":"open"}]`,
+		`[{"column_id":"task","value":"beta"},{"column_id":"status","value":"done"}]`,
+		`[{"column_id":"task","value":"gamma"},{"column_id":"status","value":"open"}]`,
+	} {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := "/app/lists/" + string(value.ID)
+
+	// The filter control offers the select column's values.
+	unfiltered := get(t, mux, target).Body.String()
+	requireContains(t, "filter control", unfiltered, `class="list-filter"`, "All items", "Status: open", "Status: done")
+
+	// Filtering to open keeps alpha and gamma, drops beta — and the Board and Table
+	// switcher links carry the filter forward.
+	filtered := get(t, mux, target+"?filter=status:open").Body.String()
+	requireContains(t, "filtered list", filtered, "alpha", "gamma", "Clear filter", `filter=status%3Aopen&amp;view=board`)
+	requireMissing(t, "filtered list drops the non-match", filtered, "beta")
+
+	// The filter survives a switch to the board: every remaining item is open, so
+	// the open lane holds both and the done lane is empty.
+	board := get(t, mux, target+"?view=board&filter=status:open").Body.String()
+	requireContains(t, "filtered board", board,
+		`class="lane-head">open <span class="lane-count">2`,
+		`class="lane-head">done <span class="lane-count">0`)
+	requireMissing(t, "filtered board drops the non-match", board, "beta")
+
+	// And a switch to the table keeps it too.
+	table := get(t, mux, target+"?view=table&filter=status:open").Body.String()
+	requireContains(t, "filtered table", table, `<table class="list-table">`, "alpha", "gamma")
+	requireMissing(t, "filtered table drops the non-match", table, "beta")
+}
+
 // TestConversationMemberPanelShowsPresenceAndStatus covers the channel member
 // drawer, a projection surface the timeline change left open: each member row
 // carries a presence dot and their status emoji, resolved to a glyph.
