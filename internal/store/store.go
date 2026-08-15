@@ -1122,6 +1122,12 @@ type Store interface {
 	UpdateListItems(context.Context, []ListItemUpdate) error
 	DeleteListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID, events.Event) error
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.ListID, []domain.ListItemID, events.Event) error
+	// List-item comments mirror canvas comments: read access to the list is
+	// enough to leave one, and only the author deletes it — the author check
+	// lives in the store's write, not the service.
+	CreateListItemComment(context.Context, domain.ListItemComment, events.Event) error
+	DeleteListItemComment(context.Context, domain.WorkspaceID, domain.ListItemCommentID, domain.UserID, events.Event) error
+	ListListItemComments(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, domain.PageRequest) (domain.ListItemCommentPage, error)
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error
 	DeleteListAccess(context.Context, domain.ListAccess, events.Event) error
 	// GetListAccess resolves the effective access one user has to one list.

@@ -55,6 +55,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"AssistantThread":                         {},
 		"CloseView":                               {},
 		"CommentOnCanvas":                         {},
+		"CommentOnListItem":                       {},
 		"CompleteFunction":                        {},
 		"CompleteWorkflowButton":                  {},
 		"ConversationCanvas":                      {},
@@ -64,6 +65,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DeleteCanvas":                            {},
 		"DeleteCanvasAccess":                      {},
 		"DeleteCanvasComment":                     {},
+		"DeleteListItemComment":                   {},
 		"DeleteListAccess":                        {},
 		"DeleteListItems":                         {},
 		"DeleteScheduledUserStatus":               {},
@@ -132,4 +134,12 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // a stranger alike with not-found. Driving it would mean re-owning the fixture
 // app, which several other cases depend on. This is a new operation joining the
 // set, not existing ground lost.
-const indistinguishableRefusalCeiling = 89
+//
+// CommentOnListItem and DeleteListItemComment join for the same reasons their
+// canvas siblings did: commenting and deleting a comment answer a holder who
+// cannot reach the fixture's list exactly as they answer a stranger, and the
+// author-only delete rule lives in the store's write rather than the service.
+// ListItemComments, like CanvasComments, is not here — a holder with list access
+// reads an empty page where a stranger is refused, so its refusal does
+// distinguish.
+const indistinguishableRefusalCeiling = 91

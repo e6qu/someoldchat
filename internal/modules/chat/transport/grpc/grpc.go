@@ -1298,6 +1298,40 @@ func (r Remote) GetListDownload(ctx context.Context, workspaceID domain.Workspac
 	return decodeProtoListDownload(out.GetDownload())
 }
 
+func (r Remote) CommentOnListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, text string) (domain.ListItemComment, error) {
+	out, err := r.lists.CommentOnListItem(ctx, &chatv1.CommentOnListItemRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID), Text: text,
+	})
+	if err != nil {
+		return domain.ListItemComment{}, err
+	}
+	return decodeProtoListItemComment(out), nil
+}
+
+func (r Remote) ListItemComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, request domain.PageRequest) (domain.ListItemCommentPage, error) {
+	out, err := r.lists.ListItemComments(ctx, &chatv1.ListItemCommentsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID),
+		Limit: int32(request.Limit), Cursor: string(request.Cursor),
+	})
+	if err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	return decodeProtoListItemCommentPage(out)
+}
+
+func (r Remote) DeleteListItemComment(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListItemCommentID) error {
+	out, err := r.lists.DeleteListItemComment(ctx, &chatv1.DeleteListItemCommentRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CommentId: string(id),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed delete list item comment response was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) SetFileDescription(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, description string) error {
 	out, err := r.files.SetFileDescription(ctx, &chatv1.SetFileDescriptionRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), FileId: string(fileID), Description: description,
@@ -5474,6 +5508,67 @@ func decodeProtoCanvasCommentPage(value *chatv1.CanvasCommentPage) (domain.Canva
 		comments = append(comments, decodeProtoCanvasComment(comment))
 	}
 	return domain.CanvasCommentPage{Comments: comments, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+}
+
+func (s *Server) CommentOnListItem(ctx context.Context, input *chatv1.CommentOnListItemRequest) (*chatv1.ListItemComment, error) {
+	value, err := s.implementation.CommentOnListItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()), input.GetText())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoListItemComment(value), nil
+}
+
+func (s *Server) ListItemComments(ctx context.Context, input *chatv1.ListItemCommentsRequest) (*chatv1.ListItemCommentPage, error) {
+	value, err := s.implementation.ListItemComments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoListItemCommentPage(value), nil
+}
+
+func (s *Server) DeleteListItemComment(ctx context.Context, input *chatv1.DeleteListItemCommentRequest) (*chatv1.ListOKResponse, error) {
+	if err := s.implementation.DeleteListItemComment(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListItemCommentID(input.GetCommentId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListOKResponse{Ok: true}, nil
+}
+
+func encodeProtoListItemComment(value domain.ListItemComment) *chatv1.ListItemComment {
+	return &chatv1.ListItemComment{
+		Id: string(value.ID), ListId: string(value.ListID), ItemId: string(value.ItemID), WorkspaceId: string(value.WorkspaceID),
+		UserId: string(value.UserID), Text: value.Text,
+		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), Deleted: value.Deleted,
+	}
+}
+
+func decodeProtoListItemComment(value *chatv1.ListItemComment) domain.ListItemComment {
+	if value == nil {
+		return domain.ListItemComment{}
+	}
+	return domain.ListItemComment{
+		ID: domain.ListItemCommentID(value.GetId()), ListID: domain.ListID(value.GetListId()), ItemID: domain.ListItemID(value.GetItemId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Text: value.GetText(),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), Deleted: value.GetDeleted(),
+	}
+}
+
+func encodeProtoListItemCommentPage(value domain.ListItemCommentPage) *chatv1.ListItemCommentPage {
+	comments := make([]*chatv1.ListItemComment, 0, len(value.Comments))
+	for _, comment := range value.Comments {
+		comments = append(comments, encodeProtoListItemComment(comment))
+	}
+	return &chatv1.ListItemCommentPage{Comments: comments, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoListItemCommentPage(value *chatv1.ListItemCommentPage) (domain.ListItemCommentPage, error) {
+	if value == nil {
+		return domain.ListItemCommentPage{}, errors.New("typed list item comment page is incomplete")
+	}
+	comments := make([]domain.ListItemComment, 0, len(value.GetComments()))
+	for _, comment := range value.GetComments() {
+		comments = append(comments, decodeProtoListItemComment(comment))
+	}
+	return domain.ListItemCommentPage{Comments: comments, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
 
 func (s *Server) CanvasGrants(ctx context.Context, input *chatv1.CanvasGrantsRequest) (*chatv1.CanvasGrantsResponse, error) {

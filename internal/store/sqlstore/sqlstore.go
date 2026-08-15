@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 164
+const schemaVersion = 165
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3332,24 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 165 {
+		// Comments anchored to a list item, mirroring canvas comments. The foreign
+		// key is to the list, not the item: read access is a list-level grant, and
+		// keying the item only as text lets a deleted item's comments fall out of
+		// view the way a canvas comment survives its section's removal, without a
+		// foreign key blocking the item delete. Created in the ladder, not the base
+		// schema, so the reference to lists resolves on PostgreSQL.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS list_item_comments (
+			id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), item_id TEXT NOT NULL DEFAULT '',
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			text TEXT NOT NULL, created_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+			return fmt.Errorf("migrate list item comments: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS list_item_comments_item ON list_item_comments(list_id, item_id, id)`); err != nil {
+			return fmt.Errorf("index list item comments: %w", err)
 		}
 	}
 	if version < 164 {
@@ -15323,6 +15341,103 @@ func (s *Store) ListCanvasComments(ctx context.Context, workspace domain.Workspa
 		page.NextCursor, err = domain.NewListCursor(string(page.Comments[len(page.Comments)-1].ID))
 		if err != nil {
 			return domain.CanvasCommentPage{}, err
+		}
+	}
+	return page, nil
+}
+
+func (s *Store) CreateListItemComment(ctx context.Context, comment domain.ListItemComment, event events.Event) error {
+	if comment.ID == "" || comment.ListID == "" || comment.ItemID == "" || comment.UserID == "" || strings.TrimSpace(comment.Text) == "" {
+		return store.InvalidArgument("a list item comment requires an identifier, a list, an item, an author and text")
+	}
+	visible, err := s.listVisible(ctx, comment.WorkspaceID, comment.UserID, comment.ListID)
+	if err != nil {
+		return err
+	}
+	if !visible {
+		return store.ErrNotFound
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_item_comments(id, list_id, item_id, workspace_id, user_id, text, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+		comment.ID, comment.ListID, comment.ItemID, comment.WorkspaceID, comment.UserID, comment.Text, comment.CreatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteListItemComment mirrors DeleteCanvasComment: the author check is inside
+// the statement, so the permission cannot be lost between reading it and acting.
+func (s *Store) DeleteListItemComment(ctx context.Context, workspace domain.WorkspaceID, id domain.ListItemCommentID, author domain.UserID, event events.Event) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE list_item_comments SET deleted = 1 WHERE id = ? AND workspace_id = ? AND user_id = ? AND deleted = 0`, id, workspace, author)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ListListItemComments reads one item's comments oldest first.
+func (s *Store) ListListItemComments(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, listID domain.ListID, itemID domain.ListItemID, request domain.PageRequest) (domain.ListItemCommentPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	visible, err := s.listVisible(ctx, workspace, user, listID)
+	if err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	if !visible {
+		return domain.ListItemCommentPage{}, store.ErrNotFound
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, list_id, item_id, workspace_id, user_id, text, created_at FROM list_item_comments
+		WHERE list_id = ? AND item_id = ? AND workspace_id = ? AND deleted = 0 AND id > ? ORDER BY id LIMIT ?`, listID, itemID, workspace, after, request.Limit+1)
+	if err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	values := make([]domain.ListItemComment, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.ListItemComment
+		var created int64
+		if err := rows.Scan(&value.ID, &value.ListID, &value.ItemID, &value.WorkspaceID, &value.UserID, &value.Text, &created); err != nil {
+			rows.Close()
+			return domain.ListItemCommentPage{}, err
+		}
+		value.CreatedAt = time.Unix(0, created).UTC()
+		values = append(values, value)
+	}
+	if err := closeRows(rows); err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	page := domain.ListItemCommentPage{Comments: values, HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		page.Comments = page.Comments[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(string(page.Comments[len(page.Comments)-1].ID))
+		if err != nil {
+			return domain.ListItemCommentPage{}, err
 		}
 	}
 	return page, nil

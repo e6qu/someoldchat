@@ -4,10 +4,39 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
+
+// TestADeactivatedAuthorCannotDeleteTheirCanvasComment makes the
+// workspace-membership guard on DeleteCanvasComment load-bearing. The store still
+// recognises the deactivated user as the comment's author, so its author-only
+// WHERE clause would still delete for them; only the service guard refuses a
+// removed member. Without this the guard was shadowed by that clause and survived
+// mutation — the same shape the list-item delete guard is proven against.
+func TestADeactivatedAuthorCannotDeleteTheirCanvasComment(t *testing.T) {
+	ctx, repository, messages := canvasWorld(t)
+	canvas, err := messages.CreateCanvas(ctx, "T1", "U1", "Under review", `{"type":"markdown","markdown":"the proposal"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	comment, err := messages.CommentOnCanvas(ctx, "T1", "U2", canvas.ID, "", "a remark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetUserDeleted(ctx, "T1", "U2", true, events.Event{ID: "gone", WorkspaceID: "T1", Topic: "user.removed", Payload: "U2", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DeleteCanvasComment(ctx, "T1", "U2", comment.ID); err == nil {
+		t.Fatal("a deactivated author deleted their canvas comment")
+	}
+}
 
 // Commenting needs read access, not write. A canvas shared for review that only
 // its editors could discuss would make review impossible, which is the opposite

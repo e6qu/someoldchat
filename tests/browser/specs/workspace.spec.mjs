@@ -3600,7 +3600,7 @@ test('[LIST-01 A11Y-01] a column can be declared from the list page', async ({ p
   await expect(page.getByText('The column was not added')).toBeVisible();
 });
 
-test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', async ({ page, context, request }) => {
+test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces them, and an item can be commented on', async ({ page, context, request }) => {
   await signIn(context);
   const name = `Launch plan ${Date.now()}`;
   const created = await request.post('/api/slackLists.create', {
@@ -3678,6 +3678,16 @@ test('[LIST-01 A11Y-01] a list with declared columns shows and enforces them', a
   await expect(page.getByText('ship it')).toHaveCount(0); // the only item is open
   await page.getByRole('link', { name: 'Clear filter' }).click();
   await expect(page.getByText('ship it')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // [LIST-02] An item opens on its own page, where a reader can comment on it,
+  // and that page is itself keyboard and screen-reader usable.
+  await page.getByRole('link', { name: 'Open' }).first().click();
+  await expect(page).toHaveURL(/\/app\/lists\/.*\/items\//);
+  await expect(page.getByRole('heading', { name: 'Comments' })).toBeVisible();
+  await page.getByLabel('Add a comment').fill('who owns this incident');
+  await page.getByRole('button', { name: 'Add comment' }).click();
+  await expect(page.getByText('who owns this incident')).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 });
 

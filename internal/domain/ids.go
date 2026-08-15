@@ -20,6 +20,7 @@ type CanvasID string
 type ListID string
 type ListItemID string
 type ListDownloadID string
+type ListItemCommentID string
 type FileCommentID string
 type CanvasCommentID string
 type ExternalUploadID string
