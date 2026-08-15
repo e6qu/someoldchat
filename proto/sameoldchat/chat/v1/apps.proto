@@ -104,6 +104,30 @@ message AppTokenCredentials {
   repeated string scopes = 3;
 }
 
+message AppTokenSummary {
+  string id = 1;
+  int64 issued_at_unix_nano = 2;
+  repeated string scopes = 3;
+  bool revoked = 4;
+}
+
+message AppTokenListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
+message AppTokenListResponse {
+  repeated AppTokenSummary tokens = 1;
+}
+
+message AppTokenRevokeOneRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string token_id = 4;
+}
+
 message AppDeliveryHealth {
   string app_id = 1;
   string surface = 2;
@@ -361,6 +385,8 @@ service AppsService {
   rpc GetDeveloperAppDeliveryHealth(AppGetRequest) returns (AppDeliveryHealth);
   rpc IssueDeveloperAppToken(AppTokenIssueRequest) returns (AppTokenCredentials);
   rpc RevokeDeveloperAppTokens(AppTokenRevokeRequest) returns (AppMutationResponse);
+  rpc ListDeveloperAppTokens(AppTokenListRequest) returns (AppTokenListResponse);
+  rpc RevokeDeveloperAppToken(AppTokenRevokeOneRequest) returns (AppMutationResponse);
   rpc InspectOAuthAuthorization(OAuthAuthorizationRequest) returns (OAuthAuthorization);
   rpc AuthorizeOAuth(OAuthAuthorizationRequest) returns (OAuthAuthorization);
 }

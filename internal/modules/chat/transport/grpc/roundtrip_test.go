@@ -378,6 +378,7 @@ func conversionCases() map[string]conversionCase {
 		"ExternalTeam":     {sample: &domain.ExternalTeam{}, through: throughInfallible(encodeProtoExternalTeam, decodeProtoExternalTeam)},
 		"ExternalTeamPage": {sample: &domain.ExternalTeamPage{Teams: []domain.ExternalTeam{{}}}, through: throughInfallible(encodeProtoExternalTeamPage, decodeProtoExternalTeamPage)},
 		"AppFunction":      {sample: &domain.AppFunction{}, through: throughInfallible(encodeProtoAppFunction, decodeProtoAppFunction)},
+		"AppTokenSummary":  {sample: &domain.AppTokenSummary{}, through: throughInfallible(encodeProtoAppTokenSummary, decodeProtoAppTokenSummary)},
 		"AppFunctions": {
 			sample: &appFunctionsRoundTrip{},
 			through: func(t *testing.T, filled any) (any, proto.Message, error) {

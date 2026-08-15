@@ -645,10 +645,46 @@ func (m Messages) IssueDeveloperAppToken(ctx context.Context, workspaceID domain
 	if err != nil {
 		return domain.AppTokenCredentials{}, err
 	}
-	if err := m.Store.CreateAppToken(ctx, token, domain.AppTokenRecord{AppID: appID, Scopes: scopes}); err != nil {
+	if err := m.Store.CreateAppToken(ctx, token, domain.AppTokenRecord{AppID: appID, Scopes: scopes, IssuedAt: time.Now().UTC()}); err != nil {
 		return domain.AppTokenCredentials{}, err
 	}
 	return domain.AppTokenCredentials{Token: token, AppID: appID, Scopes: scopes}, nil
+}
+
+// ListDeveloperAppTokens reports the app-level tokens an app has issued to its
+// owner, each named by its stored hash rather than the secret and carrying its
+// issue time and whether it is already revoked. The authority is the same as
+// issuing and bulk-revoking one — the app's owner in its development workspace.
+func (m Messages) ListDeveloperAppTokens(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) ([]domain.AppTokenSummary, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	app, _, err := m.Store.GetApp(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if app.DevelopmentWorkspaceID != workspaceID || app.OwnerID != userID {
+		return nil, store.ErrNotFound
+	}
+	return m.Store.ListAppTokens(ctx, appID)
+}
+
+// RevokeDeveloperAppToken revokes a single one of an app's tokens by its id,
+// leaving the app's other tokens working. It sits beside the bulk revocation
+// under the same owner authority; an id that names no token of this app answers
+// as a missing one does, so it cannot be used to probe another app's tokens.
+func (m Messages) RevokeDeveloperAppToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, id string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	app, _, err := m.Store.GetApp(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if app.DevelopmentWorkspaceID != workspaceID || app.OwnerID != userID {
+		return store.ErrNotFound
+	}
+	return m.Store.RevokeAppTokenByID(ctx, appID, id)
 }
 
 // RevokeDeveloperAppTokens invalidates every app-level token an app has issued.

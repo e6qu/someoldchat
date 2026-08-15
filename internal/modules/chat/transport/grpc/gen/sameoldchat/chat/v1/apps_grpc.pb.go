@@ -49,6 +49,8 @@ const (
 	AppsService_GetDeveloperAppDeliveryHealth_FullMethodName = "/sameoldchat.chat.v1.AppsService/GetDeveloperAppDeliveryHealth"
 	AppsService_IssueDeveloperAppToken_FullMethodName        = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
 	AppsService_RevokeDeveloperAppTokens_FullMethodName      = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppTokens"
+	AppsService_ListDeveloperAppTokens_FullMethodName        = "/sameoldchat.chat.v1.AppsService/ListDeveloperAppTokens"
+	AppsService_RevokeDeveloperAppToken_FullMethodName       = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppToken"
 	AppsService_InspectOAuthAuthorization_FullMethodName     = "/sameoldchat.chat.v1.AppsService/InspectOAuthAuthorization"
 	AppsService_AuthorizeOAuth_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AuthorizeOAuth"
 )
@@ -87,6 +89,8 @@ type AppsServiceClient interface {
 	GetDeveloperAppDeliveryHealth(ctx context.Context, in *AppGetRequest, opts ...grpc.CallOption) (*AppDeliveryHealth, error)
 	IssueDeveloperAppToken(ctx context.Context, in *AppTokenIssueRequest, opts ...grpc.CallOption) (*AppTokenCredentials, error)
 	RevokeDeveloperAppTokens(ctx context.Context, in *AppTokenRevokeRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	ListDeveloperAppTokens(ctx context.Context, in *AppTokenListRequest, opts ...grpc.CallOption) (*AppTokenListResponse, error)
+	RevokeDeveloperAppToken(ctx context.Context, in *AppTokenRevokeOneRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	InspectOAuthAuthorization(ctx context.Context, in *OAuthAuthorizationRequest, opts ...grpc.CallOption) (*OAuthAuthorization, error)
 	AuthorizeOAuth(ctx context.Context, in *OAuthAuthorizationRequest, opts ...grpc.CallOption) (*OAuthAuthorization, error)
 }
@@ -399,6 +403,26 @@ func (c *appsServiceClient) RevokeDeveloperAppTokens(ctx context.Context, in *Ap
 	return out, nil
 }
 
+func (c *appsServiceClient) ListDeveloperAppTokens(ctx context.Context, in *AppTokenListRequest, opts ...grpc.CallOption) (*AppTokenListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppTokenListResponse)
+	err := c.cc.Invoke(ctx, AppsService_ListDeveloperAppTokens_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) RevokeDeveloperAppToken(ctx context.Context, in *AppTokenRevokeOneRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_RevokeDeveloperAppToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *appsServiceClient) InspectOAuthAuthorization(ctx context.Context, in *OAuthAuthorizationRequest, opts ...grpc.CallOption) (*OAuthAuthorization, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(OAuthAuthorization)
@@ -453,6 +477,8 @@ type AppsServiceServer interface {
 	GetDeveloperAppDeliveryHealth(context.Context, *AppGetRequest) (*AppDeliveryHealth, error)
 	IssueDeveloperAppToken(context.Context, *AppTokenIssueRequest) (*AppTokenCredentials, error)
 	RevokeDeveloperAppTokens(context.Context, *AppTokenRevokeRequest) (*AppMutationResponse, error)
+	ListDeveloperAppTokens(context.Context, *AppTokenListRequest) (*AppTokenListResponse, error)
+	RevokeDeveloperAppToken(context.Context, *AppTokenRevokeOneRequest) (*AppMutationResponse, error)
 	InspectOAuthAuthorization(context.Context, *OAuthAuthorizationRequest) (*OAuthAuthorization, error)
 	AuthorizeOAuth(context.Context, *OAuthAuthorizationRequest) (*OAuthAuthorization, error)
 }
@@ -553,6 +579,12 @@ func (UnimplementedAppsServiceServer) IssueDeveloperAppToken(context.Context, *A
 }
 func (UnimplementedAppsServiceServer) RevokeDeveloperAppTokens(context.Context, *AppTokenRevokeRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevokeDeveloperAppTokens not implemented")
+}
+func (UnimplementedAppsServiceServer) ListDeveloperAppTokens(context.Context, *AppTokenListRequest) (*AppTokenListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDeveloperAppTokens not implemented")
+}
+func (UnimplementedAppsServiceServer) RevokeDeveloperAppToken(context.Context, *AppTokenRevokeOneRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeDeveloperAppToken not implemented")
 }
 func (UnimplementedAppsServiceServer) InspectOAuthAuthorization(context.Context, *OAuthAuthorizationRequest) (*OAuthAuthorization, error) {
 	return nil, status.Error(codes.Unimplemented, "method InspectOAuthAuthorization not implemented")
@@ -1120,6 +1152,42 @@ func _AppsService_RevokeDeveloperAppTokens_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AppsService_ListDeveloperAppTokens_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppTokenListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).ListDeveloperAppTokens(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_ListDeveloperAppTokens_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).ListDeveloperAppTokens(ctx, req.(*AppTokenListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_RevokeDeveloperAppToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppTokenRevokeOneRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).RevokeDeveloperAppToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_RevokeDeveloperAppToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).RevokeDeveloperAppToken(ctx, req.(*AppTokenRevokeOneRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AppsService_InspectOAuthAuthorization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(OAuthAuthorizationRequest)
 	if err := dec(in); err != nil {
@@ -1282,6 +1350,14 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeDeveloperAppTokens",
 			Handler:    _AppsService_RevokeDeveloperAppTokens_Handler,
+		},
+		{
+			MethodName: "ListDeveloperAppTokens",
+			Handler:    _AppsService_ListDeveloperAppTokens_Handler,
+		},
+		{
+			MethodName: "RevokeDeveloperAppToken",
+			Handler:    _AppsService_RevokeDeveloperAppToken_Handler,
 		},
 		{
 			MethodName: "InspectOAuthAuthorization",

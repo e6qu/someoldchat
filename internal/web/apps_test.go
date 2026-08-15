@@ -71,6 +71,27 @@ func TestDeveloperAppConsoleCoversCreateEditInstallTokensAndDelete(t *testing.T)
 	if record, err := repository.LookupAppToken(context.Background(), appToken); err != nil || record.AppID != appID || strings.Join(record.Scopes, " ") != "connections:write" {
 		t.Fatalf("app token record=%+v err=%v", record, err)
 	}
+	// The issued token appears in the app's inventory, named by its hash prefix
+	// (never the secret), active, with a per-token revoke control.
+	requireContains(t, "token inventory", appTokenResponse.Body.String(),
+		"Issued app-level tokens", "/app/developer/apps/app-token/revoke-one", "Active", domain.HashToken(appToken)[:12])
+
+	// Revoking that one token by its id marks it revoked without removing it from
+	// the inventory, where it now reads as revoked with no revoke control.
+	revokeOne := postForm(t, mux, "/app/developer/apps/app-token/revoke-one",
+		url.Values{"app_id": {string(appID)}, "token_id": {domain.HashToken(appToken)}}.Encode(), false)
+	if revokeOne.Code != http.StatusSeeOther {
+		t.Fatalf("revoke-one status=%d body=%s", revokeOne.Code, revokeOne.Body)
+	}
+	if record, err := repository.LookupAppToken(context.Background(), appToken); err != nil || !record.Revoked {
+		t.Fatalf("token after single revoke: record=%+v err=%v", record, err)
+	}
+	afterRevoke := get(t, mux, "/app/developer/apps?app="+url.QueryEscape(string(appID)))
+	requireContains(t, "revoked token still listed", afterRevoke.Body.String(),
+		"Issued app-level tokens", "Revoked", domain.HashToken(appToken)[:12])
+	// The reloaded inventory names the token by its hash and never carries the
+	// secret — that is shown only once, at issuance.
+	requireMissing(t, "reloaded inventory hides the secret", afterRevoke.Body.String(), appToken[len("xapp-"):])
 
 	configuration := postForm(t, mux, "/app/developer/apps/configuration-token", "", false)
 	if configuration.Code != http.StatusCreated {

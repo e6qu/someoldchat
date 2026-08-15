@@ -265,6 +265,14 @@ type Store interface {
 	// for. It is idempotent: revoking again, or an app that never issued one,
 	// is not an error.
 	RevokeAppTokens(context.Context, domain.AppID) error
+	// ListAppTokens reports an app's issued tokens to its owner, each named by
+	// the stored hash rather than the secret, newest first. Revoked tokens are
+	// included so the owner sees a revocation took effect.
+	ListAppTokens(context.Context, domain.AppID) ([]domain.AppTokenSummary, error)
+	// RevokeAppTokenByID revokes one of an app's tokens by its hash id. Scoping
+	// the update by app id keeps an owner to their own app's tokens; an id that
+	// names no token of the app is store.ErrNotFound.
+	RevokeAppTokenByID(context.Context, domain.AppID, string) error
 	LookupSession(context.Context, string) (domain.SessionRecord, error)
 	CreateSession(context.Context, string, domain.SessionRecord) error
 	// GetAuthMethod reports the persisted ADMINISTRATIVE OVERRIDE for one

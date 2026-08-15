@@ -717,6 +717,22 @@ type AppTokenRecord struct {
 	AppID   AppID
 	Scopes  []string
 	Revoked bool
+	// IssuedAt is when the token was minted. Tokens created before this was
+	// recorded carry the zero time, which reads as unknown; inventing an issue
+	// time for them would be worse than admitting it was never recorded.
+	IssuedAt time.Time
+}
+
+// AppTokenSummary is one app-level token as its app's owner sees it in the
+// inventory. Like a WorkspaceSession it is named by the stored hash of the
+// token, never the token: an owner needs to tell two tokens apart and revoke
+// one, and neither needs the credential. Handing back the token would turn
+// listing an app's tokens into a way to obtain them.
+type AppTokenSummary struct {
+	ID       string
+	IssuedAt time.Time
+	Scopes   []string
+	Revoked  bool
 }
 
 type AppTokenCredentials struct {
