@@ -1379,6 +1379,61 @@ func TestConversationMemberPanelShowsPresenceAndStatus(t *testing.T) {
 		`<li class="conversation-member"><span class="presence `)
 }
 
+// A search hit shows its author's current status beside their name, the same
+// projection the timeline makes, so a result reads like the message does.
+func TestSearchResultsProjectTheAuthorStatus(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "builder", RealName: "Bob Builder",
+		Profile: domain.UserProfile{StatusEmoji: ":tada:", StatusText: "Shipping"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{ID: "Mstatus", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U2", Text: "searchable hello from bob", CreatedAt: time.Unix(1_700_000_000, 0).UTC()}
+	event := events.Event{ID: "EMstatus", WorkspaceID: "T1", Topic: "message.created", Payload: "Mstatus", CreatedAt: message.CreatedAt}
+	if err := s.CreateMessage(context.Background(), message, event, ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app/search?q=hello&channel=Cdev").Body.String()
+	requireContains(t, "search result projects the author status", body,
+		`<span class="author-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`)
+}
+
+// A one-to-one DM's header is a person, so it carries that person's current
+// status the way every other surface does. A group DM has no single status.
+func TestDirectMessageHeaderProjectsTheOtherMembersStatus(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "builder", RealName: "Bob Builder",
+		Profile: domain.UserProfile{StatusEmoji: ":tada:", StatusText: "Shipping"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.SeedConversation(domain.Conversation{ID: "Cdm", WorkspaceID: "T1", Kind: domain.ConversationTypeIM})
+	if err := s.SeedConversationMember("Cdm", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdm", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdm").Body.String()
+	requireContains(t, "DM header names the other person and their status", body,
+		`<h1 class="channel-title">Bob Builder<span class="channel-title-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`)
+
+	// A group DM shows the joined names and no single status.
+	if err := s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", RealName: "Carol Coder",
+		Profile: domain.UserProfile{StatusEmoji: ":rocket:", StatusText: "Heads down"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.SeedConversation(domain.Conversation{ID: "Cmpim", WorkspaceID: "T1", Kind: domain.ConversationTypeMPIM})
+	for _, member := range []domain.UserID{"U1", "U2", "U3"} {
+		if err := s.SeedConversationMember("Cmpim", member); err != nil {
+			t.Fatal(err)
+		}
+	}
+	group := get(t, mux, "/app?channel=Cmpim").Body.String()
+	requireMissing(t, "a group DM shows no single member's status", group, `<span class="channel-title-status"`)
+}
+
 func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	if err := s.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "helper-bot", RealName: "Helper Bot"}); err != nil {
