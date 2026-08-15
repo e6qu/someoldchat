@@ -27,4 +27,11 @@ package mutation
 // A service test that deactivates the owner and asserts the refusal makes that
 // job load-bearing, and it does so for the pre-existing IssueDeveloperAppToken
 // too, so the pair left the set together rather than one joining it.
+//
+// Adding list-item comments held the number here rather than raising it. Their
+// read guard is shadowed by the store's access check exactly as CanvasComments'
+// is, so ListItemComments joins the set; but the same deactivated-author test
+// that makes DeleteListItemComment load-bearing was applied to the pre-existing
+// DeleteCanvasComment too, which was surviving for the identical reason, so one
+// operation left the set as one joined it.
 const survivingGuardCeiling = 82

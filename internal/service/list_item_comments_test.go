@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
@@ -85,6 +87,55 @@ func TestListItemCommentsAreInvisibleWithoutListAccess(t *testing.T) {
 	}
 	if _, err := messages.CommentOnListItem(ctx, "T1", "U3", listID, itemID, "hello"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a stranger commented: %v", err)
+	}
+}
+
+// TestDeactivatedListMembersLoseTheirCommentGuards makes the workspace-membership
+// guards on reading and deleting comments load-bearing rather than shadowed by
+// the store. A deactivated member keeps their read grant and their authorship, so
+// the store's grant check and the delete's author check both still match them —
+// only the service's active-membership guard stands between a removed member and
+// the comments, so removing it must be caught here.
+func TestDeactivatedListMembersLoseTheirCommentGuards(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Workspace"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	messages := Messages{Store: repository}
+	list, err := messages.CreateList(ctx, "T1", "U1", "Incidents", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "Title", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	item, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the outage"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetListAccess(ctx, "T1", "U1", list.ID, domain.AccessRead, nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	comment, err := messages.CommentOnListItem(ctx, "T1", "U2", list.ID, item.ID, "a remark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deactivate the owner and the author. The store still recognises U1 as the
+	// list's owner and U2 as the comment's author regardless of their standing, so
+	// the read guard (which U1's ownership would otherwise carry through the store)
+	// and the delete guard (which U2's authorship would) are the only thing left
+	// refusing a removed member.
+	for _, gone := range []domain.UserID{"U1", "U2"} {
+		if err := repository.SetUserDeleted(ctx, "T1", gone, true, events.Event{ID: domain.EventID("gone-" + string(gone)), WorkspaceID: "T1", Topic: "user.removed", Payload: string(gone), CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := messages.ListItemComments(ctx, "T1", "U1", list.ID, item.ID, domain.PageRequest{Limit: 10}); err == nil {
+		t.Fatal("a deactivated owner read the item's comments")
+	}
+	if err := messages.DeleteListItemComment(ctx, "T1", "U2", comment.ID); err == nil {
+		t.Fatal("a deactivated author deleted their comment")
 	}
 }
 
