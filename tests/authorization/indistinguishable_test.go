@@ -66,6 +66,8 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DeleteCanvasAccess":                      {},
 		"DeleteCanvasComment":                     {},
 		"DeleteListItemComment":                   {},
+		"AttachFileToListItem":                    {},
+		"DetachFileFromListItem":                  {},
 		"DeleteListAccess":                        {},
 		"DeleteListItems":                         {},
 		"DeleteScheduledUserStatus":               {},
@@ -142,4 +144,10 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // ListItemComments, like CanvasComments, is not here — a holder with list access
 // reads an empty page where a stranger is refused, so its refusal does
 // distinguish.
-const indistinguishableRefusalCeiling = 91
+//
+// AttachFileToListItem and DetachFileFromListItem join for the same structural
+// reason: with no attachment on the fixture's item, both answer the holder and a
+// stranger with the same not-found, since the missing object is reached before
+// any standing check. ListItemFiles is not here — like ListItemComments a holder
+// reads an empty list where a stranger is refused, so its refusal distinguishes.
+const indistinguishableRefusalCeiling = 93

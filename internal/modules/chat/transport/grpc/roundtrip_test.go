@@ -408,6 +408,7 @@ func conversionCases() map[string]conversionCase {
 		"CanvasCommentPage":   {sample: &domain.CanvasCommentPage{}, through: through(encodeProtoCanvasCommentPage, decodeProtoCanvasCommentPage)},
 		"ListItemComment":     {sample: &domain.ListItemComment{}, through: throughInfallible(encodeProtoListItemComment, decodeProtoListItemComment)},
 		"ListItemCommentPage": {sample: &domain.ListItemCommentPage{}, through: through(encodeProtoListItemCommentPage, decodeProtoListItemCommentPage)},
+		"ListItemFile":        {sample: &domain.ListItemFile{}, through: throughInfallible(encodeProtoListItemFile, decodeProtoListItemFile)},
 		"CanvasRevision":      {sample: &domain.CanvasRevision{}, through: throughInfallible(encodeProtoCanvasRevision, decodeProtoCanvasRevision)},
 		"CanvasRevisionPage":  {sample: &domain.CanvasRevisionPage{}, through: through(encodeProtoCanvasRevisionPage, decodeProtoCanvasRevisionPage)},
 		"ListItemSummary": {

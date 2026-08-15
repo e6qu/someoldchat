@@ -174,6 +174,16 @@ for later steps and conditions to read.
   "title", the column substituted for a schema-less list, so every list that
   declared its own primary column rendered items blank whenever the row was
   not drawn as cells.
+- An item carries files. A list editor uploads a file onto the item; every
+  reader of the list can then download it, though the file is shared into no
+  conversation. This is the first file-to-non-message attachment in the
+  product, so the file-access check — which until now granted the uploader and
+  anyone in a channel the file was shared into — gains one branch: a file is
+  also readable by anyone who may read a list it is attached to. Detaching
+  removes the association, not the file: it stays available to its uploader and
+  anywhere else it is shared, and the reader who reached it only through the
+  list loses that access again. Attaching and detaching are edits, so they take
+  write access; downloading takes only the read access the item is read under.
 - A list item can be deleted, separately from being completed: completing
   hides it reversibly, deleting does not, so it is its own control saying so.
   A batch naming an item that is not there deletes none of them. An assignment

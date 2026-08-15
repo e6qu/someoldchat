@@ -1846,6 +1846,21 @@ type ListItemCommentPage struct {
 	HasMore    bool
 }
 
+// ListItemFile records that a file is attached to one item of a list. It is the
+// product's first file-to-non-message association: unlike a message's files it
+// carries no conversation share, so the readers of the bytes are exactly the
+// readers of the list. A list editor attaches and detaches; every list reader
+// can then download, resolved in authorizeFileAccess through the same list
+// grants the item itself is read under.
+type ListItemFile struct {
+	ID          ListItemFileID
+	ListID      ListID
+	ItemID      ListItemID
+	WorkspaceID WorkspaceID
+	FileID      FileID
+	CreatedAt   time.Time
+}
+
 type CanvasRevisionPage struct {
 	Revisions  []CanvasRevision
 	NextCursor Cursor

@@ -4572,6 +4572,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/lists/{listID}/items/{itemID}", h.listItemPage)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/comments", h.commentOnListItem)
 	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/comments/{commentID}/delete", h.deleteListItemComment)
+	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/files", h.attachFileToListItem)
+	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/files/{fileID}/detach", h.detachFileFromListItem)
 	mux.HandleFunc("GET /app/workflows", h.workflows)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/stop", h.stopWorkflow)
 	mux.HandleFunc("POST /app/workflows/create", h.createWorkflow)

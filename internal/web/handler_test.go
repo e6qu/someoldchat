@@ -1288,6 +1288,78 @@ func TestListItemPageShowsAndAcceptsComments(t *testing.T) {
 	requireMissing(t, "comment gone", after, "who owns this")
 }
 
+// TestListItemPageAttachesAndServesFiles covers the item page's files section:
+// an editor uploads a file onto the item, every reader can download it though it
+// was shared into no channel, and detaching removes it again.
+func TestListItemPageAttachesAndServesFiles(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Assets", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/app/lists/" + string(value.ID) + "/items/" + string(item.ID)
+
+	// The item page shows an empty files section with an upload control for the
+	// editor.
+	requireContains(t, "empty files section", get(t, mux, base).Body.String(),
+		"Files", "No files attached.", "Attach file", `enctype="multipart/form-data"`)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("_csrf", auth.CSRFToken("session")); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("file", "diagram.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("the architecture")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, base+"/files", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	addBrowserCookies(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("attach status=%d body=%s", response.Code, response.Body)
+	}
+
+	page := get(t, mux, base).Body.String()
+	requireContains(t, "attached file shows with download and remove", page, "diagram.txt", "/app/files/", "Remove")
+	requireMissing(t, "no longer empty", page, "No files attached.")
+
+	download := regexp.MustCompile(`/app/files/([^/"]+)"`).FindStringSubmatch(page)
+	if len(download) != 2 {
+		t.Fatalf("no download link: %s", page)
+	}
+	served := get(t, mux, "/app/files/"+download[1])
+	if served.Code != http.StatusOK || served.Body.String() != "the architecture" {
+		t.Fatalf("download status=%d body=%q", served.Code, served.Body.String())
+	}
+
+	detach := regexp.MustCompile(`/files/([^/"]+)/detach`).FindStringSubmatch(page)
+	if len(detach) != 2 {
+		t.Fatalf("no detach control: %s", page)
+	}
+	if r := postForm(t, mux, base+"/files/"+detach[1]+"/detach", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("detach status=%d body=%s", r.Code, r.Body)
+	}
+	requireContains(t, "file gone", get(t, mux, base).Body.String(), "No files attached.")
+}
+
 // TestConversationMemberPanelShowsPresenceAndStatus covers the channel member
 // drawer, a projection surface the timeline change left open: each member row
 // carries a presence dot and their status emoji, resolved to a glyph.

@@ -1128,6 +1128,20 @@ type Store interface {
 	CreateListItemComment(context.Context, domain.ListItemComment, events.Event) error
 	DeleteListItemComment(context.Context, domain.WorkspaceID, domain.ListItemCommentID, domain.UserID, events.Event) error
 	ListListItemComments(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, domain.PageRequest) (domain.ListItemCommentPage, error)
+	// AttachListItemFile records that a file is attached to a list item. The
+	// list-write authority lives in the service; the store gates on list
+	// readability only, the same floor a comment create gets.
+	AttachListItemFile(context.Context, domain.ListItemFile, events.Event) error
+	// DetachListItemFile removes one file's attachment from a list item.
+	DetachListItemFile(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID, domain.FileID, events.Event) error
+	// ListItemFiles returns the files attached to one item, readable under the
+	// list's read access.
+	ListItemFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID) ([]domain.File, error)
+	// FileReadableViaListItem reports whether a file is attached to a list item
+	// on a list the user may read. It is the join between the file-access model
+	// (conversation-share based) and the list-access model that lets a list
+	// reader download an attachment that was never shared into any channel.
+	FileReadableViaListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (bool, error)
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error
 	DeleteListAccess(context.Context, domain.ListAccess, events.Event) error
 	// GetListAccess resolves the effective access one user has to one list.

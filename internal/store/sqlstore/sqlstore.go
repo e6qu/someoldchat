@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 165
+const schemaVersion = 166
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3332,29 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 166 {
+		// Files attached to a list item — the product's first file-to-non-message
+		// association. The foreign key to files(id) keeps an attachment honest, but
+		// item_id is plain text like a list item comment's so deleting the item
+		// never foreign-key-blocks. The (list_id, item_id, file_id) uniqueness makes
+		// attaching the same file to the same row twice a no-op rather than a double
+		// listing. The file_id index serves FileReadableViaListItem, the join that
+		// lets a list reader download an attachment shared into no conversation.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS list_item_files (
+			id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), item_id TEXT NOT NULL DEFAULT '',
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), file_id TEXT NOT NULL REFERENCES files(id),
+			created_at INTEGER NOT NULL,
+			UNIQUE(list_id, item_id, file_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate list item files: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS list_item_files_item ON list_item_files(list_id, item_id, id)`); err != nil {
+			return fmt.Errorf("index list item files by item: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS list_item_files_file ON list_item_files(file_id)`); err != nil {
+			return fmt.Errorf("index list item files by file: %w", err)
 		}
 	}
 	if version < 165 {
@@ -15441,6 +15464,135 @@ func (s *Store) ListListItemComments(ctx context.Context, workspace domain.Works
 		}
 	}
 	return page, nil
+}
+
+// AttachListItemFile records that a file is attached to a list item. The store
+// enforces only data integrity — the file must exist in the same workspace; the
+// (list_id, item_id, file_id) uniqueness makes a repeat attach an already-exists
+// no-op. List-write authority is the service's requireListAccess, kept out of
+// here so it stays a single load-bearing guard.
+func (s *Store) AttachListItemFile(ctx context.Context, link domain.ListItemFile, event events.Event) error {
+	if link.ID == "" || link.ListID == "" || link.ItemID == "" || link.FileID == "" {
+		return store.InvalidArgument("a list item file requires an identifier, a list, an item and a file")
+	}
+	var workspace domain.WorkspaceID
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM files WHERE id = ? AND deleted = 0`, link.FileID).Scan(&workspace)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && workspace != link.WorkspaceID) {
+		return store.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_item_files(id, list_id, item_id, workspace_id, file_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		link.ID, link.ListID, link.ItemID, link.WorkspaceID, link.FileID, link.CreatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DetachListItemFile removes one file's attachment from a list item.
+func (s *Store) DetachListItemFile(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, itemID domain.ListItemID, fileID domain.FileID, event events.Event) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM list_item_files WHERE list_id = ? AND item_id = ? AND workspace_id = ? AND file_id = ?`, listID, itemID, workspace, fileID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ListItemFiles returns the files attached to one item, oldest attachment first.
+// Read authority is the service's; here it is a join returned as data.
+func (s *Store) ListItemFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, listID domain.ListID, itemID domain.ListItemID) ([]domain.File, error) {
+	_ = user
+	rows, err := s.db.QueryContext(ctx, `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description
+		FROM list_item_files lif JOIN files f ON f.id = lif.file_id
+		WHERE lif.list_id = ? AND lif.item_id = ? AND lif.workspace_id = ? AND f.deleted = 0 ORDER BY lif.id`, listID, itemID, workspace)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]domain.File, 0)
+	for rows.Next() {
+		var file domain.File
+		var created string
+		var deleted int
+		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		file.CreatedAt, err = domain.ParseStoredTime(created)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		file.Deleted = deleted != 0
+		files = append(files, file)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, err
+	}
+	for i := range files {
+		shares, err := s.listFileShares(ctx, files[i].WorkspaceID, files[i].ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		files[i].SharedChannels = shares
+	}
+	return files, nil
+}
+
+// FileReadableViaListItem reports whether a file is attached to an item on a
+// list the user may read. It is the join between the file-access model and the
+// list-access model, letting a list reader open an attachment shared into no
+// conversation.
+func (s *Store) FileReadableViaListItem(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, fileID domain.FileID) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT list_id FROM list_item_files WHERE file_id = ? AND workspace_id = ?`, fileID, workspace)
+	if err != nil {
+		return false, err
+	}
+	var lists []domain.ListID
+	for rows.Next() {
+		var listID domain.ListID
+		if err := rows.Scan(&listID); err != nil {
+			rows.Close()
+			return false, err
+		}
+		lists = append(lists, listID)
+	}
+	if err := closeRows(rows); err != nil {
+		return false, err
+	}
+	for _, listID := range lists {
+		visible, err := s.listVisible(ctx, workspace, user, listID)
+		if err != nil {
+			return false, err
+		}
+		if visible {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ListCanvasRevisions reads what a canvas said before, newest first. Visibility

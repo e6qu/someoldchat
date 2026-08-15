@@ -1332,6 +1332,47 @@ func (r Remote) DeleteListItemComment(ctx context.Context, workspaceID domain.Wo
 	return nil
 }
 
+func (r Remote) AttachFileToListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, fileID domain.FileID) (domain.ListItemFile, error) {
+	out, err := r.lists.AttachFileToListItem(ctx, &chatv1.AttachFileToListItemRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID), FileId: string(fileID),
+	})
+	if err != nil {
+		return domain.ListItemFile{}, err
+	}
+	return decodeProtoListItemFile(out), nil
+}
+
+func (r Remote) ListItemFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID) ([]domain.File, error) {
+	out, err := r.lists.ListItemFiles(ctx, &chatv1.ListItemFilesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	files := make([]domain.File, 0, len(out.GetFiles()))
+	for _, file := range out.GetFiles() {
+		decoded, err := decodeProtoFile(file)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, decoded)
+	}
+	return files, nil
+}
+
+func (r Remote) DetachFileFromListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, fileID domain.FileID) error {
+	out, err := r.lists.DetachFileFromListItem(ctx, &chatv1.DetachFileFromListItemRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID), FileId: string(fileID),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed detach file from list item response was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) SetFileDescription(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, description string) error {
 	out, err := r.files.SetFileDescription(ctx, &chatv1.SetFileDescriptionRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), FileId: string(fileID), Description: description,
@@ -5531,6 +5572,52 @@ func (s *Server) DeleteListItemComment(ctx context.Context, input *chatv1.Delete
 		return nil, mapError(err)
 	}
 	return &chatv1.ListOKResponse{Ok: true}, nil
+}
+
+func (s *Server) AttachFileToListItem(ctx context.Context, input *chatv1.AttachFileToListItemRequest) (*chatv1.ListItemFile, error) {
+	value, err := s.implementation.AttachFileToListItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()), domain.FileID(input.GetFileId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoListItemFile(value), nil
+}
+
+func (s *Server) ListItemFiles(ctx context.Context, input *chatv1.ListItemFilesRequest) (*chatv1.ListItemFilesResponse, error) {
+	files, err := s.implementation.ListItemFiles(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.File, 0, len(files))
+	for _, file := range files {
+		encoded = append(encoded, encodeProtoFile(file))
+	}
+	return &chatv1.ListItemFilesResponse{Files: encoded}, nil
+}
+
+func (s *Server) DetachFileFromListItem(ctx context.Context, input *chatv1.DetachFileFromListItemRequest) (*chatv1.ListOKResponse, error) {
+	if err := s.implementation.DetachFileFromListItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()), domain.FileID(input.GetFileId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListOKResponse{Ok: true}, nil
+}
+
+func encodeProtoListItemFile(value domain.ListItemFile) *chatv1.ListItemFile {
+	return &chatv1.ListItemFile{
+		Id: string(value.ID), ListId: string(value.ListID), ItemId: string(value.ItemID),
+		WorkspaceId: string(value.WorkspaceID), FileId: string(value.FileID),
+		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+	}
+}
+
+func decodeProtoListItemFile(value *chatv1.ListItemFile) domain.ListItemFile {
+	if value == nil {
+		return domain.ListItemFile{}
+	}
+	return domain.ListItemFile{
+		ID: domain.ListItemFileID(value.GetId()), ListID: domain.ListID(value.GetListId()), ItemID: domain.ListItemID(value.GetItemId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), FileID: domain.FileID(value.GetFileId()),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+	}
 }
 
 func encodeProtoListItemComment(value domain.ListItemComment) *chatv1.ListItemComment {
