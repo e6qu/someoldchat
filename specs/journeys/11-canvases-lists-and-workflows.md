@@ -263,12 +263,14 @@ unchecked-before-checked, dates chronologically) with empty cells sinking to the
 bottom. A filter narrows the whole list to the rows matching one select or
 checkbox column's value; it composes with every layout and rides each view's own
 links, so switching between list, board, and table keeps it, and one control
-clears it without also discarding the grouping or the sort. The board, table, and
-any filtered view render over the whole list up to a bound. An item opens on its
-own page, where it can be commented on the same way a canvas can: read access to
-the list is enough to leave a comment, only its author deletes it, and the comment
-crosses the chat seam with a parity case comparing it across both compositions.
-Templates, a calendar layout, item attachments, and full notification/workflow
+clears it without also discarding the grouping or the sort. A fourth layout is a
+calendar: a month grid placing each item on its date column's day, with a month
+stepper and a date-column chooser when the list has more than one. The board,
+table, calendar, and any filtered view render over the whole list up to a bound.
+An item opens on its own page, where it can be commented on the same way a canvas
+can: read access to the list is enough to leave a comment, only its author deletes
+it, and the comment crosses the chat seam with a parity case comparing it across
+both compositions. Templates, item attachments, and full notification/workflow
 effects remain gaps; an item action taken from a board lane or table row returns to
 the list layout for now.
 

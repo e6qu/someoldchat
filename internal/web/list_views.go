@@ -6,9 +6,76 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
+
+// calendarDayView is one cell of the month grid: its day number, whether it
+// belongs to the month being shown or is a leading/trailing neighbour, whether it
+// is today, and the items whose date column falls on it.
+type calendarDayView struct {
+	Day     int
+	ISODate string
+	InMonth bool
+	Today   bool
+	Items   []listItemView
+}
+
+// listDateColumns are the date-typed columns; a calendar places items by one of
+// them, so a list with none cannot draw one.
+func listDateColumns(columns []domain.ListColumn) []domain.ListColumn {
+	dates := make([]domain.ListColumn, 0)
+	for _, column := range columns {
+		if column.Type == domain.ListColumnDate {
+			dates = append(dates, column)
+		}
+	}
+	return dates
+}
+
+// calendarMonthStart resolves the first day of the month to show: the requested
+// "YYYY-MM" when it parses, otherwise the month of the fallback instant.
+func calendarMonthStart(param string, fallback time.Time) time.Time {
+	if parsed, err := time.Parse("2006-01", strings.TrimSpace(param)); err == nil {
+		return time.Date(parsed.Year(), parsed.Month(), 1, 0, 0, 0, 0, time.UTC)
+	}
+	return time.Date(fallback.Year(), fallback.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// buildCalendarWeeks lays a month out as weeks of seven days starting Sunday,
+// each day carrying the items whose date value falls on it. dates[i] is the date
+// value of items[i] ("2006-01-02" or empty). today marks the current day so the
+// grid can point at it.
+func buildCalendarWeeks(month, today time.Time, items []listItemView, dates []string) [][]calendarDayView {
+	byDate := map[string][]listItemView{}
+	for index, item := range items {
+		if dates[index] != "" {
+			byDate[dates[index]] = append(byDate[dates[index]], item)
+		}
+	}
+	leading := int(month.Weekday()) // Sunday is 0
+	daysInMonth := month.AddDate(0, 1, 0).AddDate(0, 0, -1).Day()
+	weekCount := (leading + daysInMonth + 6) / 7
+	todayISO := today.UTC().Format("2006-01-02")
+	start := month.AddDate(0, 0, -leading)
+	weeks := make([][]calendarDayView, 0, weekCount)
+	cursor := start
+	for week := 0; week < weekCount; week++ {
+		days := make([]calendarDayView, 7)
+		for day := 0; day < 7; day++ {
+			iso := cursor.Format("2006-01-02")
+			days[day] = calendarDayView{
+				Day: cursor.Day(), ISODate: iso,
+				InMonth: cursor.Month() == month.Month() && cursor.Year() == month.Year(),
+				Today:   iso == todayISO, Items: byDate[iso],
+			}
+			cursor = cursor.AddDate(0, 0, 1)
+		}
+		weeks = append(weeks, days)
+	}
+	return weeks
+}
 
 // tableHeaderView is one column header of the table view: its name, the link
 // that sorts by it, and whether the table is currently sorted by it and which
