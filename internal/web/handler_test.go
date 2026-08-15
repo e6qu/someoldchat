@@ -1204,6 +1204,49 @@ func TestListFilterNarrowsItemsAndSurvivesViewSwitch(t *testing.T) {
 	requireMissing(t, "filtered table drops the non-match", table, "beta")
 }
 
+// TestListItemPageShowsAndAcceptsComments covers the item page: the list links
+// to it, it renders the item and its comments, a reader can add one, and the
+// author can delete their own.
+func TestListItemPageShowsAndAcceptsComments(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Work", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/app/lists/" + string(value.ID) + "/items/" + string(item.ID)
+	csrf := auth.CSRFToken("session")
+
+	// The list view offers a way into the item.
+	requireContains(t, "list links to item", get(t, mux, "/app/lists/"+string(value.ID)).Body.String(), `href="`+base+`"`)
+	// The item page shows the item and an empty comments section.
+	requireContains(t, "item page", get(t, mux, base).Body.String(), "ship it", "Comments", "No comments yet.", "Add comment")
+
+	if r := postForm(t, mux, base+"/comments", url.Values{"_csrf": {csrf}, "text": {"who owns this"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("add comment = %d: %s", r.Code, r.Body)
+	}
+	page := get(t, mux, base).Body.String()
+	requireContains(t, "comment shows with a delete control for its author", page, "who owns this", "/comments/")
+	match := regexp.MustCompile(`/comments/([^/"]+)/delete`).FindStringSubmatch(page)
+	if len(match) != 2 {
+		t.Fatalf("no delete control: %s", page)
+	}
+	if r := postForm(t, mux, base+"/comments/"+match[1]+"/delete", url.Values{"_csrf": {csrf}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("delete comment = %d: %s", r.Code, r.Body)
+	}
+	after := get(t, mux, base).Body.String()
+	requireContains(t, "comment gone", after, "No comments yet.")
+	requireMissing(t, "comment gone", after, "who owns this")
+}
+
 // TestConversationMemberPanelShowsPresenceAndStatus covers the channel member
 // drawer, a projection surface the timeline change left open: each member row
 // carries a presence dot and their status emoji, resolved to a glyph.

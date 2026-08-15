@@ -5232,6 +5232,54 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The list-item mirror of the canvas-comment rule: read access to the
+			// list is enough to leave a comment on a row, and only its author
+			// deletes it, so an owner cannot delete what a reader said. Both
+			// compositions must agree on that pair.
+			name: "a list item comment needs only read access and belongs to its author",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				list, err := chat.CreateList(ctx, "T1", "U1", "Incidents", "[]",
+					`[{"key":"title","name":"Title","type":"text"}]`, "", false, false)
+				if err != nil {
+					return nil, err
+				}
+				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the outage"}]`)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetListAccess(ctx, "T1", "U1", list.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
+					return nil, err
+				}
+				// A reader may comment even though they may not edit.
+				comment, err := chat.CommentOnListItem(ctx, "T1", "U2", list.ID, item.ID, "who owns this")
+				if err != nil {
+					return nil, err
+				}
+				page := domain.PageRequest{Limit: 10}
+				seen, err := chat.ListItemComments(ctx, "T1", "U1", list.ID, item.ID, page)
+				if err != nil {
+					return nil, err
+				}
+				// The owner cannot delete what somebody else said.
+				ownerDelete := chat.DeleteListItemComment(ctx, "T1", "U1", comment.ID) != nil
+				// A member with no grant can neither read nor comment.
+				_, strangerErr := chat.ListItemComments(ctx, "T1", "U3", list.ID, item.ID, page)
+				if err := chat.DeleteListItemComment(ctx, "T1", "U2", comment.ID); err != nil {
+					return nil, err
+				}
+				after, err := chat.ListItemComments(ctx, "T1", "U1", list.ID, item.ID, page)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					// The item id is minted per composition, so compare that the
+					// comment anchored to this run's item, not the id's bytes.
+					len(seen.Comments), seen.Comments[0].ItemID == item.ID, seen.Comments[0].Text,
+					string(seen.Comments[0].UserID), ownerDelete, strangerErr != nil, len(after.Comments),
+				}, nil
+			},
+		},
+		{
 			// A history is only useful if both compositions agree on what it
 			// says and on which way round it reads: a revision records the
 			// state it *replaced*, so the newest row is what the canvas said

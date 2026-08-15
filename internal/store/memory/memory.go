@@ -124,6 +124,7 @@ type Store struct {
 	canvasAccess                  map[string]domain.CanvasAccess
 	canvasRevisions               map[domain.CanvasID][]domain.CanvasRevision
 	canvasComments                map[domain.CanvasCommentID]domain.CanvasComment
+	listItemComments              map[domain.ListItemCommentID]domain.ListItemComment
 	roleAssignments               map[string]domain.RoleAssignment
 	authPolicyEntities            map[string]domain.AuthPolicyEntity
 	sessionSettings               map[string]domain.SessionSettings
@@ -344,6 +345,7 @@ func New() *Store {
 		canvasAccess:                  make(map[string]domain.CanvasAccess),
 		canvasRevisions:               make(map[domain.CanvasID][]domain.CanvasRevision),
 		canvasComments:                make(map[domain.CanvasCommentID]domain.CanvasComment),
+		listItemComments:              make(map[domain.ListItemCommentID]domain.ListItemComment),
 		roleAssignments:               make(map[string]domain.RoleAssignment),
 		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
 		sessionSettings:               make(map[string]domain.SessionSettings),
@@ -716,6 +718,92 @@ func (s *Store) DeleteCanvasComment(_ context.Context, workspace domain.Workspac
 	s.canvasComments[id] = comment
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+// listReadableLocked is the list equivalent of canvasReadableLocked: whether the
+// user has any granted access to the list, asked once so a comment create and a
+// comment read cannot disagree about who may take part.
+func (s *Store) listReadableLocked(workspace domain.WorkspaceID, user domain.UserID, id domain.ListID) bool {
+	list, ok := s.lists[id]
+	if !ok || list.WorkspaceID != workspace {
+		return false
+	}
+	_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, user, func(visit func(domain.GrantEntity, string, domain.AccessLevel)) {
+		for _, grant := range s.listAccess {
+			if grant.ListID == id {
+				visit(grant.EntityType, grant.EntityID, grant.Access)
+			}
+		}
+	})
+	return allowed
+}
+
+func (s *Store) CreateListItemComment(_ context.Context, comment domain.ListItemComment, event events.Event) error {
+	if comment.ID == "" || comment.ListID == "" || comment.ItemID == "" || comment.UserID == "" || strings.TrimSpace(comment.Text) == "" {
+		return store.InvalidArgument("a list item comment requires an identifier, a list, an item, an author and text")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.listReadableLocked(comment.WorkspaceID, comment.UserID, comment.ListID) {
+		return store.ErrNotFound
+	}
+	if _, exists := s.listItemComments[comment.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.listItemComments[comment.ID] = comment
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteListItemComment(_ context.Context, workspace domain.WorkspaceID, id domain.ListItemCommentID, author domain.UserID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	comment, ok := s.listItemComments[id]
+	if !ok || comment.Deleted || comment.WorkspaceID != workspace || comment.UserID != author {
+		return store.ErrNotFound
+	}
+	comment.Deleted = true
+	s.listItemComments[id] = comment
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListListItemComments(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, listID domain.ListID, itemID domain.ListItemID, request domain.PageRequest) (domain.ListItemCommentPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListItemCommentPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.listReadableLocked(workspace, user, listID) {
+		return domain.ListItemCommentPage{}, store.ErrNotFound
+	}
+	values := make([]domain.ListItemComment, 0, request.Limit+1)
+	for _, comment := range s.listItemComments {
+		if comment.ListID != listID || comment.ItemID != itemID || comment.WorkspaceID != workspace || comment.Deleted {
+			continue
+		}
+		if after != "" && string(comment.ID) <= after {
+			continue
+		}
+		values = append(values, comment)
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	page := domain.ListItemCommentPage{HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		values = values[:request.Limit]
+	}
+	page.Comments = values
+	if page.HasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		if err != nil {
+			return domain.ListItemCommentPage{}, err
+		}
+	}
+	return page, nil
 }
 
 func (s *Store) ListCanvasComments(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {

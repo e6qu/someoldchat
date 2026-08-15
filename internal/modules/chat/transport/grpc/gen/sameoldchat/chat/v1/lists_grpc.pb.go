@@ -19,26 +19,29 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ListsService_CreateList_FullMethodName        = "/sameoldchat.chat.v1.ListsService/CreateList"
-	ListsService_GetList_FullMethodName           = "/sameoldchat.chat.v1.ListsService/GetList"
-	ListsService_GetListAccess_FullMethodName     = "/sameoldchat.chat.v1.ListsService/GetListAccess"
-	ListsService_ListGrants_FullMethodName        = "/sameoldchat.chat.v1.ListsService/ListGrants"
-	ListsService_ListLists_FullMethodName         = "/sameoldchat.chat.v1.ListsService/ListLists"
-	ListsService_SearchLists_FullMethodName       = "/sameoldchat.chat.v1.ListsService/SearchLists"
-	ListsService_UpdateList_FullMethodName        = "/sameoldchat.chat.v1.ListsService/UpdateList"
-	ListsService_CreateListItem_FullMethodName    = "/sameoldchat.chat.v1.ListsService/CreateListItem"
-	ListsService_GetListItem_FullMethodName       = "/sameoldchat.chat.v1.ListsService/GetListItem"
-	ListsService_ListItems_FullMethodName         = "/sameoldchat.chat.v1.ListsService/ListItems"
-	ListsService_UpdateListItem_FullMethodName    = "/sameoldchat.chat.v1.ListsService/UpdateListItem"
-	ListsService_AssignListItem_FullMethodName    = "/sameoldchat.chat.v1.ListsService/AssignListItem"
-	ListsService_AddListColumn_FullMethodName     = "/sameoldchat.chat.v1.ListsService/AddListColumn"
-	ListsService_RemoveListColumn_FullMethodName  = "/sameoldchat.chat.v1.ListsService/RemoveListColumn"
-	ListsService_UpdateListCells_FullMethodName   = "/sameoldchat.chat.v1.ListsService/UpdateListCells"
-	ListsService_DeleteListItems_FullMethodName   = "/sameoldchat.chat.v1.ListsService/DeleteListItems"
-	ListsService_SetListAccess_FullMethodName     = "/sameoldchat.chat.v1.ListsService/SetListAccess"
-	ListsService_DeleteListAccess_FullMethodName  = "/sameoldchat.chat.v1.ListsService/DeleteListAccess"
-	ListsService_StartListDownload_FullMethodName = "/sameoldchat.chat.v1.ListsService/StartListDownload"
-	ListsService_GetListDownload_FullMethodName   = "/sameoldchat.chat.v1.ListsService/GetListDownload"
+	ListsService_CreateList_FullMethodName            = "/sameoldchat.chat.v1.ListsService/CreateList"
+	ListsService_GetList_FullMethodName               = "/sameoldchat.chat.v1.ListsService/GetList"
+	ListsService_GetListAccess_FullMethodName         = "/sameoldchat.chat.v1.ListsService/GetListAccess"
+	ListsService_ListGrants_FullMethodName            = "/sameoldchat.chat.v1.ListsService/ListGrants"
+	ListsService_ListLists_FullMethodName             = "/sameoldchat.chat.v1.ListsService/ListLists"
+	ListsService_SearchLists_FullMethodName           = "/sameoldchat.chat.v1.ListsService/SearchLists"
+	ListsService_UpdateList_FullMethodName            = "/sameoldchat.chat.v1.ListsService/UpdateList"
+	ListsService_CreateListItem_FullMethodName        = "/sameoldchat.chat.v1.ListsService/CreateListItem"
+	ListsService_GetListItem_FullMethodName           = "/sameoldchat.chat.v1.ListsService/GetListItem"
+	ListsService_ListItems_FullMethodName             = "/sameoldchat.chat.v1.ListsService/ListItems"
+	ListsService_UpdateListItem_FullMethodName        = "/sameoldchat.chat.v1.ListsService/UpdateListItem"
+	ListsService_AssignListItem_FullMethodName        = "/sameoldchat.chat.v1.ListsService/AssignListItem"
+	ListsService_AddListColumn_FullMethodName         = "/sameoldchat.chat.v1.ListsService/AddListColumn"
+	ListsService_RemoveListColumn_FullMethodName      = "/sameoldchat.chat.v1.ListsService/RemoveListColumn"
+	ListsService_UpdateListCells_FullMethodName       = "/sameoldchat.chat.v1.ListsService/UpdateListCells"
+	ListsService_DeleteListItems_FullMethodName       = "/sameoldchat.chat.v1.ListsService/DeleteListItems"
+	ListsService_SetListAccess_FullMethodName         = "/sameoldchat.chat.v1.ListsService/SetListAccess"
+	ListsService_DeleteListAccess_FullMethodName      = "/sameoldchat.chat.v1.ListsService/DeleteListAccess"
+	ListsService_StartListDownload_FullMethodName     = "/sameoldchat.chat.v1.ListsService/StartListDownload"
+	ListsService_GetListDownload_FullMethodName       = "/sameoldchat.chat.v1.ListsService/GetListDownload"
+	ListsService_CommentOnListItem_FullMethodName     = "/sameoldchat.chat.v1.ListsService/CommentOnListItem"
+	ListsService_ListItemComments_FullMethodName      = "/sameoldchat.chat.v1.ListsService/ListItemComments"
+	ListsService_DeleteListItemComment_FullMethodName = "/sameoldchat.chat.v1.ListsService/DeleteListItemComment"
 )
 
 // ListsServiceClient is the client API for ListsService service.
@@ -65,6 +68,9 @@ type ListsServiceClient interface {
 	DeleteListAccess(ctx context.Context, in *ListAccessRequest, opts ...grpc.CallOption) (*ListOKResponse, error)
 	StartListDownload(ctx context.Context, in *ListDownloadRequest, opts ...grpc.CallOption) (*ListDownloadResponse, error)
 	GetListDownload(ctx context.Context, in *ListDownloadRequest, opts ...grpc.CallOption) (*ListDownloadResponse, error)
+	CommentOnListItem(ctx context.Context, in *CommentOnListItemRequest, opts ...grpc.CallOption) (*ListItemComment, error)
+	ListItemComments(ctx context.Context, in *ListItemCommentsRequest, opts ...grpc.CallOption) (*ListItemCommentPage, error)
+	DeleteListItemComment(ctx context.Context, in *DeleteListItemCommentRequest, opts ...grpc.CallOption) (*ListOKResponse, error)
 }
 
 type listsServiceClient struct {
@@ -275,6 +281,36 @@ func (c *listsServiceClient) GetListDownload(ctx context.Context, in *ListDownlo
 	return out, nil
 }
 
+func (c *listsServiceClient) CommentOnListItem(ctx context.Context, in *CommentOnListItemRequest, opts ...grpc.CallOption) (*ListItemComment, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListItemComment)
+	err := c.cc.Invoke(ctx, ListsService_CommentOnListItem_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) ListItemComments(ctx context.Context, in *ListItemCommentsRequest, opts ...grpc.CallOption) (*ListItemCommentPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListItemCommentPage)
+	err := c.cc.Invoke(ctx, ListsService_ListItemComments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) DeleteListItemComment(ctx context.Context, in *DeleteListItemCommentRequest, opts ...grpc.CallOption) (*ListOKResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOKResponse)
+	err := c.cc.Invoke(ctx, ListsService_DeleteListItemComment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ListsServiceServer is the server API for ListsService service.
 // All implementations should embed UnimplementedListsServiceServer
 // for forward compatibility.
@@ -299,6 +335,9 @@ type ListsServiceServer interface {
 	DeleteListAccess(context.Context, *ListAccessRequest) (*ListOKResponse, error)
 	StartListDownload(context.Context, *ListDownloadRequest) (*ListDownloadResponse, error)
 	GetListDownload(context.Context, *ListDownloadRequest) (*ListDownloadResponse, error)
+	CommentOnListItem(context.Context, *CommentOnListItemRequest) (*ListItemComment, error)
+	ListItemComments(context.Context, *ListItemCommentsRequest) (*ListItemCommentPage, error)
+	DeleteListItemComment(context.Context, *DeleteListItemCommentRequest) (*ListOKResponse, error)
 }
 
 // UnimplementedListsServiceServer should be embedded to have
@@ -367,6 +406,15 @@ func (UnimplementedListsServiceServer) StartListDownload(context.Context, *ListD
 }
 func (UnimplementedListsServiceServer) GetListDownload(context.Context, *ListDownloadRequest) (*ListDownloadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetListDownload not implemented")
+}
+func (UnimplementedListsServiceServer) CommentOnListItem(context.Context, *CommentOnListItemRequest) (*ListItemComment, error) {
+	return nil, status.Error(codes.Unimplemented, "method CommentOnListItem not implemented")
+}
+func (UnimplementedListsServiceServer) ListItemComments(context.Context, *ListItemCommentsRequest) (*ListItemCommentPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListItemComments not implemented")
+}
+func (UnimplementedListsServiceServer) DeleteListItemComment(context.Context, *DeleteListItemCommentRequest) (*ListOKResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteListItemComment not implemented")
 }
 func (UnimplementedListsServiceServer) testEmbeddedByValue() {}
 
@@ -748,6 +796,60 @@ func _ListsService_GetListDownload_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ListsService_CommentOnListItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommentOnListItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).CommentOnListItem(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_CommentOnListItem_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).CommentOnListItem(ctx, req.(*CommentOnListItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_ListItemComments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListItemCommentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).ListItemComments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_ListItemComments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).ListItemComments(ctx, req.(*ListItemCommentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_DeleteListItemComment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteListItemCommentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).DeleteListItemComment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_DeleteListItemComment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).DeleteListItemComment(ctx, req.(*DeleteListItemCommentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ListsService_ServiceDesc is the grpc.ServiceDesc for ListsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -834,6 +936,18 @@ var ListsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetListDownload",
 			Handler:    _ListsService_GetListDownload_Handler,
+		},
+		{
+			MethodName: "CommentOnListItem",
+			Handler:    _ListsService_CommentOnListItem_Handler,
+		},
+		{
+			MethodName: "ListItemComments",
+			Handler:    _ListsService_ListItemComments_Handler,
+		},
+		{
+			MethodName: "DeleteListItemComment",
+			Handler:    _ListsService_DeleteListItemComment_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

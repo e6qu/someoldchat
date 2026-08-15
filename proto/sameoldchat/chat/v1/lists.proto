@@ -214,6 +214,46 @@ message ListOKResponse {
   bool ok = 1;
 }
 
+message ListItemComment {
+  string id = 1;
+  string list_id = 2;
+  string item_id = 3;
+  string workspace_id = 4;
+  string user_id = 5;
+  string text = 6;
+  int64 created_at_unix_nano = 7;
+  bool deleted = 8;
+}
+
+message ListItemCommentPage {
+  repeated ListItemComment comments = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message CommentOnListItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+  string text = 5;
+}
+
+message ListItemCommentsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+  int32 limit = 5;
+  string cursor = 6;
+}
+
+message DeleteListItemCommentRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string comment_id = 3;
+}
+
 service ListsService {
   rpc CreateList(CreateListRequest) returns (ListResponse);
   rpc GetList(ListItemRequest) returns (ListResponse);
@@ -235,4 +275,7 @@ service ListsService {
   rpc DeleteListAccess(ListAccessRequest) returns (ListOKResponse);
   rpc StartListDownload(ListDownloadRequest) returns (ListDownloadResponse);
   rpc GetListDownload(ListDownloadRequest) returns (ListDownloadResponse);
+  rpc CommentOnListItem(CommentOnListItemRequest) returns (ListItemComment);
+  rpc ListItemComments(ListItemCommentsRequest) returns (ListItemCommentPage);
+  rpc DeleteListItemComment(DeleteListItemCommentRequest) returns (ListOKResponse);
 }

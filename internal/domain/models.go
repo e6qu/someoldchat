@@ -1820,6 +1820,32 @@ type CanvasCommentPage struct {
 	HasMore    bool
 }
 
+// ListItemComment is a remark anchored to one item of a list. It mirrors a canvas
+// comment: read access to the list is enough to leave one, only the author
+// deletes it, and it is soft-deleted so a removed comment leaves no gap in the
+// order. It keeps its list id as well as its item id so access can be checked
+// against the list a reader was granted, not the item alone.
+type ListItemComment struct {
+	ID          ListItemCommentID
+	ListID      ListID
+	ItemID      ListItemID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Text        string
+	CreatedAt   time.Time
+	Deleted     bool
+}
+
+// ListItemCommentLimit bounds one comment, the same length a canvas comment gets:
+// a remark on a row, not a document stuffed into a cell's margin.
+const ListItemCommentLimit = 4000
+
+type ListItemCommentPage struct {
+	Comments   []ListItemComment
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type CanvasRevisionPage struct {
 	Revisions  []CanvasRevision
 	NextCursor Cursor

@@ -1992,6 +1992,386 @@ func (x *ListOKResponse) GetOk() bool {
 	return false
 }
 
+type ListItemComment struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ListId            string                 `protobuf:"bytes,2,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
+	ItemId            string                 `protobuf:"bytes,3,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,4,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId            string                 `protobuf:"bytes,5,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Text              string                 `protobuf:"bytes,6,opt,name=text,proto3" json:"text,omitempty"`
+	CreatedAtUnixNano int64                  `protobuf:"varint,7,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	Deleted           bool                   `protobuf:"varint,8,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ListItemComment) Reset() {
+	*x = ListItemComment{}
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListItemComment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListItemComment) ProtoMessage() {}
+
+func (x *ListItemComment) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListItemComment.ProtoReflect.Descriptor instead.
+func (*ListItemComment) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ListItemComment) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ListItemComment) GetListId() string {
+	if x != nil {
+		return x.ListId
+	}
+	return ""
+}
+
+func (x *ListItemComment) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *ListItemComment) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListItemComment) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ListItemComment) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *ListItemComment) GetCreatedAtUnixNano() int64 {
+	if x != nil {
+		return x.CreatedAtUnixNano
+	}
+	return 0
+}
+
+func (x *ListItemComment) GetDeleted() bool {
+	if x != nil {
+		return x.Deleted
+	}
+	return false
+}
+
+type ListItemCommentPage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Comments      []*ListItemComment     `protobuf:"bytes,1,rep,name=comments,proto3" json:"comments,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListItemCommentPage) Reset() {
+	*x = ListItemCommentPage{}
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListItemCommentPage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListItemCommentPage) ProtoMessage() {}
+
+func (x *ListItemCommentPage) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListItemCommentPage.ProtoReflect.Descriptor instead.
+func (*ListItemCommentPage) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ListItemCommentPage) GetComments() []*ListItemComment {
+	if x != nil {
+		return x.Comments
+	}
+	return nil
+}
+
+func (x *ListItemCommentPage) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+func (x *ListItemCommentPage) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+type CommentOnListItemRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ListId        string                 `protobuf:"bytes,3,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
+	ItemId        string                 `protobuf:"bytes,4,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Text          string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommentOnListItemRequest) Reset() {
+	*x = CommentOnListItemRequest{}
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommentOnListItemRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommentOnListItemRequest) ProtoMessage() {}
+
+func (x *CommentOnListItemRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommentOnListItemRequest.ProtoReflect.Descriptor instead.
+func (*CommentOnListItemRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *CommentOnListItemRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CommentOnListItemRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CommentOnListItemRequest) GetListId() string {
+	if x != nil {
+		return x.ListId
+	}
+	return ""
+}
+
+func (x *CommentOnListItemRequest) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *CommentOnListItemRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type ListItemCommentsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ListId        string                 `protobuf:"bytes,3,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
+	ItemId        string                 `protobuf:"bytes,4,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,6,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListItemCommentsRequest) Reset() {
+	*x = ListItemCommentsRequest{}
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListItemCommentsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListItemCommentsRequest) ProtoMessage() {}
+
+func (x *ListItemCommentsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListItemCommentsRequest.ProtoReflect.Descriptor instead.
+func (*ListItemCommentsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ListItemCommentsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListItemCommentsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ListItemCommentsRequest) GetListId() string {
+	if x != nil {
+		return x.ListId
+	}
+	return ""
+}
+
+func (x *ListItemCommentsRequest) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *ListItemCommentsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListItemCommentsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type DeleteListItemCommentRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CommentId     string                 `protobuf:"bytes,3,opt,name=comment_id,json=commentId,proto3" json:"comment_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteListItemCommentRequest) Reset() {
+	*x = DeleteListItemCommentRequest{}
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteListItemCommentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteListItemCommentRequest) ProtoMessage() {}
+
+func (x *DeleteListItemCommentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_lists_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteListItemCommentRequest.ProtoReflect.Descriptor instead.
+func (*DeleteListItemCommentRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_lists_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *DeleteListItemCommentRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *DeleteListItemCommentRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *DeleteListItemCommentRequest) GetCommentId() string {
+	if x != nil {
+		return x.CommentId
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_lists_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_lists_proto_rawDesc = "" +
@@ -2168,7 +2548,39 @@ const file_sameoldchat_chat_v1_lists_proto_rawDesc = "" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12=\n" +
 	"\bdownload\x18\x02 \x01(\v2!.sameoldchat.chat.v1.ListDownloadR\bdownload\" \n" +
 	"\x0eListOKResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xe7\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xee\x01\n" +
+	"\x0fListItemComment\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\alist_id\x18\x02 \x01(\tR\x06listId\x12\x17\n" +
+	"\aitem_id\x18\x03 \x01(\tR\x06itemId\x12!\n" +
+	"\fworkspace_id\x18\x04 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x05 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04text\x18\x06 \x01(\tR\x04text\x12/\n" +
+	"\x14created_at_unix_nano\x18\a \x01(\x03R\x11createdAtUnixNano\x12\x18\n" +
+	"\adeleted\x18\b \x01(\bR\adeleted\"\x93\x01\n" +
+	"\x13ListItemCommentPage\x12@\n" +
+	"\bcomments\x18\x01 \x03(\v2$.sameoldchat.chat.v1.ListItemCommentR\bcomments\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x9c\x01\n" +
+	"\x18CommentOnListItemRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
+	"\alist_id\x18\x03 \x01(\tR\x06listId\x12\x17\n" +
+	"\aitem_id\x18\x04 \x01(\tR\x06itemId\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\"\xb5\x01\n" +
+	"\x17ListItemCommentsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
+	"\alist_id\x18\x03 \x01(\tR\x06listId\x12\x17\n" +
+	"\aitem_id\x18\x04 \x01(\tR\x06itemId\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x06 \x01(\tR\x06cursor\"y\n" +
+	"\x1cDeleteListItemCommentRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"comment_id\x18\x03 \x01(\tR\tcommentId2\xae\x11\n" +
 	"\fListsService\x12W\n" +
 	"\n" +
 	"CreateList\x12&.sameoldchat.chat.v1.CreateListRequest\x1a!.sameoldchat.chat.v1.ListResponse\x12R\n" +
@@ -2192,7 +2604,10 @@ const file_sameoldchat_chat_v1_lists_proto_rawDesc = "" +
 	"\rSetListAccess\x12&.sameoldchat.chat.v1.ListAccessRequest\x1a#.sameoldchat.chat.v1.ListOKResponse\x12_\n" +
 	"\x10DeleteListAccess\x12&.sameoldchat.chat.v1.ListAccessRequest\x1a#.sameoldchat.chat.v1.ListOKResponse\x12h\n" +
 	"\x11StartListDownload\x12(.sameoldchat.chat.v1.ListDownloadRequest\x1a).sameoldchat.chat.v1.ListDownloadResponse\x12f\n" +
-	"\x0fGetListDownload\x12(.sameoldchat.chat.v1.ListDownloadRequest\x1a).sameoldchat.chat.v1.ListDownloadResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x0fGetListDownload\x12(.sameoldchat.chat.v1.ListDownloadRequest\x1a).sameoldchat.chat.v1.ListDownloadResponse\x12h\n" +
+	"\x11CommentOnListItem\x12-.sameoldchat.chat.v1.CommentOnListItemRequest\x1a$.sameoldchat.chat.v1.ListItemComment\x12j\n" +
+	"\x10ListItemComments\x12,.sameoldchat.chat.v1.ListItemCommentsRequest\x1a(.sameoldchat.chat.v1.ListItemCommentPage\x12o\n" +
+	"\x15DeleteListItemComment\x121.sameoldchat.chat.v1.DeleteListItemCommentRequest\x1a#.sameoldchat.chat.v1.ListOKResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_lists_proto_rawDescOnce sync.Once
@@ -2206,34 +2621,39 @@ func file_sameoldchat_chat_v1_lists_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_lists_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_lists_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_sameoldchat_chat_v1_lists_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_sameoldchat_chat_v1_lists_proto_goTypes = []any{
-	(*List)(nil),                    // 0: sameoldchat.chat.v1.List
-	(*ListItem)(nil),                // 1: sameoldchat.chat.v1.ListItem
-	(*AddListColumnRequest)(nil),    // 2: sameoldchat.chat.v1.AddListColumnRequest
-	(*RemoveListColumnRequest)(nil), // 3: sameoldchat.chat.v1.RemoveListColumnRequest
-	(*AssignListItemRequest)(nil),   // 4: sameoldchat.chat.v1.AssignListItemRequest
-	(*ListItemPage)(nil),            // 5: sameoldchat.chat.v1.ListItemPage
-	(*ListsRequest)(nil),            // 6: sameoldchat.chat.v1.ListsRequest
-	(*ListPage)(nil),                // 7: sameoldchat.chat.v1.ListPage
-	(*SearchListsRequest)(nil),      // 8: sameoldchat.chat.v1.SearchListsRequest
-	(*ListDownload)(nil),            // 9: sameoldchat.chat.v1.ListDownload
-	(*CreateListRequest)(nil),       // 10: sameoldchat.chat.v1.CreateListRequest
-	(*UpdateListRequest)(nil),       // 11: sameoldchat.chat.v1.UpdateListRequest
-	(*ListItemRequest)(nil),         // 12: sameoldchat.chat.v1.ListItemRequest
-	(*CreateListItemRequest)(nil),   // 13: sameoldchat.chat.v1.CreateListItemRequest
-	(*ListItemsRequest)(nil),        // 14: sameoldchat.chat.v1.ListItemsRequest
-	(*UpdateListItemRequest)(nil),   // 15: sameoldchat.chat.v1.UpdateListItemRequest
-	(*DeleteListItemsRequest)(nil),  // 16: sameoldchat.chat.v1.DeleteListItemsRequest
-	(*ListAccessRequest)(nil),       // 17: sameoldchat.chat.v1.ListAccessRequest
-	(*ListAccessResponse)(nil),      // 18: sameoldchat.chat.v1.ListAccessResponse
-	(*ListGrantsResponse)(nil),      // 19: sameoldchat.chat.v1.ListGrantsResponse
-	(*ListDownloadRequest)(nil),     // 20: sameoldchat.chat.v1.ListDownloadRequest
-	(*ListResponse)(nil),            // 21: sameoldchat.chat.v1.ListResponse
-	(*ListItemResponse)(nil),        // 22: sameoldchat.chat.v1.ListItemResponse
-	(*ListItemsResponse)(nil),       // 23: sameoldchat.chat.v1.ListItemsResponse
-	(*ListDownloadResponse)(nil),    // 24: sameoldchat.chat.v1.ListDownloadResponse
-	(*ListOKResponse)(nil),          // 25: sameoldchat.chat.v1.ListOKResponse
+	(*List)(nil),                         // 0: sameoldchat.chat.v1.List
+	(*ListItem)(nil),                     // 1: sameoldchat.chat.v1.ListItem
+	(*AddListColumnRequest)(nil),         // 2: sameoldchat.chat.v1.AddListColumnRequest
+	(*RemoveListColumnRequest)(nil),      // 3: sameoldchat.chat.v1.RemoveListColumnRequest
+	(*AssignListItemRequest)(nil),        // 4: sameoldchat.chat.v1.AssignListItemRequest
+	(*ListItemPage)(nil),                 // 5: sameoldchat.chat.v1.ListItemPage
+	(*ListsRequest)(nil),                 // 6: sameoldchat.chat.v1.ListsRequest
+	(*ListPage)(nil),                     // 7: sameoldchat.chat.v1.ListPage
+	(*SearchListsRequest)(nil),           // 8: sameoldchat.chat.v1.SearchListsRequest
+	(*ListDownload)(nil),                 // 9: sameoldchat.chat.v1.ListDownload
+	(*CreateListRequest)(nil),            // 10: sameoldchat.chat.v1.CreateListRequest
+	(*UpdateListRequest)(nil),            // 11: sameoldchat.chat.v1.UpdateListRequest
+	(*ListItemRequest)(nil),              // 12: sameoldchat.chat.v1.ListItemRequest
+	(*CreateListItemRequest)(nil),        // 13: sameoldchat.chat.v1.CreateListItemRequest
+	(*ListItemsRequest)(nil),             // 14: sameoldchat.chat.v1.ListItemsRequest
+	(*UpdateListItemRequest)(nil),        // 15: sameoldchat.chat.v1.UpdateListItemRequest
+	(*DeleteListItemsRequest)(nil),       // 16: sameoldchat.chat.v1.DeleteListItemsRequest
+	(*ListAccessRequest)(nil),            // 17: sameoldchat.chat.v1.ListAccessRequest
+	(*ListAccessResponse)(nil),           // 18: sameoldchat.chat.v1.ListAccessResponse
+	(*ListGrantsResponse)(nil),           // 19: sameoldchat.chat.v1.ListGrantsResponse
+	(*ListDownloadRequest)(nil),          // 20: sameoldchat.chat.v1.ListDownloadRequest
+	(*ListResponse)(nil),                 // 21: sameoldchat.chat.v1.ListResponse
+	(*ListItemResponse)(nil),             // 22: sameoldchat.chat.v1.ListItemResponse
+	(*ListItemsResponse)(nil),            // 23: sameoldchat.chat.v1.ListItemsResponse
+	(*ListDownloadResponse)(nil),         // 24: sameoldchat.chat.v1.ListDownloadResponse
+	(*ListOKResponse)(nil),               // 25: sameoldchat.chat.v1.ListOKResponse
+	(*ListItemComment)(nil),              // 26: sameoldchat.chat.v1.ListItemComment
+	(*ListItemCommentPage)(nil),          // 27: sameoldchat.chat.v1.ListItemCommentPage
+	(*CommentOnListItemRequest)(nil),     // 28: sameoldchat.chat.v1.CommentOnListItemRequest
+	(*ListItemCommentsRequest)(nil),      // 29: sameoldchat.chat.v1.ListItemCommentsRequest
+	(*DeleteListItemCommentRequest)(nil), // 30: sameoldchat.chat.v1.DeleteListItemCommentRequest
 }
 var file_sameoldchat_chat_v1_lists_proto_depIdxs = []int32{
 	1,  // 0: sameoldchat.chat.v1.ListItemPage.items:type_name -> sameoldchat.chat.v1.ListItem
@@ -2243,51 +2663,58 @@ var file_sameoldchat_chat_v1_lists_proto_depIdxs = []int32{
 	1,  // 4: sameoldchat.chat.v1.ListItemResponse.item:type_name -> sameoldchat.chat.v1.ListItem
 	5,  // 5: sameoldchat.chat.v1.ListItemsResponse.page:type_name -> sameoldchat.chat.v1.ListItemPage
 	9,  // 6: sameoldchat.chat.v1.ListDownloadResponse.download:type_name -> sameoldchat.chat.v1.ListDownload
-	10, // 7: sameoldchat.chat.v1.ListsService.CreateList:input_type -> sameoldchat.chat.v1.CreateListRequest
-	12, // 8: sameoldchat.chat.v1.ListsService.GetList:input_type -> sameoldchat.chat.v1.ListItemRequest
-	12, // 9: sameoldchat.chat.v1.ListsService.GetListAccess:input_type -> sameoldchat.chat.v1.ListItemRequest
-	12, // 10: sameoldchat.chat.v1.ListsService.ListGrants:input_type -> sameoldchat.chat.v1.ListItemRequest
-	6,  // 11: sameoldchat.chat.v1.ListsService.ListLists:input_type -> sameoldchat.chat.v1.ListsRequest
-	8,  // 12: sameoldchat.chat.v1.ListsService.SearchLists:input_type -> sameoldchat.chat.v1.SearchListsRequest
-	11, // 13: sameoldchat.chat.v1.ListsService.UpdateList:input_type -> sameoldchat.chat.v1.UpdateListRequest
-	13, // 14: sameoldchat.chat.v1.ListsService.CreateListItem:input_type -> sameoldchat.chat.v1.CreateListItemRequest
-	12, // 15: sameoldchat.chat.v1.ListsService.GetListItem:input_type -> sameoldchat.chat.v1.ListItemRequest
-	14, // 16: sameoldchat.chat.v1.ListsService.ListItems:input_type -> sameoldchat.chat.v1.ListItemsRequest
-	15, // 17: sameoldchat.chat.v1.ListsService.UpdateListItem:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
-	4,  // 18: sameoldchat.chat.v1.ListsService.AssignListItem:input_type -> sameoldchat.chat.v1.AssignListItemRequest
-	2,  // 19: sameoldchat.chat.v1.ListsService.AddListColumn:input_type -> sameoldchat.chat.v1.AddListColumnRequest
-	3,  // 20: sameoldchat.chat.v1.ListsService.RemoveListColumn:input_type -> sameoldchat.chat.v1.RemoveListColumnRequest
-	15, // 21: sameoldchat.chat.v1.ListsService.UpdateListCells:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
-	16, // 22: sameoldchat.chat.v1.ListsService.DeleteListItems:input_type -> sameoldchat.chat.v1.DeleteListItemsRequest
-	17, // 23: sameoldchat.chat.v1.ListsService.SetListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
-	17, // 24: sameoldchat.chat.v1.ListsService.DeleteListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
-	20, // 25: sameoldchat.chat.v1.ListsService.StartListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
-	20, // 26: sameoldchat.chat.v1.ListsService.GetListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
-	21, // 27: sameoldchat.chat.v1.ListsService.CreateList:output_type -> sameoldchat.chat.v1.ListResponse
-	21, // 28: sameoldchat.chat.v1.ListsService.GetList:output_type -> sameoldchat.chat.v1.ListResponse
-	18, // 29: sameoldchat.chat.v1.ListsService.GetListAccess:output_type -> sameoldchat.chat.v1.ListAccessResponse
-	19, // 30: sameoldchat.chat.v1.ListsService.ListGrants:output_type -> sameoldchat.chat.v1.ListGrantsResponse
-	7,  // 31: sameoldchat.chat.v1.ListsService.ListLists:output_type -> sameoldchat.chat.v1.ListPage
-	7,  // 32: sameoldchat.chat.v1.ListsService.SearchLists:output_type -> sameoldchat.chat.v1.ListPage
-	21, // 33: sameoldchat.chat.v1.ListsService.UpdateList:output_type -> sameoldchat.chat.v1.ListResponse
-	22, // 34: sameoldchat.chat.v1.ListsService.CreateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
-	22, // 35: sameoldchat.chat.v1.ListsService.GetListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
-	23, // 36: sameoldchat.chat.v1.ListsService.ListItems:output_type -> sameoldchat.chat.v1.ListItemsResponse
-	22, // 37: sameoldchat.chat.v1.ListsService.UpdateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
-	1,  // 38: sameoldchat.chat.v1.ListsService.AssignListItem:output_type -> sameoldchat.chat.v1.ListItem
-	0,  // 39: sameoldchat.chat.v1.ListsService.AddListColumn:output_type -> sameoldchat.chat.v1.List
-	0,  // 40: sameoldchat.chat.v1.ListsService.RemoveListColumn:output_type -> sameoldchat.chat.v1.List
-	23, // 41: sameoldchat.chat.v1.ListsService.UpdateListCells:output_type -> sameoldchat.chat.v1.ListItemsResponse
-	25, // 42: sameoldchat.chat.v1.ListsService.DeleteListItems:output_type -> sameoldchat.chat.v1.ListOKResponse
-	25, // 43: sameoldchat.chat.v1.ListsService.SetListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
-	25, // 44: sameoldchat.chat.v1.ListsService.DeleteListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
-	24, // 45: sameoldchat.chat.v1.ListsService.StartListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
-	24, // 46: sameoldchat.chat.v1.ListsService.GetListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
-	27, // [27:47] is the sub-list for method output_type
-	7,  // [7:27] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	26, // 7: sameoldchat.chat.v1.ListItemCommentPage.comments:type_name -> sameoldchat.chat.v1.ListItemComment
+	10, // 8: sameoldchat.chat.v1.ListsService.CreateList:input_type -> sameoldchat.chat.v1.CreateListRequest
+	12, // 9: sameoldchat.chat.v1.ListsService.GetList:input_type -> sameoldchat.chat.v1.ListItemRequest
+	12, // 10: sameoldchat.chat.v1.ListsService.GetListAccess:input_type -> sameoldchat.chat.v1.ListItemRequest
+	12, // 11: sameoldchat.chat.v1.ListsService.ListGrants:input_type -> sameoldchat.chat.v1.ListItemRequest
+	6,  // 12: sameoldchat.chat.v1.ListsService.ListLists:input_type -> sameoldchat.chat.v1.ListsRequest
+	8,  // 13: sameoldchat.chat.v1.ListsService.SearchLists:input_type -> sameoldchat.chat.v1.SearchListsRequest
+	11, // 14: sameoldchat.chat.v1.ListsService.UpdateList:input_type -> sameoldchat.chat.v1.UpdateListRequest
+	13, // 15: sameoldchat.chat.v1.ListsService.CreateListItem:input_type -> sameoldchat.chat.v1.CreateListItemRequest
+	12, // 16: sameoldchat.chat.v1.ListsService.GetListItem:input_type -> sameoldchat.chat.v1.ListItemRequest
+	14, // 17: sameoldchat.chat.v1.ListsService.ListItems:input_type -> sameoldchat.chat.v1.ListItemsRequest
+	15, // 18: sameoldchat.chat.v1.ListsService.UpdateListItem:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
+	4,  // 19: sameoldchat.chat.v1.ListsService.AssignListItem:input_type -> sameoldchat.chat.v1.AssignListItemRequest
+	2,  // 20: sameoldchat.chat.v1.ListsService.AddListColumn:input_type -> sameoldchat.chat.v1.AddListColumnRequest
+	3,  // 21: sameoldchat.chat.v1.ListsService.RemoveListColumn:input_type -> sameoldchat.chat.v1.RemoveListColumnRequest
+	15, // 22: sameoldchat.chat.v1.ListsService.UpdateListCells:input_type -> sameoldchat.chat.v1.UpdateListItemRequest
+	16, // 23: sameoldchat.chat.v1.ListsService.DeleteListItems:input_type -> sameoldchat.chat.v1.DeleteListItemsRequest
+	17, // 24: sameoldchat.chat.v1.ListsService.SetListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
+	17, // 25: sameoldchat.chat.v1.ListsService.DeleteListAccess:input_type -> sameoldchat.chat.v1.ListAccessRequest
+	20, // 26: sameoldchat.chat.v1.ListsService.StartListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
+	20, // 27: sameoldchat.chat.v1.ListsService.GetListDownload:input_type -> sameoldchat.chat.v1.ListDownloadRequest
+	28, // 28: sameoldchat.chat.v1.ListsService.CommentOnListItem:input_type -> sameoldchat.chat.v1.CommentOnListItemRequest
+	29, // 29: sameoldchat.chat.v1.ListsService.ListItemComments:input_type -> sameoldchat.chat.v1.ListItemCommentsRequest
+	30, // 30: sameoldchat.chat.v1.ListsService.DeleteListItemComment:input_type -> sameoldchat.chat.v1.DeleteListItemCommentRequest
+	21, // 31: sameoldchat.chat.v1.ListsService.CreateList:output_type -> sameoldchat.chat.v1.ListResponse
+	21, // 32: sameoldchat.chat.v1.ListsService.GetList:output_type -> sameoldchat.chat.v1.ListResponse
+	18, // 33: sameoldchat.chat.v1.ListsService.GetListAccess:output_type -> sameoldchat.chat.v1.ListAccessResponse
+	19, // 34: sameoldchat.chat.v1.ListsService.ListGrants:output_type -> sameoldchat.chat.v1.ListGrantsResponse
+	7,  // 35: sameoldchat.chat.v1.ListsService.ListLists:output_type -> sameoldchat.chat.v1.ListPage
+	7,  // 36: sameoldchat.chat.v1.ListsService.SearchLists:output_type -> sameoldchat.chat.v1.ListPage
+	21, // 37: sameoldchat.chat.v1.ListsService.UpdateList:output_type -> sameoldchat.chat.v1.ListResponse
+	22, // 38: sameoldchat.chat.v1.ListsService.CreateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
+	22, // 39: sameoldchat.chat.v1.ListsService.GetListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
+	23, // 40: sameoldchat.chat.v1.ListsService.ListItems:output_type -> sameoldchat.chat.v1.ListItemsResponse
+	22, // 41: sameoldchat.chat.v1.ListsService.UpdateListItem:output_type -> sameoldchat.chat.v1.ListItemResponse
+	1,  // 42: sameoldchat.chat.v1.ListsService.AssignListItem:output_type -> sameoldchat.chat.v1.ListItem
+	0,  // 43: sameoldchat.chat.v1.ListsService.AddListColumn:output_type -> sameoldchat.chat.v1.List
+	0,  // 44: sameoldchat.chat.v1.ListsService.RemoveListColumn:output_type -> sameoldchat.chat.v1.List
+	23, // 45: sameoldchat.chat.v1.ListsService.UpdateListCells:output_type -> sameoldchat.chat.v1.ListItemsResponse
+	25, // 46: sameoldchat.chat.v1.ListsService.DeleteListItems:output_type -> sameoldchat.chat.v1.ListOKResponse
+	25, // 47: sameoldchat.chat.v1.ListsService.SetListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
+	25, // 48: sameoldchat.chat.v1.ListsService.DeleteListAccess:output_type -> sameoldchat.chat.v1.ListOKResponse
+	24, // 49: sameoldchat.chat.v1.ListsService.StartListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
+	24, // 50: sameoldchat.chat.v1.ListsService.GetListDownload:output_type -> sameoldchat.chat.v1.ListDownloadResponse
+	26, // 51: sameoldchat.chat.v1.ListsService.CommentOnListItem:output_type -> sameoldchat.chat.v1.ListItemComment
+	27, // 52: sameoldchat.chat.v1.ListsService.ListItemComments:output_type -> sameoldchat.chat.v1.ListItemCommentPage
+	25, // 53: sameoldchat.chat.v1.ListsService.DeleteListItemComment:output_type -> sameoldchat.chat.v1.ListOKResponse
+	31, // [31:54] is the sub-list for method output_type
+	8,  // [8:31] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_lists_proto_init() }
@@ -2301,7 +2728,7 @@ func file_sameoldchat_chat_v1_lists_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_lists_proto_rawDesc), len(file_sameoldchat_chat_v1_lists_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   26,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

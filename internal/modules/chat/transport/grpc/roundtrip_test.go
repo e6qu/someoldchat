@@ -404,10 +404,12 @@ func conversionCases() map[string]conversionCase {
 				return &canvasGrantsRoundTrip{Grants: decodeProtoCanvasGrants(wire.GetGrants())}, wire, nil
 			},
 		},
-		"CanvasComment":      {sample: &domain.CanvasComment{}, through: throughInfallible(encodeProtoCanvasComment, decodeProtoCanvasComment)},
-		"CanvasCommentPage":  {sample: &domain.CanvasCommentPage{}, through: through(encodeProtoCanvasCommentPage, decodeProtoCanvasCommentPage)},
-		"CanvasRevision":     {sample: &domain.CanvasRevision{}, through: throughInfallible(encodeProtoCanvasRevision, decodeProtoCanvasRevision)},
-		"CanvasRevisionPage": {sample: &domain.CanvasRevisionPage{}, through: through(encodeProtoCanvasRevisionPage, decodeProtoCanvasRevisionPage)},
+		"CanvasComment":       {sample: &domain.CanvasComment{}, through: throughInfallible(encodeProtoCanvasComment, decodeProtoCanvasComment)},
+		"CanvasCommentPage":   {sample: &domain.CanvasCommentPage{}, through: through(encodeProtoCanvasCommentPage, decodeProtoCanvasCommentPage)},
+		"ListItemComment":     {sample: &domain.ListItemComment{}, through: throughInfallible(encodeProtoListItemComment, decodeProtoListItemComment)},
+		"ListItemCommentPage": {sample: &domain.ListItemCommentPage{}, through: through(encodeProtoListItemCommentPage, decodeProtoListItemCommentPage)},
+		"CanvasRevision":      {sample: &domain.CanvasRevision{}, through: throughInfallible(encodeProtoCanvasRevision, decodeProtoCanvasRevision)},
+		"CanvasRevisionPage":  {sample: &domain.CanvasRevisionPage{}, through: through(encodeProtoCanvasRevisionPage, decodeProtoCanvasRevisionPage)},
 		"ListItemSummary": {
 			sample:  &domain.ListItemSummary{},
 			through: throughInfallible(encodeProtoListItemSummary, decodeProtoListItemSummary),
