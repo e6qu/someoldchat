@@ -3689,6 +3689,14 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
   await page.getByRole('button', { name: 'Add comment' }).click();
   await expect(page.getByText('who owns this incident')).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
+
+  // The calendar layout arranges dated items on a month grid, reached from the
+  // switcher (the list has a Due date column), and is itself screen-reader usable.
+  await page.goto(`/app/lists/${encodeURIComponent(listID)}`);
+  await page.getByRole('link', { name: 'Calendar' }).click();
+  await expect(page).toHaveURL(/[?&]view=calendar\b/);
+  await expect(page.getByRole('columnheader', { name: 'Mon' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it asked for', async ({ page, context, request }) => {

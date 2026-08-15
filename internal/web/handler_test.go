@@ -1204,6 +1204,47 @@ func TestListFilterNarrowsItemsAndSurvivesViewSwitch(t *testing.T) {
 	requireMissing(t, "filtered table drops the non-match", table, "beta")
 }
 
+// TestListCalendarViewPlacesItemsByDate covers the calendar layout: a list with a
+// date column offers a month grid that places each item on its date, with a month
+// stepper, and a list without a date column offers no calendar.
+func TestListCalendarViewPlacesItemsByDate(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Launch", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "When", domain.ListColumnDate, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"kickoff"},{"column_id":"when","value":"2026-09-10"}]`); err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/lists/" + string(value.ID)
+
+	// A date column makes a calendar available.
+	requireContains(t, "list offers a calendar", get(t, mux, target).Body.String(), `?view=calendar`, ">Calendar</a>")
+
+	cal := get(t, mux, target+"?view=calendar&date=when&month=2026-09").Body.String()
+	requireContains(t, "calendar renders the month with the item on its day", cal,
+		`<table class="calendar"`, "September 2026", "Previous", "Next",
+		`<a class="cal-item" href="`+target+`/items/`, "kickoff")
+
+	// A list with no date column offers no calendar.
+	plain, err := messages.CreateList(ctx, "T1", "U1", "Notes", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", plain.ID, "Note", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	requireMissing(t, "no calendar without a date column", get(t, mux, "/app/lists/"+string(plain.ID)).Body.String(), ">Calendar</a>")
+}
+
 // TestListItemPageShowsAndAcceptsComments covers the item page: the list links
 // to it, it renders the item and its comments, a reader can add one, and the
 // author can delete their own.
