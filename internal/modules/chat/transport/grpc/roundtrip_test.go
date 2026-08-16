@@ -451,6 +451,13 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoDeveloperApp, decodeProtoDeveloperApp),
 		},
+		"ExternalAuthProvider": {
+			sample: &domain.ExternalAuthProvider{},
+			omitted: map[string]string{
+				"ClientSecretCiphertext": "sealed secret is storage-internal and never crosses the module boundary",
+			},
+			through: throughInfallible(encodeProtoExternalAuthProvider, decodeProtoExternalAuthProvider),
+		},
 		"InstalledApp":              {sample: &domain.InstalledApp{}, through: through(encodeProtoInstalledApp, decodeProtoInstalledApp)},
 		"OAuthAuthorizationRequest": {sample: &domain.OAuthAuthorizationRequest{}, through: through(encodeProtoOAuthAuthorizationRequest, decodeProtoOAuthAuthorizationRequest)},
 		"OAuthAuthorization":        {sample: &domain.OAuthAuthorization{}, through: through(encodeProtoOAuthAuthorization, decodeProtoOAuthAuthorization)},

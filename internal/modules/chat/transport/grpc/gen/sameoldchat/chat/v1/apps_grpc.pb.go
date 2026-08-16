@@ -19,41 +19,45 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AppsService_SetAppIcon_FullMethodName                    = "/sameoldchat.chat.v1.AppsService/SetAppIcon"
-	AppsService_ExternalAuthToken_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ExternalAuthToken"
-	AppsService_DeleteExternalAuthToken_FullMethodName       = "/sameoldchat.chat.v1.AppsService/DeleteExternalAuthToken"
-	AppsService_UpdateUserAppConnection_FullMethodName       = "/sameoldchat.chat.v1.AppsService/UpdateUserAppConnection"
-	AppsService_AssistantSearchAvailability_FullMethodName   = "/sameoldchat.chat.v1.AppsService/AssistantSearchAvailability"
-	AppsService_AssistantSearchContext_FullMethodName        = "/sameoldchat.chat.v1.AppsService/AssistantSearchContext"
-	AppsService_AppActivities_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AppActivities"
-	AppsService_AdminAppActivities_FullMethodName            = "/sameoldchat.chat.v1.AppsService/AdminAppActivities"
-	AppsService_AdminAppConfigs_FullMethodName               = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
-	AppsService_AdminSetAppConfig_FullMethodName             = "/sameoldchat.chat.v1.AppsService/AdminSetAppConfig"
-	AppsService_AdminClearAppResolution_FullMethodName       = "/sameoldchat.chat.v1.AppsService/AdminClearAppResolution"
-	AppsService_IssueAppConfigurationToken_FullMethodName    = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
-	AppsService_RotateAppConfigurationToken_FullMethodName   = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
-	AppsService_ValidateAppManifest_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
-	AppsService_CreateAppFromManifest_FullMethodName         = "/sameoldchat.chat.v1.AppsService/CreateAppFromManifest"
-	AppsService_ExportAppManifest_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ExportAppManifest"
-	AppsService_UpdateAppFromManifest_FullMethodName         = "/sameoldchat.chat.v1.AppsService/UpdateAppFromManifest"
-	AppsService_SetAppDistribution_FullMethodName            = "/sameoldchat.chat.v1.AppsService/SetAppDistribution"
-	AppsService_DeleteDeveloperApp_FullMethodName            = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
-	AppsService_ListDeveloperApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
-	AppsService_ListWorkspaceApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
-	AppsService_AdminFunctions_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AdminFunctions"
-	AppsService_PutAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
-	AppsService_GetAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
-	AppsService_QueryAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
-	AppsService_CountAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/CountAppDatastoreItems"
-	AppsService_DeleteAppDatastoreItems_FullMethodName       = "/sameoldchat.chat.v1.AppsService/DeleteAppDatastoreItems"
-	AppsService_GetDeveloperApp_FullMethodName               = "/sameoldchat.chat.v1.AppsService/GetDeveloperApp"
-	AppsService_GetDeveloperAppDeliveryHealth_FullMethodName = "/sameoldchat.chat.v1.AppsService/GetDeveloperAppDeliveryHealth"
-	AppsService_IssueDeveloperAppToken_FullMethodName        = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
-	AppsService_RevokeDeveloperAppTokens_FullMethodName      = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppTokens"
-	AppsService_ListDeveloperAppTokens_FullMethodName        = "/sameoldchat.chat.v1.AppsService/ListDeveloperAppTokens"
-	AppsService_RevokeDeveloperAppToken_FullMethodName       = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppToken"
-	AppsService_InspectOAuthAuthorization_FullMethodName     = "/sameoldchat.chat.v1.AppsService/InspectOAuthAuthorization"
-	AppsService_AuthorizeOAuth_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AuthorizeOAuth"
+	AppsService_SetAppIcon_FullMethodName                     = "/sameoldchat.chat.v1.AppsService/SetAppIcon"
+	AppsService_ExternalAuthToken_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ExternalAuthToken"
+	AppsService_DeleteExternalAuthToken_FullMethodName        = "/sameoldchat.chat.v1.AppsService/DeleteExternalAuthToken"
+	AppsService_SetAppExternalAuthProvider_FullMethodName     = "/sameoldchat.chat.v1.AppsService/SetAppExternalAuthProvider"
+	AppsService_AppExternalAuthProviders_FullMethodName       = "/sameoldchat.chat.v1.AppsService/AppExternalAuthProviders"
+	AppsService_StartExternalAuthConnection_FullMethodName    = "/sameoldchat.chat.v1.AppsService/StartExternalAuthConnection"
+	AppsService_CompleteExternalAuthConnection_FullMethodName = "/sameoldchat.chat.v1.AppsService/CompleteExternalAuthConnection"
+	AppsService_UpdateUserAppConnection_FullMethodName        = "/sameoldchat.chat.v1.AppsService/UpdateUserAppConnection"
+	AppsService_AssistantSearchAvailability_FullMethodName    = "/sameoldchat.chat.v1.AppsService/AssistantSearchAvailability"
+	AppsService_AssistantSearchContext_FullMethodName         = "/sameoldchat.chat.v1.AppsService/AssistantSearchContext"
+	AppsService_AppActivities_FullMethodName                  = "/sameoldchat.chat.v1.AppsService/AppActivities"
+	AppsService_AdminAppActivities_FullMethodName             = "/sameoldchat.chat.v1.AppsService/AdminAppActivities"
+	AppsService_AdminAppConfigs_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
+	AppsService_AdminSetAppConfig_FullMethodName              = "/sameoldchat.chat.v1.AppsService/AdminSetAppConfig"
+	AppsService_AdminClearAppResolution_FullMethodName        = "/sameoldchat.chat.v1.AppsService/AdminClearAppResolution"
+	AppsService_IssueAppConfigurationToken_FullMethodName     = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
+	AppsService_RotateAppConfigurationToken_FullMethodName    = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
+	AppsService_ValidateAppManifest_FullMethodName            = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
+	AppsService_CreateAppFromManifest_FullMethodName          = "/sameoldchat.chat.v1.AppsService/CreateAppFromManifest"
+	AppsService_ExportAppManifest_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ExportAppManifest"
+	AppsService_UpdateAppFromManifest_FullMethodName          = "/sameoldchat.chat.v1.AppsService/UpdateAppFromManifest"
+	AppsService_SetAppDistribution_FullMethodName             = "/sameoldchat.chat.v1.AppsService/SetAppDistribution"
+	AppsService_DeleteDeveloperApp_FullMethodName             = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
+	AppsService_ListDeveloperApps_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
+	AppsService_ListWorkspaceApps_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
+	AppsService_AdminFunctions_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AdminFunctions"
+	AppsService_PutAppDatastoreItems_FullMethodName           = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
+	AppsService_GetAppDatastoreItems_FullMethodName           = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
+	AppsService_QueryAppDatastoreItems_FullMethodName         = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
+	AppsService_CountAppDatastoreItems_FullMethodName         = "/sameoldchat.chat.v1.AppsService/CountAppDatastoreItems"
+	AppsService_DeleteAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/DeleteAppDatastoreItems"
+	AppsService_GetDeveloperApp_FullMethodName                = "/sameoldchat.chat.v1.AppsService/GetDeveloperApp"
+	AppsService_GetDeveloperAppDeliveryHealth_FullMethodName  = "/sameoldchat.chat.v1.AppsService/GetDeveloperAppDeliveryHealth"
+	AppsService_IssueDeveloperAppToken_FullMethodName         = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
+	AppsService_RevokeDeveloperAppTokens_FullMethodName       = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppTokens"
+	AppsService_ListDeveloperAppTokens_FullMethodName         = "/sameoldchat.chat.v1.AppsService/ListDeveloperAppTokens"
+	AppsService_RevokeDeveloperAppToken_FullMethodName        = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppToken"
+	AppsService_InspectOAuthAuthorization_FullMethodName      = "/sameoldchat.chat.v1.AppsService/InspectOAuthAuthorization"
+	AppsService_AuthorizeOAuth_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AuthorizeOAuth"
 )
 
 // AppsServiceClient is the client API for AppsService service.
@@ -63,6 +67,10 @@ type AppsServiceClient interface {
 	SetAppIcon(ctx context.Context, in *AppIconRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	ExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*ExternalAuthTokenValue, error)
 	DeleteExternalAuthToken(ctx context.Context, in *ExternalAuthTokenRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	SetAppExternalAuthProvider(ctx context.Context, in *SetExternalAuthProviderRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	AppExternalAuthProviders(ctx context.Context, in *AppExternalAuthProvidersRequest, opts ...grpc.CallOption) (*ExternalAuthProvidersResponse, error)
+	StartExternalAuthConnection(ctx context.Context, in *StartExternalAuthConnectionRequest, opts ...grpc.CallOption) (*ExternalAuthConnectionResponse, error)
+	CompleteExternalAuthConnection(ctx context.Context, in *CompleteExternalAuthConnectionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	UpdateUserAppConnection(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	AssistantSearchAvailability(ctx context.Context, in *UserConnectionRequest, opts ...grpc.CallOption) (*AssistantSearchAvailabilityValue, error)
 	AssistantSearchContext(ctx context.Context, in *AssistantSearchRequest, opts ...grpc.CallOption) (*MessagePage, error)
@@ -129,6 +137,46 @@ func (c *appsServiceClient) DeleteExternalAuthToken(ctx context.Context, in *Ext
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppMutationResponse)
 	err := c.cc.Invoke(ctx, AppsService_DeleteExternalAuthToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) SetAppExternalAuthProvider(ctx context.Context, in *SetExternalAuthProviderRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_SetAppExternalAuthProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AppExternalAuthProviders(ctx context.Context, in *AppExternalAuthProvidersRequest, opts ...grpc.CallOption) (*ExternalAuthProvidersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExternalAuthProvidersResponse)
+	err := c.cc.Invoke(ctx, AppsService_AppExternalAuthProviders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) StartExternalAuthConnection(ctx context.Context, in *StartExternalAuthConnectionRequest, opts ...grpc.CallOption) (*ExternalAuthConnectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExternalAuthConnectionResponse)
+	err := c.cc.Invoke(ctx, AppsService_StartExternalAuthConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) CompleteExternalAuthConnection(ctx context.Context, in *CompleteExternalAuthConnectionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_CompleteExternalAuthConnection_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -462,6 +510,10 @@ type AppsServiceServer interface {
 	SetAppIcon(context.Context, *AppIconRequest) (*AppMutationResponse, error)
 	ExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*ExternalAuthTokenValue, error)
 	DeleteExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*AppMutationResponse, error)
+	SetAppExternalAuthProvider(context.Context, *SetExternalAuthProviderRequest) (*AppMutationResponse, error)
+	AppExternalAuthProviders(context.Context, *AppExternalAuthProvidersRequest) (*ExternalAuthProvidersResponse, error)
+	StartExternalAuthConnection(context.Context, *StartExternalAuthConnectionRequest) (*ExternalAuthConnectionResponse, error)
+	CompleteExternalAuthConnection(context.Context, *CompleteExternalAuthConnectionRequest) (*AppMutationResponse, error)
 	UpdateUserAppConnection(context.Context, *UserConnectionRequest) (*AppMutationResponse, error)
 	AssistantSearchAvailability(context.Context, *UserConnectionRequest) (*AssistantSearchAvailabilityValue, error)
 	AssistantSearchContext(context.Context, *AssistantSearchRequest) (*MessagePage, error)
@@ -511,6 +563,18 @@ func (UnimplementedAppsServiceServer) ExternalAuthToken(context.Context, *Extern
 }
 func (UnimplementedAppsServiceServer) DeleteExternalAuthToken(context.Context, *ExternalAuthTokenRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteExternalAuthToken not implemented")
+}
+func (UnimplementedAppsServiceServer) SetAppExternalAuthProvider(context.Context, *SetExternalAuthProviderRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetAppExternalAuthProvider not implemented")
+}
+func (UnimplementedAppsServiceServer) AppExternalAuthProviders(context.Context, *AppExternalAuthProvidersRequest) (*ExternalAuthProvidersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AppExternalAuthProviders not implemented")
+}
+func (UnimplementedAppsServiceServer) StartExternalAuthConnection(context.Context, *StartExternalAuthConnectionRequest) (*ExternalAuthConnectionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartExternalAuthConnection not implemented")
+}
+func (UnimplementedAppsServiceServer) CompleteExternalAuthConnection(context.Context, *CompleteExternalAuthConnectionRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteExternalAuthConnection not implemented")
 }
 func (UnimplementedAppsServiceServer) UpdateUserAppConnection(context.Context, *UserConnectionRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateUserAppConnection not implemented")
@@ -678,6 +742,78 @@ func _AppsService_DeleteExternalAuthToken_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AppsServiceServer).DeleteExternalAuthToken(ctx, req.(*ExternalAuthTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_SetAppExternalAuthProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetExternalAuthProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).SetAppExternalAuthProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_SetAppExternalAuthProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).SetAppExternalAuthProvider(ctx, req.(*SetExternalAuthProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AppExternalAuthProviders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppExternalAuthProvidersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AppExternalAuthProviders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AppExternalAuthProviders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AppExternalAuthProviders(ctx, req.(*AppExternalAuthProvidersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_StartExternalAuthConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartExternalAuthConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).StartExternalAuthConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_StartExternalAuthConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).StartExternalAuthConnection(ctx, req.(*StartExternalAuthConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_CompleteExternalAuthConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompleteExternalAuthConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).CompleteExternalAuthConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_CompleteExternalAuthConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).CompleteExternalAuthConnection(ctx, req.(*CompleteExternalAuthConnectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1276,6 +1412,22 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteExternalAuthToken",
 			Handler:    _AppsService_DeleteExternalAuthToken_Handler,
+		},
+		{
+			MethodName: "SetAppExternalAuthProvider",
+			Handler:    _AppsService_SetAppExternalAuthProvider_Handler,
+		},
+		{
+			MethodName: "AppExternalAuthProviders",
+			Handler:    _AppsService_AppExternalAuthProviders_Handler,
+		},
+		{
+			MethodName: "StartExternalAuthConnection",
+			Handler:    _AppsService_StartExternalAuthConnection_Handler,
+		},
+		{
+			MethodName: "CompleteExternalAuthConnection",
+			Handler:    _AppsService_CompleteExternalAuthConnection_Handler,
 		},
 		{
 			MethodName: "UpdateUserAppConnection",

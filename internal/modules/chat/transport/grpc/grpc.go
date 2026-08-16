@@ -13321,6 +13321,70 @@ func (r Remote) DeleteExternalAuthToken(ctx context.Context, workspaceID domain.
 	return nil
 }
 
+func (r Remote) SetAppExternalAuthProvider(ctx context.Context, token string, appID domain.AppID, config domain.ExternalAuthProviderConfig) error {
+	out, err := r.apps.SetAppExternalAuthProvider(ctx, &chatv1.SetExternalAuthProviderRequest{
+		Token: token, AppId: string(appID), Name: config.Name, ClientId: config.ClientID, ClientSecret: config.ClientSecret,
+		AuthorizationUrl: config.AuthorizationURL, TokenUrl: config.TokenURL, Scopes: config.Scopes,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "external auth provider declaration")
+}
+
+func (r Remote) AppExternalAuthProviders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) ([]domain.ExternalAuthProvider, error) {
+	out, err := r.apps.AppExternalAuthProviders(ctx, &chatv1.AppExternalAuthProvidersRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	providers := make([]domain.ExternalAuthProvider, 0, len(out.GetProviders()))
+	for _, provider := range out.GetProviders() {
+		providers = append(providers, decodeProtoExternalAuthProvider(provider))
+	}
+	return providers, nil
+}
+
+func (r Remote) StartExternalAuthConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, providerName, callbackURL string) (string, error) {
+	out, err := r.apps.StartExternalAuthConnection(ctx, &chatv1.StartExternalAuthConnectionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), ProviderName: providerName, CallbackUrl: callbackURL,
+	})
+	if err != nil {
+		return "", err
+	}
+	return out.GetAuthorizeUrl(), nil
+}
+
+func (r Remote) CompleteExternalAuthConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, providerName, code, state, callbackURL string) error {
+	out, err := r.apps.CompleteExternalAuthConnection(ctx, &chatv1.CompleteExternalAuthConnectionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), ProviderName: providerName, Code: code, State: state, CallbackUrl: callbackURL,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "external auth connection")
+}
+
+func decodeProtoExternalAuthProvider(value *chatv1.ExternalAuthProvider) domain.ExternalAuthProvider {
+	if value == nil {
+		return domain.ExternalAuthProvider{}
+	}
+	return domain.ExternalAuthProvider{
+		AppID: domain.AppID(value.GetAppId()), Name: value.GetName(), ClientID: value.GetClientId(),
+		AuthorizationURL: value.GetAuthorizationUrl(), TokenURL: value.GetTokenUrl(),
+		Scopes: append([]string(nil), value.GetScopes()...), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+	}
+}
+
+func encodeProtoExternalAuthProvider(value domain.ExternalAuthProvider) *chatv1.ExternalAuthProvider {
+	return &chatv1.ExternalAuthProvider{
+		AppId: string(value.AppID), Name: value.Name, ClientId: value.ClientID,
+		AuthorizationUrl: value.AuthorizationURL, TokenUrl: value.TokenURL,
+		Scopes: value.Scopes, CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
+	}
+}
+
 func (r Remote) UpdateUserAppConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) error {
 	out, err := r.apps.UpdateUserAppConnection(ctx, &chatv1.UserConnectionRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
@@ -13791,6 +13855,43 @@ func (s *Server) ExternalAuthToken(ctx context.Context, input *chatv1.ExternalAu
 func (s *Server) DeleteExternalAuthToken(ctx context.Context, input *chatv1.ExternalAuthTokenRequest) (*chatv1.AppMutationResponse, error) {
 	if err := s.implementation.DeleteExternalAuthToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
 		domain.AppID(input.GetAppId()), input.GetExternalTokenId()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SetAppExternalAuthProvider(ctx context.Context, input *chatv1.SetExternalAuthProviderRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.SetAppExternalAuthProvider(ctx, input.GetToken(), domain.AppID(input.GetAppId()), domain.ExternalAuthProviderConfig{
+		Name: input.GetName(), ClientID: input.GetClientId(), ClientSecret: input.GetClientSecret(),
+		AuthorizationURL: input.GetAuthorizationUrl(), TokenURL: input.GetTokenUrl(), Scopes: append([]string(nil), input.GetScopes()...),
+	}); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AppExternalAuthProviders(ctx context.Context, input *chatv1.AppExternalAuthProvidersRequest) (*chatv1.ExternalAuthProvidersResponse, error) {
+	providers, err := s.implementation.AppExternalAuthProviders(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	response := &chatv1.ExternalAuthProvidersResponse{Providers: make([]*chatv1.ExternalAuthProvider, 0, len(providers))}
+	for _, provider := range providers {
+		response.Providers = append(response.Providers, encodeProtoExternalAuthProvider(provider))
+	}
+	return response, nil
+}
+
+func (s *Server) StartExternalAuthConnection(ctx context.Context, input *chatv1.StartExternalAuthConnectionRequest) (*chatv1.ExternalAuthConnectionResponse, error) {
+	authorizeURL, err := s.implementation.StartExternalAuthConnection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetProviderName(), input.GetCallbackUrl())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ExternalAuthConnectionResponse{AuthorizeUrl: authorizeURL}, nil
+}
+
+func (s *Server) CompleteExternalAuthConnection(ctx context.Context, input *chatv1.CompleteExternalAuthConnectionRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.CompleteExternalAuthConnection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetProviderName(), input.GetCode(), input.GetState(), input.GetCallbackUrl()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.AppMutationResponse{Ok: true}, nil

@@ -283,6 +283,59 @@ message UserConnectionRequest {
   string app_id = 3;
 }
 
+message ExternalAuthProvider {
+  string app_id = 1;
+  string name = 2;
+  string client_id = 3;
+  string authorization_url = 4;
+  string token_url = 5;
+  repeated string scopes = 6;
+  int64 created_at_unix_nano = 7;
+}
+
+message SetExternalAuthProviderRequest {
+  string token = 1;
+  string app_id = 2;
+  string name = 3;
+  string client_id = 4;
+  string client_secret = 5;
+  string authorization_url = 6;
+  string token_url = 7;
+  repeated string scopes = 8;
+}
+
+message AppExternalAuthProvidersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
+message ExternalAuthProvidersResponse {
+  repeated ExternalAuthProvider providers = 1;
+}
+
+message StartExternalAuthConnectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string provider_name = 4;
+  string callback_url = 5;
+}
+
+message ExternalAuthConnectionResponse {
+  string authorize_url = 1;
+}
+
+message CompleteExternalAuthConnectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string provider_name = 4;
+  string code = 5;
+  string state = 6;
+  string callback_url = 7;
+}
+
 message AssistantSearchAvailabilityValue {
   bool enabled = 1;
   repeated string searchable_sources = 2;
@@ -366,6 +419,10 @@ service AppsService {
   rpc SetAppIcon(AppIconRequest) returns (AppMutationResponse);
   rpc ExternalAuthToken(ExternalAuthTokenRequest) returns (ExternalAuthTokenValue);
   rpc DeleteExternalAuthToken(ExternalAuthTokenRequest) returns (AppMutationResponse);
+  rpc SetAppExternalAuthProvider(SetExternalAuthProviderRequest) returns (AppMutationResponse);
+  rpc AppExternalAuthProviders(AppExternalAuthProvidersRequest) returns (ExternalAuthProvidersResponse);
+  rpc StartExternalAuthConnection(StartExternalAuthConnectionRequest) returns (ExternalAuthConnectionResponse);
+  rpc CompleteExternalAuthConnection(CompleteExternalAuthConnectionRequest) returns (AppMutationResponse);
   rpc UpdateUserAppConnection(UserConnectionRequest) returns (AppMutationResponse);
   rpc AssistantSearchAvailability(UserConnectionRequest) returns (AssistantSearchAvailabilityValue);
   rpc AssistantSearchContext(AssistantSearchRequest) returns (MessagePage);

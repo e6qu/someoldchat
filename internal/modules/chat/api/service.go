@@ -295,6 +295,10 @@ type Service interface {
 	SetAppIcon(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string) error
 	ExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.ExternalAuthToken, error)
 	DeleteExternalAuthToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string) error
+	SetAppExternalAuthProvider(context.Context, string, domain.AppID, domain.ExternalAuthProviderConfig) error
+	AppExternalAuthProviders(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) ([]domain.ExternalAuthProvider, error)
+	StartExternalAuthConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (string, error)
+	CompleteExternalAuthConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, string, string) error
 	UpdateUserAppConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
 	AssistantSearchAvailability(context.Context, domain.WorkspaceID, domain.UserID) (domain.AssistantSearchAvailability, error)
 	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)

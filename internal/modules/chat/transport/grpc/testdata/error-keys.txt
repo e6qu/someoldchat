@@ -32,6 +32,7 @@ service.conversation_already_archived
 service.conversation_not_archived
 service.conversation_posting_restricted
 service.emoji_already_exists
+service.external_auth_connection
 service.external_invite_not_permitted
 service.function_access_denied
 service.function_not_running
@@ -54,6 +55,7 @@ service.invalid_dialog
 service.invalid_emoji
 service.invalid_entity
 service.invalid_ephemeral
+service.invalid_external_auth_provider
 service.invalid_external_upload
 service.invalid_file
 service.invalid_integration_logs

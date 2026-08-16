@@ -138,6 +138,7 @@ type Store struct {
 	appActivities                 []domain.AppActivity
 	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
 	externalAuthTokens            map[string]domain.ExternalAuthToken
+	externalAuthProviders         map[string]domain.ExternalAuthProvider
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -361,6 +362,7 @@ func New() *Store {
 		conversationObjects:           make(map[string]domain.LinkedObject),
 		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
 		externalAuthTokens:            make(map[string]domain.ExternalAuthToken),
+		externalAuthProviders:         make(map[string]domain.ExternalAuthProvider),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -2137,6 +2139,45 @@ func (s *Store) SetExternalAuthToken(_ context.Context, value domain.ExternalAut
 	s.externalAuthTokens[value.ID] = value
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func externalAuthProviderKey(appID domain.AppID, name string) string {
+	return string(appID) + "\x00" + name
+}
+
+func (s *Store) SetExternalAuthProvider(_ context.Context, value domain.ExternalAuthProvider) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.apps[value.AppID]; !exists {
+		return store.ErrNotFound
+	}
+	s.externalAuthProviders[externalAuthProviderKey(value.AppID, value.Name)] = value
+	return nil
+}
+
+func (s *Store) ListExternalAuthProviders(_ context.Context, appID domain.AppID) ([]domain.ExternalAuthProvider, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	providers := make([]domain.ExternalAuthProvider, 0)
+	for _, value := range s.externalAuthProviders {
+		if value.AppID != appID {
+			continue
+		}
+		value.ClientSecretCiphertext = ""
+		providers = append(providers, value)
+	}
+	sort.Slice(providers, func(left, right int) bool { return providers[left].Name < providers[right].Name })
+	return providers, nil
+}
+
+func (s *Store) GetExternalAuthProvider(_ context.Context, appID domain.AppID, name string) (domain.ExternalAuthProvider, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.externalAuthProviders[externalAuthProviderKey(appID, name)]
+	if !exists {
+		return domain.ExternalAuthProvider{}, store.ErrNotFound
+	}
+	return value, nil
 }
 
 func (s *Store) DeleteExternalAuthToken(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, id string, event events.Event) error {
