@@ -91,7 +91,13 @@ func TestWhoCanPostEnforcesEveryMemberClass(t *testing.T) {
 	mustPost(t, ctx, m, "Uadmin")
 	mustNotPost(t, ctx, m, "Umember")
 
-	// Returning to everyone reopens it for the guest.
+	// The explicit "everyone" token is Slack's default spelled out and admits
+	// every member, guests included, exactly as an empty list does.
+	setWhoCanPost(t, ctx, m, domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{domain.ConversationPosterEveryone}})
+	mustPost(t, ctx, m, "Uguest")
+	mustPost(t, ctx, m, "Umember")
+
+	// Returning to an empty list reopens it for the guest too.
 	setWhoCanPost(t, ctx, m, domain.ConversationPreferenceList{})
 	mustPost(t, ctx, m, "Uguest")
 }

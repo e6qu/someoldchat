@@ -1067,6 +1067,11 @@ type ConversationPreferenceList struct {
 type ConversationPreferenceType string
 
 const (
+	// ConversationPosterEveryone admits every member and is Slack's default and
+	// the value its manage-posting-permissions surface labels "everyone". It is
+	// the explicit spelling of the same permission an empty list carries, so a
+	// channel that sets it and one that clears the permission behave alike.
+	ConversationPosterEveryone ConversationPreferenceType = "everyone"
 	// ConversationPosterRegularMembers admits full members — everyone who is
 	// not a guest. Combined with ConversationPosterAdmins (who are never
 	// restricted anyway) this is Slack's "everyone except guests".
@@ -1081,7 +1086,7 @@ const (
 
 func (t ConversationPreferenceType) Valid() bool {
 	switch t {
-	case ConversationPosterRegularMembers, ConversationPosterGuests, ConversationPosterAdmins:
+	case ConversationPosterEveryone, ConversationPosterRegularMembers, ConversationPosterGuests, ConversationPosterAdmins:
 		return true
 	}
 	return false
@@ -1107,6 +1112,8 @@ func (list ConversationPreferenceList) Permits(membership WorkspaceMembership) b
 	}
 	for _, kind := range list.Types {
 		switch kind {
+		case ConversationPosterEveryone:
+			return true
 		case ConversationPosterGuests:
 			if membership.Guest() {
 				return true

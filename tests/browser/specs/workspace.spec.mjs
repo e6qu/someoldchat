@@ -2803,6 +2803,15 @@ test('[NAV-01 A11Y-01] channels can be organised into a custom sidebar section',
   // Collapsing the section hides its channels and the toggle flips.
   await section.getByRole('button', { name: 'Collapse Priorities' }).click();
   await expect(page.getByRole('button', { name: 'Expand Priorities' })).toBeVisible();
+
+  // Restore the shared state. The browser suite runs against one memory-store
+  // server, so a test that reorganises the sidebar must put it back or every
+  // later test sees general in a custom section rather than the default Channels
+  // group. Deleting the section drops its channel back to that group.
+  await section.locator('.section-menu > summary').click();
+  await section.getByRole('button', { name: 'Delete section' }).click();
+  await expect(page.getByRole('navigation', { name: 'Priorities' })).toHaveCount(0);
+  await expect(page.locator('.side-section[aria-label="Channels"] .side-row', { hasText: 'general' })).toBeVisible();
 });
 
 test('[NAV-01 A11Y-01] the workspace shell names its regions and marks the current destination', async ({ page, context }) => {

@@ -2887,6 +2887,22 @@ func TestAdminConversationPrefsLifecycle(t *testing.T) {
 	}
 }
 
+// TestAdminConversationPrefsAcceptsTheEveryoneToken guards the exact payload the
+// official Web API SDK qualification sends. "everyone" is Slack's own label for
+// the unrestricted posting setting, and rejecting it broke SDK compatibility;
+// this keeps that catchable in make check rather than only in the CI SDK job.
+func TestAdminConversationPrefsAcceptsTheEveryoneToken(t *testing.T) {
+	handler := testHandler()
+	set := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.setConversationPrefs", strings.NewReader(`channel_id=C1&prefs={"can_thread":{"type":["everyone"]},"who_can_post":{"type":["everyone"]}}`))
+	set.Header.Set("Authorization", "Bearer token")
+	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	changed := httptest.NewRecorder()
+	handler.ServeHTTP(changed, set)
+	if changed.Code != http.StatusOK || !strings.Contains(changed.Body.String(), `"ok":true`) {
+		t.Fatalf("set status=%d body=%s", changed.Code, changed.Body)
+	}
+}
+
 func TestRemoteFileLifecycle(t *testing.T) {
 	handler := testHandler()
 	add := httptest.NewRequest(http.MethodPost, "/api/files.remote.add", strings.NewReader("external_id=remote-1&title=Remote%20file&external_url=https%3A%2F%2Ffiles.example%2Fdoc"))
