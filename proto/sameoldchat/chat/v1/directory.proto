@@ -612,6 +612,10 @@ message AuthPolicyEntityPage {
   int32 total_count = 4;
 }
 
+message MemberAuthPolicyResponse {
+  bool must_use_password_sign_in = 1;
+}
+
 service DirectoryService {
   rpc Users(UsersRequest) returns (UserPage);
   rpc ConversationMembers(ConversationMembersRequest) returns (UserPage);
@@ -647,6 +651,10 @@ service DirectoryService {
   rpc AdminAssignAuthPolicy(AuthPolicyMutationRequest) returns (MutationResponse);
   rpc AdminRemoveAuthPolicyEntities(AuthPolicyMutationRequest) returns (MutationResponse);
   rpc AdminAuthPolicyEntities(AuthPolicyEntitiesRequest) returns (AuthPolicyEntityPage);
+  // MemberMustUsePasswordSignIn is the member's own read of whether the
+  // email_password auth policy binds them. The sign-in paths consult it and are
+  // not administrators, so AdminAuthPolicyEntities cannot serve them.
+  rpc MemberMustUsePasswordSignIn(WorkspaceRequest) returns (MemberAuthPolicyResponse);
   rpc ResetUserSessions(ResetUserSessionsRequest) returns (MutationResponse);
   rpc UserSessions(ResetUserSessionsRequest) returns (UserSessionsResponse);
   rpc ResetUserSessionsBulk(ResetUserSessionsBulkRequest) returns (MutationResponse);

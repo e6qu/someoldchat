@@ -2742,6 +2742,13 @@ func (s *Store) ListAuthPolicyEntities(_ context.Context, workspace domain.Works
 	return page, err
 }
 
+func (s *Store) IsUnderAuthPolicy(_ context.Context, workspace domain.WorkspaceID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entity, ok := s.authPolicyEntities[authPolicyEntityKey(domain.AuthPolicyEntity{Policy: policy, EntityType: kind, EntityID: entityID})]
+	return ok && entity.WorkspaceID == workspace, nil
+}
+
 func authPolicyEntityKey(entity domain.AuthPolicyEntity) string {
 	return string(entity.Policy) + "\x00" + string(entity.EntityType) + "\x00" + entity.EntityID
 }

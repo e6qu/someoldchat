@@ -335,6 +335,7 @@ type Service interface {
 	AdminAssignAuthPolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminRemoveAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)
+	MemberMustUsePasswordSignIn(context.Context, domain.WorkspaceID, domain.UserID) (bool, error)
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)
 	Conversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	OpenConversation(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) (domain.Conversation, error)

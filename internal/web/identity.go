@@ -532,6 +532,24 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "authorization identity is not provisioned", http.StatusForbidden)
 		return
 	}
+	// Slack's one authentication policy, email_password, names the members who
+	// sign in with an email address and password rather than through single
+	// sign-on. Every completion of this handler is an external identity provider
+	// sign-in — the one thing the policy forbids — so a member it binds is refused
+	// here regardless of which provider asserted them. Whether the deployment also
+	// offers a password path is its own configuration, owned by the administrator
+	// who assigned the policy; the policy still forbids this method, and completing
+	// the sign-on anyway would be the assignment reported back and enforcing
+	// nothing — the defect this closes.
+	mustUsePassword, policyErr := h.service.MemberMustUsePasswordSignIn(r.Context(), user.WorkspaceID, user.ID)
+	if policyErr != nil {
+		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if mustUsePassword {
+		http.Error(w, "this workspace requires you to sign in with your email address and password", http.StatusForbidden)
+		return
+	}
 	// A browser session carries only the authority its user's durable workspace
 	// role justifies. An unrecognized role produces no scopes at all rather than
 	// a default set, so the failure direction is closed.

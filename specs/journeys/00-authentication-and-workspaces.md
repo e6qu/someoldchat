@@ -26,13 +26,19 @@ protected permalink.
 4. A non-member cannot enter the shell or learn private conversation content.
    The response offers an applicable request/join/sign-in path rather than a
    fabricated empty workspace.
+5. Slack's `email_password` authentication policy is honoured. A member the
+   policy binds signs in with an email address and password rather than through
+   single sign-on, so an external-identity-provider sign-in for that member is
+   refused with an explanation and mints no session. Workspace admins and owners
+   assign the policy; it is not self-service.
 
 **Durable/API effects:** Authentication creates one revocable, workspace-bound
 session. It MUST NOT silently create conversation memberships.
 
 **Required variants:** expired authorization response, identity-provider
-denial, disabled member, deleted workspace, stale permalink, cold wake, and two
-concurrent first sign-ins for the same external identity.
+denial, disabled member, deleted workspace, stale permalink, cold wake, a member
+bound to the email-and-password authentication policy, and two concurrent first
+sign-ins for the same external identity.
 
 ## AUTH-02 — Choose among workspaces
 

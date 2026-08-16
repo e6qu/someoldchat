@@ -1893,6 +1893,14 @@ func (r Remote) MemberSessionSettings(ctx context.Context, workspaceID domain.Wo
 	return decodeProtoSessionSettings(out), nil
 }
 
+func (r Remote) MemberMustUsePasswordSignIn(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (bool, error) {
+	out, err := r.directory.MemberMustUsePasswordSignIn(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return false, err
+	}
+	return out.GetMustUsePasswordSignIn(), nil
+}
+
 func sessionSettingsMutation(workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) *chatv1.SessionSettingsMutationRequest {
 	ids := make([]string, 0, len(targets))
 	for _, target := range targets {
@@ -6321,6 +6329,14 @@ func (s *Server) MemberSessionSettings(ctx context.Context, input *chatv1.Worksp
 		return nil, mapError(err)
 	}
 	return encodeProtoSessionSettings(settings), nil
+}
+
+func (s *Server) MemberMustUsePasswordSignIn(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.MemberAuthPolicyResponse, error) {
+	required, err := s.implementation.MemberMustUsePasswordSignIn(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MemberAuthPolicyResponse{MustUsePasswordSignIn: required}, nil
 }
 
 func (s *Server) AdminSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.SessionSettingsResponse, error) {

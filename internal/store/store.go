@@ -433,6 +433,10 @@ type Store interface {
 	// ListAuthPolicyEntities reports the entities one policy holds, in a stable
 	// order, and how many there are in total.
 	ListAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)
+	// IsUnderAuthPolicy reports whether one entity is bound by one policy. The
+	// sign-in paths ask this per member, so it is an indexed point lookup rather
+	// than a page scan of everyone the policy holds.
+	IsUnderAuthPolicy(context.Context, domain.WorkspaceID, domain.AuthPolicyName, domain.PolicyEntityType, string) (bool, error)
 	// GetUserExpiration reports when a guest account lapses. A zero time means
 	// the account does not lapse.
 	GetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)

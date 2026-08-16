@@ -2193,8 +2193,22 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The sign-in path's own read of the policy: U2 is still bound, U1 was
+				// just removed and is not, and a non-member is refused. The two
+				// compositions must agree, because this is the value that refuses an
+				// SSO sign-in a member's policy forbids.
+				u1Bound, err := chat.MemberMustUsePasswordSignIn(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				u2Bound, err := chat.MemberMustUsePasswordSignIn(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				_, boundStrangerErr := chat.MemberMustUsePasswordSignIn(ctx, "T1", "U-nobody")
 				return []any{first, page.TotalCount, page.HasMore, second, len(left.Entities), left.TotalCount,
-					unknownPolicy != nil, unknownKind != nil, stranger != nil}, nil
+					unknownPolicy != nil, unknownKind != nil, stranger != nil,
+					u1Bound, u2Bound, boundStrangerErr != nil}, nil
 			},
 		},
 		{

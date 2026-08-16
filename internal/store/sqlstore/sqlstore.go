@@ -5895,6 +5895,19 @@ func (s *Store) ListAuthPolicyEntities(ctx context.Context, workspace domain.Wor
 	return page, err
 }
 
+func (s *Store) IsUnderAuthPolicy(ctx context.Context, workspace domain.WorkspaceID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityID string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM auth_policy_entities WHERE workspace_id = ? AND policy_name = ? AND entity_type = ? AND entity_id = ? LIMIT 1`,
+		workspace, policy, kind, entityID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) GetUserExpiration(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (time.Time, error) {
 	var exists int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id = ? AND workspace_id = ?`, user, workspace).Scan(&exists); err != nil {

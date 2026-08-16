@@ -126,6 +126,7 @@ func authorityMatrix() map[string]authority {
 		"AdminSearchConversations":            authorityAdmin,
 		"AdminSessionSettings":                authorityAdmin,
 		"MemberSessionSettings":               authorityAnyMember,
+		"MemberMustUsePasswordSignIn":         authorityAnyMember,
 		"AdminSetAnomalyAllowList":            authorityAdmin,
 		"AdminSetAppConfig":                   authorityAdmin,
 		"AdminSetConversationArchived":        authorityAdmin,

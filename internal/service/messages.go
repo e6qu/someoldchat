@@ -4551,6 +4551,19 @@ func (m Messages) MemberSessionSettings(ctx context.Context, workspaceID domain.
 	return settings[0], nil
 }
 
+// MemberMustUsePasswordSignIn reports whether the email_password authentication
+// policy binds this member. Slack's one auth policy names the members who sign
+// in with an email address and password rather than through single sign-on, so
+// a member it binds must be refused an SSO sign-in. The sign-in paths consult
+// this and are not administrators, which is why it is self-scoped like
+// MemberSessionSettings rather than the administrative AdminAuthPolicyEntities.
+func (m Messages) MemberMustUsePasswordSignIn(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (bool, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return false, err
+	}
+	return m.Store.IsUnderAuthPolicy(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, string(userID))
+}
+
 // AdminAssignAuthPolicy puts members under an authentication policy. Every
 // named member is checked before one row is written, so a request that names
 // somebody outside the workspace leaves nothing behind.

@@ -20,6 +20,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -661,6 +662,68 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 	identity, err := store.GetExternalIdentity(context.Background(), "T1", "google", "google-subject")
 	if err != nil || identity.UserID != "U1" {
 		t.Fatalf("identity=%+v err=%v", identity, err)
+	}
+}
+
+// TestOIDCSignInRefusesAMemberBoundToEmailPasswordPolicy is the load-bearing
+// test for the auth-policy enforcement: a member the email_password policy binds
+// signs in with an email address and password, not through single sign-on, so
+// the provider callback refuses them and mints no session. Without the check the
+// assignment reported back and enforced nothing, which was the defect.
+func TestOIDCSignInRefusesAMemberBoundToEmailPasswordPolicy(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	if err := store.SetAuthPolicyEntities(context.Background(),
+		[]domain.AuthPolicyEntity{{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: "U1", WorkspaceID: "T1", CreatedAt: time.Now().UTC()}},
+		events.Event{ID: "e-policy", WorkspaceID: "T1", Topic: "auth.policy_entities_assigned", Payload: "U1", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	service := service.Messages{Store: store}
+	providerClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/token":
+			return providerResponse(r, `{"access_token":"provider-token"}`), nil
+		case "/userinfo":
+			return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","email_verified":true,"name":"Alice"}`), nil
+		default:
+			return providerResponse(r, "not found"), nil
+		}
+	})}
+	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "google", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://accounts.google.com/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.client = providerClient
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	begin := httptest.NewRecorder()
+	mux.ServeHTTP(begin, httptest.NewRequest(http.MethodGet, "/auth/google", nil))
+	if begin.Code != http.StatusFound {
+		t.Fatalf("begin status=%d body=%s", begin.Code, begin.Body.String())
+	}
+	location, err := url.Parse(begin.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackRequest := httptest.NewRequest(http.MethodGet, "/auth/google/callback?code=one-time-code&state="+url.QueryEscape(location.Query().Get("state")), nil)
+	for _, cookie := range begin.Result().Cookies() {
+		callbackRequest.AddCookie(cookie)
+	}
+	callback := httptest.NewRecorder()
+	mux.ServeHTTP(callback, callbackRequest)
+
+	if callback.Code != http.StatusForbidden {
+		t.Fatalf("callback status=%d, want 403; body=%s", callback.Code, callback.Body.String())
+	}
+	if !strings.Contains(callback.Body.String(), "email address and password") {
+		t.Fatalf("refusal body did not explain the policy: %s", callback.Body.String())
+	}
+	if session := findSessionCookie(callback.Result().Cookies()); session != nil && session.Value != "" {
+		t.Fatal("a member the policy forbids was given a session")
 	}
 }
 
