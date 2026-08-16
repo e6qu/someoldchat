@@ -795,6 +795,37 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
   expect(Buffer.concat(chunks).toString()).toBe('browser file contents');
 });
 
+// Slack lets a member reorder attachments before sending; the files then arrive
+// in that order. Here the order is the staged list's order, so moving one chip
+// reorders the message it becomes.
+test('[FILE-01] staged attachments can be reordered before sending', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app?channel=Cdev');
+
+  await page.locator('#upload-file').setInputFiles([
+    { name: 'alpha.txt', mimeType: 'text/plain', buffer: Buffer.from('a') },
+    { name: 'bravo.txt', mimeType: 'text/plain', buffer: Buffer.from('bb') },
+  ]);
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  const chips = page.locator('#upload-preview .staged-file');
+  await expect(chips).toHaveCount(2);
+  await expect(chips.nth(0)).toContainText('alpha.txt');
+  await expect(chips.nth(1)).toContainText('bravo.txt');
+
+  // Move the first file later; the staged order flips.
+  await chips.nth(0).getByRole('button', { name: 'Move alpha.txt later' }).click();
+  await expect(page.locator('#upload-preview .staged-file').nth(0)).toContainText('bravo.txt');
+  await expect(page.locator('#upload-preview .staged-file').nth(1)).toContainText('alpha.txt');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Sending honours the new order: the message's files read bravo then alpha.
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const files = page.locator('.message').last().locator('.message-file');
+  await expect(files).toHaveCount(2);
+  await expect(files.nth(0)).toContainText('bravo.txt');
+  await expect(files.nth(1)).toContainText('alpha.txt');
+});
+
 test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, filterable, and backed by real files', async ({ page, context, request }) => {
   await signIn(context);
   const needle = `typed-search-${Date.now()}`;
