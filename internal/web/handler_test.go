@@ -2427,14 +2427,21 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 		text       string
 		recurrence domain.ReminderRecurrence
 		hour       int
+		wantDate   string
 		wantError  error
 	}{
-		{expression: "stand-up tomorrow at 9am", text: "stand-up", hour: 9},
+		{expression: "stand-up tomorrow at 9am", text: "stand-up", hour: 9, wantDate: "2026-07-30"},
 		{expression: "stand-up in 20 minutes", text: "stand-up", hour: 8},
 		{expression: "stand-up in an hour", text: "stand-up", hour: 9},
 		{expression: "stand-up in a minute", text: "stand-up", hour: 8},
-		{expression: "stand-up in a week", text: "stand-up", hour: 8},
-		{expression: "stand-up in 2 weeks", text: "stand-up", hour: 8},
+		{expression: "stand-up in a week", text: "stand-up", hour: 8, wantDate: "2026-08-05"},
+		{expression: "stand-up in 2 weeks", text: "stand-up", hour: 8, wantDate: "2026-08-12"},
+		// A month and a year are calendar steps: the day of month and time of day
+		// are kept, the month or year advanced.
+		{expression: "stand-up in a month", text: "stand-up", hour: 8, wantDate: "2026-08-29"},
+		{expression: "stand-up in 6 months", text: "stand-up", hour: 8, wantDate: "2027-01-29"},
+		{expression: "stand-up in a year", text: "stand-up", hour: 8, wantDate: "2027-07-29"},
+		{expression: "stand-up in 2 years", text: "stand-up", hour: 8, wantDate: "2028-07-29"},
 		{expression: "stand-up on Friday at 9am", text: "stand-up", hour: 9},
 		{expression: "stand-up on Friday", text: "stand-up", hour: 9},
 		{expression: "stand-up on August 1 at 9am", text: "stand-up", hour: 9},
@@ -2457,6 +2464,9 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 			}
 			if err != nil || text != testCase.text || recurrence != testCase.recurrence || due.Hour() != testCase.hour || !due.After(now) {
 				t.Fatalf("text=%q due=%s recurrence=%q err=%v", text, due, recurrence, err)
+			}
+			if testCase.wantDate != "" && due.UTC().Format("2006-01-02") != testCase.wantDate {
+				t.Fatalf("due date=%s want=%s", due.UTC().Format("2006-01-02"), testCase.wantDate)
 			}
 		})
 	}
