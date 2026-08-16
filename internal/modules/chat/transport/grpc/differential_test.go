@@ -4979,6 +4979,9 @@ func parityCases() []parityCase {
 				if err := chat.SetSidebarSectionCollapsed(ctx, "T1", "U1", alpha.ID, true); err != nil {
 					return nil, err
 				}
+				if err := chat.SetSidebarSectionNotificationLevel(ctx, "T1", "U1", alpha.ID, domain.NotificationMute); err != nil {
+					return nil, err
+				}
 				// Two channels join Priorities, the second placed after the first.
 				if err := chat.AssignConversationToSidebarSection(ctx, "T1", "U1", "C1", alpha.ID, ""); err != nil {
 					return nil, err
@@ -5010,7 +5013,7 @@ func parityCases() []parityCase {
 				reorderErr := chat.ReorderSidebarSections(ctx, "T1", "U1", []domain.SidebarSectionID{alpha.ID, "not-a-section"})
 				result := []any{len(sections)}
 				if len(sections) == 2 {
-					result = append(result, sections[0].Name, sections[1].Name, sections[1].Collapsed, len(sections[1].Conversations))
+					result = append(result, sections[0].Name, sections[1].Name, sections[1].Collapsed, string(sections[1].NotificationLevel), len(sections[1].Conversations))
 					if len(sections[1].Conversations) == 2 {
 						result = append(result, string(sections[1].Conversations[0]), string(sections[1].Conversations[1]))
 					}

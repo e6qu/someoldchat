@@ -33,6 +33,7 @@ const (
 	ActivityService_CreateSidebarSection_FullMethodName                   = "/sameoldchat.chat.v1.ActivityService/CreateSidebarSection"
 	ActivityService_RenameSidebarSection_FullMethodName                   = "/sameoldchat.chat.v1.ActivityService/RenameSidebarSection"
 	ActivityService_SetSidebarSectionCollapsed_FullMethodName             = "/sameoldchat.chat.v1.ActivityService/SetSidebarSectionCollapsed"
+	ActivityService_SetSidebarSectionNotificationLevel_FullMethodName     = "/sameoldchat.chat.v1.ActivityService/SetSidebarSectionNotificationLevel"
 	ActivityService_DeleteSidebarSection_FullMethodName                   = "/sameoldchat.chat.v1.ActivityService/DeleteSidebarSection"
 	ActivityService_ReorderSidebarSections_FullMethodName                 = "/sameoldchat.chat.v1.ActivityService/ReorderSidebarSections"
 	ActivityService_AssignConversationToSidebarSection_FullMethodName     = "/sameoldchat.chat.v1.ActivityService/AssignConversationToSidebarSection"
@@ -60,6 +61,7 @@ type ActivityServiceClient interface {
 	CreateSidebarSection(ctx context.Context, in *CreateSidebarSectionRequest, opts ...grpc.CallOption) (*SidebarSection, error)
 	RenameSidebarSection(ctx context.Context, in *RenameSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetSidebarSectionCollapsed(ctx context.Context, in *SetSidebarSectionCollapsedRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	SetSidebarSectionNotificationLevel(ctx context.Context, in *SetSidebarSectionNotificationLevelRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	DeleteSidebarSection(ctx context.Context, in *DeleteSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	ReorderSidebarSections(ctx context.Context, in *ReorderSidebarSectionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AssignConversationToSidebarSection(ctx context.Context, in *AssignConversationToSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -217,6 +219,16 @@ func (c *activityServiceClient) SetSidebarSectionCollapsed(ctx context.Context, 
 	return out, nil
 }
 
+func (c *activityServiceClient) SetSidebarSectionNotificationLevel(ctx context.Context, in *SetSidebarSectionNotificationLevelRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_SetSidebarSectionNotificationLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *activityServiceClient) DeleteSidebarSection(ctx context.Context, in *DeleteSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -305,6 +317,7 @@ type ActivityServiceServer interface {
 	CreateSidebarSection(context.Context, *CreateSidebarSectionRequest) (*SidebarSection, error)
 	RenameSidebarSection(context.Context, *RenameSidebarSectionRequest) (*MutationResponse, error)
 	SetSidebarSectionCollapsed(context.Context, *SetSidebarSectionCollapsedRequest) (*MutationResponse, error)
+	SetSidebarSectionNotificationLevel(context.Context, *SetSidebarSectionNotificationLevelRequest) (*MutationResponse, error)
 	DeleteSidebarSection(context.Context, *DeleteSidebarSectionRequest) (*MutationResponse, error)
 	ReorderSidebarSections(context.Context, *ReorderSidebarSectionsRequest) (*MutationResponse, error)
 	AssignConversationToSidebarSection(context.Context, *AssignConversationToSidebarSectionRequest) (*MutationResponse, error)
@@ -362,6 +375,9 @@ func (UnimplementedActivityServiceServer) RenameSidebarSection(context.Context, 
 }
 func (UnimplementedActivityServiceServer) SetSidebarSectionCollapsed(context.Context, *SetSidebarSectionCollapsedRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetSidebarSectionCollapsed not implemented")
+}
+func (UnimplementedActivityServiceServer) SetSidebarSectionNotificationLevel(context.Context, *SetSidebarSectionNotificationLevelRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetSidebarSectionNotificationLevel not implemented")
 }
 func (UnimplementedActivityServiceServer) DeleteSidebarSection(context.Context, *DeleteSidebarSectionRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteSidebarSection not implemented")
@@ -656,6 +672,24 @@ func _ActivityService_SetSidebarSectionCollapsed_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ActivityService_SetSidebarSectionNotificationLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSidebarSectionNotificationLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).SetSidebarSectionNotificationLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_SetSidebarSectionNotificationLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).SetSidebarSectionNotificationLevel(ctx, req.(*SetSidebarSectionNotificationLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ActivityService_DeleteSidebarSection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteSidebarSectionRequest)
 	if err := dec(in); err != nil {
@@ -844,6 +878,10 @@ var ActivityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetSidebarSectionCollapsed",
 			Handler:    _ActivityService_SetSidebarSectionCollapsed_Handler,
+		},
+		{
+			MethodName: "SetSidebarSectionNotificationLevel",
+			Handler:    _ActivityService_SetSidebarSectionNotificationLevel_Handler,
 		},
 		{
 			MethodName: "DeleteSidebarSection",

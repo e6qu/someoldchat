@@ -837,6 +837,9 @@ type Store interface {
 	RenameSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, string) error
 	// SetSidebarSectionCollapsed records whether a section is shown collapsed.
 	SetSidebarSectionCollapsed(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, bool) error
+	// SetSidebarSectionNotificationLevel records the level a section's channels
+	// notify at when they carry no override of their own.
+	SetSidebarSectionNotificationLevel(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, domain.NotificationLevel) error
 	// DeleteSidebarSection removes a section; its channels fall back to the
 	// default group.
 	DeleteSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID) error

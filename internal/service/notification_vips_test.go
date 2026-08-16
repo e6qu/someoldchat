@@ -83,6 +83,50 @@ func TestVIPOverrideNeverNotifiesANonMember(t *testing.T) {
 	}
 }
 
+// A section's notification level layers between a channel's own override and the
+// workspace default: a muted section suppresses a channel that the workspace
+// default would otherwise deliver, and a channel's own override still wins.
+func TestSectionNotificationLevelLayersBetweenConversationAndWorkspace(t *testing.T) {
+	ctx, messages, s := vipWorld(t)
+	// U2's workspace default is All, so a plain channel message reaches them.
+	if _, err := messages.SetWorkspaceNotificationPreferences(ctx, "T1", "U2", domain.NotificationAll, nil, true, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", "hello one", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := channelActivityCount(t, s, "U2"); got != 1 {
+		t.Fatalf("baseline U2 channel activity = %d, want 1 (workspace All)", got)
+	}
+	// Placing C1 in a muted section suppresses what the workspace default delivered.
+	section, err := messages.CreateSidebarSection(ctx, "T1", "U2", "Muted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.AssignConversationToSidebarSection(ctx, "T1", "U2", "C1", section.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetSidebarSectionNotificationLevel(ctx, "T1", "U2", section.ID, domain.NotificationMute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", "hello two", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := channelActivityCount(t, s, "U2"); got != 1 {
+		t.Fatalf("after section mute, U2 channel activity = %d, want still 1 (the muted section suppressed the new message)", got)
+	}
+	// A channel's own override beats the section: U2 sets C1 to All.
+	if _, err := messages.SetConversationNotificationPreferences(ctx, "T1", "U2", "C1", domain.NotificationAll, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", "hello three", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := channelActivityCount(t, s, "U2"); got != 2 {
+		t.Fatalf("with a channel override of All over a muted section, U2 = %d, want 2", got)
+	}
+}
+
 // SetNotificationVIP manages the member's own list: toggling adds then removes,
 // marking yourself or a stranger is refused, and it is read back on the prefs.
 func TestSetNotificationVIPManagesTheMembersOwnList(t *testing.T) {

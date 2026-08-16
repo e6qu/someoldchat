@@ -3103,6 +3103,72 @@ func sidebarSectionsOrderIdenticallyOnEveryProfile(t *testing.T, open opener) {
 	}
 }
 
+// A section's notification level is consulted inside the per-recipient fanout,
+// which is written twice. A muted section must suppress a channel item the
+// workspace default would deliver, and a section set to All must deliver one,
+// identically on memory and SQL.
+func sectionNotificationLevelLayersIdenticallyOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	author := domain.UserID("UA" + f.suffix)
+	reader := domain.UserID("UR" + f.suffix)
+	for _, user := range []domain.UserID{author, reader} {
+		if err := f.repository.SeedUser(ctx, domain.User{ID: user, WorkspaceID: f.workspaceID, Name: string(user)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repository.SeedConversationMember(ctx, f.channelID, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The reader's workspace default is All, so a plain channel message reaches them.
+	prefs := domain.DefaultWorkspaceNotificationPreferences(f.workspaceID, reader)
+	prefs.Level = domain.NotificationAll
+	prefs.ActivityChannels = true
+	if err := f.repository.SetWorkspaceNotificationPreferences(ctx, prefs, f.event("wsprefs", "notification.preferences_changed", string(reader))); err != nil {
+		t.Fatal(err)
+	}
+	section := domain.SidebarSectionID("sec-notify-" + f.suffix)
+	if err := f.repository.CreateSidebarSection(ctx, domain.SidebarSection{ID: section, WorkspaceID: f.workspaceID, UserID: reader, Name: "Focus", CreatedAt: time.Unix(1_700_000_000, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, reader, f.channelID, section, ""); err != nil {
+		t.Fatal(err)
+	}
+	channelItems := func() int {
+		t.Helper()
+		page, err := f.repository.ListActivity(ctx, f.workspaceID, reader, domain.ActivityQuery{Kinds: []domain.ActivityKind{domain.ActivityChannel}, Page: domain.PageRequest{Limit: 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Items)
+	}
+	post := func(id, text string, at int64) {
+		t.Helper()
+		message := domain.Message{ID: domain.MessageID(id + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID, AuthorID: author, Text: text, Attachments: "[]", CreatedAt: domain.MessageInstant(time.Unix(at, 0).UTC())}
+		if err := f.repository.CreateMessage(ctx, message, f.event("msg-"+id, "message.created", string(message.ID)), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A muted section suppresses what the workspace All default would deliver.
+	if err := f.repository.SetSidebarSectionNotificationLevel(ctx, f.workspaceID, reader, section, domain.NotificationMute); err != nil {
+		t.Fatal(err)
+	}
+	post("M-muted-", "in a muted section", 1_700_000_100)
+	if got := channelItems(); got != 0 {
+		t.Fatalf("a muted section delivered %d channel items, want 0", got)
+	}
+	// Setting it to All delivers again.
+	if err := f.repository.SetSidebarSectionNotificationLevel(ctx, f.workspaceID, reader, section, domain.NotificationAll); err != nil {
+		t.Fatal(err)
+	}
+	post("M-all-", "in an all section", 1_700_000_200)
+	if got := channelItems(); got != 1 {
+		t.Fatalf("an all section delivered %d channel items, want 1", got)
+	}
+}
+
 // Assignment is state on the item and news in Activity, and the two profiles
 // resolve reachability differently — one joins the shared list predicate, the
 // other walks grants under a lock. The contract drives both, including the due

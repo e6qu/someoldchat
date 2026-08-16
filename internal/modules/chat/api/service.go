@@ -382,6 +382,7 @@ type Service interface {
 	CreateSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.SidebarSection, error)
 	RenameSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, string) error
 	SetSidebarSectionCollapsed(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, bool) error
+	SetSidebarSectionNotificationLevel(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, domain.NotificationLevel) error
 	DeleteSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID) error
 	ReorderSidebarSections(context.Context, domain.WorkspaceID, domain.UserID, []domain.SidebarSectionID) error
 	AssignConversationToSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.SidebarSectionID, domain.ConversationID) error

@@ -188,6 +188,7 @@ func authorityMatrix() map[string]authority {
 		"CreateSidebarSection":                    authorityAnyMember,
 		"RenameSidebarSection":                    authorityAnyMember,
 		"SetSidebarSectionCollapsed":              authorityAnyMember,
+		"SetSidebarSectionNotificationLevel":      authorityAnyMember,
 		"DeleteSidebarSection":                    authorityAnyMember,
 		"ReorderSidebarSections":                  authorityAnyMember,
 		"AssignConversationToSidebarSection":      authorityAnyMember,

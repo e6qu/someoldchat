@@ -5105,6 +5105,7 @@ func encodeProtoSidebarSection(value domain.SidebarSection) *chatv1.SidebarSecti
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
 		Name: value.Name, Position: int32(value.Position), Collapsed: value.Collapsed,
 		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), Conversations: conversations,
+		NotificationLevel: string(value.NotificationLevel),
 	}
 }
 
@@ -5115,7 +5116,8 @@ func decodeProtoSidebarSection(value *chatv1.SidebarSection) domain.SidebarSecti
 	section := domain.SidebarSection{
 		ID: domain.SidebarSectionID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		UserID: domain.UserID(value.GetUserId()), Name: value.GetName(), Position: int(value.GetPosition()),
-		Collapsed: value.GetCollapsed(), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+		Collapsed: value.GetCollapsed(), NotificationLevel: domain.NotificationLevel(value.GetNotificationLevel()),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 	}
 	for _, id := range value.GetConversations() {
 		section.Conversations = append(section.Conversations, domain.ConversationID(id))
@@ -5161,6 +5163,17 @@ func (r Remote) SetSidebarSectionCollapsed(ctx context.Context, workspaceID doma
 	}
 	if !out.GetOk() {
 		return errors.New("typed set sidebar section collapsed response was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) SetSidebarSectionNotificationLevel(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, level domain.NotificationLevel) error {
+	out, err := r.activity.SetSidebarSectionNotificationLevel(ctx, &chatv1.SetSidebarSectionNotificationLevelRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SectionId: string(id), Level: string(level)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed set sidebar section notification level response was not acknowledged")
 	}
 	return nil
 }
@@ -9418,6 +9431,13 @@ func (s *Server) RenameSidebarSection(ctx context.Context, input *chatv1.RenameS
 
 func (s *Server) SetSidebarSectionCollapsed(ctx context.Context, input *chatv1.SetSidebarSectionCollapsedRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.SetSidebarSectionCollapsed(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SidebarSectionID(input.GetSectionId()), input.GetCollapsed()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SetSidebarSectionNotificationLevel(ctx context.Context, input *chatv1.SetSidebarSectionNotificationLevelRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SetSidebarSectionNotificationLevel(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SidebarSectionID(input.GetSectionId()), domain.NotificationLevel(input.GetLevel())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil

@@ -3342,7 +3342,8 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		// constraint on it — that would only make a reorder collide mid-update.
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS sidebar_sections (
 			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
-			name TEXT NOT NULL, position INTEGER NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+			name TEXT NOT NULL, position INTEGER NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0,
+			notification_level TEXT NOT NULL DEFAULT 'inherit', created_at INTEGER NOT NULL
 		)`); err != nil {
 			return fmt.Errorf("migrate sidebar sections: %w", err)
 		}
@@ -13489,7 +13490,7 @@ func (s *Store) DeleteActivitySavedView(ctx context.Context, workspace domain.Wo
 }
 
 func (s *Store) SidebarSections(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.SidebarSection, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, position, collapsed, created_at FROM sidebar_sections WHERE workspace_id = ? AND user_id = ? ORDER BY position, id`, workspace, user)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, position, collapsed, notification_level, created_at FROM sidebar_sections WHERE workspace_id = ? AND user_id = ? ORDER BY position, id`, workspace, user)
 	if err != nil {
 		return nil, err
 	}
@@ -13498,7 +13499,7 @@ func (s *Store) SidebarSections(ctx context.Context, workspace domain.WorkspaceI
 		section := domain.SidebarSection{WorkspaceID: workspace, UserID: user}
 		var collapsed int
 		var created int64
-		if err := rows.Scan(&section.ID, &section.Name, &section.Position, &collapsed, &created); err != nil {
+		if err := rows.Scan(&section.ID, &section.Name, &section.Position, &collapsed, &section.NotificationLevel, &created); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -13542,8 +13543,12 @@ func (s *Store) CreateSidebarSection(ctx context.Context, section domain.Sidebar
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position)+1, 0) FROM sidebar_sections WHERE workspace_id = ? AND user_id = ?`, section.WorkspaceID, section.UserID).Scan(&position); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sidebar_sections(id, workspace_id, user_id, name, position, collapsed, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)`,
-		section.ID, section.WorkspaceID, section.UserID, section.Name, position, section.CreatedAt.UTC().UnixNano()); err != nil {
+	level := section.NotificationLevel
+	if level == "" {
+		level = domain.NotificationInherit
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sidebar_sections(id, workspace_id, user_id, name, position, collapsed, notification_level, created_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+		section.ID, section.WorkspaceID, section.UserID, section.Name, position, level, section.CreatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	return tx.Commit()
@@ -13558,6 +13563,13 @@ func (s *Store) RenameSidebarSection(ctx context.Context, workspace domain.Works
 
 func (s *Store) SetSidebarSectionCollapsed(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, collapsed bool) error {
 	return s.updateOwnedSidebarSection(ctx, workspace, user, id, `UPDATE sidebar_sections SET collapsed = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`, boolInt(collapsed))
+}
+
+func (s *Store) SetSidebarSectionNotificationLevel(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, level domain.NotificationLevel) error {
+	if !level.ValidConversationOverride() {
+		return store.InvalidArgument("a sidebar section notification level is invalid")
+	}
+	return s.updateOwnedSidebarSection(ctx, workspace, user, id, `UPDATE sidebar_sections SET notification_level = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`, string(level))
 }
 
 // updateOwnedSidebarSection runs a single-column update scoped to the owner and
@@ -14297,10 +14309,15 @@ func insertMessageActivity(ctx context.Context, tx txRunner, message domain.Mess
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		effective := conversationPreferences.EffectiveLevel(workspacePreferences)
+		var sectionLevel domain.NotificationLevel
+		if err := tx.QueryRowContext(ctx, `SELECT ss.notification_level FROM sidebar_sections ss JOIN sidebar_section_members m ON m.section_id = ss.id WHERE ss.workspace_id = ? AND ss.user_id = ? AND m.conversation_id = ?`, message.WorkspaceID, user, message.Conversation).Scan(&sectionLevel); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		effective := conversationPreferences.EffectiveLevelWithSection(sectionLevel, workspacePreferences)
 		if message.ThreadTimestamp == "" && direct == 0 && groupDirect == 0 {
 			// A VIP's every channel message reaches the member, even where their
-			// level (mute, or the default mentions-only) would otherwise drop it.
+			// level (mute, the default mentions-only, or a muted section) would
+			// otherwise drop it.
 			if domain.ContainsUserID(workspacePreferences.VIPs, message.AuthorID) {
 				add(user, domain.ActivityChannel)
 			}

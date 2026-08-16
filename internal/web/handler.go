@@ -2073,6 +2073,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             {{if .CanUp}}<form method="post" action="/app/sidebar/sections/move?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="direction" value="up"><button type="submit">Move up</button></form>{{end}}
             {{if .CanDown}}<form method="post" action="/app/sidebar/sections/move?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="direction" value="down"><button type="submit">Move down</button></form>{{end}}
             <form method="post" action="/app/sidebar/sections/rename?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><label>Rename<input type="text" name="name" maxlength="80" value="{{.Name}}" required></label><button type="submit">Save name</button></form>
+            <form method="post" action="/app/sidebar/sections/notify?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><label>Notify me about<select name="level"><option value="inherit"{{if or (eq .NotificationLevel "inherit") (eq .NotificationLevel "")}} selected{{end}}>Workspace default</option><option value="all"{{if eq .NotificationLevel "all"}} selected{{end}}>All new messages</option><option value="mentions"{{if eq .NotificationLevel "mentions"}} selected{{end}}>Mentions</option><option value="mute"{{if eq .NotificationLevel "mute"}} selected{{end}}>Nothing</option></select></label><button type="submit">Save</button></form>
             <form method="post" action="/app/sidebar/sections/delete?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><button type="submit">Delete section</button></form>
           </details>
         </div>
@@ -4612,6 +4613,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/sidebar/sections/rename", h.renameSidebarSection)
 	mux.HandleFunc("POST /app/sidebar/sections/delete", h.deleteSidebarSection)
 	mux.HandleFunc("POST /app/sidebar/sections/collapse", h.setSidebarSectionCollapsed)
+	mux.HandleFunc("POST /app/sidebar/sections/notify", h.setSidebarSectionNotificationLevel)
 	mux.HandleFunc("POST /app/sidebar/sections/move", h.moveSidebarSection)
 	mux.HandleFunc("POST /app/sidebar/sections/assign", h.assignConversationToSidebarSection)
 	mux.HandleFunc("POST /app/activity/read", h.acknowledgeActivityReminders)
@@ -6418,12 +6420,13 @@ type sidebarSectionOption struct {
 // in order, whether it is shown collapsed, and whether it can move up or down
 // among the member's sections.
 type sidebarSectionView struct {
-	ID        string
-	Name      string
-	Collapsed bool
-	CanUp     bool
-	CanDown   bool
-	Channels  []conversationView
+	ID                string
+	Name              string
+	Collapsed         bool
+	NotificationLevel string
+	CanUp             bool
+	CanDown           bool
+	Channels          []conversationView
 }
 
 type sidebarView struct {
@@ -6480,7 +6483,8 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 		for index, section := range sections {
 			sectionView := sidebarSectionView{
 				ID: string(section.ID), Name: section.Name, Collapsed: section.Collapsed,
-				CanUp: index > 0, CanDown: index < len(sections)-1,
+				NotificationLevel: string(section.NotificationLevel),
+				CanUp:             index > 0, CanDown: index < len(sections)-1,
 			}
 			for _, id := range section.Conversations {
 				if item, ok := channelByID[id]; ok {
@@ -7662,6 +7666,23 @@ func (h Handler) setSidebarSectionCollapsed(w http.ResponseWriter, r *http.Reque
 	}
 	if err := h.Messages.SetSidebarSectionCollapsed(r.Context(), principal.WorkspaceID, principal.UserID, domain.SidebarSectionID(strings.TrimSpace(fields["section_id"])), fields["collapsed"] == "true"); err != nil {
 		h.writeMutationError(w, r, http.StatusNotFound, "That section was not changed", "It is no longer there.")
+		return
+	}
+	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))
+}
+
+func (h Handler) setSidebarSectionNotificationLevel(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the sidebar and try again.")
+	if !ok {
+		return
+	}
+	if err := h.Messages.SetSidebarSectionNotificationLevel(r.Context(), principal.WorkspaceID, principal.UserID, domain.SidebarSectionID(strings.TrimSpace(fields["section_id"])), domain.NotificationLevel(strings.TrimSpace(fields["level"]))); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That section's notifications were not changed", "Choose a level and try again.")
 		return
 	}
 	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))

@@ -117,6 +117,14 @@ message SidebarSection {
   bool collapsed = 6;
   int64 created_at_unix_nano = 7;
   repeated string conversations = 8;
+  string notification_level = 9;
+}
+
+message SetSidebarSectionNotificationLevelRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string section_id = 3;
+  string level = 4;
 }
 
 message SidebarSectionsRequest {
@@ -272,6 +280,7 @@ service ActivityService {
   rpc CreateSidebarSection(CreateSidebarSectionRequest) returns (SidebarSection);
   rpc RenameSidebarSection(RenameSidebarSectionRequest) returns (MutationResponse);
   rpc SetSidebarSectionCollapsed(SetSidebarSectionCollapsedRequest) returns (MutationResponse);
+  rpc SetSidebarSectionNotificationLevel(SetSidebarSectionNotificationLevelRequest) returns (MutationResponse);
   rpc DeleteSidebarSection(DeleteSidebarSectionRequest) returns (MutationResponse);
   rpc ReorderSidebarSections(ReorderSidebarSectionsRequest) returns (MutationResponse);
   rpc AssignConversationToSidebarSection(AssignConversationToSidebarSectionRequest) returns (MutationResponse);

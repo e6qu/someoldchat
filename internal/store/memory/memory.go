@@ -7481,8 +7481,42 @@ func (s *Store) CreateSidebarSection(_ context.Context, section domain.SidebarSe
 	}
 	section.Position = position
 	section.Conversations = nil
+	if section.NotificationLevel == "" {
+		section.NotificationLevel = domain.NotificationInherit
+	}
 	s.sidebarSections[section.ID] = section
 	return nil
+}
+
+func (s *Store) SetSidebarSectionNotificationLevel(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, level domain.NotificationLevel) error {
+	if !level.ValidConversationOverride() {
+		return store.InvalidArgument("a sidebar section notification level is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	section.NotificationLevel = level
+	s.sidebarSections[id] = section
+	return nil
+}
+
+// sectionNotificationLevelLocked returns the notification level of the section
+// this member has placed the conversation in, or empty when it is in none.
+func (s *Store) sectionNotificationLevelLocked(workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) domain.NotificationLevel {
+	for _, section := range s.sidebarSections {
+		if section.WorkspaceID != workspace || section.UserID != user {
+			continue
+		}
+		for _, assigned := range section.Conversations {
+			if assigned == conversation {
+				return section.NotificationLevel
+			}
+		}
+	}
+	return ""
 }
 
 func (s *Store) RenameSidebarSection(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, name string) error {
@@ -7928,10 +7962,11 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 		if stored, ok := s.conversationNotificationPrefs[conversationNotificationKey(message.WorkspaceID, user, message.Conversation)]; ok {
 			conversationPreferences = stored
 		}
-		effective := conversationPreferences.EffectiveLevel(workspacePreferences)
+		effective := conversationPreferences.EffectiveLevelWithSection(s.sectionNotificationLevelLocked(message.WorkspaceID, user, message.Conversation), workspacePreferences)
 		if message.ThreadTimestamp == "" && !conversation.IsDirectOrGroup() {
 			// A VIP's every channel message reaches the member, even where their
-			// level (mute, or the default mentions-only) would otherwise drop it.
+			// level (mute, the default mentions-only, or a muted section) would
+			// otherwise drop it.
 			if domain.ContainsUserID(workspacePreferences.VIPs, message.AuthorID) {
 				add(user, domain.ActivityChannel)
 			}

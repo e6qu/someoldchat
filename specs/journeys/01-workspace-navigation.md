@@ -73,9 +73,11 @@ channels between them and reorders the sections, and collapses a section so its
 channels are hidden — all durable, all the member's own. Each section is its own
 named navigation region; a channel not assigned to any section falls to the
 default Channels group, and a channel the member has left drops out of its
-section at render time rather than lingering. Section-level notification
-settings are the one part still to come — they layer a per-section level into
-the same fanout the conversation and workspace levels resolve through.
+section at render time rather than lingering. A section also carries its own
+notification level, layered in the per-recipient fanout between a channel's own
+override and the workspace default: a muted section silences a channel the
+workspace default would deliver, and a channel's own setting still wins over the
+section's.
 
 ## NAV-05 — Use history and permalinks
 

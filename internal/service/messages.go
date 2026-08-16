@@ -7234,6 +7234,18 @@ func (m Messages) SetSidebarSectionCollapsed(ctx context.Context, workspaceID do
 	return m.Store.SetSidebarSectionCollapsed(ctx, workspaceID, userID, id, collapsed)
 }
 
+// SetSidebarSectionNotificationLevel sets the level a section's channels notify
+// at when they carry no override of their own.
+func (m Messages) SetSidebarSectionNotificationLevel(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, level domain.NotificationLevel) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	if !level.ValidConversationOverride() {
+		return ErrInvalidSidebarSection
+	}
+	return m.Store.SetSidebarSectionNotificationLevel(ctx, workspaceID, userID, id, level)
+}
+
 // DeleteSidebarSection removes a section; its channels fall back to the default
 // group.
 func (m Messages) DeleteSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID) error {

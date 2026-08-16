@@ -1435,6 +1435,14 @@ func TestSidebarSectionsOrganizeChannels(t *testing.T) {
 		t.Fatalf("section channels = %v, want [Cdev]", sections[0].Conversations)
 	}
 
+	// The section can be muted, which the fanout consults.
+	if r := postForm(t, mux, "/app/sidebar/sections/notify?channel=Cdev", url.Values{"_csrf": {csrf}, "section_id": {id}, "level": {"mute"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("notify status=%d body=%s", r.Code, r.Body)
+	}
+	if muted, _ := messages.SidebarSections(context.Background(), "T1", "U1"); muted[0].NotificationLevel != domain.NotificationMute {
+		t.Fatalf("section level = %q, want mute", muted[0].NotificationLevel)
+	}
+
 	if r := postForm(t, mux, "/app/sidebar/sections/collapse?channel=Cdev", url.Values{"_csrf": {csrf}, "section_id": {id}, "collapsed": {"true"}}.Encode(), false); r.Code != http.StatusSeeOther {
 		t.Fatalf("collapse status=%d body=%s", r.Code, r.Body)
 	}

@@ -1700,18 +1700,37 @@ const SidebarSectionLimit = 30
 // simply falls out of the group rather than lingering. Position orders the
 // sections against each other; Collapsed is durable per-section state.
 type SidebarSection struct {
-	ID            SidebarSectionID
-	WorkspaceID   WorkspaceID
-	UserID        UserID
-	Name          string
-	Position      int
-	Collapsed     bool
-	CreatedAt     time.Time
-	Conversations []ConversationID
+	ID          SidebarSectionID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Name        string
+	Position    int
+	Collapsed   bool
+	// NotificationLevel is the level the section's channels notify at when they
+	// carry no override of their own — Slack's per-section notification setting.
+	// NotificationInherit (the default) leaves each channel on the workspace
+	// default, so a plain section changes nothing.
+	NotificationLevel NotificationLevel
+	CreatedAt         time.Time
+	Conversations     []ConversationID
 }
 
 func (section SidebarSection) Valid() bool {
 	return strings.TrimSpace(section.Name) != ""
+}
+
+// EffectiveLevelWithSection resolves the level a channel notifies at when its
+// member has placed it in a section: the channel's own override wins, then the
+// section's, then the workspace default. It layers the section between the
+// conversation and the workspace exactly where Slack does.
+func (preferences ConversationNotificationPreferences) EffectiveLevelWithSection(section NotificationLevel, workspace WorkspaceNotificationPreferences) NotificationLevel {
+	if preferences.Level != NotificationInherit {
+		return preferences.Level
+	}
+	if section != "" && section != NotificationInherit {
+		return section
+	}
+	return workspace.Level
 }
 
 type ActivityMutation string
