@@ -6428,6 +6428,33 @@ func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, works
 	return preferences, nil
 }
 
+// SetNotificationVIP marks or unmarks another member as one of the caller's
+// VIPs — someone whose channel messages always reach them, even in a channel
+// they have muted. The target must be a real member of the workspace; marking
+// yourself, or someone who is not here, is refused as a missing person is, so
+// it cannot be used to probe who exists.
+func (m Messages) SetNotificationVIP(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, target domain.UserID, add bool) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	if target == "" || target == userID {
+		return store.InvalidArgument("a VIP must be another member")
+	}
+	person, err := m.Store.GetUser(ctx, target)
+	if err != nil || person.WorkspaceID != workspaceID || person.Deleted {
+		return store.ErrNotFound
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"notification.vip_changed",
+		events.String("user_id", string(userID)),
+		events.String("target_id", string(target)),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetNotificationVIP(ctx, workspaceID, userID, target, add, event)
+}
+
 func (m Messages) ConversationNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationNotificationPreferences, error) {
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.ConversationNotificationPreferences{}, err

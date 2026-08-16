@@ -367,6 +367,7 @@ type Service interface {
 	WorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationLevel, []string, bool, bool, bool) (domain.WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationSchedule) (domain.WorkspaceNotificationPreferences, error)
+	SetNotificationVIP(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, bool) error
 	ConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.NotificationLevel, bool) (domain.ConversationNotificationPreferences, error)
 	ThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (bool, error)

@@ -6771,6 +6771,7 @@ func (s *Store) GetWorkspaceNotificationPreferences(_ context.Context, workspace
 	defer s.mu.RUnlock()
 	if preferences, ok := s.workspaceNotificationPrefs[workspaceNotificationKey(workspace, user)]; ok {
 		preferences.Keywords = append([]string(nil), preferences.Keywords...)
+		preferences.VIPs = append([]domain.UserID(nil), preferences.VIPs...)
 		return preferences, nil
 	}
 	return domain.DefaultWorkspaceNotificationPreferences(workspace, user), nil
@@ -6790,7 +6791,44 @@ func (s *Store) SetWorkspaceNotificationPreferences(_ context.Context, preferenc
 		return store.ErrNotFound
 	}
 	preferences.Keywords = append([]string(nil), preferences.Keywords...)
+	// The VIP list is set through its own operation; a preferences write must
+	// preserve it rather than carry (and so clobber) it, matching the SQL
+	// profile whose upsert does not touch the vips column.
+	preferences.VIPs = append([]domain.UserID(nil), s.workspaceNotificationPrefs[workspaceNotificationKey(preferences.WorkspaceID, preferences.UserID)].VIPs...)
 	s.workspaceNotificationPrefs[workspaceNotificationKey(preferences.WorkspaceID, preferences.UserID)] = preferences
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) SetNotificationVIP(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, target domain.UserID, add bool, event events.Event) error {
+	if target == "" || target == user {
+		return store.InvalidArgument("a VIP must be another member")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.workspaces[workspace]; !ok {
+		return store.ErrNotFound
+	}
+	if _, ok := s.members[string(workspace)+"\x00"+string(user)]; !ok {
+		return store.ErrNotFound
+	}
+	key := workspaceNotificationKey(workspace, user)
+	preferences, ok := s.workspaceNotificationPrefs[key]
+	if !ok {
+		preferences = domain.DefaultWorkspaceNotificationPreferences(workspace, user)
+	}
+	vips := domain.NormalizeUserIDs(preferences.VIPs)
+	updated := make([]domain.UserID, 0, len(vips)+1)
+	for _, id := range vips {
+		if id != target {
+			updated = append(updated, id)
+		}
+	}
+	if add {
+		updated = append(updated, target)
+	}
+	preferences.VIPs = updated
+	s.workspaceNotificationPrefs[key] = preferences
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -7730,6 +7768,11 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 		}
 		effective := conversationPreferences.EffectiveLevel(workspacePreferences)
 		if message.ThreadTimestamp == "" && !conversation.IsDirectOrGroup() {
+			// A VIP's every channel message reaches the member, even where their
+			// level (mute, or the default mentions-only) would otherwise drop it.
+			if domain.ContainsUserID(workspacePreferences.VIPs, message.AuthorID) {
+				add(user, domain.ActivityChannel)
+			}
 			if effective == domain.NotificationAll && workspacePreferences.ActivityChannels {
 				add(user, domain.ActivityChannel)
 			}

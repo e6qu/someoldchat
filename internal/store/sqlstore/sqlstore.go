@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 168
+const schemaVersion = 169
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3332,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 169 {
+		// A member's VIPs — the people whose channel messages always reach them,
+		// even in a channel they have muted or set to mentions only. Stored as a
+		// JSON list on the member's notification preferences so the fanout, which
+		// already loads that row per recipient, reads it without a second query.
+		// The column-exists guard keeps a rewound schema replaying it idempotently.
+		columns, err := s.tableColumns(ctx, db, "notification_preferences")
+		if err != nil {
+			return err
+		}
+		if !columns["vips"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE notification_preferences ADD COLUMN vips TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				return fmt.Errorf("migrate notification vips: %w", err)
+			}
 		}
 	}
 	if version < 168 {
@@ -12529,17 +12545,21 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 
 func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, user)
-	var keywords string
+	var keywords, vips string
 	var activityChannels, activityReminders, browserNotifications, scheduleEnabled int
 	var scheduleDays string
-	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders, browser_notifications, schedule_enabled, schedule_days, schedule_start, schedule_end, schedule_zone FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
-		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders, &browserNotifications, &scheduleEnabled, &scheduleDays, &preferences.Schedule.StartMinute, &preferences.Schedule.EndMinute, &preferences.Schedule.TimeZone)
+	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders, browser_notifications, schedule_enabled, schedule_days, schedule_start, schedule_end, schedule_zone, vips FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
+		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders, &browserNotifications, &scheduleEnabled, &scheduleDays, &preferences.Schedule.StartMinute, &preferences.Schedule.EndMinute, &preferences.Schedule.TimeZone, &vips)
 	if errors.Is(err, sql.ErrNoRows) {
 		return preferences, nil
 	}
 	if err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err
 	}
+	if err := json.Unmarshal([]byte(vips), &preferences.VIPs); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	preferences.VIPs = domain.NormalizeUserIDs(preferences.VIPs)
 	if err := json.Unmarshal([]byte(keywords), &preferences.Keywords); err != nil {
 		return domain.WorkspaceNotificationPreferences{}, err
 	}
@@ -12605,6 +12625,63 @@ func (s *Store) SetWorkspaceNotificationPreferences(ctx context.Context, prefere
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders, browser_notifications = excluded.browser_notifications, schedule_enabled = excluded.schedule_enabled, schedule_days = excluded.schedule_days, schedule_start = excluded.schedule_start, schedule_end = excluded.schedule_end, schedule_zone = excluded.schedule_zone`,
 		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders), boolInt(preferences.BrowserNotifications),
 		boolInt(preferences.Schedule.Enabled), string(days), preferences.Schedule.StartMinute, preferences.Schedule.EndMinute, preferences.Schedule.TimeZone); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetNotificationVIP adds or removes one person from a member's VIP list,
+// touching only the vips column so a concurrent preference write is preserved.
+// The row is created with defaults if the member had no preferences yet.
+func (s *Store) SetNotificationVIP(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, target domain.UserID, add bool, event events.Event) error {
+	if target == "" || target == user {
+		return store.InvalidArgument("a VIP must be another member")
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var current string
+	err = tx.QueryRowContext(ctx, `SELECT vips FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).Scan(&current)
+	var vips []domain.UserID
+	if err == nil {
+		if err := json.Unmarshal([]byte(current), &vips); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	vips = domain.NormalizeUserIDs(vips)
+	updated := make([]domain.UserID, 0, len(vips)+1)
+	for _, id := range vips {
+		if id != target {
+			updated = append(updated, id)
+		}
+	}
+	if add {
+		updated = append(updated, target)
+	}
+	encoded, err := json.Marshal(updated)
+	if err != nil {
+		return err
+	}
+	defaults := domain.DefaultWorkspaceNotificationPreferences(workspace, user)
+	defaultKeywords, err := json.Marshal(defaults.Keywords)
+	if err != nil {
+		return err
+	}
+	defaultDays, err := json.Marshal(weekdayNumbers(defaults.Schedule.Days))
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders, browser_notifications, schedule_enabled, schedule_days, schedule_start, schedule_end, schedule_zone, vips)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET vips = excluded.vips`,
+		workspace, user, defaults.Level, string(defaultKeywords), boolInt(defaults.ActivityChannels), boolInt(defaults.ActivityReminders), boolInt(defaults.BrowserNotifications),
+		boolInt(defaults.Schedule.Enabled), string(defaultDays), defaults.Schedule.StartMinute, defaults.Schedule.EndMinute, defaults.Schedule.TimeZone, string(encoded)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -13941,10 +14018,10 @@ func insertMessageActivity(ctx context.Context, tx txRunner, message domain.Mess
 			add(user, domain.ActivityDM)
 		}
 		workspacePreferences := domain.DefaultWorkspaceNotificationPreferences(message.WorkspaceID, user)
-		var keywordsJSON string
+		var keywordsJSON, vipsJSON string
 		var activityChannels, activityReminders int
-		err := tx.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, message.WorkspaceID, user).
-			Scan(&workspacePreferences.Level, &keywordsJSON, &activityChannels, &activityReminders)
+		err := tx.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders, vips FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, message.WorkspaceID, user).
+			Scan(&workspacePreferences.Level, &keywordsJSON, &activityChannels, &activityReminders, &vipsJSON)
 		if err == nil {
 			if err := json.Unmarshal([]byte(keywordsJSON), &workspacePreferences.Keywords); err != nil {
 				return err
@@ -13952,6 +14029,10 @@ func insertMessageActivity(ctx context.Context, tx txRunner, message domain.Mess
 			workspacePreferences.Keywords = domain.NormalizeNotificationKeywords(workspacePreferences.Keywords)
 			workspacePreferences.ActivityChannels = activityChannels != 0
 			workspacePreferences.ActivityReminders = activityReminders != 0
+			if err := json.Unmarshal([]byte(vipsJSON), &workspacePreferences.VIPs); err != nil {
+				return err
+			}
+			workspacePreferences.VIPs = domain.NormalizeUserIDs(workspacePreferences.VIPs)
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -13966,6 +14047,11 @@ func insertMessageActivity(ctx context.Context, tx txRunner, message domain.Mess
 		}
 		effective := conversationPreferences.EffectiveLevel(workspacePreferences)
 		if message.ThreadTimestamp == "" && direct == 0 && groupDirect == 0 {
+			// A VIP's every channel message reaches the member, even where their
+			// level (mute, or the default mentions-only) would otherwise drop it.
+			if domain.ContainsUserID(workspacePreferences.VIPs, message.AuthorID) {
+				add(user, domain.ActivityChannel)
+			}
 			if effective == domain.NotificationAll && workspacePreferences.ActivityChannels {
 				add(user, domain.ActivityChannel)
 			}
