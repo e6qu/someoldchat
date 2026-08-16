@@ -6559,6 +6559,16 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The manifest carries a redirect URL, so distribution activates and
+				// then deactivates; both compositions must agree on the resulting state.
+				distributed, err := chat.SetAppDistribution(ctx, configuration.Token, app.ID, true)
+				if err != nil {
+					return nil, err
+				}
+				reprivatized, err := chat.SetAppDistribution(ctx, configuration.Token, app.ID, false)
+				if err != nil {
+					return nil, err
+				}
 				oauthRequest := domain.OAuthAuthorizationRequest{ClientID: credentials.ClientID, WorkspaceID: "T1", UserID: "U1", RedirectURI: "https://example.test/oauth", BotScopes: []string{"chat:write"}, State: "state"}
 				inspected, err := chat.InspectOAuthAuthorization(ctx, oauthRequest)
 				if err != nil {
@@ -6619,7 +6629,7 @@ func parityCases() []parityCase {
 				if err := chat.DeleteDeveloperApp(ctx, rotated.Token, app.ID); err != nil {
 					return nil, err
 				}
-				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), len(listed), revokeOneErr == nil, revokedCount, strangerRevoke != nil, updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
+				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), len(listed), revokeOneErr == nil, revokedCount, strangerRevoke != nil, updated.Name, updated.ManifestVersion, distributed.Distribution, reprivatized.Distribution, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
 					v1Token.AccessToken != "", string(v1Token.TokenType), len(v1Token.Scopes) > 0,
 					openID.IDToken != "", openID.AccessToken != "",
 					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName, revoked.Revoked}, nil

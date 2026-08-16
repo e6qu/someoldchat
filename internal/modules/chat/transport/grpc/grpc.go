@@ -13212,6 +13212,14 @@ func (r Remote) UpdateAppFromManifest(ctx context.Context, token string, appID d
 	return decodeProtoDeveloperApp(out.GetApp())
 }
 
+func (r Remote) SetAppDistribution(ctx context.Context, token string, appID domain.AppID, public bool) (domain.App, error) {
+	out, err := r.apps.SetAppDistribution(ctx, &chatv1.AppDistributionRequest{Token: token, AppId: string(appID), Public: public})
+	if err != nil {
+		return domain.App{}, err
+	}
+	return decodeProtoDeveloperApp(out.GetApp())
+}
+
 func (r Remote) DeleteDeveloperApp(ctx context.Context, token string, appID domain.AppID) error {
 	out, err := r.apps.DeleteDeveloperApp(ctx, &chatv1.AppManifestRequest{Token: token, AppId: string(appID)})
 	if err != nil {
@@ -13722,6 +13730,14 @@ func (s *Server) ExportAppManifest(ctx context.Context, input *chatv1.AppManifes
 
 func (s *Server) UpdateAppFromManifest(ctx context.Context, input *chatv1.AppManifestRequest) (*chatv1.AppMutationResponse, error) {
 	app, err := s.implementation.UpdateAppFromManifest(ctx, input.GetToken(), domain.AppID(input.GetAppId()), input.GetManifest())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true, App: encodeProtoDeveloperApp(app)}, nil
+}
+
+func (s *Server) SetAppDistribution(ctx context.Context, input *chatv1.AppDistributionRequest) (*chatv1.AppMutationResponse, error) {
+	app, err := s.implementation.SetAppDistribution(ctx, input.GetToken(), domain.AppID(input.GetAppId()), input.GetPublic())
 	if err != nil {
 		return nil, mapError(err)
 	}

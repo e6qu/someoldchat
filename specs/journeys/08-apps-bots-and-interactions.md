@@ -34,6 +34,13 @@ in an `incoming_webhook` object. The installer must be a member of the channel
 they name; a channel named without the scope is ignored; and a hook the mint
 could not complete is absent from the response rather than failing the install.
 
+Which workspaces may install an app is the owner's decision. An app starts
+private — installable only in the workspace it was developed in — and its owner
+activates public distribution from the developer console to let any workspace
+install it. Activation requires a redirect URL in the manifest, because an
+install with nowhere to return to cannot complete; deactivation is always
+allowed and does not uninstall the app where it already runs.
+
 ## APP-03 — Use an app bot and App Home
 
 Bot messages are visibly app/bot-authored and honor Slack's channel membership,

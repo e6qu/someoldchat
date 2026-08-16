@@ -74,6 +74,7 @@ func authorityMatrix() map[string]authority {
 		"SetSocketModeCursor":                authorityCredential,
 		"UninstallApp":                       authorityCredential,
 		"UpdateAppFromManifest":              authorityCredential,
+		"SetAppDistribution":                 authorityCredential,
 		"UploadExternalFile":                 authorityCredential,
 		"ValidateAppManifest":                authorityCredential,
 

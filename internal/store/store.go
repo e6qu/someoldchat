@@ -530,6 +530,10 @@ type Store interface {
 	GetAppByClientID(context.Context, string) (domain.App, domain.AppManifestRevision, error)
 	ListDeveloperApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.App, error)
 	UpdateApp(context.Context, domain.App, domain.AppManifestRevision) error
+	// SetAppDistribution changes only an app's distribution state, without
+	// touching its manifest or minting a revision — activating or deactivating
+	// public distribution is not a manifest edit.
+	SetAppDistribution(context.Context, domain.AppID, string, time.Time) error
 	DeleteApp(context.Context, domain.AppID, domain.UserID, time.Time) error
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)

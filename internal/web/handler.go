@@ -4717,6 +4717,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/developer/apps", h.reloadDeveloperApps)
 	mux.HandleFunc("POST /app/developer/apps/create", h.createDeveloperApp)
 	mux.HandleFunc("POST /app/developer/apps/update", h.updateDeveloperApp)
+	mux.HandleFunc("POST /app/developer/apps/distribution", h.setDeveloperAppDistribution)
 	mux.HandleFunc("POST /app/developer/apps/delete", h.deleteDeveloperApp)
 	mux.HandleFunc("POST /app/developer/apps/configuration-token", h.issueDeveloperConfigurationToken)
 	mux.HandleFunc("POST /app/developer/apps/app-token", h.issueDeveloperAppToken)

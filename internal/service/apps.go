@@ -29,6 +29,10 @@ var (
 	ErrAppConfigurationAuthentication = errors.New("app configuration token is invalid")
 	ErrAppCredentialKeyUnavailable    = errors.New("application credential encryption key is unavailable")
 	ErrInvalidAppManifest             = errors.New("app manifest is invalid")
+	// ErrAppNotDistributable refuses public distribution for an app that has no
+	// redirect URL: an install has nowhere to return to, so Slack does not let
+	// distribution activate until one exists, and neither does this.
+	ErrAppNotDistributable = errors.New("app cannot be distributed without a redirect URL")
 )
 
 func appSigningSecretAssociatedData(appID domain.AppID) string {
@@ -363,6 +367,44 @@ func (m Messages) DeleteDeveloperApp(ctx context.Context, configurationToken str
 		return store.ErrNotFound
 	}
 	return m.Store.DeleteApp(ctx, appID, principal.UserID, time.Now().UTC())
+}
+
+// SetAppDistribution activates or deactivates public distribution for an app its
+// owner controls. A distributed app may be installed in any workspace, not only
+// the one it was developed in — the install path already reads the distribution
+// state — so activating it needs the same precondition Slack imposes: at least
+// one redirect URL, since an install with nowhere to return to cannot complete.
+// Deactivating is always allowed, and does not uninstall anywhere it already is.
+func (m Messages) SetAppDistribution(ctx context.Context, configurationToken string, appID domain.AppID, public bool) (domain.App, error) {
+	principal, err := m.appConfigurationPrincipal(ctx, configurationToken)
+	if err != nil {
+		return domain.App{}, err
+	}
+	app, revision, err := m.Store.GetApp(ctx, appID)
+	if err != nil {
+		return domain.App{}, err
+	}
+	if app.DevelopmentWorkspaceID != principal.WorkspaceID || app.OwnerID != principal.UserID {
+		return domain.App{}, store.ErrNotFound
+	}
+	distribution := "private"
+	if public {
+		parsed, problems := appmanifest.Parse(revision.Manifest)
+		if len(problems) != 0 {
+			return domain.App{}, ErrInvalidAppManifest
+		}
+		if len(parsed.RedirectURLs) == 0 {
+			return domain.App{}, ErrAppNotDistributable
+		}
+		distribution = "public"
+	}
+	now := time.Now().UTC()
+	if err := m.Store.SetAppDistribution(ctx, appID, distribution, now); err != nil {
+		return domain.App{}, err
+	}
+	app.Distribution = distribution
+	app.UpdatedAt = now
+	return app, nil
 }
 
 func (m Messages) ListDeveloperApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.App, error) {

@@ -31,6 +31,12 @@ message AppManifestRequest {
   string team_id = 4;
 }
 
+message AppDistributionRequest {
+  string token = 1;
+  string app_id = 2;
+  bool public = 3;
+}
+
 message AppManifestError {
   string message = 1;
   string pointer = 2;
@@ -374,6 +380,7 @@ service AppsService {
   rpc CreateAppFromManifest(AppManifestRequest) returns (AppCreateResponse);
   rpc ExportAppManifest(AppManifestRequest) returns (AppExportResponse);
   rpc UpdateAppFromManifest(AppManifestRequest) returns (AppMutationResponse);
+  rpc SetAppDistribution(AppDistributionRequest) returns (AppMutationResponse);
   rpc DeleteDeveloperApp(AppManifestRequest) returns (AppMutationResponse);
   rpc ListDeveloperApps(AppListRequest) returns (AppListResponse);
   rpc ListWorkspaceApps(AppListRequest) returns (InstalledAppListResponse);

@@ -36,6 +36,7 @@ const (
 	AppsService_CreateAppFromManifest_FullMethodName         = "/sameoldchat.chat.v1.AppsService/CreateAppFromManifest"
 	AppsService_ExportAppManifest_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ExportAppManifest"
 	AppsService_UpdateAppFromManifest_FullMethodName         = "/sameoldchat.chat.v1.AppsService/UpdateAppFromManifest"
+	AppsService_SetAppDistribution_FullMethodName            = "/sameoldchat.chat.v1.AppsService/SetAppDistribution"
 	AppsService_DeleteDeveloperApp_FullMethodName            = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
 	AppsService_ListDeveloperApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
 	AppsService_ListWorkspaceApps_FullMethodName             = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
@@ -76,6 +77,7 @@ type AppsServiceClient interface {
 	CreateAppFromManifest(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppCreateResponse, error)
 	ExportAppManifest(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppExportResponse, error)
 	UpdateAppFromManifest(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	SetAppDistribution(ctx context.Context, in *AppDistributionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	DeleteDeveloperApp(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	ListDeveloperApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*AppListResponse, error)
 	ListWorkspaceApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*InstalledAppListResponse, error)
@@ -273,6 +275,16 @@ func (c *appsServiceClient) UpdateAppFromManifest(ctx context.Context, in *AppMa
 	return out, nil
 }
 
+func (c *appsServiceClient) SetAppDistribution(ctx context.Context, in *AppDistributionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_SetAppDistribution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *appsServiceClient) DeleteDeveloperApp(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppMutationResponse)
@@ -464,6 +476,7 @@ type AppsServiceServer interface {
 	CreateAppFromManifest(context.Context, *AppManifestRequest) (*AppCreateResponse, error)
 	ExportAppManifest(context.Context, *AppManifestRequest) (*AppExportResponse, error)
 	UpdateAppFromManifest(context.Context, *AppManifestRequest) (*AppMutationResponse, error)
+	SetAppDistribution(context.Context, *AppDistributionRequest) (*AppMutationResponse, error)
 	DeleteDeveloperApp(context.Context, *AppManifestRequest) (*AppMutationResponse, error)
 	ListDeveloperApps(context.Context, *AppListRequest) (*AppListResponse, error)
 	ListWorkspaceApps(context.Context, *AppListRequest) (*InstalledAppListResponse, error)
@@ -540,6 +553,9 @@ func (UnimplementedAppsServiceServer) ExportAppManifest(context.Context, *AppMan
 }
 func (UnimplementedAppsServiceServer) UpdateAppFromManifest(context.Context, *AppManifestRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateAppFromManifest not implemented")
+}
+func (UnimplementedAppsServiceServer) SetAppDistribution(context.Context, *AppDistributionRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetAppDistribution not implemented")
 }
 func (UnimplementedAppsServiceServer) DeleteDeveloperApp(context.Context, *AppManifestRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteDeveloperApp not implemented")
@@ -914,6 +930,24 @@ func _AppsService_UpdateAppFromManifest_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AppsServiceServer).UpdateAppFromManifest(ctx, req.(*AppManifestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_SetAppDistribution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppDistributionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).SetAppDistribution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_SetAppDistribution_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).SetAppDistribution(ctx, req.(*AppDistributionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1298,6 +1332,10 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateAppFromManifest",
 			Handler:    _AppsService_UpdateAppFromManifest_Handler,
+		},
+		{
+			MethodName: "SetAppDistribution",
+			Handler:    _AppsService_SetAppDistribution_Handler,
 		},
 		{
 			MethodName: "DeleteDeveloperApp",
