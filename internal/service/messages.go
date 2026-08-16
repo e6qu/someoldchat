@@ -1345,6 +1345,14 @@ func (m Messages) resolveSearchUser(ctx context.Context, workspaceID domain.Work
 	if reference == "" {
 		return domain.UserID("__no_search_match__")
 	}
+	// Slack's from:me names the searcher. It resolves here rather than in the
+	// parser, which does not know who is searching, and a member literally named
+	// "me" cannot shadow it — Slack reserves the word the same way. Before this,
+	// from:me resolved to no member and the search returned nothing rather than
+	// the member's own messages.
+	if strings.EqualFold(reference, "me") {
+		return userID
+	}
 	if user, err := m.UserInfo(ctx, workspaceID, userID, domain.UserID(reference)); err == nil {
 		return user.ID
 	}
