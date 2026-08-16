@@ -57,6 +57,7 @@ var (
 	ErrInvalidSnooze            = errors.New("snooze duration must be between 1 and 1440 minutes")
 	ErrInvalidReminder          = errors.New("reminder text, user, and time are required")
 	ErrInvalidLaterReminder     = errors.New("Later reminder arguments are invalid")
+	ErrInvalidActivitySavedView = errors.New("activity saved view arguments are invalid")
 	ErrReminderTimeInPast       = errors.New("reminder time is in the past")
 	ErrScheduledTimeInPast      = errors.New("scheduled message time is in the past")
 	ErrScheduledTimeTooFar      = errors.New("scheduled message time is more than 120 days away")
@@ -7098,6 +7099,51 @@ func (m Messages) SetActivityPreferences(ctx context.Context, workspaceID domain
 		return domain.ActivityPreferences{}, err
 	}
 	return preferences, nil
+}
+
+// CreateActivitySavedView records one of a member's named Activity filters. Any
+// workspace member may keep their own; the kinds are deduplicated so a view
+// asks the store for each kind once.
+func (m Messages) CreateActivitySavedView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, kinds []domain.ActivityKind) (domain.ActivitySavedView, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ActivitySavedView{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > domain.ActivitySavedViewNameLimit || len(kinds) == 0 {
+		return domain.ActivitySavedView{}, ErrInvalidActivitySavedView
+	}
+	seen := map[domain.ActivityKind]bool{}
+	deduped := make([]domain.ActivityKind, 0, len(kinds))
+	for _, kind := range kinds {
+		if !kind.Valid() {
+			return domain.ActivitySavedView{}, ErrInvalidActivitySavedView
+		}
+		if !seen[kind] {
+			seen[kind] = true
+			deduped = append(deduped, kind)
+		}
+	}
+	identifier, err := domain.PublicID("temp:ASV:")
+	if err != nil {
+		return domain.ActivitySavedView{}, err
+	}
+	view := domain.ActivitySavedView{
+		ID: domain.ActivitySavedViewID(identifier), WorkspaceID: workspaceID, UserID: userID,
+		Name: name, Kinds: deduped, CreatedAt: time.Now().UTC(),
+	}
+	if err := m.Store.CreateActivitySavedView(ctx, view); err != nil {
+		return domain.ActivitySavedView{}, err
+	}
+	return view, nil
+}
+
+// DeleteActivitySavedView removes one of the member's saved views. Another
+// member's id answers as a missing one, so it cannot probe someone else's views.
+func (m Messages) DeleteActivitySavedView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ActivitySavedViewID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.DeleteActivitySavedView(ctx, workspaceID, userID, id)
 }
 
 func (m Messages) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) error {

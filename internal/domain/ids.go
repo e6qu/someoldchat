@@ -28,6 +28,7 @@ type ExternalUploadID string
 type ReminderID string
 type LaterReminderID string
 type ActivityID string
+type ActivitySavedViewID string
 type SavedItemID string
 type ScheduledMessageID string
 type ScheduledStatusID string

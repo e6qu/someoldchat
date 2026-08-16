@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 167
+const schemaVersion = 168
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3332,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 168 {
+		// A member's named Activity filters. Kinds are a space-joined list like
+		// scopes; the read path splits them back into the same ActivityQuery a
+		// single filter tab builds. Created in the ladder, not the base schema, so
+		// the references to workspaces and users resolve on PostgreSQL.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS activity_saved_views (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			name TEXT NOT NULL, kinds TEXT NOT NULL, created_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate activity saved views: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS activity_saved_views_user ON activity_saved_views(workspace_id, user_id, created_at)`); err != nil {
+			return fmt.Errorf("index activity saved views: %w", err)
 		}
 	}
 	if version < 167 {
@@ -13293,10 +13308,85 @@ func (s *Store) MutateActivity(ctx context.Context, workspace domain.WorkspaceID
 func (s *Store) GetActivityPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.ActivityPreferences, error) {
 	preferences := domain.ActivityPreferences{WorkspaceID: workspace, UserID: user, Layout: domain.ActivityDetailed}
 	err := s.db.QueryRowContext(ctx, `SELECT layout FROM activity_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).Scan(&preferences.Layout)
-	if errors.Is(err, sql.ErrNoRows) {
-		return preferences, nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return preferences, err
 	}
-	return preferences, err
+	preferences.SavedViews, err = s.listActivitySavedViews(ctx, workspace, user)
+	if err != nil {
+		return domain.ActivityPreferences{}, err
+	}
+	return preferences, nil
+}
+
+func (s *Store) listActivitySavedViews(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.ActivitySavedView, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, user_id, name, kinds, created_at FROM activity_saved_views
+		WHERE workspace_id = ? AND user_id = ? ORDER BY created_at DESC, id`, workspace, user)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	views := make([]domain.ActivitySavedView, 0)
+	for rows.Next() {
+		var view domain.ActivitySavedView
+		var kinds string
+		var created int64
+		if err := rows.Scan(&view.ID, &view.WorkspaceID, &view.UserID, &view.Name, &kinds, &created); err != nil {
+			return nil, err
+		}
+		view.CreatedAt = timeFromUnixNanoOrZero(created)
+		for _, field := range strings.Fields(kinds) {
+			view.Kinds = append(view.Kinds, domain.ActivityKind(field))
+		}
+		views = append(views, view)
+	}
+	return views, rows.Err()
+}
+
+func (s *Store) CreateActivitySavedView(ctx context.Context, view domain.ActivitySavedView) error {
+	if view.ID == "" || !view.Valid() {
+		return store.InvalidArgument("an activity saved view requires an id, a name and at least one kind")
+	}
+	kinds := make([]string, 0, len(view.Kinds))
+	for _, kind := range view.Kinds {
+		kinds = append(kinds, string(kind))
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_saved_views WHERE workspace_id = ? AND user_id = ?`, view.WorkspaceID, view.UserID).Scan(&count); err != nil {
+		return err
+	}
+	if count >= domain.ActivitySavedViewLimit {
+		return store.InvalidArgument("no more activity saved views may be created")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_saved_views(id, workspace_id, user_id, name, kinds, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		view.ID, view.WorkspaceID, view.UserID, view.Name, strings.Join(kinds, " "), view.CreatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteActivitySavedView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ActivitySavedViewID) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM activity_saved_views WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func (s *Store) SetActivityPreferences(ctx context.Context, preferences domain.ActivityPreferences) error {

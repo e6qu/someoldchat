@@ -5724,10 +5724,32 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// A saved view is a named combination of kinds, read back through the
+				// preferences and deleted by its id. The id is minted per composition,
+				// so compare the name, kinds and counts, not the id's bytes.
+				view, err := chat.CreateActivitySavedView(ctx, "T1", "U1", "Important", []domain.ActivityKind{domain.ActivityMention, domain.ActivityDM})
+				if err != nil {
+					return nil, err
+				}
+				withView, err := chat.ActivityPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				strangerDelete := chat.DeleteActivitySavedView(ctx, "T1", "U1", "not-a-real-view")
+				if err := chat.DeleteActivitySavedView(ctx, "T1", "U1", view.ID); err != nil {
+					return nil, err
+				}
+				afterDelete, err := chat.ActivityPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
 				return []any{
 					page.Items[0].Message.ID == message.ID, page.Items[0].Kinds,
 					len(cleared.Items), !cleared.Items[0].ReadAt.IsZero(),
 					defaults.Layout, preferences.Layout,
+					view.Name, len(view.Kinds), len(withView.SavedViews),
+					withView.SavedViews[0].Name == "Important", len(withView.SavedViews[0].Kinds),
+					strangerDelete != nil, len(afterDelete.SavedViews),
 				}, nil
 			},
 		},

@@ -215,8 +215,13 @@ Implemented evidence:
   It also provides URL-backed sender/conversation/date/content/order filters,
   authenticated file links, explicit current-conversation scope, and
   `Command/Control+F`.
-- Slack Connect and canvas-share invitations, VIP and section notifications,
-  and custom saved views depend on product models not yet implemented.
+- A member can save a custom Activity view: a named combination of kinds that
+  becomes a reusable tab, resolving to the same multi-kind query a single filter
+  builds. Each view is its maker's own, deleted through its own control, and
+  read back on the preferences the layout rides on.
+- Slack Connect and canvas-share invitations and VIP and section notifications
+  depend on product models not yet implemented — VIP a per-person preference,
+  sections the sidebar-sections feature that does not exist yet.
   Internal public/private channel additions are implemented in Invitations;
   unsupported invitation types are not fabricated;
 - schema version 107 creates the durable Activity store but does not backfill

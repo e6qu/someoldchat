@@ -182,6 +182,8 @@ func authorityMatrix() map[string]authority {
 		"ActiveHuddle":                            authorityAnyMember,
 		"Activity":                                authorityAnyMember,
 		"ActivityPreferences":                     authorityAnyMember,
+		"CreateActivitySavedView":                 authorityAnyMember,
+		"DeleteActivitySavedView":                 authorityAnyMember,
 		"AddBookmark":                             authorityAnyMember,
 		"AddCall":                                 authorityAnyMember,
 		"AddCallParticipants":                     authorityAnyMember,

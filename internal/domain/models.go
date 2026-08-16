@@ -1607,6 +1607,44 @@ type ActivityPreferences struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	Layout      ActivityLayout
+	// SavedViews are the member's named Activity filters, resolved when the
+	// preferences are read. They are a read projection here — created and
+	// deleted through their own operations — so the layout write does not have
+	// to carry the whole list and race a concurrent create.
+	SavedViews []ActivitySavedView
+}
+
+// ActivitySavedViewNameLimit bounds a saved view's name: a label for a filter,
+// not a description.
+const ActivitySavedViewNameLimit = 80
+
+// ActivitySavedViewLimit bounds how many saved views one member keeps, so the
+// tab strip stays a strip rather than growing without bound.
+const ActivitySavedViewLimit = 20
+
+// ActivitySavedView is a member's named Activity filter — a reusable
+// combination of kinds, the way Slack lets a member save a custom Activity
+// view. It belongs to the member who made it; the read path feeds its Kinds
+// into the same ActivityQuery a single filter tab uses.
+type ActivitySavedView struct {
+	ID          ActivitySavedViewID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Name        string
+	Kinds       []ActivityKind
+	CreatedAt   time.Time
+}
+
+func (view ActivitySavedView) Valid() bool {
+	if strings.TrimSpace(view.Name) == "" || len(view.Kinds) == 0 {
+		return false
+	}
+	for _, kind := range view.Kinds {
+		if !kind.Valid() {
+			return false
+		}
+	}
+	return true
 }
 
 type ActivityMutation string

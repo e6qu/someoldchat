@@ -5042,6 +5042,29 @@ func (r Remote) SetActivityPreferences(ctx context.Context, workspaceID domain.W
 	return decodeProtoActivityPreferences(out), nil
 }
 
+func (r Remote) CreateActivitySavedView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, kinds []domain.ActivityKind) (domain.ActivitySavedView, error) {
+	encoded := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		encoded = append(encoded, string(kind))
+	}
+	out, err := r.activity.CreateActivitySavedView(ctx, &chatv1.CreateActivitySavedViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Kinds: encoded})
+	if err != nil {
+		return domain.ActivitySavedView{}, err
+	}
+	return decodeProtoActivitySavedView(out), nil
+}
+
+func (r Remote) DeleteActivitySavedView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ActivitySavedViewID) error {
+	out, err := r.activity.DeleteActivitySavedView(ctx, &chatv1.DeleteActivitySavedViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ViewId: string(id)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed delete activity saved view response was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) WorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
 	out, err := r.activity.GetWorkspaceNotificationPreferences(ctx, &chatv1.NotificationPreferencesRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -9203,6 +9226,25 @@ func (s *Server) SetActivityPreferences(ctx context.Context, input *chatv1.SetAc
 	return encodeProtoActivityPreferences(preferences), nil
 }
 
+func (s *Server) CreateActivitySavedView(ctx context.Context, input *chatv1.CreateActivitySavedViewRequest) (*chatv1.ActivitySavedView, error) {
+	kinds := make([]domain.ActivityKind, 0, len(input.GetKinds()))
+	for _, kind := range input.GetKinds() {
+		kinds = append(kinds, domain.ActivityKind(kind))
+	}
+	view, err := s.implementation.CreateActivitySavedView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), kinds)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoActivitySavedView(view), nil
+}
+
+func (s *Server) DeleteActivitySavedView(ctx context.Context, input *chatv1.DeleteActivitySavedViewRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteActivitySavedView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ActivitySavedViewID(input.GetViewId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) GetWorkspaceNotificationPreferences(ctx context.Context, input *chatv1.NotificationPreferencesRequest) (*chatv1.WorkspaceNotificationPreferences, error) {
 	preferences, err := s.implementation.WorkspaceNotificationPreferences(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
 	if err != nil {
@@ -11885,14 +11927,47 @@ func decodeProtoActivityItem(value *chatv1.ActivityItem) (domain.ActivityItem, e
 }
 
 func encodeProtoActivityPreferences(value domain.ActivityPreferences) *chatv1.ActivityPreferences {
-	return &chatv1.ActivityPreferences{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Layout: string(value.Layout)}
+	views := make([]*chatv1.ActivitySavedView, 0, len(value.SavedViews))
+	for _, view := range value.SavedViews {
+		views = append(views, encodeProtoActivitySavedView(view))
+	}
+	return &chatv1.ActivityPreferences{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Layout: string(value.Layout), SavedViews: views}
 }
 
 func decodeProtoActivityPreferences(value *chatv1.ActivityPreferences) domain.ActivityPreferences {
 	if value == nil {
 		return domain.ActivityPreferences{}
 	}
-	return domain.ActivityPreferences{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Layout: domain.ActivityLayout(value.GetLayout())}
+	preferences := domain.ActivityPreferences{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Layout: domain.ActivityLayout(value.GetLayout())}
+	for _, view := range value.GetSavedViews() {
+		preferences.SavedViews = append(preferences.SavedViews, decodeProtoActivitySavedView(view))
+	}
+	return preferences
+}
+
+func encodeProtoActivitySavedView(value domain.ActivitySavedView) *chatv1.ActivitySavedView {
+	kinds := make([]string, 0, len(value.Kinds))
+	for _, kind := range value.Kinds {
+		kinds = append(kinds, string(kind))
+	}
+	return &chatv1.ActivitySavedView{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
+		Name: value.Name, Kinds: kinds, CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+	}
+}
+
+func decodeProtoActivitySavedView(value *chatv1.ActivitySavedView) domain.ActivitySavedView {
+	if value == nil {
+		return domain.ActivitySavedView{}
+	}
+	view := domain.ActivitySavedView{
+		ID: domain.ActivitySavedViewID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID: domain.UserID(value.GetUserId()), Name: value.GetName(), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+	}
+	for _, kind := range value.GetKinds() {
+		view.Kinds = append(view.Kinds, domain.ActivityKind(kind))
+	}
+	return view
 }
 
 func encodeProtoWorkspaceNotificationPreferences(value domain.WorkspaceNotificationPreferences) *chatv1.WorkspaceNotificationPreferences {
