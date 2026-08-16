@@ -1686,6 +1686,34 @@ func (view ActivitySavedView) Valid() bool {
 	return true
 }
 
+// SidebarSectionNameLimit bounds a section's name: a label for a group of
+// channels, not a description.
+const SidebarSectionNameLimit = 80
+
+// SidebarSectionLimit bounds how many sections one member keeps.
+const SidebarSectionLimit = 30
+
+// SidebarSection is a member's named, collapsible group of channels in their
+// own sidebar, the way Slack lets a member organise the channel list. It
+// belongs to the member who made it; the ordered conversations it holds are
+// resolved when it is read, and a channel the member has left or that is gone
+// simply falls out of the group rather than lingering. Position orders the
+// sections against each other; Collapsed is durable per-section state.
+type SidebarSection struct {
+	ID            SidebarSectionID
+	WorkspaceID   WorkspaceID
+	UserID        UserID
+	Name          string
+	Position      int
+	Collapsed     bool
+	CreatedAt     time.Time
+	Conversations []ConversationID
+}
+
+func (section SidebarSection) Valid() bool {
+	return strings.TrimSpace(section.Name) != ""
+}
+
 type ActivityMutation string
 
 const (

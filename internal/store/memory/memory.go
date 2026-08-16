@@ -97,6 +97,7 @@ type Store struct {
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
 	activitySavedViews            map[domain.ActivitySavedViewID]domain.ActivitySavedView
+	sidebarSections               map[domain.SidebarSectionID]domain.SidebarSection
 	searchHistory                 map[string]domain.SearchHistoryEntry
 	reactions                     map[domain.MessageID]map[string]domain.Reaction
 	pins                          map[domain.MessageID]map[domain.UserID]domain.Pin
@@ -321,6 +322,7 @@ func New() *Store {
 		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
 		activityPreferences:           make(map[string]domain.ActivityPreferences),
 		activitySavedViews:            make(map[domain.ActivitySavedViewID]domain.ActivitySavedView),
+		sidebarSections:               make(map[domain.SidebarSectionID]domain.SidebarSection),
 		reactions:                     make(map[domain.MessageID]map[string]domain.Reaction),
 		pins:                          make(map[domain.MessageID]map[domain.UserID]domain.Pin),
 		files:                         make(map[domain.FileID]domain.File),
@@ -7436,6 +7438,166 @@ func (s *Store) DeleteActivitySavedView(_ context.Context, workspace domain.Work
 		return store.ErrNotFound
 	}
 	delete(s.activitySavedViews, id)
+	return nil
+}
+
+func (s *Store) SidebarSections(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.SidebarSection, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sections := make([]domain.SidebarSection, 0)
+	for _, section := range s.sidebarSections {
+		if section.WorkspaceID != workspace || section.UserID != user {
+			continue
+		}
+		copied := section
+		copied.Conversations = append([]domain.ConversationID(nil), section.Conversations...)
+		sections = append(sections, copied)
+	}
+	sort.Slice(sections, func(left, right int) bool {
+		if sections[left].Position != sections[right].Position {
+			return sections[left].Position < sections[right].Position
+		}
+		return sections[left].ID < sections[right].ID
+	})
+	return sections, nil
+}
+
+func (s *Store) CreateSidebarSection(_ context.Context, section domain.SidebarSection) error {
+	if section.ID == "" || !section.Valid() {
+		return store.InvalidArgument("a sidebar section requires an id and a name")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.sidebarSections[section.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	position := 0
+	for _, existing := range s.sidebarSections {
+		if existing.WorkspaceID == section.WorkspaceID && existing.UserID == section.UserID {
+			if existing.Position >= position {
+				position = existing.Position + 1
+			}
+		}
+	}
+	section.Position = position
+	section.Conversations = nil
+	s.sidebarSections[section.ID] = section
+	return nil
+}
+
+func (s *Store) RenameSidebarSection(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return store.InvalidArgument("a sidebar section name is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	section.Name = name
+	s.sidebarSections[id] = section
+	return nil
+}
+
+func (s *Store) SetSidebarSectionCollapsed(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, collapsed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	section.Collapsed = collapsed
+	s.sidebarSections[id] = section
+	return nil
+}
+
+func (s *Store) DeleteSidebarSection(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	delete(s.sidebarSections, id)
+	return nil
+}
+
+func (s *Store) ReorderSidebarSections(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, order []domain.SidebarSectionID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	owned := make(map[domain.SidebarSectionID]struct{})
+	for id, section := range s.sidebarSections {
+		if section.WorkspaceID == workspace && section.UserID == user {
+			owned[id] = struct{}{}
+		}
+	}
+	if len(order) != len(owned) {
+		return store.InvalidArgument("a section reorder must list every section exactly once")
+	}
+	seen := make(map[domain.SidebarSectionID]struct{}, len(order))
+	for _, id := range order {
+		if _, ok := owned[id]; !ok {
+			return store.ErrNotFound
+		}
+		if _, dup := seen[id]; dup {
+			return store.InvalidArgument("a section reorder must list every section exactly once")
+		}
+		seen[id] = struct{}{}
+	}
+	for position, id := range order {
+		section := s.sidebarSections[id]
+		section.Position = position
+		s.sidebarSections[id] = section
+	}
+	return nil
+}
+
+func (s *Store) AssignConversationToSidebarSection(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, sectionID domain.SidebarSectionID, after domain.ConversationID) error {
+	if conversation == "" {
+		return store.InvalidArgument("a conversation is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sectionID != "" {
+		section, ok := s.sidebarSections[sectionID]
+		if !ok || section.WorkspaceID != workspace || section.UserID != user {
+			return store.ErrNotFound
+		}
+	}
+	// A conversation lives in at most one of the member's sections: remove it
+	// from every section first, then place it where asked.
+	for id, section := range s.sidebarSections {
+		if section.WorkspaceID != workspace || section.UserID != user {
+			continue
+		}
+		filtered := section.Conversations[:0:0]
+		for _, existing := range section.Conversations {
+			if existing != conversation {
+				filtered = append(filtered, existing)
+			}
+		}
+		section.Conversations = filtered
+		s.sidebarSections[id] = section
+	}
+	if sectionID == "" {
+		return nil
+	}
+	section := s.sidebarSections[sectionID]
+	placed := make([]domain.ConversationID, 0, len(section.Conversations)+1)
+	inserted := false
+	for _, existing := range section.Conversations {
+		placed = append(placed, existing)
+		if after != "" && existing == after {
+			placed = append(placed, conversation)
+			inserted = true
+		}
+	}
+	if !inserted {
+		placed = append(placed, conversation)
+	}
+	section.Conversations = placed
+	s.sidebarSections[sectionID] = section
 	return nil
 }
 

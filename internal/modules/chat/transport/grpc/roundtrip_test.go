@@ -519,6 +519,13 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: throughInfallible(encodeProtoActivitySavedView, decodeProtoActivitySavedView),
 		},
+		"SidebarSection": {
+			sample: &domain.SidebarSection{},
+			prepare: func(filled any) {
+				filled.(*domain.SidebarSection).Conversations = []domain.ConversationID{"C1", "C2"}
+			},
+			through: throughInfallible(encodeProtoSidebarSection, decodeProtoSidebarSection),
+		},
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
 		"ScheduledStatus":  {sample: &domain.ScheduledStatus{}, through: through(encodeProtoScheduledStatus, decodeProtoScheduledStatus)},
 		"Draft":            {sample: &domain.Draft{}, through: through(encodeProtoDraft, decodeProtoDraft)},

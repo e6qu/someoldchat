@@ -4963,6 +4963,63 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "sidebar sections are the member's own ordered, collapsible groups of channels",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				alpha, err := chat.CreateSidebarSection(ctx, "T1", "U1", "Alpha")
+				if err != nil {
+					return nil, err
+				}
+				beta, err := chat.CreateSidebarSection(ctx, "T1", "U1", "Beta")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RenameSidebarSection(ctx, "T1", "U1", alpha.ID, "Priorities"); err != nil {
+					return nil, err
+				}
+				if err := chat.SetSidebarSectionCollapsed(ctx, "T1", "U1", alpha.ID, true); err != nil {
+					return nil, err
+				}
+				// Two channels join Priorities, the second placed after the first.
+				if err := chat.AssignConversationToSidebarSection(ctx, "T1", "U1", "C1", alpha.ID, ""); err != nil {
+					return nil, err
+				}
+				if err := chat.AssignConversationToSidebarSection(ctx, "T1", "U1", "C2", alpha.ID, "C1"); err != nil {
+					return nil, err
+				}
+				// Put Beta before Priorities.
+				if err := chat.ReorderSidebarSections(ctx, "T1", "U1", []domain.SidebarSectionID{beta.ID, alpha.ID}); err != nil {
+					return nil, err
+				}
+				sections, err := chat.SidebarSections(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// The ids are minted per composition, so compare names, order,
+				// collapse and the channel ids (which are literal), not the ids.
+				others, err := chat.SidebarSections(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteSidebarSection(ctx, "T1", "U1", beta.ID); err != nil {
+					return nil, err
+				}
+				afterDelete, err := chat.SidebarSections(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				reorderErr := chat.ReorderSidebarSections(ctx, "T1", "U1", []domain.SidebarSectionID{alpha.ID, "not-a-section"})
+				result := []any{len(sections)}
+				if len(sections) == 2 {
+					result = append(result, sections[0].Name, sections[1].Name, sections[1].Collapsed, len(sections[1].Conversations))
+					if len(sections[1].Conversations) == 2 {
+						result = append(result, string(sections[1].Conversations[0]), string(sections[1].Conversations[1]))
+					}
+				}
+				result = append(result, len(others), len(afterDelete), reorderErr != nil)
+				return result, nil
+			},
+		},
+		{
 			// A description is the uploader's account of their own file, so the
 			// permission is the interesting part: both compositions have to
 			// agree that someone else's attempt fails rather than silently

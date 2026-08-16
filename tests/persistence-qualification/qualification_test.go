@@ -127,6 +127,7 @@ func runQualification(t *testing.T, open opener) {
 		{"a canvas share reaches Activity on every profile", canvasShareReachesActivity},
 		{"a notification schedule round-trips on every profile", notificationScheduleRoundTrips},
 		{"a VIP's channel message pierces mute on every profile", vipChannelMessagePiercesMuteOnEveryProfile},
+		{"sidebar sections order identically on every profile", sidebarSectionsOrderIdenticallyOnEveryProfile},
 		{"an assigned list item reaches Activity on every profile", listAssignmentReachesActivity},
 		{"deleting a list item is all or nothing and survives in Activity", deletingAListItemIsAllOrNothingAndSurvivesInActivity},
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},

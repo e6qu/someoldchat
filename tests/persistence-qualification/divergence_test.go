@@ -3056,6 +3056,53 @@ func vipChannelMessagePiercesMuteOnEveryProfile(t *testing.T, open opener) {
 	}
 }
 
+// Sidebar section and channel order is where the profiles could drift: the SQL
+// path rewrites positions (delete-then-reinsert for members, an offset pass for
+// sections) while memory reorders a slice. A member who arranged their sidebar
+// must see the same arrangement whichever profile served it.
+func sidebarSectionsOrderIdenticallyOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	alpha := domain.SidebarSectionID("sec-alpha-" + f.suffix)
+	beta := domain.SidebarSectionID("sec-beta-" + f.suffix)
+	if err := f.repository.CreateSidebarSection(ctx, domain.SidebarSection{ID: alpha, WorkspaceID: f.workspaceID, UserID: f.userID, Name: "Alpha", CreatedAt: time.Unix(1_700_000_000, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.CreateSidebarSection(ctx, domain.SidebarSection{ID: beta, WorkspaceID: f.workspaceID, UserID: f.userID, Name: "Beta", CreatedAt: time.Unix(1_700_000_001, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []domain.ConversationID{"CA", "CB", "CC"} {
+		if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, f.userID, channel, alpha, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Move CA to the end of alpha (after CC), then move CB into beta.
+	if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, f.userID, "CA", alpha, "CC"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, f.userID, "CB", beta, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.ReorderSidebarSections(ctx, f.workspaceID, f.userID, []domain.SidebarSectionID{beta, alpha}); err != nil {
+		t.Fatal(err)
+	}
+	sections, err := f.repository.SidebarSections(ctx, f.workspaceID, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sections) != 2 || sections[0].ID != beta || sections[1].ID != alpha {
+		t.Fatalf("section order = %+v, want beta then alpha", sections)
+	}
+	if len(sections[0].Conversations) != 1 || sections[0].Conversations[0] != "CB" {
+		t.Fatalf("beta channels = %v, want [CB]", sections[0].Conversations)
+	}
+	if len(sections[1].Conversations) != 2 || sections[1].Conversations[0] != "CC" || sections[1].Conversations[1] != "CA" {
+		t.Fatalf("alpha channels = %v, want [CC CA]", sections[1].Conversations)
+	}
+}
+
 // Assignment is state on the item and news in Activity, and the two profiles
 // resolve reachability differently — one joins the shared list predicate, the
 // other walks grants under a lock. The contract drives both, including the due

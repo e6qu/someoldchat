@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 169
+const schemaVersion = 170
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3332,28 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 170 {
+		// A member's custom sidebar sections and the channels assigned to each.
+		// Created in the ladder, not the base schema, so the references to
+		// workspaces and users resolve on PostgreSQL. Position orders sections and
+		// members; it is kept distinct in code and tie-broken by id, so no unique
+		// constraint on it — that would only make a reorder collide mid-update.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS sidebar_sections (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			name TEXT NOT NULL, position INTEGER NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate sidebar sections: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS sidebar_sections_user ON sidebar_sections(workspace_id, user_id, position)`); err != nil {
+			return fmt.Errorf("index sidebar sections: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS sidebar_section_members (
+			section_id TEXT NOT NULL REFERENCES sidebar_sections(id), conversation_id TEXT NOT NULL, position INTEGER NOT NULL,
+			PRIMARY KEY (section_id, conversation_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate sidebar section members: %w", err)
 		}
 	}
 	if version < 169 {
@@ -13462,6 +13484,236 @@ func (s *Store) DeleteActivitySavedView(ctx context.Context, workspace domain.Wo
 	}
 	if changed == 0 {
 		return store.ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SidebarSections(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.SidebarSection, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, position, collapsed, created_at FROM sidebar_sections WHERE workspace_id = ? AND user_id = ? ORDER BY position, id`, workspace, user)
+	if err != nil {
+		return nil, err
+	}
+	sections := make([]domain.SidebarSection, 0)
+	for rows.Next() {
+		section := domain.SidebarSection{WorkspaceID: workspace, UserID: user}
+		var collapsed int
+		var created int64
+		if err := rows.Scan(&section.ID, &section.Name, &section.Position, &collapsed, &created); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		section.Collapsed = collapsed != 0
+		section.CreatedAt = timeFromUnixNanoOrZero(created)
+		sections = append(sections, section)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, err
+	}
+	for index := range sections {
+		memberRows, err := s.db.QueryContext(ctx, `SELECT conversation_id FROM sidebar_section_members WHERE section_id = ? ORDER BY position, conversation_id`, sections[index].ID)
+		if err != nil {
+			return nil, err
+		}
+		for memberRows.Next() {
+			var conversation domain.ConversationID
+			if err := memberRows.Scan(&conversation); err != nil {
+				memberRows.Close()
+				return nil, err
+			}
+			sections[index].Conversations = append(sections[index].Conversations, conversation)
+		}
+		if err := closeRows(memberRows); err != nil {
+			return nil, err
+		}
+	}
+	return sections, nil
+}
+
+func (s *Store) CreateSidebarSection(ctx context.Context, section domain.SidebarSection) error {
+	if section.ID == "" || !section.Valid() {
+		return store.InvalidArgument("a sidebar section requires an id and a name")
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var position int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position)+1, 0) FROM sidebar_sections WHERE workspace_id = ? AND user_id = ?`, section.WorkspaceID, section.UserID).Scan(&position); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sidebar_sections(id, workspace_id, user_id, name, position, collapsed, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)`,
+		section.ID, section.WorkspaceID, section.UserID, section.Name, position, section.CreatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RenameSidebarSection(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return store.InvalidArgument("a sidebar section name is required")
+	}
+	return s.updateOwnedSidebarSection(ctx, workspace, user, id, `UPDATE sidebar_sections SET name = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`, name)
+}
+
+func (s *Store) SetSidebarSectionCollapsed(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, collapsed bool) error {
+	return s.updateOwnedSidebarSection(ctx, workspace, user, id, `UPDATE sidebar_sections SET collapsed = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`, boolInt(collapsed))
+}
+
+// updateOwnedSidebarSection runs a single-column update scoped to the owner and
+// reports store.ErrNotFound when the id names no section of theirs.
+func (s *Store) updateOwnedSidebarSection(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, query string, value any) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, query, value, id, workspace, user)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteSidebarSection(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var owned int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sidebar_sections WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user).Scan(&owned); err != nil {
+		return err
+	}
+	if owned == 0 {
+		return store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sidebar_section_members WHERE section_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sidebar_sections WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ReorderSidebarSections(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, order []domain.SidebarSectionID) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM sidebar_sections WHERE workspace_id = ? AND user_id = ?`, workspace, user)
+	if err != nil {
+		return err
+	}
+	owned := make(map[domain.SidebarSectionID]struct{})
+	for rows.Next() {
+		var id domain.SidebarSectionID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		owned[id] = struct{}{}
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	if len(order) != len(owned) {
+		return store.InvalidArgument("a section reorder must list every section exactly once")
+	}
+	seen := make(map[domain.SidebarSectionID]struct{}, len(order))
+	for _, id := range order {
+		if _, ok := owned[id]; !ok {
+			return store.ErrNotFound
+		}
+		if _, dup := seen[id]; dup {
+			return store.InvalidArgument("a section reorder must list every section exactly once")
+		}
+		seen[id] = struct{}{}
+	}
+	// Move every section out of the target range first so no intermediate update
+	// collides with another's final position.
+	if _, err := tx.ExecContext(ctx, `UPDATE sidebar_sections SET position = position + ? WHERE workspace_id = ? AND user_id = ?`, len(order)+1, workspace, user); err != nil {
+		return err
+	}
+	for position, id := range order {
+		if _, err := tx.ExecContext(ctx, `UPDATE sidebar_sections SET position = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`, position, id, workspace, user); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) AssignConversationToSidebarSection(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, sectionID domain.SidebarSectionID, after domain.ConversationID) error {
+	if conversation == "" {
+		return store.InvalidArgument("a conversation is required")
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if sectionID != "" {
+		var owned int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sidebar_sections WHERE id = ? AND workspace_id = ? AND user_id = ?`, sectionID, workspace, user).Scan(&owned); err != nil {
+			return err
+		}
+		if owned == 0 {
+			return store.ErrNotFound
+		}
+	}
+	// A conversation is in at most one of the member's sections.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sidebar_section_members WHERE conversation_id = ? AND section_id IN (SELECT id FROM sidebar_sections WHERE workspace_id = ? AND user_id = ?)`, conversation, workspace, user); err != nil {
+		return err
+	}
+	if sectionID == "" {
+		return tx.Commit()
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT conversation_id FROM sidebar_section_members WHERE section_id = ? ORDER BY position, conversation_id`, sectionID)
+	if err != nil {
+		return err
+	}
+	var members []domain.ConversationID
+	for rows.Next() {
+		var existing domain.ConversationID
+		if err := rows.Scan(&existing); err != nil {
+			rows.Close()
+			return err
+		}
+		members = append(members, existing)
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	placed := make([]domain.ConversationID, 0, len(members)+1)
+	inserted := false
+	for _, existing := range members {
+		placed = append(placed, existing)
+		if after != "" && existing == after {
+			placed = append(placed, conversation)
+			inserted = true
+		}
+	}
+	if !inserted {
+		placed = append(placed, conversation)
+	}
+	// Rewrite the section's members in the new order — delete then reinsert so no
+	// position collides mid-update.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sidebar_section_members WHERE section_id = ?`, sectionID); err != nil {
+		return err
+	}
+	for position, existing := range placed {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sidebar_section_members(section_id, conversation_id, position) VALUES (?, ?, ?)`, sectionID, existing, position); err != nil {
+			return classify(err)
+		}
 	}
 	return tx.Commit()
 }

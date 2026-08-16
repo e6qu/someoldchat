@@ -66,6 +66,8 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DeleteCanvasAccess":                      {},
 		"DeleteCanvasComment":                     {},
 		"DeleteActivitySavedView":                 {},
+		"DeleteSidebarSection":                    {},
+		"SetSidebarSectionCollapsed":              {},
 		"DeleteListItemComment":                   {},
 		"AttachFileToListItem":                    {},
 		"DetachFileFromListItem":                  {},
@@ -167,4 +169,10 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // not-found, since the missing view is reached before any standing check.
 // CreateActivitySavedView is not here — a member creates their own view where a
 // stranger is refused, so its outcome distinguishes.
-const indistinguishableRefusalCeiling = 96
+// DeleteSidebarSection and SetSidebarSectionCollapsed join for the same reason
+// their saved-view sibling did: with no section on the fixture, both answer a
+// member who holds none exactly as they answer a stranger, not-found, because
+// the missing section is reached before any standing check. The other sidebar
+// operations distinguish — a create/read/rename/reorder/assign reaches a
+// validation or ownership branch that a holder and a stranger do not share.
+const indistinguishableRefusalCeiling = 98

@@ -58,6 +58,7 @@ var (
 	ErrInvalidReminder          = errors.New("reminder text, user, and time are required")
 	ErrInvalidLaterReminder     = errors.New("Later reminder arguments are invalid")
 	ErrInvalidActivitySavedView = errors.New("activity saved view arguments are invalid")
+	ErrInvalidSidebarSection    = errors.New("sidebar section arguments are invalid")
 	ErrReminderTimeInPast       = errors.New("reminder time is in the past")
 	ErrScheduledTimeInPast      = errors.New("scheduled message time is in the past")
 	ErrScheduledTimeTooFar      = errors.New("scheduled message time is more than 120 days away")
@@ -7171,6 +7172,97 @@ func (m Messages) DeleteActivitySavedView(ctx context.Context, workspaceID domai
 		return err
 	}
 	return m.Store.DeleteActivitySavedView(ctx, workspaceID, userID, id)
+}
+
+// SidebarSections returns the member's own custom sidebar sections, in order,
+// each carrying its assigned channels.
+func (m Messages) SidebarSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.SidebarSection, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	return m.Store.SidebarSections(ctx, workspaceID, userID)
+}
+
+// CreateSidebarSection adds a new, empty section at the end of the member's
+// list, up to a bound so the sidebar stays a sidebar.
+func (m Messages) CreateSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string) (domain.SidebarSection, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SidebarSection{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > domain.SidebarSectionNameLimit {
+		return domain.SidebarSection{}, ErrInvalidSidebarSection
+	}
+	existing, err := m.Store.SidebarSections(ctx, workspaceID, userID)
+	if err != nil {
+		return domain.SidebarSection{}, err
+	}
+	if len(existing) >= domain.SidebarSectionLimit {
+		return domain.SidebarSection{}, ErrInvalidSidebarSection
+	}
+	identifier, err := domain.PublicID("temp:SBS:")
+	if err != nil {
+		return domain.SidebarSection{}, err
+	}
+	section := domain.SidebarSection{
+		ID: domain.SidebarSectionID(identifier), WorkspaceID: workspaceID, UserID: userID,
+		Name: name, CreatedAt: time.Now().UTC(),
+	}
+	if err := m.Store.CreateSidebarSection(ctx, section); err != nil {
+		return domain.SidebarSection{}, err
+	}
+	return section, nil
+}
+
+// RenameSidebarSection changes a section's name.
+func (m Messages) RenameSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, name string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > domain.SidebarSectionNameLimit {
+		return ErrInvalidSidebarSection
+	}
+	return m.Store.RenameSidebarSection(ctx, workspaceID, userID, id, name)
+}
+
+// SetSidebarSectionCollapsed records whether a section is shown collapsed.
+func (m Messages) SetSidebarSectionCollapsed(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, collapsed bool) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.SetSidebarSectionCollapsed(ctx, workspaceID, userID, id, collapsed)
+}
+
+// DeleteSidebarSection removes a section; its channels fall back to the default
+// group.
+func (m Messages) DeleteSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.DeleteSidebarSection(ctx, workspaceID, userID, id)
+}
+
+// ReorderSidebarSections sets the order of the member's sections; it must name
+// each of theirs exactly once.
+func (m Messages) ReorderSidebarSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, order []domain.SidebarSectionID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.ReorderSidebarSections(ctx, workspaceID, userID, order)
+}
+
+// AssignConversationToSidebarSection moves a channel into a section (after an
+// anchor channel, or at the end), or out of every section when the section id
+// is empty.
+func (m Messages) AssignConversationToSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, sectionID domain.SidebarSectionID, after domain.ConversationID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	if conversationID == "" {
+		return ErrInvalidSidebarSection
+	}
+	return m.Store.AssignConversationToSidebarSection(ctx, workspaceID, userID, conversationID, sectionID, after)
 }
 
 func (m Messages) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) error {
