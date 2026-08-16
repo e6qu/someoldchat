@@ -46,30 +46,37 @@ var (
 	ErrBarrieredFromMember      = errors.New("an information barrier separates these members")
 	ErrInvalidWorkspace         = errors.New("workspace settings are invalid")
 	ErrInvalidConversationPrefs = errors.New("conversation preferences are invalid")
-	ErrInvalidReaction          = errors.New("reaction name is invalid")
-	ErrBlobUnavailable          = errors.New("blob storage is unavailable")
-	ErrInvalidFile              = errors.New("file metadata is invalid")
-	ErrInvalidSearch            = errors.New("search query is invalid")
-	ErrInvalidProfile           = errors.New("user profile is invalid")
-	ErrInvalidScheduledStatus   = errors.New("scheduled status is invalid")
-	ErrScheduledStatusLimit     = errors.New("five statuses are already scheduled")
-	ErrInvalidPresence          = errors.New("user presence is invalid")
-	ErrInvalidSnooze            = errors.New("snooze duration must be between 1 and 1440 minutes")
-	ErrInvalidReminder          = errors.New("reminder text, user, and time are required")
-	ErrInvalidLaterReminder     = errors.New("Later reminder arguments are invalid")
-	ErrInvalidActivitySavedView = errors.New("activity saved view arguments are invalid")
-	ErrReminderTimeInPast       = errors.New("reminder time is in the past")
-	ErrScheduledTimeInPast      = errors.New("scheduled message time is in the past")
-	ErrScheduledTimeTooFar      = errors.New("scheduled message time is more than 120 days away")
-	ErrScheduledTooMany         = errors.New("too many messages are scheduled in the channel window")
-	ErrInvalidUserGroup         = errors.New("user group name, handle, and members are invalid")
-	ErrInvalidCall              = errors.New("call external id and join URL are required")
-	ErrInvalidEphemeral         = errors.New("ephemeral message recipient, conversation, and text are required")
-	ErrInvalidAccessLog         = errors.New("access log fields are invalid")
-	ErrInvalidEmoji             = errors.New("custom emoji name or URL is invalid")
-	ErrEmojiAlreadyExists       = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile        = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest     = errors.New("invite request is invalid")
+	// ErrConversationPostingRestricted is a member being refused a post their
+	// membership allows but the channel's posting permissions do not. It is
+	// distinct from ErrNotInConversation on purpose: the member can read the
+	// channel and see the refusal is about permission, which is what Slack's
+	// restricted_action reports.
+	ErrConversationPostingRestricted = errors.New("channel posting is restricted")
+	ErrInvalidReaction               = errors.New("reaction name is invalid")
+	ErrBlobUnavailable               = errors.New("blob storage is unavailable")
+	ErrInvalidFile                   = errors.New("file metadata is invalid")
+	ErrInvalidSearch                 = errors.New("search query is invalid")
+	ErrInvalidProfile                = errors.New("user profile is invalid")
+	ErrInvalidScheduledStatus        = errors.New("scheduled status is invalid")
+	ErrScheduledStatusLimit          = errors.New("five statuses are already scheduled")
+	ErrInvalidPresence               = errors.New("user presence is invalid")
+	ErrInvalidSnooze                 = errors.New("snooze duration must be between 1 and 1440 minutes")
+	ErrInvalidReminder               = errors.New("reminder text, user, and time are required")
+	ErrInvalidLaterReminder          = errors.New("Later reminder arguments are invalid")
+	ErrInvalidActivitySavedView      = errors.New("activity saved view arguments are invalid")
+	ErrInvalidSidebarSection         = errors.New("sidebar section arguments are invalid")
+	ErrReminderTimeInPast            = errors.New("reminder time is in the past")
+	ErrScheduledTimeInPast           = errors.New("scheduled message time is in the past")
+	ErrScheduledTimeTooFar           = errors.New("scheduled message time is more than 120 days away")
+	ErrScheduledTooMany              = errors.New("too many messages are scheduled in the channel window")
+	ErrInvalidUserGroup              = errors.New("user group name, handle, and members are invalid")
+	ErrInvalidCall                   = errors.New("call external id and join URL are required")
+	ErrInvalidEphemeral              = errors.New("ephemeral message recipient, conversation, and text are required")
+	ErrInvalidAccessLog              = errors.New("access log fields are invalid")
+	ErrInvalidEmoji                  = errors.New("custom emoji name or URL is invalid")
+	ErrEmojiAlreadyExists            = errors.New("custom emoji already exists")
+	ErrInvalidRemoteFile             = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest          = errors.New("invite request is invalid")
 	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
 	// person reading it needs to know whether to ask for a new invitation or
 	// to check which address they signed in with.
@@ -4544,6 +4551,19 @@ func (m Messages) MemberSessionSettings(ctx context.Context, workspaceID domain.
 	return settings[0], nil
 }
 
+// MemberMustUsePasswordSignIn reports whether the email_password authentication
+// policy binds this member. Slack's one auth policy names the members who sign
+// in with an email address and password rather than through single sign-on, so
+// a member it binds must be refused an SSO sign-in. The sign-in paths consult
+// this and are not administrators, which is why it is self-scoped like
+// MemberSessionSettings rather than the administrative AdminAuthPolicyEntities.
+func (m Messages) MemberMustUsePasswordSignIn(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (bool, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return false, err
+	}
+	return m.Store.IsUnderAuthPolicy(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, string(userID))
+}
+
 // AdminAssignAuthPolicy puts members under an authentication policy. Every
 // named member is checked before one row is written, so a request that names
 // somebody outside the workspace leaves nothing behind.
@@ -5493,7 +5513,7 @@ func normalizeConversationPreferenceList(value domain.ConversationPreferenceList
 	typeSeen := make(map[domain.ConversationPreferenceType]struct{}, len(value.Types))
 	for _, item := range value.Types {
 		item = domain.ConversationPreferenceType(strings.TrimSpace(string(item)))
-		if item == "" {
+		if !item.Valid() {
 			return domain.ConversationPreferenceList{}, ErrInvalidConversationPrefs
 		}
 		if _, exists := typeSeen[item]; exists {
@@ -7173,6 +7193,109 @@ func (m Messages) DeleteActivitySavedView(ctx context.Context, workspaceID domai
 	return m.Store.DeleteActivitySavedView(ctx, workspaceID, userID, id)
 }
 
+// SidebarSections returns the member's own custom sidebar sections, in order,
+// each carrying its assigned channels.
+func (m Messages) SidebarSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.SidebarSection, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	return m.Store.SidebarSections(ctx, workspaceID, userID)
+}
+
+// CreateSidebarSection adds a new, empty section at the end of the member's
+// list, up to a bound so the sidebar stays a sidebar.
+func (m Messages) CreateSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string) (domain.SidebarSection, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SidebarSection{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > domain.SidebarSectionNameLimit {
+		return domain.SidebarSection{}, ErrInvalidSidebarSection
+	}
+	existing, err := m.Store.SidebarSections(ctx, workspaceID, userID)
+	if err != nil {
+		return domain.SidebarSection{}, err
+	}
+	if len(existing) >= domain.SidebarSectionLimit {
+		return domain.SidebarSection{}, ErrInvalidSidebarSection
+	}
+	identifier, err := domain.PublicID("temp:SBS:")
+	if err != nil {
+		return domain.SidebarSection{}, err
+	}
+	section := domain.SidebarSection{
+		ID: domain.SidebarSectionID(identifier), WorkspaceID: workspaceID, UserID: userID,
+		Name: name, CreatedAt: time.Now().UTC(),
+	}
+	if err := m.Store.CreateSidebarSection(ctx, section); err != nil {
+		return domain.SidebarSection{}, err
+	}
+	return section, nil
+}
+
+// RenameSidebarSection changes a section's name.
+func (m Messages) RenameSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, name string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > domain.SidebarSectionNameLimit {
+		return ErrInvalidSidebarSection
+	}
+	return m.Store.RenameSidebarSection(ctx, workspaceID, userID, id, name)
+}
+
+// SetSidebarSectionCollapsed records whether a section is shown collapsed.
+func (m Messages) SetSidebarSectionCollapsed(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, collapsed bool) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.SetSidebarSectionCollapsed(ctx, workspaceID, userID, id, collapsed)
+}
+
+// SetSidebarSectionNotificationLevel sets the level a section's channels notify
+// at when they carry no override of their own.
+func (m Messages) SetSidebarSectionNotificationLevel(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, level domain.NotificationLevel) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	if !level.ValidConversationOverride() {
+		return ErrInvalidSidebarSection
+	}
+	return m.Store.SetSidebarSectionNotificationLevel(ctx, workspaceID, userID, id, level)
+}
+
+// DeleteSidebarSection removes a section; its channels fall back to the default
+// group.
+func (m Messages) DeleteSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.DeleteSidebarSection(ctx, workspaceID, userID, id)
+}
+
+// ReorderSidebarSections sets the order of the member's sections; it must name
+// each of theirs exactly once.
+func (m Messages) ReorderSidebarSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, order []domain.SidebarSectionID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.ReorderSidebarSections(ctx, workspaceID, userID, order)
+}
+
+// AssignConversationToSidebarSection moves a channel into a section (after an
+// anchor channel, or at the end), or out of every section when the section id
+// is empty.
+func (m Messages) AssignConversationToSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, sectionID domain.SidebarSectionID, after domain.ConversationID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	if conversationID == "" {
+		return ErrInvalidSidebarSection
+	}
+	return m.Store.AssignConversationToSidebarSection(ctx, workspaceID, userID, conversationID, sectionID, after)
+}
+
 func (m Messages) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
@@ -7925,6 +8048,66 @@ func (m Messages) SendCallSignal(ctx context.Context, workspaceID domain.Workspa
 		return err
 	}
 	return m.Store.AppendEvent(ctx, event)
+}
+
+// SendHuddleReaction broadcasts one participant's ephemeral emoji reaction to
+// the others in a running huddle. Like a WebRTC signal it is never stored — it
+// is a moment, not a record — but unlike a signal it reaches every participant
+// rather than one, so it is scoped to the huddle's conversation the way the
+// huddle's own lifecycle events are. Slack's huddle reactions float up and fade;
+// the durable side of this is deliberately nothing.
+func (m Messages) SendHuddleReaction(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, callID domain.CallID, name string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return err
+	}
+	reaction, err := m.huddleReactionEmoji(ctx, workspaceID, name)
+	if err != nil {
+		return err
+	}
+	call, err := m.Store.GetCall(ctx, workspaceID, callID)
+	if err != nil {
+		return err
+	}
+	// The huddle must be running and the sender in it, which is the same
+	// standing SendCallSignal requires: a reaction is not a way to reach a
+	// huddle nobody may see, or to keep reaching one after leaving.
+	if !call.EndedAt.IsZero() || !slices.Contains(call.Participants, actor) {
+		return ErrInvalidCall
+	}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("huddle.reaction",
+		events.String("call_id", string(callID)),
+		events.String("channel_id", string(call.ConversationID)),
+		events.String("user_id", string(actor)),
+		events.String("reaction", reaction),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// huddleReactionEmoji validates that name is a standard reaction or a durable
+// workspace custom emoji and returns its normalized form — the same rule
+// AddReaction applies to a message reaction. A huddle reaction is ephemeral, so
+// the name is only validated, never stored.
+func (m Messages) huddleReactionEmoji(ctx context.Context, workspaceID domain.WorkspaceID, name string) (string, error) {
+	name = normalizeEmojiName(name)
+	if _, _, standard := slackemoji.ParseReactionName(name); standard {
+		return name, nil
+	}
+	if !validEmojiName(name) {
+		return "", ErrInvalidReaction
+	}
+	custom, err := m.Store.ListEmojis(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	for _, value := range custom {
+		if normalizeEmojiName(value.Name) == name {
+			return name, nil
+		}
+	}
+	return "", ErrInvalidReaction
 }
 
 func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic string, id domain.CallID, conversationID domain.ConversationID, at time.Time) (events.Event, error) {
@@ -9252,6 +9435,29 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	}
 	if target.Archived {
 		return domain.Message{}, ErrConversationAlreadyArchived
+	}
+	// Channel posting permissions restrict which members may post. They apply
+	// only to a member posting to a channel: direct and group messages carry no
+	// such preference, and an app posting with its own identity is governed by
+	// its installation, not by a member class. A top-level message is judged
+	// against who-may-post; a threaded reply against who-may-reply, so a channel
+	// can restrict new conversation while leaving its threads open.
+	if authorID != "" && request.AppID == "" && !target.IsDirectOrGroup() {
+		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, authorID)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		prefs, err := m.Store.GetConversationPrefs(ctx, request.Conversation)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		list := prefs.WhoCanPost
+		if request.ThreadTimestamp != "" {
+			list = prefs.CanThread
+		}
+		if !list.Permits(membership) {
+			return domain.Message{}, ErrConversationPostingRestricted
+		}
 	}
 	threadTimestampValue := domain.MessageTimestamp("")
 	if request.ThreadTimestamp != "" {

@@ -29,6 +29,7 @@ service.cannot_invite_self
 service.cannot_leave_default
 service.conversation_already_archived
 service.conversation_not_archived
+service.conversation_posting_restricted
 service.emoji_already_exists
 service.external_invite_not_permitted
 service.function_access_denied
@@ -72,6 +73,7 @@ service.invalid_retention_duration
 service.invalid_scheduled_status
 service.invalid_search
 service.invalid_shared_invite
+service.invalid_sidebar_section
 service.invalid_snooze
 service.invalid_stream_chunks
 service.invalid_timestamp

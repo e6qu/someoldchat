@@ -88,6 +88,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_reminder", code: codes.InvalidArgument, sentinel: service.ErrInvalidReminder},
 	{key: "service.invalid_later_reminder", code: codes.InvalidArgument, sentinel: service.ErrInvalidLaterReminder},
 	{key: "service.invalid_activity_saved_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidActivitySavedView},
+	{key: "service.invalid_sidebar_section", code: codes.InvalidArgument, sentinel: service.ErrInvalidSidebarSection},
 	{key: "service.reminder_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrReminderTimeInPast},
 	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
 	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},
@@ -217,6 +218,10 @@ var errorClasses = []errorClass{
 	// caller is a workspace member and the conversation exists, so it is neither
 	// an absence nor a permission failure.
 	{key: "service.not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrNotInConversation},
+	// The channel's posting permissions refuse a member who could otherwise
+	// post; it is a precondition on the channel, not an absence or a lack of
+	// membership, which is why it sits beside not_in_conversation.
+	{key: "service.conversation_posting_restricted", code: codes.FailedPrecondition, sentinel: service.ErrConversationPostingRestricted},
 	{key: "service.cannot_invite_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotInviteSelf},
 	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppInteractionUnavailable},
 	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: service.ErrAppHomeNotEnabled},

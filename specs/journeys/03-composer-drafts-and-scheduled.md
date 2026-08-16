@@ -22,6 +22,20 @@
    duplicate, and server-rejected sends retain recoverable input and present a
    specific non-500 result.
 
+A channel may restrict who posts. Slack's manage-posting-permissions surface
+offers everyone, everyone except guests, admins only, and a named allowlist, and
+lets a channel keep threads open while restricting new messages; all four are
+enforced. A member the channel does not admit is refused before the message is
+written and told so specifically — a non-500 result they can act on, not an
+outage or a silent drop — which is the "permission-changed" and disabled-posting
+case above made real. A top-level message is judged against who-may-post and a
+threaded reply against who-may-reply, so a channel can close new conversation
+while its threads stay open. Workspace admins and owners are never restricted,
+Slack's channel-management invariant, and direct or group messages carry no such
+policy. The permission is set through `admin.conversations.setConversationPrefs`
+over a closed member-class vocabulary, and an unknown class is refused rather
+than stored. Across the Slack API this refusal is `restricted_action`.
+
 Audio and video clip controls request only the required browser devices, show
 recording and permission-failure state, stop at Slack's five-minute limit, and
 stage the resulting media without sending it. The member may add text, remove

@@ -433,6 +433,10 @@ type Store interface {
 	// ListAuthPolicyEntities reports the entities one policy holds, in a stable
 	// order, and how many there are in total.
 	ListAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)
+	// IsUnderAuthPolicy reports whether one entity is bound by one policy. The
+	// sign-in paths ask this per member, so it is an indexed point lookup rather
+	// than a page scan of everyone the policy holds.
+	IsUnderAuthPolicy(context.Context, domain.WorkspaceID, domain.AuthPolicyName, domain.PolicyEntityType, string) (bool, error)
 	// GetUserExpiration reports when a guest account lapses. A zero time means
 	// the account does not lapse.
 	GetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
@@ -826,6 +830,30 @@ type Store interface {
 	// DeleteActivitySavedView removes one of a member's saved views by id. An id
 	// that names no view of theirs is store.ErrNotFound.
 	DeleteActivitySavedView(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivitySavedViewID) error
+	// SidebarSections returns a member's custom sidebar sections in order, each
+	// carrying its assigned conversation ids in order. It is the member's own;
+	// nobody else's sections are reachable through it.
+	SidebarSections(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.SidebarSection, error)
+	// CreateSidebarSection records a new section at the end of the member's list.
+	CreateSidebarSection(context.Context, domain.SidebarSection) error
+	// RenameSidebarSection changes a section's name; an id that names no section
+	// of the member's is store.ErrNotFound.
+	RenameSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, string) error
+	// SetSidebarSectionCollapsed records whether a section is shown collapsed.
+	SetSidebarSectionCollapsed(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, bool) error
+	// SetSidebarSectionNotificationLevel records the level a section's channels
+	// notify at when they carry no override of their own.
+	SetSidebarSectionNotificationLevel(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, domain.NotificationLevel) error
+	// DeleteSidebarSection removes a section; its channels fall back to the
+	// default group.
+	DeleteSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID) error
+	// ReorderSidebarSections sets the order of the member's sections. Ids that are
+	// not the member's, or that omit some of theirs, are refused.
+	ReorderSidebarSections(context.Context, domain.WorkspaceID, domain.UserID, []domain.SidebarSectionID) error
+	// AssignConversationToSidebarSection moves a conversation into a section after
+	// the anchor conversation (or to the section's end when the anchor is empty),
+	// or removes it from every section when the section id is empty.
+	AssignConversationToSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.SidebarSectionID, domain.ConversationID) error
 	ListUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.UserPage, error)
 	// SearchUsers is the same directory listing narrowed by a folded name. The
 	// workspace directory has no per-reader visibility rule, so this shares the

@@ -97,6 +97,7 @@ type Store struct {
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
 	activitySavedViews            map[domain.ActivitySavedViewID]domain.ActivitySavedView
+	sidebarSections               map[domain.SidebarSectionID]domain.SidebarSection
 	searchHistory                 map[string]domain.SearchHistoryEntry
 	reactions                     map[domain.MessageID]map[string]domain.Reaction
 	pins                          map[domain.MessageID]map[domain.UserID]domain.Pin
@@ -321,6 +322,7 @@ func New() *Store {
 		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
 		activityPreferences:           make(map[string]domain.ActivityPreferences),
 		activitySavedViews:            make(map[domain.ActivitySavedViewID]domain.ActivitySavedView),
+		sidebarSections:               make(map[domain.SidebarSectionID]domain.SidebarSection),
 		reactions:                     make(map[domain.MessageID]map[string]domain.Reaction),
 		pins:                          make(map[domain.MessageID]map[domain.UserID]domain.Pin),
 		files:                         make(map[domain.FileID]domain.File),
@@ -2738,6 +2740,13 @@ func (s *Store) ListAuthPolicyEntities(_ context.Context, workspace domain.Works
 		page.NextCursor, err = domain.NewListCursor(entities[len(entities)-1].EntityID)
 	}
 	return page, err
+}
+
+func (s *Store) IsUnderAuthPolicy(_ context.Context, workspace domain.WorkspaceID, policy domain.AuthPolicyName, kind domain.PolicyEntityType, entityID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entity, ok := s.authPolicyEntities[authPolicyEntityKey(domain.AuthPolicyEntity{Policy: policy, EntityType: kind, EntityID: entityID})]
+	return ok && entity.WorkspaceID == workspace, nil
 }
 
 func authPolicyEntityKey(entity domain.AuthPolicyEntity) string {
@@ -7439,6 +7448,200 @@ func (s *Store) DeleteActivitySavedView(_ context.Context, workspace domain.Work
 	return nil
 }
 
+func (s *Store) SidebarSections(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.SidebarSection, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sections := make([]domain.SidebarSection, 0)
+	for _, section := range s.sidebarSections {
+		if section.WorkspaceID != workspace || section.UserID != user {
+			continue
+		}
+		copied := section
+		copied.Conversations = append([]domain.ConversationID(nil), section.Conversations...)
+		sections = append(sections, copied)
+	}
+	sort.Slice(sections, func(left, right int) bool {
+		if sections[left].Position != sections[right].Position {
+			return sections[left].Position < sections[right].Position
+		}
+		return sections[left].ID < sections[right].ID
+	})
+	return sections, nil
+}
+
+func (s *Store) CreateSidebarSection(_ context.Context, section domain.SidebarSection) error {
+	if section.ID == "" || !section.Valid() {
+		return store.InvalidArgument("a sidebar section requires an id and a name")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.sidebarSections[section.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	position := 0
+	for _, existing := range s.sidebarSections {
+		if existing.WorkspaceID == section.WorkspaceID && existing.UserID == section.UserID {
+			if existing.Position >= position {
+				position = existing.Position + 1
+			}
+		}
+	}
+	section.Position = position
+	section.Conversations = nil
+	if section.NotificationLevel == "" {
+		section.NotificationLevel = domain.NotificationInherit
+	}
+	s.sidebarSections[section.ID] = section
+	return nil
+}
+
+func (s *Store) SetSidebarSectionNotificationLevel(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, level domain.NotificationLevel) error {
+	if !level.ValidConversationOverride() {
+		return store.InvalidArgument("a sidebar section notification level is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	section.NotificationLevel = level
+	s.sidebarSections[id] = section
+	return nil
+}
+
+// sectionNotificationLevelLocked returns the notification level of the section
+// this member has placed the conversation in, or empty when it is in none.
+func (s *Store) sectionNotificationLevelLocked(workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) domain.NotificationLevel {
+	for _, section := range s.sidebarSections {
+		if section.WorkspaceID != workspace || section.UserID != user {
+			continue
+		}
+		for _, assigned := range section.Conversations {
+			if assigned == conversation {
+				return section.NotificationLevel
+			}
+		}
+	}
+	return ""
+}
+
+func (s *Store) RenameSidebarSection(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return store.InvalidArgument("a sidebar section name is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	section.Name = name
+	s.sidebarSections[id] = section
+	return nil
+}
+
+func (s *Store) SetSidebarSectionCollapsed(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID, collapsed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	section.Collapsed = collapsed
+	s.sidebarSections[id] = section
+	return nil
+}
+
+func (s *Store) DeleteSidebarSection(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SidebarSectionID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	section, ok := s.sidebarSections[id]
+	if !ok || section.WorkspaceID != workspace || section.UserID != user {
+		return store.ErrNotFound
+	}
+	delete(s.sidebarSections, id)
+	return nil
+}
+
+func (s *Store) ReorderSidebarSections(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, order []domain.SidebarSectionID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	owned := make(map[domain.SidebarSectionID]struct{})
+	for id, section := range s.sidebarSections {
+		if section.WorkspaceID == workspace && section.UserID == user {
+			owned[id] = struct{}{}
+		}
+	}
+	if len(order) != len(owned) {
+		return store.InvalidArgument("a section reorder must list every section exactly once")
+	}
+	seen := make(map[domain.SidebarSectionID]struct{}, len(order))
+	for _, id := range order {
+		if _, ok := owned[id]; !ok {
+			return store.ErrNotFound
+		}
+		if _, dup := seen[id]; dup {
+			return store.InvalidArgument("a section reorder must list every section exactly once")
+		}
+		seen[id] = struct{}{}
+	}
+	for position, id := range order {
+		section := s.sidebarSections[id]
+		section.Position = position
+		s.sidebarSections[id] = section
+	}
+	return nil
+}
+
+func (s *Store) AssignConversationToSidebarSection(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, sectionID domain.SidebarSectionID, after domain.ConversationID) error {
+	if conversation == "" {
+		return store.InvalidArgument("a conversation is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sectionID != "" {
+		section, ok := s.sidebarSections[sectionID]
+		if !ok || section.WorkspaceID != workspace || section.UserID != user {
+			return store.ErrNotFound
+		}
+	}
+	// A conversation lives in at most one of the member's sections: remove it
+	// from every section first, then place it where asked.
+	for id, section := range s.sidebarSections {
+		if section.WorkspaceID != workspace || section.UserID != user {
+			continue
+		}
+		filtered := section.Conversations[:0:0]
+		for _, existing := range section.Conversations {
+			if existing != conversation {
+				filtered = append(filtered, existing)
+			}
+		}
+		section.Conversations = filtered
+		s.sidebarSections[id] = section
+	}
+	if sectionID == "" {
+		return nil
+	}
+	section := s.sidebarSections[sectionID]
+	placed := make([]domain.ConversationID, 0, len(section.Conversations)+1)
+	inserted := false
+	for _, existing := range section.Conversations {
+		placed = append(placed, existing)
+		if after != "" && existing == after {
+			placed = append(placed, conversation)
+			inserted = true
+		}
+	}
+	if !inserted {
+		placed = append(placed, conversation)
+	}
+	section.Conversations = placed
+	s.sidebarSections[sectionID] = section
+	return nil
+}
+
 func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.ConversationListRequest) (domain.ConversationPage, error) {
 	if request.Limit <= 0 {
 		return domain.ConversationPage{}, store.InvalidArgument("page limit must be positive")
@@ -7766,10 +7969,11 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 		if stored, ok := s.conversationNotificationPrefs[conversationNotificationKey(message.WorkspaceID, user, message.Conversation)]; ok {
 			conversationPreferences = stored
 		}
-		effective := conversationPreferences.EffectiveLevel(workspacePreferences)
+		effective := conversationPreferences.EffectiveLevelWithSection(s.sectionNotificationLevelLocked(message.WorkspaceID, user, message.Conversation), workspacePreferences)
 		if message.ThreadTimestamp == "" && !conversation.IsDirectOrGroup() {
 			// A VIP's every channel message reaches the member, even where their
-			// level (mute, or the default mentions-only) would otherwise drop it.
+			// level (mute, the default mentions-only, or a muted section) would
+			// otherwise drop it.
 			if domain.ContainsUserID(workspacePreferences.VIPs, message.AuthorID) {
 				add(user, domain.ActivityChannel)
 			}

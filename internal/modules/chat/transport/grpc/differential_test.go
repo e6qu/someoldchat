@@ -1779,9 +1779,18 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// A participant's ephemeral reaction: a valid emoji is accepted, an
+				// unknown one is refused, a channel member outside the huddle (U3)
+				// may not send one, and neither may a workspace member outside the
+				// conversation (UA).
+				reacted := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, ":tada:")
+				reactUnknown := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, "not-an-emoji")
+				reactNonParticipant := chat.SendHuddleReaction(ctx, "T1", "U3", started.ID, "tada")
+				reactOutsider := chat.SendHuddleReaction(ctx, "T1", "UA", started.ID, "tada")
 				if _, err := chat.LeaveHuddle(ctx, "T1", "U2", "C1"); err != nil {
 					return nil, err
 				}
+				// U1 is still in it, but once it ends a reaction is refused too.
 				// U2 has gone, so U1 can no longer reach them through the call.
 				afterLeaving := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
 				ended, err := chat.EndHuddle(ctx, "T1", "U1", "C1")
@@ -1789,6 +1798,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				afterEnding := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
+				reactAfterEnding := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, "tada")
 				_, gone := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
 				return []any{
 					started.Title, len(started.Participants), len(joined.Participants), len(active.Participants),
@@ -1797,6 +1807,8 @@ func parityCases() []parityCase {
 					self != nil, outsider != nil, stranger != nil, unknownKind != nil,
 					empty != nil, oversized != nil, missingCall != nil,
 					afterLeaving != nil, afterEnding != nil,
+					reacted == nil, reactUnknown != nil, reactNonParticipant != nil,
+					reactOutsider != nil, reactAfterEnding != nil,
 					inviteMember == nil, inviteSelf != nil, inviteJoined != nil,
 					inviteOutsider != nil, inviteFromNonParticipant != nil,
 				}, nil
@@ -2193,8 +2205,22 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The sign-in path's own read of the policy: U2 is still bound, U1 was
+				// just removed and is not, and a non-member is refused. The two
+				// compositions must agree, because this is the value that refuses an
+				// SSO sign-in a member's policy forbids.
+				u1Bound, err := chat.MemberMustUsePasswordSignIn(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				u2Bound, err := chat.MemberMustUsePasswordSignIn(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				_, boundStrangerErr := chat.MemberMustUsePasswordSignIn(ctx, "T1", "U-nobody")
 				return []any{first, page.TotalCount, page.HasMore, second, len(left.Entities), left.TotalCount,
-					unknownPolicy != nil, unknownKind != nil, stranger != nil}, nil
+					unknownPolicy != nil, unknownKind != nil, stranger != nil,
+					u1Bound, u2Bound, boundStrangerErr != nil}, nil
 			},
 		},
 		{
@@ -4604,7 +4630,7 @@ func parityCases() []parityCase {
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				prefs := domain.ConversationPrefs{
 					ConversationID: "C2",
-					CanThread:      domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{"admin"}},
+					CanThread:      domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{domain.ConversationPosterAdmins}},
 				}
 				if _, err := chat.AdminSetConversationPrefs(ctx, "T1", "UA", "C1", prefs); err != nil {
 					return nil, err
@@ -4960,6 +4986,66 @@ func parityCases() []parityCase {
 					after.Schedule.Enabled, after.Schedule.Days, after.Schedule.StartMinute, after.Schedule.EndMinute, after.Schedule.TimeZone, invalidErr != nil, read.Schedule.Enabled,
 					len(withVIP.VIPs), len(withVIP.VIPs) == 1 && withVIP.VIPs[0] == "U2", selfErr != nil, strangerErr != nil, len(afterVIP.VIPs),
 				}, nil
+			},
+		},
+		{
+			name: "sidebar sections are the member's own ordered, collapsible groups of channels",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				alpha, err := chat.CreateSidebarSection(ctx, "T1", "U1", "Alpha")
+				if err != nil {
+					return nil, err
+				}
+				beta, err := chat.CreateSidebarSection(ctx, "T1", "U1", "Beta")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RenameSidebarSection(ctx, "T1", "U1", alpha.ID, "Priorities"); err != nil {
+					return nil, err
+				}
+				if err := chat.SetSidebarSectionCollapsed(ctx, "T1", "U1", alpha.ID, true); err != nil {
+					return nil, err
+				}
+				if err := chat.SetSidebarSectionNotificationLevel(ctx, "T1", "U1", alpha.ID, domain.NotificationMute); err != nil {
+					return nil, err
+				}
+				// Two channels join Priorities, the second placed after the first.
+				if err := chat.AssignConversationToSidebarSection(ctx, "T1", "U1", "C1", alpha.ID, ""); err != nil {
+					return nil, err
+				}
+				if err := chat.AssignConversationToSidebarSection(ctx, "T1", "U1", "C2", alpha.ID, "C1"); err != nil {
+					return nil, err
+				}
+				// Put Beta before Priorities.
+				if err := chat.ReorderSidebarSections(ctx, "T1", "U1", []domain.SidebarSectionID{beta.ID, alpha.ID}); err != nil {
+					return nil, err
+				}
+				sections, err := chat.SidebarSections(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// The ids are minted per composition, so compare names, order,
+				// collapse and the channel ids (which are literal), not the ids.
+				others, err := chat.SidebarSections(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteSidebarSection(ctx, "T1", "U1", beta.ID); err != nil {
+					return nil, err
+				}
+				afterDelete, err := chat.SidebarSections(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				reorderErr := chat.ReorderSidebarSections(ctx, "T1", "U1", []domain.SidebarSectionID{alpha.ID, "not-a-section"})
+				result := []any{len(sections)}
+				if len(sections) == 2 {
+					result = append(result, sections[0].Name, sections[1].Name, sections[1].Collapsed, string(sections[1].NotificationLevel), len(sections[1].Conversations))
+					if len(sections[1].Conversations) == 2 {
+						result = append(result, string(sections[1].Conversations[0]), string(sections[1].Conversations[1]))
+					}
+				}
+				result = append(result, len(others), len(afterDelete), reorderErr != nil)
+				return result, nil
 			},
 		},
 		{

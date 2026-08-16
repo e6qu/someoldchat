@@ -777,6 +777,74 @@ func (x *CallSignalRequest) GetPayload() string {
 	return ""
 }
 
+type HuddleReactionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CallId        string                 `protobuf:"bytes,3,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	Reaction      string                 `protobuf:"bytes,4,opt,name=reaction,proto3" json:"reaction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HuddleReactionRequest) Reset() {
+	*x = HuddleReactionRequest{}
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HuddleReactionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HuddleReactionRequest) ProtoMessage() {}
+
+func (x *HuddleReactionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HuddleReactionRequest.ProtoReflect.Descriptor instead.
+func (*HuddleReactionRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *HuddleReactionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *HuddleReactionRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *HuddleReactionRequest) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *HuddleReactionRequest) GetReaction() string {
+	if x != nil {
+		return x.Reaction
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_calls_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
@@ -849,9 +917,15 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\acall_id\x18\x03 \x01(\tR\x06callId\x12!\n" +
 	"\frecipient_id\x18\x04 \x01(\tR\vrecipientId\x12\x12\n" +
 	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x18\n" +
-	"\apayload\x18\x06 \x01(\tR\apayload2\xf0\b\n" +
+	"\apayload\x18\x06 \x01(\tR\apayload\"\x88\x01\n" +
+	"\x15HuddleReactionRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
+	"\acall_id\x18\x03 \x01(\tR\x06callId\x12\x1a\n" +
+	"\breaction\x18\x04 \x01(\tR\breaction2\xd9\t\n" +
 	"\fCallsService\x12_\n" +
-	"\x0eSendCallSignal\x12&.sameoldchat.chat.v1.CallSignalRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12a\n" +
+	"\x0eSendCallSignal\x12&.sameoldchat.chat.v1.CallSignalRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12g\n" +
+	"\x12SendHuddleReaction\x12*.sameoldchat.chat.v1.HuddleReactionRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12a\n" +
 	"\x0eInviteToHuddle\x12(.sameoldchat.chat.v1.HuddleInviteRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12I\n" +
 	"\aAddCall\x12#.sameoldchat.chat.v1.AddCallRequest\x1a\x19.sameoldchat.chat.v1.Call\x12L\n" +
 	"\vStartHuddle\x12\".sameoldchat.chat.v1.HuddleRequest\x1a\x19.sameoldchat.chat.v1.Call\x12K\n" +
@@ -879,7 +953,7 @@ func file_sameoldchat_chat_v1_calls_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_calls_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_sameoldchat_chat_v1_calls_proto_goTypes = []any{
 	(*Call)(nil),                    // 0: sameoldchat.chat.v1.Call
 	(*HuddleRequest)(nil),           // 1: sameoldchat.chat.v1.HuddleRequest
@@ -890,37 +964,40 @@ var file_sameoldchat_chat_v1_calls_proto_goTypes = []any{
 	(*CallParticipantsRequest)(nil), // 6: sameoldchat.chat.v1.CallParticipantsRequest
 	(*HuddleInviteRequest)(nil),     // 7: sameoldchat.chat.v1.HuddleInviteRequest
 	(*CallSignalRequest)(nil),       // 8: sameoldchat.chat.v1.CallSignalRequest
-	(*MutationResponse)(nil),        // 9: sameoldchat.chat.v1.MutationResponse
+	(*HuddleReactionRequest)(nil),   // 9: sameoldchat.chat.v1.HuddleReactionRequest
+	(*MutationResponse)(nil),        // 10: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_calls_proto_depIdxs = []int32{
 	8,  // 0: sameoldchat.chat.v1.CallsService.SendCallSignal:input_type -> sameoldchat.chat.v1.CallSignalRequest
-	7,  // 1: sameoldchat.chat.v1.CallsService.InviteToHuddle:input_type -> sameoldchat.chat.v1.HuddleInviteRequest
-	2,  // 2: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
-	1,  // 3: sameoldchat.chat.v1.CallsService.StartHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 4: sameoldchat.chat.v1.CallsService.JoinHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 5: sameoldchat.chat.v1.CallsService.LeaveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 6: sameoldchat.chat.v1.CallsService.EndHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 7: sameoldchat.chat.v1.CallsService.GetActiveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	4,  // 8: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
-	3,  // 9: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
-	5,  // 10: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
-	6,  // 11: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	6,  // 12: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	9,  // 13: sameoldchat.chat.v1.CallsService.SendCallSignal:output_type -> sameoldchat.chat.v1.MutationResponse
-	9,  // 14: sameoldchat.chat.v1.CallsService.InviteToHuddle:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 15: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
-	0,  // 16: sameoldchat.chat.v1.CallsService.StartHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 17: sameoldchat.chat.v1.CallsService.JoinHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 18: sameoldchat.chat.v1.CallsService.LeaveHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 19: sameoldchat.chat.v1.CallsService.EndHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 20: sameoldchat.chat.v1.CallsService.GetActiveHuddle:output_type -> sameoldchat.chat.v1.Call
-	9,  // 21: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 22: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
-	0,  // 23: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
-	9,  // 24: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	9,  // 25: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	13, // [13:26] is the sub-list for method output_type
-	0,  // [0:13] is the sub-list for method input_type
+	9,  // 1: sameoldchat.chat.v1.CallsService.SendHuddleReaction:input_type -> sameoldchat.chat.v1.HuddleReactionRequest
+	7,  // 2: sameoldchat.chat.v1.CallsService.InviteToHuddle:input_type -> sameoldchat.chat.v1.HuddleInviteRequest
+	2,  // 3: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
+	1,  // 4: sameoldchat.chat.v1.CallsService.StartHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 5: sameoldchat.chat.v1.CallsService.JoinHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 6: sameoldchat.chat.v1.CallsService.LeaveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 7: sameoldchat.chat.v1.CallsService.EndHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	1,  // 8: sameoldchat.chat.v1.CallsService.GetActiveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	4,  // 9: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
+	3,  // 10: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
+	5,  // 11: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
+	6,  // 12: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	6,  // 13: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	10, // 14: sameoldchat.chat.v1.CallsService.SendCallSignal:output_type -> sameoldchat.chat.v1.MutationResponse
+	10, // 15: sameoldchat.chat.v1.CallsService.SendHuddleReaction:output_type -> sameoldchat.chat.v1.MutationResponse
+	10, // 16: sameoldchat.chat.v1.CallsService.InviteToHuddle:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 17: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
+	0,  // 18: sameoldchat.chat.v1.CallsService.StartHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 19: sameoldchat.chat.v1.CallsService.JoinHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 20: sameoldchat.chat.v1.CallsService.LeaveHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 21: sameoldchat.chat.v1.CallsService.EndHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 22: sameoldchat.chat.v1.CallsService.GetActiveHuddle:output_type -> sameoldchat.chat.v1.Call
+	10, // 23: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 24: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
+	0,  // 25: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
+	10, // 26: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	10, // 27: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	14, // [14:28] is the sub-list for method output_type
+	0,  // [0:14] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -938,7 +1015,7 @@ func file_sameoldchat_chat_v1_calls_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_calls_proto_rawDesc), len(file_sameoldchat_chat_v1_calls_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

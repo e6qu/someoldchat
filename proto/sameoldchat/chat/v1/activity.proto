@@ -108,6 +108,74 @@ message DeleteActivitySavedViewRequest {
   string view_id = 3;
 }
 
+message SidebarSection {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string name = 4;
+  int32 position = 5;
+  bool collapsed = 6;
+  int64 created_at_unix_nano = 7;
+  repeated string conversations = 8;
+  string notification_level = 9;
+}
+
+message SetSidebarSectionNotificationLevelRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string section_id = 3;
+  string level = 4;
+}
+
+message SidebarSectionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message SidebarSectionsResponse {
+  repeated SidebarSection sections = 1;
+}
+
+message CreateSidebarSectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+}
+
+message RenameSidebarSectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string section_id = 3;
+  string name = 4;
+}
+
+message SetSidebarSectionCollapsedRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string section_id = 3;
+  bool collapsed = 4;
+}
+
+message DeleteSidebarSectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string section_id = 3;
+}
+
+message ReorderSidebarSectionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string section_ids = 3;
+}
+
+message AssignConversationToSidebarSectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string section_id = 4;
+  string after_conversation_id = 5;
+}
+
 message NotificationPreferencesRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -208,6 +276,14 @@ service ActivityService {
   rpc SetWorkspaceNotificationPreferences(SetWorkspaceNotificationPreferencesRequest) returns (WorkspaceNotificationPreferences);
   rpc SetNotificationSchedule(SetNotificationScheduleRequest) returns (WorkspaceNotificationPreferences);
   rpc SetNotificationVIP(SetNotificationVIPRequest) returns (MutationResponse);
+  rpc SidebarSections(SidebarSectionsRequest) returns (SidebarSectionsResponse);
+  rpc CreateSidebarSection(CreateSidebarSectionRequest) returns (SidebarSection);
+  rpc RenameSidebarSection(RenameSidebarSectionRequest) returns (MutationResponse);
+  rpc SetSidebarSectionCollapsed(SetSidebarSectionCollapsedRequest) returns (MutationResponse);
+  rpc SetSidebarSectionNotificationLevel(SetSidebarSectionNotificationLevelRequest) returns (MutationResponse);
+  rpc DeleteSidebarSection(DeleteSidebarSectionRequest) returns (MutationResponse);
+  rpc ReorderSidebarSections(ReorderSidebarSectionsRequest) returns (MutationResponse);
+  rpc AssignConversationToSidebarSection(AssignConversationToSidebarSectionRequest) returns (MutationResponse);
   rpc GetConversationNotificationPreferences(ConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
   rpc SetConversationNotificationPreferences(SetConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
   rpc GetThreadFollow(ThreadFollowRequest) returns (ThreadFollow);

@@ -25,6 +25,15 @@ arrival/departure, moderator action, and degraded media reconcile without
 duplicating participants. Muted/video/screen-sharing state MUST match the media
 session rather than an optimistic button alone.
 
+Reactions are implemented: a participant sends one of the huddle's quick emoji
+and every participant sees it float briefly and fade. The reaction is ephemeral
+— broadcast to the huddle and never stored — validated against the same
+standard-or-custom emoji rule as a message reaction, and refused to anyone who
+is not in the running huddle. It rides the huddle's own live event without
+refreshing the media session, alongside the WebRTC signalling the same live
+stream carries. Captions require speech-to-text this deployment does not host
+and remain a bounded gap rather than a fabricated control.
+
 ## HUDDLE-03 — Invite and notify participants
 
 A member already in a huddle can pull in a specific person who has not looked.

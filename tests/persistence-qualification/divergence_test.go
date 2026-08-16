@@ -3056,6 +3056,119 @@ func vipChannelMessagePiercesMuteOnEveryProfile(t *testing.T, open opener) {
 	}
 }
 
+// Sidebar section and channel order is where the profiles could drift: the SQL
+// path rewrites positions (delete-then-reinsert for members, an offset pass for
+// sections) while memory reorders a slice. A member who arranged their sidebar
+// must see the same arrangement whichever profile served it.
+func sidebarSectionsOrderIdenticallyOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	alpha := domain.SidebarSectionID("sec-alpha-" + f.suffix)
+	beta := domain.SidebarSectionID("sec-beta-" + f.suffix)
+	if err := f.repository.CreateSidebarSection(ctx, domain.SidebarSection{ID: alpha, WorkspaceID: f.workspaceID, UserID: f.userID, Name: "Alpha", CreatedAt: time.Unix(1_700_000_000, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.CreateSidebarSection(ctx, domain.SidebarSection{ID: beta, WorkspaceID: f.workspaceID, UserID: f.userID, Name: "Beta", CreatedAt: time.Unix(1_700_000_001, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []domain.ConversationID{"CA", "CB", "CC"} {
+		if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, f.userID, channel, alpha, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Move CA to the end of alpha (after CC), then move CB into beta.
+	if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, f.userID, "CA", alpha, "CC"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, f.userID, "CB", beta, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.ReorderSidebarSections(ctx, f.workspaceID, f.userID, []domain.SidebarSectionID{beta, alpha}); err != nil {
+		t.Fatal(err)
+	}
+	sections, err := f.repository.SidebarSections(ctx, f.workspaceID, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sections) != 2 || sections[0].ID != beta || sections[1].ID != alpha {
+		t.Fatalf("section order = %+v, want beta then alpha", sections)
+	}
+	if len(sections[0].Conversations) != 1 || sections[0].Conversations[0] != "CB" {
+		t.Fatalf("beta channels = %v, want [CB]", sections[0].Conversations)
+	}
+	if len(sections[1].Conversations) != 2 || sections[1].Conversations[0] != "CC" || sections[1].Conversations[1] != "CA" {
+		t.Fatalf("alpha channels = %v, want [CC CA]", sections[1].Conversations)
+	}
+}
+
+// A section's notification level is consulted inside the per-recipient fanout,
+// which is written twice. A muted section must suppress a channel item the
+// workspace default would deliver, and a section set to All must deliver one,
+// identically on memory and SQL.
+func sectionNotificationLevelLayersIdenticallyOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	author := domain.UserID("UA" + f.suffix)
+	reader := domain.UserID("UR" + f.suffix)
+	for _, user := range []domain.UserID{author, reader} {
+		if err := f.repository.SeedUser(ctx, domain.User{ID: user, WorkspaceID: f.workspaceID, Name: string(user)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repository.SeedConversationMember(ctx, f.channelID, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The reader's workspace default is All, so a plain channel message reaches them.
+	prefs := domain.DefaultWorkspaceNotificationPreferences(f.workspaceID, reader)
+	prefs.Level = domain.NotificationAll
+	prefs.ActivityChannels = true
+	if err := f.repository.SetWorkspaceNotificationPreferences(ctx, prefs, f.event("wsprefs", "notification.preferences_changed", string(reader))); err != nil {
+		t.Fatal(err)
+	}
+	section := domain.SidebarSectionID("sec-notify-" + f.suffix)
+	if err := f.repository.CreateSidebarSection(ctx, domain.SidebarSection{ID: section, WorkspaceID: f.workspaceID, UserID: reader, Name: "Focus", CreatedAt: time.Unix(1_700_000_000, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.AssignConversationToSidebarSection(ctx, f.workspaceID, reader, f.channelID, section, ""); err != nil {
+		t.Fatal(err)
+	}
+	channelItems := func() int {
+		t.Helper()
+		page, err := f.repository.ListActivity(ctx, f.workspaceID, reader, domain.ActivityQuery{Kinds: []domain.ActivityKind{domain.ActivityChannel}, Page: domain.PageRequest{Limit: 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Items)
+	}
+	post := func(id, text string, at int64) {
+		t.Helper()
+		message := domain.Message{ID: domain.MessageID(id + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID, AuthorID: author, Text: text, Attachments: "[]", CreatedAt: domain.MessageInstant(time.Unix(at, 0).UTC())}
+		if err := f.repository.CreateMessage(ctx, message, f.event("msg-"+id, "message.created", string(message.ID)), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A muted section suppresses what the workspace All default would deliver.
+	if err := f.repository.SetSidebarSectionNotificationLevel(ctx, f.workspaceID, reader, section, domain.NotificationMute); err != nil {
+		t.Fatal(err)
+	}
+	post("M-muted-", "in a muted section", 1_700_000_100)
+	if got := channelItems(); got != 0 {
+		t.Fatalf("a muted section delivered %d channel items, want 0", got)
+	}
+	// Setting it to All delivers again.
+	if err := f.repository.SetSidebarSectionNotificationLevel(ctx, f.workspaceID, reader, section, domain.NotificationAll); err != nil {
+		t.Fatal(err)
+	}
+	post("M-all-", "in an all section", 1_700_000_200)
+	if got := channelItems(); got != 1 {
+		t.Fatalf("an all section delivered %d channel items, want 1", got)
+	}
+}
+
 // Assignment is state on the item and news in Activity, and the two profiles
 // resolve reachability differently — one joins the shared list predicate, the
 // other walks grants under a lock. The contract drives both, including the due

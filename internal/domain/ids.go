@@ -29,6 +29,7 @@ type ReminderID string
 type LaterReminderID string
 type ActivityID string
 type ActivitySavedViewID string
+type SidebarSectionID string
 type SavedItemID string
 type ScheduledMessageID string
 type ScheduledStatusID string

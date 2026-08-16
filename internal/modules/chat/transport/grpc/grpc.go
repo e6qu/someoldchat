@@ -277,6 +277,19 @@ func (r Remote) SendCallSignal(ctx context.Context, workspaceID domain.Workspace
 	return nil
 }
 
+func (r Remote) SendHuddleReaction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, callID domain.CallID, reaction string) error {
+	out, err := r.calls.SendHuddleReaction(ctx, &chatv1.HuddleReactionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CallId: string(callID), Reaction: reaction,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed huddle reaction was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) InviteToHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor, invitee domain.UserID, conversationID domain.ConversationID) error {
 	out, err := r.calls.InviteToHuddle(ctx, &chatv1.HuddleInviteRequest{
 		WorkspaceId: string(workspaceID), UserId: string(actor), InviteeId: string(invitee), ConversationId: string(conversationID),
@@ -1891,6 +1904,14 @@ func (r Remote) MemberSessionSettings(ctx context.Context, workspaceID domain.Wo
 		return domain.SessionSettings{}, err
 	}
 	return decodeProtoSessionSettings(out), nil
+}
+
+func (r Remote) MemberMustUsePasswordSignIn(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (bool, error) {
+	out, err := r.directory.MemberMustUsePasswordSignIn(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return false, err
+	}
+	return out.GetMustUsePasswordSignIn(), nil
 }
 
 func sessionSettingsMutation(workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) *chatv1.SessionSettingsMutationRequest {
@@ -5096,6 +5117,127 @@ func (r Remote) SetNotificationVIP(ctx context.Context, workspaceID domain.Works
 	return nil
 }
 
+func encodeProtoSidebarSection(value domain.SidebarSection) *chatv1.SidebarSection {
+	conversations := make([]string, 0, len(value.Conversations))
+	for _, id := range value.Conversations {
+		conversations = append(conversations, string(id))
+	}
+	return &chatv1.SidebarSection{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
+		Name: value.Name, Position: int32(value.Position), Collapsed: value.Collapsed,
+		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), Conversations: conversations,
+		NotificationLevel: string(value.NotificationLevel),
+	}
+}
+
+func decodeProtoSidebarSection(value *chatv1.SidebarSection) domain.SidebarSection {
+	if value == nil {
+		return domain.SidebarSection{}
+	}
+	section := domain.SidebarSection{
+		ID: domain.SidebarSectionID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID: domain.UserID(value.GetUserId()), Name: value.GetName(), Position: int(value.GetPosition()),
+		Collapsed: value.GetCollapsed(), NotificationLevel: domain.NotificationLevel(value.GetNotificationLevel()),
+		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+	}
+	for _, id := range value.GetConversations() {
+		section.Conversations = append(section.Conversations, domain.ConversationID(id))
+	}
+	return section
+}
+
+func (r Remote) SidebarSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.SidebarSection, error) {
+	out, err := r.activity.SidebarSections(ctx, &chatv1.SidebarSectionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	sections := make([]domain.SidebarSection, 0, len(out.GetSections()))
+	for _, section := range out.GetSections() {
+		sections = append(sections, decodeProtoSidebarSection(section))
+	}
+	return sections, nil
+}
+
+func (r Remote) CreateSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string) (domain.SidebarSection, error) {
+	out, err := r.activity.CreateSidebarSection(ctx, &chatv1.CreateSidebarSectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name})
+	if err != nil {
+		return domain.SidebarSection{}, err
+	}
+	return decodeProtoSidebarSection(out), nil
+}
+
+func (r Remote) RenameSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, name string) error {
+	out, err := r.activity.RenameSidebarSection(ctx, &chatv1.RenameSidebarSectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SectionId: string(id), Name: name})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed rename sidebar section response was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) SetSidebarSectionCollapsed(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, collapsed bool) error {
+	out, err := r.activity.SetSidebarSectionCollapsed(ctx, &chatv1.SetSidebarSectionCollapsedRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SectionId: string(id), Collapsed: collapsed})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed set sidebar section collapsed response was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) SetSidebarSectionNotificationLevel(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID, level domain.NotificationLevel) error {
+	out, err := r.activity.SetSidebarSectionNotificationLevel(ctx, &chatv1.SetSidebarSectionNotificationLevelRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SectionId: string(id), Level: string(level)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed set sidebar section notification level response was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) DeleteSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SidebarSectionID) error {
+	out, err := r.activity.DeleteSidebarSection(ctx, &chatv1.DeleteSidebarSectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SectionId: string(id)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed delete sidebar section response was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) ReorderSidebarSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, order []domain.SidebarSectionID) error {
+	ids := make([]string, 0, len(order))
+	for _, id := range order {
+		ids = append(ids, string(id))
+	}
+	out, err := r.activity.ReorderSidebarSections(ctx, &chatv1.ReorderSidebarSectionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SectionIds: ids})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed reorder sidebar sections response was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AssignConversationToSidebarSection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, sectionID domain.SidebarSectionID, after domain.ConversationID) error {
+	out, err := r.activity.AssignConversationToSidebarSection(ctx, &chatv1.AssignConversationToSidebarSectionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), SectionId: string(sectionID), AfterConversationId: string(after),
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed assign conversation to sidebar section response was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
 	out, err := r.activity.SetWorkspaceNotificationPreferences(ctx, &chatv1.SetWorkspaceNotificationPreferencesRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Level: string(level),
@@ -6025,6 +6167,14 @@ func (s *Server) SendCallSignal(ctx context.Context, input *chatv1.CallSignalReq
 	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
+func (s *Server) SendHuddleReaction(ctx context.Context, input *chatv1.HuddleReactionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SendHuddleReaction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.CallID(input.GetCallId()), input.GetReaction()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) InviteToHuddle(ctx context.Context, input *chatv1.HuddleInviteRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.InviteToHuddle(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
 		domain.UserID(input.GetInviteeId()), domain.ConversationID(input.GetConversationId())); err != nil {
@@ -6200,6 +6350,14 @@ func (s *Server) MemberSessionSettings(ctx context.Context, input *chatv1.Worksp
 		return nil, mapError(err)
 	}
 	return encodeProtoSessionSettings(settings), nil
+}
+
+func (s *Server) MemberMustUsePasswordSignIn(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.MemberAuthPolicyResponse, error) {
+	required, err := s.implementation.MemberMustUsePasswordSignIn(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MemberAuthPolicyResponse{MustUsePasswordSignIn: required}, nil
 }
 
 func (s *Server) AdminSessionSettings(ctx context.Context, input *chatv1.SessionSettingsMutationRequest) (*chatv1.SessionSettingsResponse, error) {
@@ -9276,6 +9434,72 @@ func (s *Server) SetNotificationSchedule(ctx context.Context, input *chatv1.SetN
 
 func (s *Server) SetNotificationVIP(ctx context.Context, input *chatv1.SetNotificationVIPRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.SetNotificationVIP(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetId()), input.GetAdd()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SidebarSections(ctx context.Context, input *chatv1.SidebarSectionsRequest) (*chatv1.SidebarSectionsResponse, error) {
+	sections, err := s.implementation.SidebarSections(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]*chatv1.SidebarSection, 0, len(sections))
+	for _, section := range sections {
+		encoded = append(encoded, encodeProtoSidebarSection(section))
+	}
+	return &chatv1.SidebarSectionsResponse{Sections: encoded}, nil
+}
+
+func (s *Server) CreateSidebarSection(ctx context.Context, input *chatv1.CreateSidebarSectionRequest) (*chatv1.SidebarSection, error) {
+	section, err := s.implementation.CreateSidebarSection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSidebarSection(section), nil
+}
+
+func (s *Server) RenameSidebarSection(ctx context.Context, input *chatv1.RenameSidebarSectionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.RenameSidebarSection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SidebarSectionID(input.GetSectionId()), input.GetName()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SetSidebarSectionCollapsed(ctx context.Context, input *chatv1.SetSidebarSectionCollapsedRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SetSidebarSectionCollapsed(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SidebarSectionID(input.GetSectionId()), input.GetCollapsed()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SetSidebarSectionNotificationLevel(ctx context.Context, input *chatv1.SetSidebarSectionNotificationLevelRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SetSidebarSectionNotificationLevel(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SidebarSectionID(input.GetSectionId()), domain.NotificationLevel(input.GetLevel())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) DeleteSidebarSection(ctx context.Context, input *chatv1.DeleteSidebarSectionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteSidebarSection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SidebarSectionID(input.GetSectionId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ReorderSidebarSections(ctx context.Context, input *chatv1.ReorderSidebarSectionsRequest) (*chatv1.MutationResponse, error) {
+	order := make([]domain.SidebarSectionID, 0, len(input.GetSectionIds()))
+	for _, id := range input.GetSectionIds() {
+		order = append(order, domain.SidebarSectionID(id))
+	}
+	if err := s.implementation.ReorderSidebarSections(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), order); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AssignConversationToSidebarSection(ctx context.Context, input *chatv1.AssignConversationToSidebarSectionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AssignConversationToSidebarSection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.SidebarSectionID(input.GetSectionId()), domain.ConversationID(input.GetAfterConversationId())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil

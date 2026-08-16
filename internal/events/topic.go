@@ -347,6 +347,11 @@ var topicRules = []topicRule{
 	// the conversation rather than to its addressee would hand them to
 	// everybody in the huddle.
 	{topic: "huddle.signal", recipient: true, note: "not pinned: Slack documents no huddle signalling event"},
+	// A reaction is a participant's ephemeral emoji, shown to everyone in the
+	// huddle and then gone. Unlike a signal it names no addressee — it is meant
+	// for all the participants — so it is not recipient-scoped; the client shows
+	// it only for the huddle it is watching, by call id.
+	{topic: "huddle.reaction", note: "not pinned: Slack documents no huddle reaction event"},
 	{topic: "canvas.created", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.commented", note: "first-party: canvases postdate the snapshot and Slack publishes no canvas comment event"},

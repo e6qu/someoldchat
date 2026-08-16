@@ -2780,6 +2780,40 @@ test('[NAV-05] a permalink lands on its message, and history returns without rep
   await expect(page.getByRole('heading', { name: 'Threads', exact: true, level: 2 })).toBeVisible();
 });
 
+// A member organises their channel sidebar into named, collapsible sections and
+// moves channels between them, the way Slack lets them.
+test('[NAV-01 A11Y-01] channels can be organised into a custom sidebar section', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app?channel=Cdev');
+
+  await page.locator('.new-section > summary').click();
+  await page.getByLabel('Section name').fill('Priorities');
+  await page.getByRole('button', { name: 'Create section' }).click();
+
+  const section = page.getByRole('navigation', { name: 'Priorities' });
+  await expect(section).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Move the general channel into the section through its own menu.
+  const generalRow = page.locator('.side-section[aria-label="Channels"] .side-row', { hasText: 'general' });
+  await generalRow.locator('.channel-menu > summary').click();
+  await generalRow.getByRole('button', { name: 'Move to Priorities' }).click();
+  await expect(section.getByRole('link', { name: /general/ })).toBeVisible();
+
+  // Collapsing the section hides its channels and the toggle flips.
+  await section.getByRole('button', { name: 'Collapse Priorities' }).click();
+  await expect(page.getByRole('button', { name: 'Expand Priorities' })).toBeVisible();
+
+  // Restore the shared state. The browser suite runs against one memory-store
+  // server, so a test that reorganises the sidebar must put it back or every
+  // later test sees general in a custom section rather than the default Channels
+  // group. Deleting the section drops its channel back to that group.
+  await section.locator('.section-menu > summary').click();
+  await section.getByRole('button', { name: 'Delete section' }).click();
+  await expect(page.getByRole('navigation', { name: 'Priorities' })).toHaveCount(0);
+  await expect(page.locator('.side-section[aria-label="Channels"] .side-row', { hasText: 'general' })).toBeVisible();
+});
+
 test('[NAV-01 A11Y-01] the workspace shell names its regions and marks the current destination', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
@@ -3856,6 +3890,15 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   // The status region says what is happening, continuously, for a reader who
   // cannot see the tiles.
   await expect(page.locator('[data-huddle-status]')).not.toBeEmpty();
+
+  // A joined member is offered quick reactions and can send one. The float-and-
+  // fade display rides the live stream, whose timing is not asserted here; that
+  // the control renders and the send is accepted is the deterministic half.
+  const reaction = page.locator('[data-huddle-react-name="tada"]');
+  await expect(reaction).toBeVisible();
+  const reacted = page.waitForResponse((response) => response.url().endsWith('/app/huddle/react') && response.request().method() === 'POST');
+  await reaction.click();
+  expect((await reacted).status()).toBe(200);
 
   // Leaving takes the session away with it, so no control is offered for a
   // connection this member no longer has.

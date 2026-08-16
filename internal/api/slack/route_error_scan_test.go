@@ -522,6 +522,7 @@ func sentinelDrivenCodes() map[string]string {
 		"no_permission":              "service.ErrMessageNotOwned / ErrNotWorkspaceAdmin, classified by sentinel",
 		"not_an_admin":               "mapAdminError's role denial, classified by sentinel",
 		"not_in_channel":             "service.ErrNotInConversation, classified by sentinel",
+		"restricted_action":          "service.ErrConversationPostingRestricted, classified by sentinel: the channel's posting permissions refuse a member who may read it",
 		"cant_invite_self":           "service.ErrCannotInviteSelf, classified by sentinel",
 		"cant_delete_primary_owner":  "service.ErrLastWorkspaceOwner, classified by sentinel",
 		"barriered_from_member":      "service.ErrBarrieredFromMember, classified by sentinel",

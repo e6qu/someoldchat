@@ -298,6 +298,7 @@ type Service interface {
 	AssistantSearchAvailability(context.Context, domain.WorkspaceID, domain.UserID) (domain.AssistantSearchAvailability, error)
 	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	SendCallSignal(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, domain.UserID, domain.CallSignalKind, string) error
+	SendHuddleReaction(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, string) error
 	InviteToHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, domain.ConversationID) error
 	AdminRequestExport(context.Context, domain.WorkspaceID, domain.UserID, string, map[string]int64) error
 	RequestWorkflowStepResponsesExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) error
@@ -335,6 +336,7 @@ type Service interface {
 	AdminAssignAuthPolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminRemoveAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, []string) error
 	AdminAuthPolicyEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AuthPolicyName, domain.PolicyEntityType, domain.PageRequest) (domain.AuthPolicyEntityPage, error)
+	MemberMustUsePasswordSignIn(context.Context, domain.WorkspaceID, domain.UserID) (bool, error)
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)
 	Conversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	OpenConversation(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) (domain.Conversation, error)
@@ -378,6 +380,14 @@ type Service interface {
 	SetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityLayout) (domain.ActivityPreferences, error)
 	CreateActivitySavedView(context.Context, domain.WorkspaceID, domain.UserID, string, []domain.ActivityKind) (domain.ActivitySavedView, error)
 	DeleteActivitySavedView(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivitySavedViewID) error
+	SidebarSections(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.SidebarSection, error)
+	CreateSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.SidebarSection, error)
+	RenameSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, string) error
+	SetSidebarSectionCollapsed(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, bool) error
+	SetSidebarSectionNotificationLevel(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID, domain.NotificationLevel) error
+	DeleteSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.SidebarSectionID) error
+	ReorderSidebarSections(context.Context, domain.WorkspaceID, domain.UserID, []domain.SidebarSectionID) error
+	AssignConversationToSidebarSection(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.SidebarSectionID, domain.ConversationID) error
 	AddReaction(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
 	RemoveReaction(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
 	Reactions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) ([]domain.Reaction, domain.Cursor, bool, error)

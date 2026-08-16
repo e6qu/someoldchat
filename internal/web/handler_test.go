@@ -1406,6 +1406,59 @@ func TestMemberDirectoryMarksAndRemovesVIPs(t *testing.T) {
 	requireMissing(t, "VIP removed", get(t, mux, "/app/members").Body.String(), "★ VIP")
 }
 
+// TestSidebarSectionsOrganizeChannels covers the sidebar section lifecycle: a
+// member creates a section, moves a channel into it, collapses it, and deletes
+// it, and the channel returns to the default group.
+func TestSidebarSectionsOrganizeChannels(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+	messages := service.Messages{Store: s}
+
+	requireContains(t, "new section control", get(t, mux, "/app?channel=Cdev").Body.String(),
+		"New section", "/app/sidebar/sections/create")
+
+	if r := postForm(t, mux, "/app/sidebar/sections/create?channel=Cdev", url.Values{"_csrf": {csrf}, "name": {"Priorities"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", r.Code, r.Body)
+	}
+	sections, err := messages.SidebarSections(context.Background(), "T1", "U1")
+	if err != nil || len(sections) != 1 || sections[0].Name != "Priorities" {
+		t.Fatalf("sections after create = %+v err=%v", sections, err)
+	}
+	id := string(sections[0].ID)
+	requireContains(t, "section renders with management", get(t, mux, "/app?channel=Cdev").Body.String(),
+		`aria-label="Priorities"`, "Delete section")
+
+	if r := postForm(t, mux, "/app/sidebar/sections/assign?channel=Cdev", url.Values{"_csrf": {csrf}, "conversation": {"Cdev"}, "section": {id}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("assign status=%d body=%s", r.Code, r.Body)
+	}
+	if sections, _ := messages.SidebarSections(context.Background(), "T1", "U1"); len(sections[0].Conversations) != 1 || sections[0].Conversations[0] != "Cdev" {
+		t.Fatalf("section channels = %v, want [Cdev]", sections[0].Conversations)
+	}
+
+	// The section can be muted, which the fanout consults.
+	if r := postForm(t, mux, "/app/sidebar/sections/notify?channel=Cdev", url.Values{"_csrf": {csrf}, "section_id": {id}, "level": {"mute"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("notify status=%d body=%s", r.Code, r.Body)
+	}
+	if muted, _ := messages.SidebarSections(context.Background(), "T1", "U1"); muted[0].NotificationLevel != domain.NotificationMute {
+		t.Fatalf("section level = %q, want mute", muted[0].NotificationLevel)
+	}
+
+	if r := postForm(t, mux, "/app/sidebar/sections/collapse?channel=Cdev", url.Values{"_csrf": {csrf}, "section_id": {id}, "collapsed": {"true"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("collapse status=%d body=%s", r.Code, r.Body)
+	}
+	if collapsed, _ := messages.SidebarSections(context.Background(), "T1", "U1"); !collapsed[0].Collapsed {
+		t.Fatal("section did not collapse")
+	}
+
+	if r := postForm(t, mux, "/app/sidebar/sections/delete?channel=Cdev", url.Values{"_csrf": {csrf}, "section_id": {id}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("delete status=%d body=%s", r.Code, r.Body)
+	}
+	requireMissing(t, "section gone", get(t, mux, "/app?channel=Cdev").Body.String(), `aria-label="Priorities"`)
+	if remaining, _ := messages.SidebarSections(context.Background(), "T1", "U1"); len(remaining) != 0 {
+		t.Fatalf("sections after delete = %+v, want none", remaining)
+	}
+}
+
 // A search hit shows its author's current status beside their name, the same
 // projection the timeline makes, so a result reads like the message does.
 func TestSearchResultsProjectTheAuthorStatus(t *testing.T) {
@@ -2631,16 +2684,24 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if err := s.DeleteView(ctx, "T1", "U1", firstView.ID, false, viewEvent("event-view-closed", "view.closed", now.Add(4*time.Second))); err != nil {
 		t.Fatal(err)
 	}
-	// A huddle is started, joined by a second person and then left by both, so
-	// all four huddle topics are emitted by real mutations rather than asserted
-	// from a list.
+	// A huddle is started, joined by a second person, carries a signal and a
+	// reaction, and is then left by both, so every huddle topic the page
+	// subscribes to is emitted by a real mutation rather than asserted from a
+	// list.
 	messages := service.Messages{Store: s}
-	if _, err := messages.StartHuddle(ctx, "T1", "U1", "Cdev", ""); err != nil {
+	call, err := messages.StartHuddle(ctx, "T1", "U1", "Cdev", "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second"})
 	s.SeedConversationMember("Cdev", "U2")
 	if _, err := messages.JoinHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SendCallSignal(ctx, "T1", "U1", call.ID, "U2", domain.CallSignalOffer, "v=0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SendHuddleReaction(ctx, "T1", "U1", call.ID, "tada"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
@@ -5213,6 +5274,15 @@ func TestRemoteFilesAreVisibleAndNeverClaimToBeHosted(t *testing.T) {
 // claim, and the claim has changed: joining now connects the browser to each
 // other participant. The tripwire is rewritten rather than deleted, so it
 // guards the new claim as it guarded the old one.
+func activeHuddleCallID(t *testing.T, store *memory.Store) string {
+	t.Helper()
+	call, err := store.ActiveHuddle(context.Background(), "T1", "Cdev")
+	if err != nil {
+		t.Fatalf("active huddle: %v", err)
+	}
+	return string(call.ID)
+}
+
 func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	store, mux := browserWorkspace(t, auth.AllScopes())
 	ctx := context.Background()
@@ -5232,9 +5302,23 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 		"Huddle in", "Leave huddle", "End for everyone",
 		// The member who started the huddle is in it, so the media session and
 		// its controls are present rather than a note explaining their absence.
-		"huddle-media-session", "huddle-tiles",
-		"data-huddle-control=\"microphone\"", "data-huddle-control=\"camera\"", "data-huddle-control=\"screen\"")
+		"data-huddle-call=", "huddle-tiles",
+		"data-huddle-control=\"microphone\"", "data-huddle-control=\"camera\"", "data-huddle-control=\"screen\"",
+		// The huddle offers quick reactions to the joined member.
+		"data-huddle-react=\"/app/huddle/react\"", "data-huddle-react-name=\"tada\"")
 	requireMissing(t, "active huddle bar", active, "Start a huddle")
+
+	// A participant's reaction is accepted; it is ephemeral, so success is the
+	// acknowledgement and nothing durable to read back.
+	reacted := postForm(t, mux, "/app/huddle/react", url.Values{"_csrf": {auth.CSRFToken("session")}, "call_id": {activeHuddleCallID(t, store)}, "reaction": {"tada"}}.Encode(), false)
+	if reacted.Code != http.StatusOK {
+		t.Fatalf("react=%d: %s", reacted.Code, reacted.Body)
+	}
+	// An emoji the workspace does not hold is refused as the member's mistake.
+	badReaction := postForm(t, mux, "/app/huddle/react", url.Values{"_csrf": {auth.CSRFToken("session")}, "call_id": {activeHuddleCallID(t, store)}, "reaction": {"not-an-emoji"}}.Encode(), false)
+	if badReaction.Code != http.StatusBadRequest {
+		t.Fatalf("bad reaction=%d: %s", badReaction.Code, badReaction.Body)
+	}
 
 	// A second person joins through the service; the bar is a live fragment,
 	// so the participant list follows without a page load.
@@ -5256,7 +5340,7 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	requireContains(t, "after leaving", afterLeaving, "Join huddle")
 	// Somebody who is not in the huddle has no media session: the controls
 	// belong to a connection this reader does not have.
-	requireMissing(t, "after leaving", afterLeaving, "Start a huddle", "huddle-media-session")
+	requireMissing(t, "after leaving", afterLeaving, "Start a huddle", "data-huddle-call=")
 
 	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
 		t.Fatal(err)

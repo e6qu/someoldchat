@@ -50,6 +50,7 @@ const (
 	DirectoryService_AdminAssignAuthPolicy_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminAssignAuthPolicy"
 	DirectoryService_AdminRemoveAuthPolicyEntities_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminRemoveAuthPolicyEntities"
 	DirectoryService_AdminAuthPolicyEntities_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminAuthPolicyEntities"
+	DirectoryService_MemberMustUsePasswordSignIn_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/MemberMustUsePasswordSignIn"
 	DirectoryService_ResetUserSessions_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessions"
 	DirectoryService_UserSessions_FullMethodName                       = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
 	DirectoryService_ResetUserSessionsBulk_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
@@ -129,6 +130,10 @@ type DirectoryServiceClient interface {
 	AdminAssignAuthPolicy(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRemoveAuthPolicyEntities(ctx context.Context, in *AuthPolicyMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminAuthPolicyEntities(ctx context.Context, in *AuthPolicyEntitiesRequest, opts ...grpc.CallOption) (*AuthPolicyEntityPage, error)
+	// MemberMustUsePasswordSignIn is the member's own read of whether the
+	// email_password auth policy binds them. The sign-in paths consult it and are
+	// not administrators, so AdminAuthPolicyEntities cannot serve them.
+	MemberMustUsePasswordSignIn(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*MemberAuthPolicyResponse, error)
 	ResetUserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -482,6 +487,16 @@ func (c *directoryServiceClient) AdminAuthPolicyEntities(ctx context.Context, in
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AuthPolicyEntityPage)
 	err := c.cc.Invoke(ctx, DirectoryService_AdminAuthPolicyEntities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) MemberMustUsePasswordSignIn(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*MemberAuthPolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MemberAuthPolicyResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_MemberMustUsePasswordSignIn_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -916,6 +931,10 @@ type DirectoryServiceServer interface {
 	AdminAssignAuthPolicy(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
 	AdminRemoveAuthPolicyEntities(context.Context, *AuthPolicyMutationRequest) (*MutationResponse, error)
 	AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error)
+	// MemberMustUsePasswordSignIn is the member's own read of whether the
+	// email_password auth policy binds them. The sign-in paths consult it and are
+	// not administrators, so AdminAuthPolicyEntities cannot serve them.
+	MemberMustUsePasswordSignIn(context.Context, *WorkspaceRequest) (*MemberAuthPolicyResponse, error)
 	ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error)
 	UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error)
@@ -1056,6 +1075,9 @@ func (UnimplementedDirectoryServiceServer) AdminRemoveAuthPolicyEntities(context
 }
 func (UnimplementedDirectoryServiceServer) AdminAuthPolicyEntities(context.Context, *AuthPolicyEntitiesRequest) (*AuthPolicyEntityPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminAuthPolicyEntities not implemented")
+}
+func (UnimplementedDirectoryServiceServer) MemberMustUsePasswordSignIn(context.Context, *WorkspaceRequest) (*MemberAuthPolicyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MemberMustUsePasswordSignIn not implemented")
 }
 func (UnimplementedDirectoryServiceServer) ResetUserSessions(context.Context, *ResetUserSessionsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetUserSessions not implemented")
@@ -1748,6 +1770,24 @@ func _DirectoryService_AdminAuthPolicyEntities_Handler(srv interface{}, ctx cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).AdminAuthPolicyEntities(ctx, req.(*AuthPolicyEntitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_MemberMustUsePasswordSignIn_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).MemberMustUsePasswordSignIn(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_MemberMustUsePasswordSignIn_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).MemberMustUsePasswordSignIn(ctx, req.(*WorkspaceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2584,6 +2624,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminAuthPolicyEntities",
 			Handler:    _DirectoryService_AdminAuthPolicyEntities_Handler,
+		},
+		{
+			MethodName: "MemberMustUsePasswordSignIn",
+			Handler:    _DirectoryService_MemberMustUsePasswordSignIn_Handler,
 		},
 		{
 			MethodName: "ResetUserSessions",

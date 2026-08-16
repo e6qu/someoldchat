@@ -29,6 +29,14 @@ const (
 	ActivityService_SetWorkspaceNotificationPreferences_FullMethodName    = "/sameoldchat.chat.v1.ActivityService/SetWorkspaceNotificationPreferences"
 	ActivityService_SetNotificationSchedule_FullMethodName                = "/sameoldchat.chat.v1.ActivityService/SetNotificationSchedule"
 	ActivityService_SetNotificationVIP_FullMethodName                     = "/sameoldchat.chat.v1.ActivityService/SetNotificationVIP"
+	ActivityService_SidebarSections_FullMethodName                        = "/sameoldchat.chat.v1.ActivityService/SidebarSections"
+	ActivityService_CreateSidebarSection_FullMethodName                   = "/sameoldchat.chat.v1.ActivityService/CreateSidebarSection"
+	ActivityService_RenameSidebarSection_FullMethodName                   = "/sameoldchat.chat.v1.ActivityService/RenameSidebarSection"
+	ActivityService_SetSidebarSectionCollapsed_FullMethodName             = "/sameoldchat.chat.v1.ActivityService/SetSidebarSectionCollapsed"
+	ActivityService_SetSidebarSectionNotificationLevel_FullMethodName     = "/sameoldchat.chat.v1.ActivityService/SetSidebarSectionNotificationLevel"
+	ActivityService_DeleteSidebarSection_FullMethodName                   = "/sameoldchat.chat.v1.ActivityService/DeleteSidebarSection"
+	ActivityService_ReorderSidebarSections_FullMethodName                 = "/sameoldchat.chat.v1.ActivityService/ReorderSidebarSections"
+	ActivityService_AssignConversationToSidebarSection_FullMethodName     = "/sameoldchat.chat.v1.ActivityService/AssignConversationToSidebarSection"
 	ActivityService_GetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/GetConversationNotificationPreferences"
 	ActivityService_SetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/SetConversationNotificationPreferences"
 	ActivityService_GetThreadFollow_FullMethodName                        = "/sameoldchat.chat.v1.ActivityService/GetThreadFollow"
@@ -49,6 +57,14 @@ type ActivityServiceClient interface {
 	SetWorkspaceNotificationPreferences(ctx context.Context, in *SetWorkspaceNotificationPreferencesRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(ctx context.Context, in *SetNotificationScheduleRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	SetNotificationVIP(ctx context.Context, in *SetNotificationVIPRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	SidebarSections(ctx context.Context, in *SidebarSectionsRequest, opts ...grpc.CallOption) (*SidebarSectionsResponse, error)
+	CreateSidebarSection(ctx context.Context, in *CreateSidebarSectionRequest, opts ...grpc.CallOption) (*SidebarSection, error)
+	RenameSidebarSection(ctx context.Context, in *RenameSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	SetSidebarSectionCollapsed(ctx context.Context, in *SetSidebarSectionCollapsedRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	SetSidebarSectionNotificationLevel(ctx context.Context, in *SetSidebarSectionNotificationLevelRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	DeleteSidebarSection(ctx context.Context, in *DeleteSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	ReorderSidebarSections(ctx context.Context, in *ReorderSidebarSectionsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AssignConversationToSidebarSection(ctx context.Context, in *AssignConversationToSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	GetConversationNotificationPreferences(ctx context.Context, in *ConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(ctx context.Context, in *SetConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
 	GetThreadFollow(ctx context.Context, in *ThreadFollowRequest, opts ...grpc.CallOption) (*ThreadFollow, error)
@@ -163,6 +179,86 @@ func (c *activityServiceClient) SetNotificationVIP(ctx context.Context, in *SetN
 	return out, nil
 }
 
+func (c *activityServiceClient) SidebarSections(ctx context.Context, in *SidebarSectionsRequest, opts ...grpc.CallOption) (*SidebarSectionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SidebarSectionsResponse)
+	err := c.cc.Invoke(ctx, ActivityService_SidebarSections_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) CreateSidebarSection(ctx context.Context, in *CreateSidebarSectionRequest, opts ...grpc.CallOption) (*SidebarSection, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SidebarSection)
+	err := c.cc.Invoke(ctx, ActivityService_CreateSidebarSection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) RenameSidebarSection(ctx context.Context, in *RenameSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_RenameSidebarSection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) SetSidebarSectionCollapsed(ctx context.Context, in *SetSidebarSectionCollapsedRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_SetSidebarSectionCollapsed_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) SetSidebarSectionNotificationLevel(ctx context.Context, in *SetSidebarSectionNotificationLevelRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_SetSidebarSectionNotificationLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) DeleteSidebarSection(ctx context.Context, in *DeleteSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_DeleteSidebarSection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) ReorderSidebarSections(ctx context.Context, in *ReorderSidebarSectionsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_ReorderSidebarSections_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) AssignConversationToSidebarSection(ctx context.Context, in *AssignConversationToSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_AssignConversationToSidebarSection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *activityServiceClient) GetConversationNotificationPreferences(ctx context.Context, in *ConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ConversationNotificationPreferences)
@@ -217,6 +313,14 @@ type ActivityServiceServer interface {
 	SetWorkspaceNotificationPreferences(context.Context, *SetWorkspaceNotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(context.Context, *SetNotificationScheduleRequest) (*WorkspaceNotificationPreferences, error)
 	SetNotificationVIP(context.Context, *SetNotificationVIPRequest) (*MutationResponse, error)
+	SidebarSections(context.Context, *SidebarSectionsRequest) (*SidebarSectionsResponse, error)
+	CreateSidebarSection(context.Context, *CreateSidebarSectionRequest) (*SidebarSection, error)
+	RenameSidebarSection(context.Context, *RenameSidebarSectionRequest) (*MutationResponse, error)
+	SetSidebarSectionCollapsed(context.Context, *SetSidebarSectionCollapsedRequest) (*MutationResponse, error)
+	SetSidebarSectionNotificationLevel(context.Context, *SetSidebarSectionNotificationLevelRequest) (*MutationResponse, error)
+	DeleteSidebarSection(context.Context, *DeleteSidebarSectionRequest) (*MutationResponse, error)
+	ReorderSidebarSections(context.Context, *ReorderSidebarSectionsRequest) (*MutationResponse, error)
+	AssignConversationToSidebarSection(context.Context, *AssignConversationToSidebarSectionRequest) (*MutationResponse, error)
 	GetConversationNotificationPreferences(context.Context, *ConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, *SetConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
 	GetThreadFollow(context.Context, *ThreadFollowRequest) (*ThreadFollow, error)
@@ -259,6 +363,30 @@ func (UnimplementedActivityServiceServer) SetNotificationSchedule(context.Contex
 }
 func (UnimplementedActivityServiceServer) SetNotificationVIP(context.Context, *SetNotificationVIPRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetNotificationVIP not implemented")
+}
+func (UnimplementedActivityServiceServer) SidebarSections(context.Context, *SidebarSectionsRequest) (*SidebarSectionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SidebarSections not implemented")
+}
+func (UnimplementedActivityServiceServer) CreateSidebarSection(context.Context, *CreateSidebarSectionRequest) (*SidebarSection, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateSidebarSection not implemented")
+}
+func (UnimplementedActivityServiceServer) RenameSidebarSection(context.Context, *RenameSidebarSectionRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenameSidebarSection not implemented")
+}
+func (UnimplementedActivityServiceServer) SetSidebarSectionCollapsed(context.Context, *SetSidebarSectionCollapsedRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetSidebarSectionCollapsed not implemented")
+}
+func (UnimplementedActivityServiceServer) SetSidebarSectionNotificationLevel(context.Context, *SetSidebarSectionNotificationLevelRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetSidebarSectionNotificationLevel not implemented")
+}
+func (UnimplementedActivityServiceServer) DeleteSidebarSection(context.Context, *DeleteSidebarSectionRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteSidebarSection not implemented")
+}
+func (UnimplementedActivityServiceServer) ReorderSidebarSections(context.Context, *ReorderSidebarSectionsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReorderSidebarSections not implemented")
+}
+func (UnimplementedActivityServiceServer) AssignConversationToSidebarSection(context.Context, *AssignConversationToSidebarSectionRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AssignConversationToSidebarSection not implemented")
 }
 func (UnimplementedActivityServiceServer) GetConversationNotificationPreferences(context.Context, *ConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversationNotificationPreferences not implemented")
@@ -472,6 +600,150 @@ func _ActivityService_SetNotificationVIP_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ActivityService_SidebarSections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SidebarSectionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).SidebarSections(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_SidebarSections_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).SidebarSections(ctx, req.(*SidebarSectionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_CreateSidebarSection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateSidebarSectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).CreateSidebarSection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_CreateSidebarSection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).CreateSidebarSection(ctx, req.(*CreateSidebarSectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_RenameSidebarSection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenameSidebarSectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).RenameSidebarSection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_RenameSidebarSection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).RenameSidebarSection(ctx, req.(*RenameSidebarSectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_SetSidebarSectionCollapsed_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSidebarSectionCollapsedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).SetSidebarSectionCollapsed(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_SetSidebarSectionCollapsed_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).SetSidebarSectionCollapsed(ctx, req.(*SetSidebarSectionCollapsedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_SetSidebarSectionNotificationLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSidebarSectionNotificationLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).SetSidebarSectionNotificationLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_SetSidebarSectionNotificationLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).SetSidebarSectionNotificationLevel(ctx, req.(*SetSidebarSectionNotificationLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_DeleteSidebarSection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteSidebarSectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).DeleteSidebarSection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_DeleteSidebarSection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).DeleteSidebarSection(ctx, req.(*DeleteSidebarSectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_ReorderSidebarSections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReorderSidebarSectionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).ReorderSidebarSections(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_ReorderSidebarSections_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).ReorderSidebarSections(ctx, req.(*ReorderSidebarSectionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_AssignConversationToSidebarSection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssignConversationToSidebarSectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).AssignConversationToSidebarSection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_AssignConversationToSidebarSection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).AssignConversationToSidebarSection(ctx, req.(*AssignConversationToSidebarSectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ActivityService_GetConversationNotificationPreferences_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ConversationNotificationPreferencesRequest)
 	if err := dec(in); err != nil {
@@ -590,6 +862,38 @@ var ActivityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetNotificationVIP",
 			Handler:    _ActivityService_SetNotificationVIP_Handler,
+		},
+		{
+			MethodName: "SidebarSections",
+			Handler:    _ActivityService_SidebarSections_Handler,
+		},
+		{
+			MethodName: "CreateSidebarSection",
+			Handler:    _ActivityService_CreateSidebarSection_Handler,
+		},
+		{
+			MethodName: "RenameSidebarSection",
+			Handler:    _ActivityService_RenameSidebarSection_Handler,
+		},
+		{
+			MethodName: "SetSidebarSectionCollapsed",
+			Handler:    _ActivityService_SetSidebarSectionCollapsed_Handler,
+		},
+		{
+			MethodName: "SetSidebarSectionNotificationLevel",
+			Handler:    _ActivityService_SetSidebarSectionNotificationLevel_Handler,
+		},
+		{
+			MethodName: "DeleteSidebarSection",
+			Handler:    _ActivityService_DeleteSidebarSection_Handler,
+		},
+		{
+			MethodName: "ReorderSidebarSections",
+			Handler:    _ActivityService_ReorderSidebarSections_Handler,
+		},
+		{
+			MethodName: "AssignConversationToSidebarSection",
+			Handler:    _ActivityService_AssignConversationToSidebarSection_Handler,
 		},
 		{
 			MethodName: "GetConversationNotificationPreferences",

@@ -1058,7 +1058,74 @@ type ConversationPreferenceList struct {
 	Users []UserID
 }
 
+// ConversationPreferenceType names a class of members a channel's posting or
+// threading permission may admit. Slack's "manage posting permissions" surface
+// offers everyone, everyone-except-guests, admins-only, and a named allowlist;
+// the first three are these member classes and the fourth is the Users list.
+// A value this deployment does not hold is not a member class and cannot be
+// stored, exactly as an unknown workspace role ranks below every real one.
 type ConversationPreferenceType string
+
+const (
+	// ConversationPosterEveryone admits every member and is Slack's default and
+	// the value its manage-posting-permissions surface labels "everyone". It is
+	// the explicit spelling of the same permission an empty list carries, so a
+	// channel that sets it and one that clears the permission behave alike.
+	ConversationPosterEveryone ConversationPreferenceType = "everyone"
+	// ConversationPosterRegularMembers admits full members — everyone who is
+	// not a guest. Combined with ConversationPosterAdmins (who are never
+	// restricted anyway) this is Slack's "everyone except guests".
+	ConversationPosterRegularMembers ConversationPreferenceType = "regular_members"
+	// ConversationPosterGuests admits multi- and single-channel guests.
+	ConversationPosterGuests ConversationPreferenceType = "guests"
+	// ConversationPosterAdmins admits workspace admins and owners. They are
+	// never restricted regardless of the list, so this token only makes the
+	// admins-only choice expressible on its own.
+	ConversationPosterAdmins ConversationPreferenceType = "admins"
+)
+
+func (t ConversationPreferenceType) Valid() bool {
+	switch t {
+	case ConversationPosterEveryone, ConversationPosterRegularMembers, ConversationPosterGuests, ConversationPosterAdmins:
+		return true
+	}
+	return false
+}
+
+// Permits reports whether a member may act under this preference list. An empty
+// list restricts nothing — Slack's default is that everyone may post, so a
+// channel that never set a permission admits everyone. Workspace admins and
+// owners are never restricted, which is Slack's channel-management invariant:
+// they can always post no matter what the list says. Otherwise the member
+// qualifies by an explicit allowlist entry or by their member class.
+func (list ConversationPreferenceList) Permits(membership WorkspaceMembership) bool {
+	if len(list.Types) == 0 && len(list.Users) == 0 {
+		return true
+	}
+	if membership.Role.Rank() >= WorkspaceRoleAdmin.Rank() {
+		return true
+	}
+	for _, user := range list.Users {
+		if user == membership.UserID {
+			return true
+		}
+	}
+	for _, kind := range list.Types {
+		switch kind {
+		case ConversationPosterEveryone:
+			return true
+		case ConversationPosterGuests:
+			if membership.Guest() {
+				return true
+			}
+		case ConversationPosterRegularMembers:
+			if !membership.Guest() {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 type ConversationPrefs struct {
 	ConversationID ConversationID
@@ -1684,6 +1751,53 @@ func (view ActivitySavedView) Valid() bool {
 		}
 	}
 	return true
+}
+
+// SidebarSectionNameLimit bounds a section's name: a label for a group of
+// channels, not a description.
+const SidebarSectionNameLimit = 80
+
+// SidebarSectionLimit bounds how many sections one member keeps.
+const SidebarSectionLimit = 30
+
+// SidebarSection is a member's named, collapsible group of channels in their
+// own sidebar, the way Slack lets a member organise the channel list. It
+// belongs to the member who made it; the ordered conversations it holds are
+// resolved when it is read, and a channel the member has left or that is gone
+// simply falls out of the group rather than lingering. Position orders the
+// sections against each other; Collapsed is durable per-section state.
+type SidebarSection struct {
+	ID          SidebarSectionID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Name        string
+	Position    int
+	Collapsed   bool
+	// NotificationLevel is the level the section's channels notify at when they
+	// carry no override of their own — Slack's per-section notification setting.
+	// NotificationInherit (the default) leaves each channel on the workspace
+	// default, so a plain section changes nothing.
+	NotificationLevel NotificationLevel
+	CreatedAt         time.Time
+	Conversations     []ConversationID
+}
+
+func (section SidebarSection) Valid() bool {
+	return strings.TrimSpace(section.Name) != ""
+}
+
+// EffectiveLevelWithSection resolves the level a channel notifies at when its
+// member has placed it in a section: the channel's own override wins, then the
+// section's, then the workspace default. It layers the section between the
+// conversation and the workspace exactly where Slack does.
+func (preferences ConversationNotificationPreferences) EffectiveLevelWithSection(section NotificationLevel, workspace WorkspaceNotificationPreferences) NotificationLevel {
+	if preferences.Level != NotificationInherit {
+		return preferences.Level
+	}
+	if section != "" && section != NotificationInherit {
+		return section
+	}
+	return workspace.Level
 }
 
 type ActivityMutation string

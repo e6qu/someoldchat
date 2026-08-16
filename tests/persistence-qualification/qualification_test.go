@@ -127,6 +127,8 @@ func runQualification(t *testing.T, open opener) {
 		{"a canvas share reaches Activity on every profile", canvasShareReachesActivity},
 		{"a notification schedule round-trips on every profile", notificationScheduleRoundTrips},
 		{"a VIP's channel message pierces mute on every profile", vipChannelMessagePiercesMuteOnEveryProfile},
+		{"sidebar sections order identically on every profile", sidebarSectionsOrderIdenticallyOnEveryProfile},
+		{"section notification level layers identically on every profile", sectionNotificationLevelLayersIdenticallyOnEveryProfile},
 		{"an assigned list item reaches Activity on every profile", listAssignmentReachesActivity},
 		{"deleting a list item is all or nothing and survives in Activity", deletingAListItemIsAllOrNothingAndSurvivesInActivity},
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},
@@ -2014,6 +2016,22 @@ func authPolicyEntitiesAgreeOnEveryProfile(t *testing.T, open opener) {
 	unknown := []domain.AuthPolicyEntity{{Policy: domain.AuthPolicyEmailPassword, EntityType: domain.PolicyEntityUser, EntityID: "U-absent-" + suffix, WorkspaceID: workspaceID, CreatedAt: now}}
 	if err := repository.SetAuthPolicyEntities(ctx, unknown, event("policy-unknown", "auth.policy_entities_assigned")); err == nil {
 		t.Fatal("an entity outside the workspace was stored")
+	}
+	// The sign-in path's point lookup must answer identically on every profile:
+	// the member still under the policy is bound, the one just removed is not, an
+	// unknown identifier is not, and a real member queried against the wrong
+	// workspace is not.
+	if bound, err := repository.IsUnderAuthPolicy(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, string(first)); err != nil || !bound {
+		t.Fatalf("first under policy = %v err=%v, want true", bound, err)
+	}
+	if bound, err := repository.IsUnderAuthPolicy(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, string(second)); err != nil || bound {
+		t.Fatalf("second under policy after removal = %v err=%v, want false", bound, err)
+	}
+	if bound, err := repository.IsUnderAuthPolicy(ctx, workspaceID, domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, "U-absent-"+suffix); err != nil || bound {
+		t.Fatalf("absent entity under policy = %v err=%v, want false", bound, err)
+	}
+	if bound, err := repository.IsUnderAuthPolicy(ctx, domain.WorkspaceID("T-other-"+suffix), domain.AuthPolicyEmailPassword, domain.PolicyEntityUser, string(first)); err != nil || bound {
+		t.Fatalf("first under policy in another workspace = %v err=%v, want false", bound, err)
 	}
 }
 
