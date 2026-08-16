@@ -104,6 +104,37 @@ func listURL(listPath string, params url.Values) string {
 	return listPath
 }
 
+// listViewParamKeys are the query keys that select a list's view — its layout,
+// grouping, sort, filter and calendar month. A redirect back after a mutation
+// keeps only these, so a form cannot round-trip arbitrary query into a location.
+var listViewParamKeys = []string{"view", "filter", "group", "sort", "dir", "date", "month"}
+
+// sanitizedListView keeps only the known view parameters from a query string.
+func sanitizedListView(rawQuery string) string {
+	parsed, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return ""
+	}
+	kept := url.Values{}
+	for _, key := range listViewParamKeys {
+		if value := strings.TrimSpace(parsed.Get(key)); value != "" {
+			kept.Set(key, value)
+		}
+	}
+	return kept.Encode()
+}
+
+// listReturnPath is where a list mutation returns: the list, in whatever view
+// the member was looking at, rebuilt from the sanitized return query the form
+// carried so completing an item on a board stays on the board.
+func listReturnPath(id domain.ListID, rawReturn string) string {
+	path := "/app/lists/" + url.PathEscape(string(id))
+	if view := sanitizedListView(rawReturn); view != "" {
+		return path + "?" + view
+	}
+	return path
+}
+
 // listFilterColumns are the columns a list can filter by — the same closed-value
 // select and checkbox columns a board groups by, because an open text, number,
 // date, or person column has no small set of values a filter control could

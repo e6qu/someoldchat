@@ -738,6 +738,9 @@ type listData struct {
 	// and asking for one on a list without one falls back to the list.
 	View        string
 	BoardActive bool
+	// ViewQuery is the current view's sanitized query string, carried on the
+	// create-item and filter forms so a mutation returns to the same view.
+	ViewQuery   string
 	ListViewURL string
 	// BoardViewURL is empty when no column can group the list into lanes, which
 	// is how the template knows not to offer a board that would have one lane.
@@ -809,6 +812,10 @@ type listItemView struct {
 	CanWrite  bool
 	CSRFToken string
 	Members   []memberView
+	// ReturnQuery is the current view's query string (board, table, filter, sort),
+	// carried on each action form so completing, assigning, or deleting an item
+	// returns to the same view rather than dropping back to the plain list.
+	ReturnQuery string
 }
 
 type directExpansionReviewData struct {
@@ -3183,15 +3190,15 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 .calendar{width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid var(--line)}.calendar th{background:var(--panel-strong);padding:6px;font-size:12px;border:1px solid var(--line)}.calendar td.cal-day{border:1px solid var(--line);vertical-align:top;height:88px;padding:4px;background:var(--panel)}.calendar td.cal-out{background:var(--field);color:var(--muted)}.calendar td.cal-today{outline:2px solid var(--focus);outline-offset:-2px}.cal-num{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:3px}.cal-item{display:block;font-size:12px;padding:2px 5px;margin-bottom:3px;border-radius:5px;background:var(--action);color:var(--on-strong);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cal-item.cal-done{background:var(--panel-strong);color:var(--muted);text-decoration:line-through}
 ` + sharingStyle + `
 </style>{{end}}
-{{define "listRow"}}{{$row := .}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span>{{if .Cells}}<span class="cells">{{range .Cells}}<span class="cell"><span class="cell-name">{{.ColumnName}}</span><span class="cell-value">{{if .Value}}{{.Value}}{{else}}—{{end}}</span></span>{{end}}</span>{{else}}<span class="title">{{.Title}}</span>{{end}}{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}<a class="item-open" href="/app/lists/{{.ListID}}/items/{{.ID}}">Open</a>{{if .CanWrite}}<form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
-<details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+{{define "listRow"}}{{$row := .}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span>{{if .Cells}}<span class="cells">{{range .Cells}}<span class="cell"><span class="cell-name">{{.ColumnName}}</span><span class="cell-value">{{if .Value}}{{.Value}}{{else}}—{{end}}</span></span>{{end}}</span>{{else}}<span class="title">{{.Title}}</span>{{end}}{{if .AssigneeName}}<span class="item-assignee">{{.AssigneeName}}</span>{{end}}{{if .DueDate}}<span class="item-due{{if .Overdue}} overdue{{end}}">Due {{.DueDate}}{{if .Overdue}} · overdue{{end}}</span>{{end}}<a class="item-open" href="/app/lists/{{.ListID}}/items/{{.ID}}">Open</a>{{if .CanWrite}}<form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>
+<details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}">
 <label for="assignee-{{.ID}}">Assign to</label><select id="assignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $row.Members}}<option value="{{.ID}}"{{if eq .ID $row.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
 <label for="due-{{.ID}}">Due</label><input id="due-{{.ID}}" type="date" name="due" value="{{.DueDate}}">
 <button type="submit">Save assignment</button></form></details>
-<details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}">
 <p class="read-only">Deleting removes this item and everything on it for good. Completing it instead keeps it and can be undone.</p>
 <button type="submit">Delete this item</button></form></details>{{end}}</li>{{end}}
-{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div><nav class="list-views" aria-label="List view"><a href="{{.ListViewURL}}"{{if and (not .BoardActive) (not .TableActive)}} class="current" aria-current="page"{{end}}>List</a>{{if .TableViewURL}}<a href="{{.TableViewURL}}"{{if .TableActive}} class="current" aria-current="page"{{end}}>Table</a>{{end}}{{if .BoardViewURL}}<a href="{{.BoardViewURL}}"{{if .BoardActive}} class="current" aria-current="page"{{end}}>Board</a>{{end}}{{if .CalendarViewURL}}<a href="{{.CalendarViewURL}}"{{if .CalendarActive}} class="current" aria-current="page"{{end}}>Calendar</a>{{end}}</nav>{{if .BoardActive}}<nav class="list-groups" aria-label="Group by"><span class="group-label">Group by</span>{{range .GroupChoices}}<a href="{{.URL}}"{{if .Selected}} class="current" aria-current="true"{{end}}>{{.Name}}</a>{{end}}</nav>{{end}}{{if .FilterOptions}}<form class="list-filter" method="get" action="/app/lists/{{.ID}}" aria-label="Filter items"><input type="hidden" name="view" value="{{.View}}">{{if .BoardActive}}<input type="hidden" name="group" value="{{.GroupKey}}">{{end}}{{if .TableActive}}<input type="hidden" name="sort" value="{{.SortKey}}"><input type="hidden" name="dir" value="{{.SortDir}}">{{end}}<label for="list-filter-select">Filter</label><select id="list-filter-select" name="filter"><option value="">All items</option>{{range .FilterOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select><button type="submit">Apply</button>{{if .FilterActive}}<a class="clear-filter" href="{{.ClearFilterURL}}">Clear filter</a>{{end}}</form>{{end}}{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>
+{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div><nav class="list-views" aria-label="List view"><a href="{{.ListViewURL}}"{{if and (not .BoardActive) (not .TableActive)}} class="current" aria-current="page"{{end}}>List</a>{{if .TableViewURL}}<a href="{{.TableViewURL}}"{{if .TableActive}} class="current" aria-current="page"{{end}}>Table</a>{{end}}{{if .BoardViewURL}}<a href="{{.BoardViewURL}}"{{if .BoardActive}} class="current" aria-current="page"{{end}}>Board</a>{{end}}{{if .CalendarViewURL}}<a href="{{.CalendarViewURL}}"{{if .CalendarActive}} class="current" aria-current="page"{{end}}>Calendar</a>{{end}}</nav>{{if .BoardActive}}<nav class="list-groups" aria-label="Group by"><span class="group-label">Group by</span>{{range .GroupChoices}}<a href="{{.URL}}"{{if .Selected}} class="current" aria-current="true"{{end}}>{{.Name}}</a>{{end}}</nav>{{end}}{{if .FilterOptions}}<form class="list-filter" method="get" action="/app/lists/{{.ID}}" aria-label="Filter items"><input type="hidden" name="view" value="{{.View}}">{{if .BoardActive}}<input type="hidden" name="group" value="{{.GroupKey}}">{{end}}{{if .TableActive}}<input type="hidden" name="sort" value="{{.SortKey}}"><input type="hidden" name="dir" value="{{.SortDir}}">{{end}}<label for="list-filter-select">Filter</label><select id="list-filter-select" name="filter"><option value="">All items</option>{{range .FilterOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select><button type="submit">Apply</button>{{if .FilterActive}}<a class="clear-filter" href="{{.ClearFilterURL}}">Clear filter</a>{{end}}</form>{{end}}{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ViewQuery}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}{{if .Columns}}<p class="list-columns muted">Columns: {{range $index, $column := .Columns}}{{if $index}}, {{end}}{{$column.Name}} ({{$column.Type}}){{end}}</p>
 {{if .CanWrite}}<details class="remove-column"><summary>Remove a column</summary>
 <p class="read-only">Removing a column deletes what every item recorded under it, for good. The first column names the item and stays.</p>
 <ul class="column-list">{{range .Columns}}<li class="column-row"><span class="column-name">{{.Name}}</span><span class="column-type">{{.Type}}</span>{{if .Primary}}<span class="column-reason">names the item</span>{{else}}<form method="post" action="/app/lists/{{$.ID}}/columns/remove"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="key" value="{{.Key}}"><button type="submit">Remove {{.Name}}</button></form>{{end}}</li>{{end}}</ul>
@@ -3204,7 +3211,7 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 <button type="submit">Add column</button></form>
 <p class="read-only">A column is added to the end. Removing one is not offered here: it would have to remove that value from every item, which is a deletion worth asking for deliberately.</p>
 </details>{{end}}
-{{if .BoardActive}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the board groups the first 1,000.</p>{{end}}<div class="board">{{range .Lanes}}<section class="lane" aria-label="{{.Label}} ({{.Count}} item{{if ne .Count 1}}s{{end}})"><h3 class="lane-head">{{.Label}} <span class="lane-count">{{.Count}}</span></h3><ul class="items lane-items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">None</li>{{end}}</ul></section>{{end}}</div>{{else if .TableActive}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the table shows the first 1,000.</p>{{end}}<div class="table-wrap"><table class="list-table"><thead><tr>{{range .TableHeaders}}<th scope="col" aria-sort="{{if eq .Sorted "asc"}}ascending{{else if eq .Sorted "desc"}}descending{{else}}none{{end}}"><a href="{{.URL}}">{{.Name}}{{if eq .Sorted "asc"}} <span aria-hidden="true">▲</span>{{else if eq .Sorted "desc"}} <span aria-hidden="true">▼</span>{{end}}</a></th>{{end}}<th scope="col">Assignee</th><th scope="col">Due</th><th scope="col">Open</th>{{if .CanWrite}}<th scope="col">Actions</th>{{end}}</tr></thead><tbody>{{range .Items}}{{$row := .}}<tr{{if .Archived}} class="archived"{{end}}>{{range .Cells}}<td>{{if .Value}}{{.Value}}{{else}}—{{end}}</td>{{end}}<td>{{if .AssigneeName}}{{.AssigneeName}}{{else}}—{{end}}</td><td{{if .Overdue}} class="overdue"{{end}}>{{if .DueDate}}{{.DueDate}}{{else}}—{{end}}</td><td><a class="item-open" href="/app/lists/{{.ListID}}/items/{{.ID}}">Open</a></td>{{if $.CanWrite}}<td><div class="row-actions"><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form><details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label for="tassignee-{{.ID}}">Assign to</label><select id="tassignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $row.Members}}<option value="{{.ID}}"{{if eq .ID $row.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select><label for="tdue-{{.ID}}">Due</label><input id="tdue-{{.ID}}" type="date" name="due" value="{{.DueDate}}"><button type="submit">Save</button></form></details><details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><p class="read-only">Deleting removes this item for good.</p><button type="submit">Delete</button></form></details></div></td>{{end}}</tr>{{else}}<tr><td class="empty" colspan="99">No items yet.</td></tr>{{end}}</tbody></table></div>{{else if .CalendarActive}}<nav class="calendar-nav" aria-label="Month"><a href="{{.PrevMonthURL}}">← Previous</a><span class="calendar-month">{{.MonthLabel}}</span><a href="{{.NextMonthURL}}">Next →</a></nav>{{if .DateChoices}}<nav class="list-groups" aria-label="Date column"><span class="group-label">By date</span>{{range .DateChoices}}<a href="{{.URL}}"{{if .Selected}} class="current" aria-current="true"{{end}}>{{.Name}}</a>{{end}}</nav>{{end}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the calendar shows the first 1,000.</p>{{end}}<div class="table-wrap"><table class="calendar" aria-label="{{.MonthLabel}} by {{.DateColumnName}}"><thead><tr><th scope="col">Sun</th><th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th></tr></thead><tbody>{{range .CalendarWeeks}}<tr>{{range .}}<td class="cal-day{{if not .InMonth}} cal-out{{end}}{{if .Today}} cal-today{{end}}"><span class="cal-num">{{.Day}}</span>{{range .Items}}<a class="cal-item{{if .Archived}} cal-done{{end}}" href="/app/lists/{{.ListID}}/items/{{.ID}}">{{.Title}}</a>{{end}}</td>{{end}}</tr>{{end}}</tbody></table></div>{{else}}<ul class="items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}{{end}}
+{{if .BoardActive}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the board groups the first 1,000.</p>{{end}}<div class="board">{{range .Lanes}}<section class="lane" aria-label="{{.Label}} ({{.Count}} item{{if ne .Count 1}}s{{end}})"><h3 class="lane-head">{{.Label}} <span class="lane-count">{{.Count}}</span></h3><ul class="items lane-items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">None</li>{{end}}</ul></section>{{end}}</div>{{else if .TableActive}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the table shows the first 1,000.</p>{{end}}<div class="table-wrap"><table class="list-table"><thead><tr>{{range .TableHeaders}}<th scope="col" aria-sort="{{if eq .Sorted "asc"}}ascending{{else if eq .Sorted "desc"}}descending{{else}}none{{end}}"><a href="{{.URL}}">{{.Name}}{{if eq .Sorted "asc"}} <span aria-hidden="true">▲</span>{{else if eq .Sorted "desc"}} <span aria-hidden="true">▼</span>{{end}}</a></th>{{end}}<th scope="col">Assignee</th><th scope="col">Due</th><th scope="col">Open</th>{{if .CanWrite}}<th scope="col">Actions</th>{{end}}</tr></thead><tbody>{{range .Items}}{{$row := .}}<tr{{if .Archived}} class="archived"{{end}}>{{range .Cells}}<td>{{if .Value}}{{.Value}}{{else}}—{{end}}</td>{{end}}<td>{{if .AssigneeName}}{{.AssigneeName}}{{else}}—{{end}}</td><td{{if .Overdue}} class="overdue"{{end}}>{{if .DueDate}}{{.DueDate}}{{else}}—{{end}}</td><td><a class="item-open" href="/app/lists/{{.ListID}}/items/{{.ID}}">Open</a></td>{{if $.CanWrite}}<td><div class="row-actions"><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form><details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}"><label for="tassignee-{{.ID}}">Assign to</label><select id="tassignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $row.Members}}<option value="{{.ID}}"{{if eq .ID $row.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select><label for="tdue-{{.ID}}">Due</label><input id="tdue-{{.ID}}" type="date" name="due" value="{{.DueDate}}"><button type="submit">Save</button></form></details><details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}"><p class="read-only">Deleting removes this item for good.</p><button type="submit">Delete</button></form></details></div></td>{{end}}</tr>{{else}}<tr><td class="empty" colspan="99">No items yet.</td></tr>{{end}}</tbody></table></div>{{else if .CalendarActive}}<nav class="calendar-nav" aria-label="Month"><a href="{{.PrevMonthURL}}">← Previous</a><span class="calendar-month">{{.MonthLabel}}</span><a href="{{.NextMonthURL}}">Next →</a></nav>{{if .DateChoices}}<nav class="list-groups" aria-label="Date column"><span class="group-label">By date</span>{{range .DateChoices}}<a href="{{.URL}}"{{if .Selected}} class="current" aria-current="true"{{end}}>{{.Name}}</a>{{end}}</nav>{{end}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the calendar shows the first 1,000.</p>{{end}}<div class="table-wrap"><table class="calendar" aria-label="{{.MonthLabel}} by {{.DateColumnName}}"><thead><tr><th scope="col">Sun</th><th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th></tr></thead><tbody>{{range .CalendarWeeks}}<tr>{{range .}}<td class="cal-day{{if not .InMonth}} cal-out{{end}}{{if .Today}} cal-today{{end}}"><span class="cal-num">{{.Day}}</span>{{range .Items}}<a class="cal-item{{if .Archived}} cal-done{{end}}" href="/app/lists/{{.ListID}}/items/{{.ID}}">{{.Title}}</a>{{end}}</td>{{end}}</tr>{{end}}</tbody></table></div>{{else}}<ul class="items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}{{end}}
 ` + sharingSection + `</main>{{end}}`
 
 var listTemplate = mustPage(listMarkup)
@@ -9555,9 +9562,34 @@ func listItemTitle(columns []domain.ListColumn, fields string) string {
 	return named
 }
 
-func listTitleFields(title string) string {
-	value, _ := json.Marshal([]map[string]any{{"column_id": "title", "value": strings.TrimSpace(title)}})
+// listTitleFields builds the single-cell item body the quick-add form submits,
+// placing the typed title under the list's primary column. A to-do list's
+// primary column is keyed "title"; a structured list's is whatever its first
+// column was named, so hardcoding "title" made the quick-add form reject every
+// row on a columned list as a cell under an undeclared column.
+func listTitleFields(title, primaryKey string) string {
+	key := strings.TrimSpace(primaryKey)
+	if key == "" {
+		key = "title"
+	}
+	value, _ := json.Marshal([]map[string]any{{"column_id": key, "value": strings.TrimSpace(title)}})
 	return string(value)
+}
+
+// listPrimaryColumnKey is the key of a list's primary column — the one the
+// quick-add form fills — defaulting to the to-do list's "title" when the schema
+// is the unstructured default or cannot be read.
+func listPrimaryColumnKey(schema string) string {
+	columns, err := domain.ParseListSchema(schema)
+	if err != nil {
+		return "title"
+	}
+	for _, column := range columns {
+		if column.Primary {
+			return column.Key
+		}
+	}
+	return "title"
 }
 
 func (h Handler) lists(w http.ResponseWriter, r *http.Request) {
@@ -9732,8 +9764,9 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 	groupValues := make([]string, 0, len(rawItems))
 	sortValues := make([]string, 0, len(rawItems))
 	dateValues := make([]string, 0, len(rawItems))
+	viewQuery := sanitizedListView(r.URL.RawQuery)
 	for _, item := range rawItems {
-		row := listItemView{ID: string(item.ID), Title: listItemTitle(columns, item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID), ListID: string(id), CanWrite: canWrite, CSRFToken: csrf, Members: assignable}
+		row := listItemView{ID: string(item.ID), Title: listItemTitle(columns, item.Fields), Archived: item.Archived, AssigneeID: string(item.AssigneeID), ListID: string(id), CanWrite: canWrite, CSRFToken: csrf, Members: assignable, ReturnQuery: viewQuery}
 		if structured {
 			row.Cells = listCellViews(columns, item.Fields)
 		}
@@ -9845,7 +9878,7 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	owner := value.OwnerID == principal.UserID
 	grants, shareTargets := h.listSharing(r.Context(), principal, value, owner)
-	h.writeHTML(w, listTemplate, listData{Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeListsWrite), SharePath: listPath, ShareNoun: "list", ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite, Notice: strings.TrimSpace(r.URL.Query().Get("notice")), View: viewName, BoardActive: board, ListViewURL: listURL(listPath, filterParams()), BoardViewURL: boardViewURL, GroupChoices: groupChoices, GroupName: groupName, Lanes: lanes, BoardTruncated: truncated, TableActive: table, TableViewURL: tableViewURL, TableHeaders: tableHeaders, SortKey: sortKey, SortDir: sortDir, GroupKey: group.Key, FilterOptions: buildFilterOptions(columns, activeFilter), FilterActive: filterActive, ClearFilterURL: listURL(listPath, clearParams), CalendarActive: calendar, CalendarViewURL: calendarViewURL, CalendarWeeks: calendarWeeks, MonthLabel: calendarMonthLabel, PrevMonthURL: prevMonthURL, NextMonthURL: nextMonthURL, DateChoices: dateChoices, DateColumnName: dateColumnName}, http.StatusOK, "list rendering unavailable")
+	h.writeHTML(w, listTemplate, listData{Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeListsWrite), SharePath: listPath, ShareNoun: "list", ID: string(id), Name: value.Name, Members: assignable, Columns: columnViews, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite, Notice: strings.TrimSpace(r.URL.Query().Get("notice")), View: viewName, BoardActive: board, ViewQuery: viewQuery, ListViewURL: listURL(listPath, filterParams()), BoardViewURL: boardViewURL, GroupChoices: groupChoices, GroupName: groupName, Lanes: lanes, BoardTruncated: truncated, TableActive: table, TableViewURL: tableViewURL, TableHeaders: tableHeaders, SortKey: sortKey, SortDir: sortDir, GroupKey: group.Key, FilterOptions: buildFilterOptions(columns, activeFilter), FilterActive: filterActive, ClearFilterURL: listURL(listPath, clearParams), CalendarActive: calendar, CalendarViewURL: calendarViewURL, CalendarWeeks: calendarWeeks, MonthLabel: calendarMonthLabel, PrevMonthURL: prevMonthURL, NextMonthURL: nextMonthURL, DateChoices: dateChoices, DateColumnName: dateColumnName}, http.StatusOK, "list rendering unavailable")
 }
 
 func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
@@ -9926,11 +9959,17 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
-	if _, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, id, "", listTitleFields(fields["title"])); err != nil {
+	// The quick-add form types into the primary column, whose key is "title" on a
+	// to-do list but the first column's name on a structured one.
+	primaryKey := "title"
+	if value, listErr := h.Messages.List(r.Context(), principal.WorkspaceID, principal.UserID, id); listErr == nil {
+		primaryKey = listPrimaryColumnKey(value.Schema)
+	}
+	if _, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, id, "", listTitleFields(fields["title"], primaryKey)); err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "The item was not added", "Enter a title and try again.")
 		return
 	}
-	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
+	h.redirectMutation(w, r, listReturnPath(id, fields["return"]))
 }
 
 // assignListItem records who an item is for and when it is wanted. A due date
@@ -9946,7 +9985,8 @@ func (h Handler) deleteListItem(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	if _, ok := h.decodeMutation(w, r, "Reload the list and try again."); !ok {
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
 		return
 	}
 	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
@@ -9959,7 +9999,7 @@ func (h Handler) deleteListItem(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusNotFound, "The item was not deleted", "It is no longer there, or this list is not yours to change.")
 		return
 	}
-	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
+	h.redirectMutation(w, r, listReturnPath(id, fields["return"]))
 }
 
 func (h Handler) assignListItem(w http.ResponseWriter, r *http.Request) {
@@ -9987,7 +10027,7 @@ func (h Handler) assignListItem(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusConflict, "The assignment was not saved", "The item changed elsewhere, or the person cannot open this list. Reload the list and try again.")
 		return
 	}
-	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(listID)))
+	h.redirectMutation(w, r, listReturnPath(listID, fields["return"]))
 }
 
 func (h Handler) toggleListItem(w http.ResponseWriter, r *http.Request) {
@@ -10007,7 +10047,7 @@ func (h Handler) toggleListItem(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusConflict, "The item was not updated", "It changed elsewhere or you no longer have edit access. Reload the list and try again.")
 		return
 	}
-	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(listID)))
+	h.redirectMutation(w, r, listReturnPath(listID, fields["return"]))
 }
 
 func (h Handler) members(w http.ResponseWriter, r *http.Request) {
