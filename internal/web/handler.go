@@ -1574,6 +1574,7 @@ const workspaceRefinements = `<style>
 .huddle-reactions-bar{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
 .huddle-react{border:1px solid var(--field-line);border-radius:16px;background:var(--panel-strong);padding:2px 9px;font-size:16px;line-height:1.4;cursor:pointer}
 .huddle-react:hover{background:var(--hover)}
+.huddle-canvas-link{display:inline-block;margin:2px 0;font-size:13px;font-weight:600}
 .huddle-reactions{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .huddle-reaction-bubble{position:absolute;bottom:8px;font-size:26px;line-height:1;animation:huddle-float 2.6s ease-out forwards}
 @keyframes huddle-float{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1;transform:translateY(-12px) scale(1)}100%{opacity:0;transform:translateY(-120px) scale(1)}}
@@ -2529,6 +2530,7 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
   {{if .Reactions}}<div class="huddle-reactions-bar" role="group" aria-label="Send a reaction">
     {{range .Reactions}}<button type="button" class="huddle-react" data-huddle-react-name="{{.Name}}" aria-label="React with :{{.Name}}:">{{.Glyph}}</button>{{end}}
   </div>{{end}}
+  {{if .CanvasURL}}<a class="huddle-canvas-link" href="{{.CanvasURL}}">Open the huddle canvas</a>{{end}}
   <ul class="huddle-tiles" data-huddle-tiles aria-label="People in this huddle"></ul>
   <div class="huddle-reactions" data-huddle-reactions aria-hidden="true"></div>
 </div>{{end}}

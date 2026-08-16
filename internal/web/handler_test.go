@@ -5305,7 +5305,9 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 		"data-huddle-call=", "huddle-tiles",
 		"data-huddle-control=\"microphone\"", "data-huddle-control=\"camera\"", "data-huddle-control=\"screen\"",
 		// The huddle offers quick reactions to the joined member.
-		"data-huddle-react=\"/app/huddle/react\"", "data-huddle-react-name=\"tada\"")
+		"data-huddle-react=\"/app/huddle/react\"", "data-huddle-react-name=\"tada\"",
+		// And it offers the conversation's canvas as the huddle's shared notes.
+		"Open the huddle canvas", "/app/channel-canvas?channel=Cdev")
 	requireMissing(t, "active huddle bar", active, "Start a huddle")
 
 	// A participant's reaction is accepted; it is ephemeral, so success is the
