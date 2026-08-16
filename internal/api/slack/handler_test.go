@@ -2870,7 +2870,7 @@ func TestAdminConversationConvertToPrivateTakesEffect(t *testing.T) {
 
 func TestAdminConversationPrefsLifecycle(t *testing.T) {
 	handler := testHandler()
-	set := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.setConversationPrefs", strings.NewReader(`channel_id=C1&prefs={"can_thread":{"type":["everyone"],"user":["U1"]},"who_can_post":{"type":["admin"],"user":[]}}`))
+	set := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.setConversationPrefs", strings.NewReader(`channel_id=C1&prefs={"can_thread":{"type":["regular_members"],"user":["U1"]},"who_can_post":{"type":["admins"],"user":[]}}`))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	changed := httptest.NewRecorder()
@@ -2882,7 +2882,7 @@ func TestAdminConversationPrefsLifecycle(t *testing.T) {
 	get.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, get)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"everyone"`) {
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"regular_members"`) {
 		t.Fatalf("get status=%d body=%s", result.Code, result.Body)
 	}
 }

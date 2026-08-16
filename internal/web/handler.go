@@ -10573,6 +10573,12 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusForbidden
 			reason = "You are not a member of this conversation, so the message was not sent."
 		}
+		// The channel's posting permissions refuse this member. It is a refusal
+		// the reader can act on — ask an administrator — not an outage.
+		if errors.Is(err, service.ErrConversationPostingRestricted) {
+			status = http.StatusForbidden
+			reason = "Posting in this channel is restricted, so the message was not sent."
+		}
 		if errors.Is(err, service.ErrConversationAlreadyArchived) {
 			status = http.StatusConflict
 			reason = "This conversation is archived, so new messages cannot be sent."
@@ -11701,6 +11707,9 @@ func (h Handler) writeMessageMutationError(w http.ResponseWriter, r *http.Reques
 	case errors.Is(err, service.ErrNotInConversation):
 		status = http.StatusForbidden
 		reason = "You are no longer a member of this conversation."
+	case errors.Is(err, service.ErrConversationPostingRestricted):
+		status = http.StatusForbidden
+		reason = "Posting in that channel is restricted, so the message was not " + action + "."
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, service.ErrMessageAlreadyDeleted):
 		status = http.StatusNotFound
 		heading = "That message is no longer available"

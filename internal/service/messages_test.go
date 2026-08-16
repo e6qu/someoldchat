@@ -842,10 +842,10 @@ func TestAdminConversationPrefsAreTypedNormalizedAndDurable(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	messages := Messages{Store: s}
 	value, err := messages.AdminSetConversationPrefs(context.Background(), "T1", "U1", "C1", domain.ConversationPrefs{
-		CanThread:  domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{" everyone ", "everyone"}, Users: []domain.UserID{"U2"}},
-		WhoCanPost: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{"admin"}, Users: []domain.UserID{"U2", "U2"}},
+		CanThread:  domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{" regular_members ", "regular_members"}, Users: []domain.UserID{"U2"}},
+		WhoCanPost: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{"admins"}, Users: []domain.UserID{"U2", "U2"}},
 	})
-	if err != nil || len(value.CanThread.Types) != 1 || value.CanThread.Types[0] != "everyone" || len(value.WhoCanPost.Users) != 1 {
+	if err != nil || len(value.CanThread.Types) != 1 || value.CanThread.Types[0] != domain.ConversationPosterRegularMembers || len(value.WhoCanPost.Users) != 1 {
 		t.Fatalf("value=%+v err=%v", value, err)
 	}
 	loaded, err := messages.AdminGetConversationPrefs(context.Background(), "T1", "U1", "C1")

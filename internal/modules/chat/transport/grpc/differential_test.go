@@ -4604,7 +4604,7 @@ func parityCases() []parityCase {
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				prefs := domain.ConversationPrefs{
 					ConversationID: "C2",
-					CanThread:      domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{"admin"}},
+					CanThread:      domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{domain.ConversationPosterAdmins}},
 				}
 				if _, err := chat.AdminSetConversationPrefs(ctx, "T1", "UA", "C1", prefs); err != nil {
 					return nil, err

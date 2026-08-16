@@ -46,31 +46,37 @@ var (
 	ErrBarrieredFromMember      = errors.New("an information barrier separates these members")
 	ErrInvalidWorkspace         = errors.New("workspace settings are invalid")
 	ErrInvalidConversationPrefs = errors.New("conversation preferences are invalid")
-	ErrInvalidReaction          = errors.New("reaction name is invalid")
-	ErrBlobUnavailable          = errors.New("blob storage is unavailable")
-	ErrInvalidFile              = errors.New("file metadata is invalid")
-	ErrInvalidSearch            = errors.New("search query is invalid")
-	ErrInvalidProfile           = errors.New("user profile is invalid")
-	ErrInvalidScheduledStatus   = errors.New("scheduled status is invalid")
-	ErrScheduledStatusLimit     = errors.New("five statuses are already scheduled")
-	ErrInvalidPresence          = errors.New("user presence is invalid")
-	ErrInvalidSnooze            = errors.New("snooze duration must be between 1 and 1440 minutes")
-	ErrInvalidReminder          = errors.New("reminder text, user, and time are required")
-	ErrInvalidLaterReminder     = errors.New("Later reminder arguments are invalid")
-	ErrInvalidActivitySavedView = errors.New("activity saved view arguments are invalid")
-	ErrInvalidSidebarSection    = errors.New("sidebar section arguments are invalid")
-	ErrReminderTimeInPast       = errors.New("reminder time is in the past")
-	ErrScheduledTimeInPast      = errors.New("scheduled message time is in the past")
-	ErrScheduledTimeTooFar      = errors.New("scheduled message time is more than 120 days away")
-	ErrScheduledTooMany         = errors.New("too many messages are scheduled in the channel window")
-	ErrInvalidUserGroup         = errors.New("user group name, handle, and members are invalid")
-	ErrInvalidCall              = errors.New("call external id and join URL are required")
-	ErrInvalidEphemeral         = errors.New("ephemeral message recipient, conversation, and text are required")
-	ErrInvalidAccessLog         = errors.New("access log fields are invalid")
-	ErrInvalidEmoji             = errors.New("custom emoji name or URL is invalid")
-	ErrEmojiAlreadyExists       = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile        = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest     = errors.New("invite request is invalid")
+	// ErrConversationPostingRestricted is a member being refused a post their
+	// membership allows but the channel's posting permissions do not. It is
+	// distinct from ErrNotInConversation on purpose: the member can read the
+	// channel and see the refusal is about permission, which is what Slack's
+	// restricted_action reports.
+	ErrConversationPostingRestricted = errors.New("channel posting is restricted")
+	ErrInvalidReaction               = errors.New("reaction name is invalid")
+	ErrBlobUnavailable               = errors.New("blob storage is unavailable")
+	ErrInvalidFile                   = errors.New("file metadata is invalid")
+	ErrInvalidSearch                 = errors.New("search query is invalid")
+	ErrInvalidProfile                = errors.New("user profile is invalid")
+	ErrInvalidScheduledStatus        = errors.New("scheduled status is invalid")
+	ErrScheduledStatusLimit          = errors.New("five statuses are already scheduled")
+	ErrInvalidPresence               = errors.New("user presence is invalid")
+	ErrInvalidSnooze                 = errors.New("snooze duration must be between 1 and 1440 minutes")
+	ErrInvalidReminder               = errors.New("reminder text, user, and time are required")
+	ErrInvalidLaterReminder          = errors.New("Later reminder arguments are invalid")
+	ErrInvalidActivitySavedView      = errors.New("activity saved view arguments are invalid")
+	ErrInvalidSidebarSection         = errors.New("sidebar section arguments are invalid")
+	ErrReminderTimeInPast            = errors.New("reminder time is in the past")
+	ErrScheduledTimeInPast           = errors.New("scheduled message time is in the past")
+	ErrScheduledTimeTooFar           = errors.New("scheduled message time is more than 120 days away")
+	ErrScheduledTooMany              = errors.New("too many messages are scheduled in the channel window")
+	ErrInvalidUserGroup              = errors.New("user group name, handle, and members are invalid")
+	ErrInvalidCall                   = errors.New("call external id and join URL are required")
+	ErrInvalidEphemeral              = errors.New("ephemeral message recipient, conversation, and text are required")
+	ErrInvalidAccessLog              = errors.New("access log fields are invalid")
+	ErrInvalidEmoji                  = errors.New("custom emoji name or URL is invalid")
+	ErrEmojiAlreadyExists            = errors.New("custom emoji already exists")
+	ErrInvalidRemoteFile             = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest          = errors.New("invite request is invalid")
 	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
 	// person reading it needs to know whether to ask for a new invitation or
 	// to check which address they signed in with.
@@ -5494,7 +5500,7 @@ func normalizeConversationPreferenceList(value domain.ConversationPreferenceList
 	typeSeen := make(map[domain.ConversationPreferenceType]struct{}, len(value.Types))
 	for _, item := range value.Types {
 		item = domain.ConversationPreferenceType(strings.TrimSpace(string(item)))
-		if item == "" {
+		if !item.Valid() {
 			return domain.ConversationPreferenceList{}, ErrInvalidConversationPrefs
 		}
 		if _, exists := typeSeen[item]; exists {
@@ -9356,6 +9362,29 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	}
 	if target.Archived {
 		return domain.Message{}, ErrConversationAlreadyArchived
+	}
+	// Channel posting permissions restrict which members may post. They apply
+	// only to a member posting to a channel: direct and group messages carry no
+	// such preference, and an app posting with its own identity is governed by
+	// its installation, not by a member class. A top-level message is judged
+	// against who-may-post; a threaded reply against who-may-reply, so a channel
+	// can restrict new conversation while leaving its threads open.
+	if authorID != "" && request.AppID == "" && !target.IsDirectOrGroup() {
+		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, authorID)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		prefs, err := m.Store.GetConversationPrefs(ctx, request.Conversation)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		list := prefs.WhoCanPost
+		if request.ThreadTimestamp != "" {
+			list = prefs.CanThread
+		}
+		if !list.Permits(membership) {
+			return domain.Message{}, ErrConversationPostingRestricted
+		}
 	}
 	threadTimestampValue := domain.MessageTimestamp("")
 	if request.ThreadTimestamp != "" {

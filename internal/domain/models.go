@@ -1058,7 +1058,67 @@ type ConversationPreferenceList struct {
 	Users []UserID
 }
 
+// ConversationPreferenceType names a class of members a channel's posting or
+// threading permission may admit. Slack's "manage posting permissions" surface
+// offers everyone, everyone-except-guests, admins-only, and a named allowlist;
+// the first three are these member classes and the fourth is the Users list.
+// A value this deployment does not hold is not a member class and cannot be
+// stored, exactly as an unknown workspace role ranks below every real one.
 type ConversationPreferenceType string
+
+const (
+	// ConversationPosterRegularMembers admits full members — everyone who is
+	// not a guest. Combined with ConversationPosterAdmins (who are never
+	// restricted anyway) this is Slack's "everyone except guests".
+	ConversationPosterRegularMembers ConversationPreferenceType = "regular_members"
+	// ConversationPosterGuests admits multi- and single-channel guests.
+	ConversationPosterGuests ConversationPreferenceType = "guests"
+	// ConversationPosterAdmins admits workspace admins and owners. They are
+	// never restricted regardless of the list, so this token only makes the
+	// admins-only choice expressible on its own.
+	ConversationPosterAdmins ConversationPreferenceType = "admins"
+)
+
+func (t ConversationPreferenceType) Valid() bool {
+	switch t {
+	case ConversationPosterRegularMembers, ConversationPosterGuests, ConversationPosterAdmins:
+		return true
+	}
+	return false
+}
+
+// Permits reports whether a member may act under this preference list. An empty
+// list restricts nothing — Slack's default is that everyone may post, so a
+// channel that never set a permission admits everyone. Workspace admins and
+// owners are never restricted, which is Slack's channel-management invariant:
+// they can always post no matter what the list says. Otherwise the member
+// qualifies by an explicit allowlist entry or by their member class.
+func (list ConversationPreferenceList) Permits(membership WorkspaceMembership) bool {
+	if len(list.Types) == 0 && len(list.Users) == 0 {
+		return true
+	}
+	if membership.Role.Rank() >= WorkspaceRoleAdmin.Rank() {
+		return true
+	}
+	for _, user := range list.Users {
+		if user == membership.UserID {
+			return true
+		}
+	}
+	for _, kind := range list.Types {
+		switch kind {
+		case ConversationPosterGuests:
+			if membership.Guest() {
+				return true
+			}
+		case ConversationPosterRegularMembers:
+			if !membership.Guest() {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 type ConversationPrefs struct {
 	ConversationID ConversationID

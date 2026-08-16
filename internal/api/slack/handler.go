@@ -10841,6 +10841,13 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, service.ErrNotInConversation) {
 		return "not_in_channel"
 	}
+	// The channel's posting permissions refused a member who may read it. Slack's
+	// chat.postMessage enum declares restricted_action for exactly this — "a team
+	// preference prevents the authenticated user from posting" — and it is not a
+	// membership or argument failure.
+	if errors.Is(err, service.ErrConversationPostingRestricted) {
+		return "restricted_action"
+	}
 	if errors.Is(err, service.ErrCannotInviteSelf) {
 		return "cant_invite_self"
 	}
