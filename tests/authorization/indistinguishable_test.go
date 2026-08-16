@@ -65,6 +65,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DeleteCanvas":                            {},
 		"DeleteCanvasAccess":                      {},
 		"DeleteCanvasComment":                     {},
+		"DeleteActivitySavedView":                 {},
 		"DeleteListItemComment":                   {},
 		"AttachFileToListItem":                    {},
 		"DetachFileFromListItem":                  {},
@@ -160,4 +161,10 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // bulk sibling that lists distinguish here — a holder listing an app they do not
 // own is refused, not shown an empty list — because the not-found is reached at
 // the ownership check, before any token is read.
-const indistinguishableRefusalCeiling = 95
+//
+// DeleteActivitySavedView joins because the fixture has no saved view: deleting
+// one answers a member who holds none exactly as it answers a stranger, both
+// not-found, since the missing view is reached before any standing check.
+// CreateActivitySavedView is not here — a member creates their own view where a
+// stranger is refused, so its outcome distinguishes.
+const indistinguishableRefusalCeiling = 96

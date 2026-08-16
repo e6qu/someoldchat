@@ -35,6 +35,7 @@ service.function_access_denied
 service.function_not_running
 service.huddle_not_owned
 service.invalid_access_log
+service.invalid_activity_saved_view
 service.invalid_app_approval
 service.invalid_app_manifest
 service.invalid_app_response

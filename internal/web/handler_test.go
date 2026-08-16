@@ -1700,6 +1700,51 @@ func TestResolveSlackReferenceJSONLeavesOpaqueValuesAndPlainTextLiteral(t *testi
 	)
 }
 
+// TestActivitySavedViewsCanBeCreatedFilteredAndDeleted covers the Activity
+// saved-view UI: a member names a filter over several kinds, it becomes a tab
+// that renders, an unknown view id is refused, and deleting it returns to All.
+func TestActivitySavedViewsCanBeCreatedFilteredAndDeleted(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+
+	requireContains(t, "saved view create form", get(t, mux, "/app/activity?channel=Cdev").Body.String(),
+		"New saved view", `name="name"`, "/app/activity/views")
+
+	created := postForm(t, mux, "/app/activity/views?channel=Cdev",
+		url.Values{"_csrf": {csrf}, "name": {"Important"}, "kind": {"mention", "dm"}}.Encode(), false)
+	if created.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
+	}
+	location := strings.ReplaceAll(created.Header().Get("Location"), "&amp;", "&")
+	if !strings.Contains(location, "view=") {
+		t.Fatalf("create redirect=%q, want the new view", location)
+	}
+
+	// The view is a tab on the Activity page, and its own page carries the delete
+	// control with the raw id.
+	requireContains(t, "saved view tab", get(t, mux, "/app/activity?channel=Cdev").Body.String(), "Important")
+	viewPage := get(t, mux, location)
+	if viewPage.Code != http.StatusOK {
+		t.Fatalf("open view status=%d body=%s", viewPage.Code, viewPage.Body)
+	}
+	requireContains(t, "delete control on the view page", viewPage.Body.String(), "Delete this view", `name="view_id"`)
+	id := regexp.MustCompile(`name="view_id" value="([^"]+)"`).FindStringSubmatch(viewPage.Body.String())
+	if len(id) != 2 {
+		t.Fatalf("no view id in the delete form: %s", viewPage.Body)
+	}
+
+	if bad := get(t, mux, "/app/activity?channel=Cdev&view=not-a-real-view"); bad.Code != http.StatusBadRequest {
+		t.Fatalf("unknown view status=%d body=%s", bad.Code, bad.Body)
+	}
+
+	deleted := postForm(t, mux, "/app/activity/views/delete?channel=Cdev",
+		url.Values{"_csrf": {csrf}, "view_id": {id[1]}}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body)
+	}
+	requireMissing(t, "view gone", get(t, mux, "/app/activity?channel=Cdev").Body.String(), "Delete this view")
+}
+
 func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"}); err != nil {

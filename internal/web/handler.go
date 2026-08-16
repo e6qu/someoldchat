@@ -942,10 +942,15 @@ type activityData struct {
 	CSRFToken   string
 	Items       []activityItemView
 	Filters     []activityFilterView
+	SavedViews  []activitySavedViewView
+	KindOptions []activityKindOption
 	Layout      string
 	UnreadOnly  bool
 	ClearedOnly bool
 	Kind        string
+	View        string
+	CreateURL   string
+	DeleteURL   string
 	UnreadURL   string
 	ClearedURL  string
 	ActiveURL   string
@@ -957,6 +962,20 @@ type activityFilterView struct {
 	Label   string
 	URL     string
 	Current bool
+}
+
+// activitySavedViewView is one of a member's saved Activity filters as a tab:
+// where it links, how to remove it, and whether it is the one being shown.
+type activitySavedViewView struct {
+	ID      string
+	Name    string
+	URL     string
+	Current bool
+}
+
+type activityKindOption struct {
+	Value string
+	Label string
 }
 
 type activityItemView struct {
@@ -2739,6 +2758,7 @@ var activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(980px,calc(100% - 28px));margin:22px auto 48px}.activity-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.activity-heading h2{margin:0 auto 0 0;font-size:25px}.layout-forms{display:flex;gap:4px}.layout-forms form{margin:0}.layout-forms button,.bulk-actions button,.item-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.layout-forms button[aria-pressed=true]{background:var(--action);color:var(--on-strong)}
 .activity-tabs{display:flex;gap:3px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:10px}.activity-tabs a{white-space:nowrap;padding:9px 11px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.activity-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.activity-options{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.activity-options a{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;color:var(--text);text-decoration:none;font-weight:700}.activity-options a[aria-current=page]{background:var(--hover);border-color:var(--action)}
+.saved-views{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;margin:0 0 10px}.saved-view-delete button,.saved-view-create summary{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;background:var(--bg);color:var(--text);font-weight:700;cursor:pointer;list-style:none}.saved-view-create[open] summary{background:var(--hover);border-color:var(--action)}.saved-view-create form{margin-top:8px;display:grid;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel);max-width:320px}.saved-view-name{display:grid;gap:4px;font-weight:700}.saved-view-name input{padding:7px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.saved-view-kinds{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;border:1px solid var(--line);border-radius:6px;margin:0;padding:8px}.saved-view-kinds legend{font-weight:700;color:var(--muted);padding:0 4px}.saved-view-kinds label{display:flex;align-items:center;gap:6px;font-weight:400}.saved-view-create button[type=submit]{justify-self:start;border:0;border-radius:6px;padding:8px 12px;background:var(--action);color:var(--on-strong);font-weight:800}
 .bulk-actions{min-height:39px;display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:8px 8px 0 0;background:var(--panel)}.bulk-actions span{margin-right:auto;color:var(--muted);font-size:13px}.activity-list{margin:0;padding:0;list-style:none;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;overflow:hidden}.activity-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;padding:14px;background:var(--panel);border-top:1px solid var(--line);outline:none}.activity-row:first-child{border-top:0}.activity-row:hover,.activity-row:focus{background:var(--hover)}.activity-row.unread{box-shadow:inset 3px 0 var(--action)}.activity-select{margin-top:3px}.activity-main{min-width:0}.activity-head{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.activity-kind{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:var(--action)}.activity-author{font-weight:800}.activity-meta{color:var(--muted);font-size:12px}.activity-text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.activity-source{color:inherit;text-decoration:none}.activity-source:focus-visible{text-decoration:underline}.item-actions{display:flex;gap:4px;align-items:start}.item-actions button{padding:5px 8px}.unavailable{color:var(--muted);font-style:italic}.empty{margin:0;padding:34px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:16px}
 .activity-list.dense .activity-row{padding:8px 12px}.activity-list.dense .activity-text{display:inline;margin-left:5px}.activity-list.dense .activity-head{display:inline-flex}
 .activity-reaction-dialog{width:min(520px,calc(100% - 24px));border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 18px 55px #0005}.activity-reaction-dialog::backdrop{background:#0007}.activity-reaction-shell{padding:16px}.activity-reaction-head{display:flex;align-items:center;gap:10px}.activity-reaction-head h3{margin:0 auto 0 0}.activity-reaction-head button{border:0;background:transparent;color:var(--text);font-size:22px}.activity-reaction-controls{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:13px 0}.activity-reaction-controls input,.activity-reaction-controls select{min-width:0;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.activity-reaction-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:5px;margin:0;padding:0;list-style:none;max-height:310px;overflow:auto}.activity-reaction-results button{width:100%;min-height:58px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text);display:grid;place-items:center;padding:4px}.activity-reaction-results button:hover,.activity-reaction-results button:focus{background:var(--hover);border-color:var(--action)}.activity-reaction-results img{width:24px;height:24px;object-fit:contain}.activity-reaction-results small{max-width:100%;overflow:hidden;text-overflow:ellipsis}.activity-reaction-status{min-height:20px;color:var(--muted);font-size:13px}
@@ -2773,12 +2793,13 @@ if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldc
 })();</script>{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-<div class="activity-heading"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
-<nav class="activity-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
+<div class="activity-heading"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
+<nav class="activity-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}{{range .SavedViews}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</nav>
 <div class="activity-options"><a href="{{.UnreadURL}}"{{if .UnreadOnly}} aria-current="page"{{end}}>Unread</a>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">Cleared</a>{{end}}</div>
+<div class="saved-views">{{if .View}}<form class="saved-view-delete" method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.View}}"><button type="submit">Delete this view</button></form>{{end}}<details class="saved-view-create"><summary>New saved view</summary><form method="post" action="{{.CreateURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="saved-view-name">Name<input name="name" maxlength="80" placeholder="Important" required></label><fieldset class="saved-view-kinds"><legend>Kinds</legend>{{range .KindOptions}}<label><input type="checkbox" name="kind" value="{{.Value}}">{{.Label}}</label>{{end}}</fieldset><button type="submit">Save view</button></form></details></div>
 <div id="activity-feed">
 <form method="post" action="/app/activity/mutate?channel={{.Channel}}">
-<input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}">
+<input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}">
 <div class="bulk-actions"><span id="selection-count" aria-live="polite">Select items with X or the checkboxes</span>{{if .ClearedOnly}}<button type="submit" name="mutation" value="restore">Restore selected</button>{{else}}<button type="submit" name="mutation" value="read">Mark selected read</button><button type="submit" name="mutation" value="unread">Mark selected unread</button><button type="submit" name="mutation" value="clear">Clear selected</button>{{end}}</div>
 {{if .Items}}<ul class="activity-list {{.Layout}}" aria-label="Activity feed">{{range .Items}}<li class="activity-row{{if .Unread}} unread{{end}}" data-activity-row data-activity-id="{{.ID}}" tabindex="-1">
 <input class="activity-select" type="checkbox" name="activity_id" value="{{.ID}}" aria-label="Select activity from {{.ActorName}}">
@@ -4541,6 +4562,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/activity", h.activity)
 	mux.HandleFunc("POST /app/activity/mutate", h.mutateActivity)
 	mux.HandleFunc("POST /app/activity/preferences", h.setActivityPreferences)
+	mux.HandleFunc("POST /app/activity/views", h.createActivitySavedView)
+	mux.HandleFunc("POST /app/activity/views/delete", h.deleteActivitySavedView)
 	mux.HandleFunc("POST /app/activity/read", h.acknowledgeActivityReminders)
 	mux.HandleFunc("GET /app/notifications", h.notifications)
 	mux.HandleFunc("POST /app/notifications/preferences", h.setWorkspaceNotifications)
@@ -7054,14 +7077,38 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	if channel == "" {
 		channel = string(h.Channel)
 	}
+	// Preferences carry the member's saved views, so they are read before the
+	// query: a saved view resolves to the same Kinds a single filter tab does.
+	preferences, err := h.Messages.ActivityPreferences(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your Activity layout is temporarily unavailable.")
+		return
+	}
 	kindValue := strings.TrimSpace(r.URL.Query().Get("kind"))
+	viewValue := strings.TrimSpace(r.URL.Query().Get("view"))
 	kindByValue := map[string]domain.ActivityKind{
 		"dm": domain.ActivityDM, "mention": domain.ActivityMention, "thread": domain.ActivityThread,
 		"channel": domain.ActivityChannel, "reaction": domain.ActivityReaction, "invitation": domain.ActivityInvitation,
 		"app": domain.ActivityApp, "reminder": domain.ActivityReminder,
 	}
 	var kinds []domain.ActivityKind
-	if kindValue != "" {
+	switch {
+	case viewValue != "":
+		// A saved view names its own kinds; it and a single filter do not combine.
+		found := false
+		for _, view := range preferences.SavedViews {
+			if string(view.ID) == viewValue {
+				kinds = view.Kinds
+				found = true
+				break
+			}
+		}
+		if !found {
+			h.writePageError(w, http.StatusBadRequest, "That saved view is not available", "Open Activity again and choose one of your views.")
+			return
+		}
+		kindValue = ""
+	case kindValue != "":
 		kind, ok := kindByValue[kindValue]
 		if !ok {
 			h.writePageError(w, http.StatusBadRequest, "That Activity filter is not valid", "Open Activity again and choose one of the available filters.")
@@ -7084,14 +7131,10 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "Activity is temporarily unavailable.")
 		return
 	}
-	preferences, err := h.Messages.ActivityPreferences(r.Context(), principal.WorkspaceID, principal.UserID)
-	if err != nil {
-		h.writeStoreError(w, err, "Your Activity layout is temporarily unavailable.")
-		return
-	}
 	data := activityData{
-		Channel: channel, Kind: kindValue, UnreadOnly: unreadOnly, ClearedOnly: clearedOnly,
-		Layout: string(preferences.Layout),
+		Channel: channel, Kind: kindValue, View: viewValue, UnreadOnly: unreadOnly, ClearedOnly: clearedOnly,
+		Layout: string(preferences.Layout), CreateURL: "/app/activity/views?channel=" + url.QueryEscape(channel),
+		DeleteURL: "/app/activity/views/delete?channel=" + url.QueryEscape(channel),
 	}
 	if sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName); cookieErr == nil && strings.TrimSpace(sessionCookie.Value) != "" {
 		data.CSRFToken = auth.CSRFToken(sessionCookie.Value)
@@ -7224,15 +7267,24 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, filter := range filterDefinitions {
 		data.Filters = append(data.Filters, activityFilterView{
-			Label: filter.label, Current: kindValue == filter.value,
-			URL: activityPageURL(channel, filter.value, unreadOnly, clearedOnly, ""),
+			Label: filter.label, Current: viewValue == "" && kindValue == filter.value,
+			URL: activityPageURL(channel, filter.value, "", unreadOnly, clearedOnly, ""),
+		})
+		if filter.value != "" {
+			data.KindOptions = append(data.KindOptions, activityKindOption{Value: filter.value, Label: filter.label})
+		}
+	}
+	for _, view := range preferences.SavedViews {
+		data.SavedViews = append(data.SavedViews, activitySavedViewView{
+			ID: string(view.ID), Name: view.Name, Current: viewValue == string(view.ID),
+			URL: activityPageURL(channel, "", string(view.ID), false, false, ""),
 		})
 	}
-	data.UnreadURL = activityPageURL(channel, kindValue, !unreadOnly, clearedOnly, "")
-	data.ClearedURL = activityPageURL(channel, kindValue, false, true, "")
-	data.ActiveURL = activityPageURL(channel, kindValue, false, false, "")
+	data.UnreadURL = activityPageURL(channel, kindValue, viewValue, !unreadOnly, clearedOnly, "")
+	data.ClearedURL = activityPageURL(channel, kindValue, viewValue, false, true, "")
+	data.ActiveURL = activityPageURL(channel, kindValue, viewValue, false, false, "")
 	if page.HasMore && page.NextCursor != "" {
-		data.MoreURL = activityPageURL(channel, kindValue, unreadOnly, clearedOnly, page.NextCursor)
+		data.MoreURL = activityPageURL(channel, kindValue, viewValue, unreadOnly, clearedOnly, page.NextCursor)
 	}
 	h.writeHTML(w, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
 }
@@ -7269,10 +7321,13 @@ func activityKindLabel(item domain.ActivityItem) string {
 	return strings.Join(labels, " · ")
 }
 
-func activityPageURL(channel, kind string, unread, cleared bool, cursor domain.Cursor) string {
+func activityPageURL(channel, kind, view string, unread, cleared bool, cursor domain.Cursor) string {
 	values := url.Values{"channel": {channel}}
 	if kind != "" {
 		values.Set("kind", kind)
+	}
+	if view != "" {
+		values.Set("view", view)
 	}
 	if unread {
 		values.Set("unread", "1")
@@ -7342,7 +7397,7 @@ func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
 		channel = string(h.Channel)
 	}
 	h.redirectMutation(w, r, activityPageURL(
-		channel, strings.TrimSpace(r.FormValue("kind")),
+		channel, strings.TrimSpace(r.FormValue("kind")), strings.TrimSpace(r.FormValue("view")),
 		r.FormValue("unread") == "1", r.FormValue("cleared") == "1", "",
 	))
 }
@@ -7371,9 +7426,63 @@ func (h Handler) setActivityPreferences(w http.ResponseWriter, r *http.Request) 
 		channel = string(h.Channel)
 	}
 	h.redirectMutation(w, r, activityPageURL(
-		channel, strings.TrimSpace(fields["kind"]),
+		channel, strings.TrimSpace(fields["kind"]), strings.TrimSpace(fields["view"]),
 		fields["unread"] == "1", fields["cleared"] == "1", "",
 	))
+}
+
+// createActivitySavedView records a member's named Activity filter from the
+// create form's name and checked kinds, then returns to the new view.
+func (h Handler) createActivitySavedView(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, kindValues, err := decodeFormValues(w, r, "kind")
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That form could not be read", "Reload Activity and try again.")
+		return
+	}
+	if !h.requireCSRF(w, r) {
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	kinds := make([]domain.ActivityKind, 0, len(kindValues))
+	for _, value := range kindValues {
+		kinds = append(kinds, domain.ActivityKind(strings.TrimSpace(value)))
+	}
+	view, err := h.Messages.CreateActivitySavedView(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], kinds)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That view was not saved", "Give the view a name and choose at least one kind, and check you have room for another.")
+		return
+	}
+	h.redirectMutation(w, r, activityPageURL(channel, "", string(view.ID), false, false, ""))
+}
+
+// deleteActivitySavedView removes a member's saved view and returns to All.
+func (h Handler) deleteActivitySavedView(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Activity and try again.")
+	if !ok {
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	if err := h.Messages.DeleteActivitySavedView(r.Context(), principal.WorkspaceID, principal.UserID, domain.ActivitySavedViewID(strings.TrimSpace(fields["view_id"]))); err != nil {
+		h.writeMutationError(w, r, http.StatusNotFound, "That view was not removed", "It is no longer there, or it is not yours to remove.")
+		return
+	}
+	h.redirectMutation(w, r, activityPageURL(channel, "", "", false, false, ""))
 }
 
 func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Request) {

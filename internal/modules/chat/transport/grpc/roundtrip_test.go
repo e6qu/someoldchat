@@ -512,6 +512,13 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: throughInfallible(encodeProtoActivityPreferences, decodeProtoActivityPreferences),
 		},
+		"ActivitySavedView": {
+			sample: &domain.ActivitySavedView{},
+			prepare: func(filled any) {
+				filled.(*domain.ActivitySavedView).Kinds = []domain.ActivityKind{domain.ActivityMention, domain.ActivityDM}
+			},
+			through: throughInfallible(encodeProtoActivitySavedView, decodeProtoActivitySavedView),
+		},
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
 		"ScheduledStatus":  {sample: &domain.ScheduledStatus{}, through: through(encodeProtoScheduledStatus, decodeProtoScheduledStatus)},
 		"Draft":            {sample: &domain.Draft{}, through: through(encodeProtoDraft, decodeProtoDraft)},

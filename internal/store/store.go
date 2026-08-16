@@ -812,8 +812,15 @@ type Store interface {
 	RecordSharedInviteDecision(context.Context, domain.SharedInvite, domain.UserID, time.Time) error
 	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
 	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
+	// GetActivityPreferences returns the member's layout and, resolved with it,
+	// their saved Activity views.
 	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)
 	SetActivityPreferences(context.Context, domain.ActivityPreferences) error
+	// CreateActivitySavedView records one of a member's named Activity filters.
+	CreateActivitySavedView(context.Context, domain.ActivitySavedView) error
+	// DeleteActivitySavedView removes one of a member's saved views by id. An id
+	// that names no view of theirs is store.ErrNotFound.
+	DeleteActivitySavedView(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivitySavedViewID) error
 	ListUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.UserPage, error)
 	// SearchUsers is the same directory listing narrowed by a folded name. The
 	// workspace directory has no per-reader visibility rule, so this shares the

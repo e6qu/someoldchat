@@ -96,6 +96,7 @@ type Store struct {
 	typing                        map[string]domain.TypingSignal
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
+	activitySavedViews            map[domain.ActivitySavedViewID]domain.ActivitySavedView
 	searchHistory                 map[string]domain.SearchHistoryEntry
 	reactions                     map[domain.MessageID]map[string]domain.Reaction
 	pins                          map[domain.MessageID]map[domain.UserID]domain.Pin
@@ -319,6 +320,7 @@ func New() *Store {
 		typing:                        make(map[string]domain.TypingSignal),
 		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
 		activityPreferences:           make(map[string]domain.ActivityPreferences),
+		activitySavedViews:            make(map[domain.ActivitySavedViewID]domain.ActivitySavedView),
 		reactions:                     make(map[domain.MessageID]map[string]domain.Reaction),
 		pins:                          make(map[domain.MessageID]map[domain.UserID]domain.Pin),
 		files:                         make(map[domain.FileID]domain.File),
@@ -7323,10 +7325,12 @@ func (s *Store) MutateActivity(_ context.Context, workspace domain.WorkspaceID, 
 func (s *Store) GetActivityPreferences(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.ActivityPreferences, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if preferences, ok := s.activityPreferences[activityPreferencesKey(workspace, user)]; ok {
-		return preferences, nil
+	preferences := domain.ActivityPreferences{WorkspaceID: workspace, UserID: user, Layout: domain.ActivityDetailed}
+	if stored, ok := s.activityPreferences[activityPreferencesKey(workspace, user)]; ok {
+		preferences.Layout = stored.Layout
 	}
-	return domain.ActivityPreferences{WorkspaceID: workspace, UserID: user, Layout: domain.ActivityDetailed}, nil
+	preferences.SavedViews = s.listActivitySavedViewsLocked(workspace, user)
+	return preferences, nil
 }
 
 func (s *Store) SetActivityPreferences(_ context.Context, preferences domain.ActivityPreferences) error {
@@ -7335,7 +7339,65 @@ func (s *Store) SetActivityPreferences(_ context.Context, preferences domain.Act
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Saved views live in their own store and are set through their own
+	// operations; the layout write must not carry or clobber them.
+	preferences.SavedViews = nil
 	s.activityPreferences[activityPreferencesKey(preferences.WorkspaceID, preferences.UserID)] = preferences
+	return nil
+}
+
+// listActivitySavedViewsLocked returns a member's saved views newest first, ties
+// broken by id, matching the SQL profile's order.
+func (s *Store) listActivitySavedViewsLocked(workspace domain.WorkspaceID, user domain.UserID) []domain.ActivitySavedView {
+	views := make([]domain.ActivitySavedView, 0)
+	for _, view := range s.activitySavedViews {
+		if view.WorkspaceID != workspace || view.UserID != user {
+			continue
+		}
+		copied := view
+		copied.Kinds = append([]domain.ActivityKind(nil), view.Kinds...)
+		views = append(views, copied)
+	}
+	sort.Slice(views, func(left, right int) bool {
+		if !views[left].CreatedAt.Equal(views[right].CreatedAt) {
+			return views[left].CreatedAt.After(views[right].CreatedAt)
+		}
+		return views[left].ID < views[right].ID
+	})
+	return views
+}
+
+func (s *Store) CreateActivitySavedView(_ context.Context, view domain.ActivitySavedView) error {
+	if view.ID == "" || !view.Valid() {
+		return store.InvalidArgument("an activity saved view requires an id, a name and at least one kind")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.activitySavedViews[view.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	count := 0
+	for _, existing := range s.activitySavedViews {
+		if existing.WorkspaceID == view.WorkspaceID && existing.UserID == view.UserID {
+			count++
+		}
+	}
+	if count >= domain.ActivitySavedViewLimit {
+		return store.InvalidArgument("no more activity saved views may be created")
+	}
+	view.Kinds = append([]domain.ActivityKind(nil), view.Kinds...)
+	s.activitySavedViews[view.ID] = view
+	return nil
+}
+
+func (s *Store) DeleteActivitySavedView(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ActivitySavedViewID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	view, ok := s.activitySavedViews[id]
+	if !ok || view.WorkspaceID != workspace || view.UserID != user {
+		return store.ErrNotFound
+	}
+	delete(s.activitySavedViews, id)
 	return nil
 }
 

@@ -87,6 +87,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_snooze", code: codes.InvalidArgument, sentinel: service.ErrInvalidSnooze},
 	{key: "service.invalid_reminder", code: codes.InvalidArgument, sentinel: service.ErrInvalidReminder},
 	{key: "service.invalid_later_reminder", code: codes.InvalidArgument, sentinel: service.ErrInvalidLaterReminder},
+	{key: "service.invalid_activity_saved_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidActivitySavedView},
 	{key: "service.reminder_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrReminderTimeInPast},
 	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
 	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},

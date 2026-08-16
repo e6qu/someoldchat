@@ -83,6 +83,29 @@ message ActivityPreferences {
   string workspace_id = 1;
   string user_id = 2;
   string layout = 3;
+  repeated ActivitySavedView saved_views = 4;
+}
+
+message ActivitySavedView {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string name = 4;
+  repeated string kinds = 5;
+  int64 created_at_unix_nano = 6;
+}
+
+message CreateActivitySavedViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  repeated string kinds = 4;
+}
+
+message DeleteActivitySavedViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string view_id = 3;
 }
 
 message NotificationPreferencesRequest {
@@ -171,6 +194,8 @@ service ActivityService {
   rpc MutateActivity(MutateActivityRequest) returns (MutationResponse);
   rpc GetActivityPreferences(ActivityPreferencesRequest) returns (ActivityPreferences);
   rpc SetActivityPreferences(SetActivityPreferencesRequest) returns (ActivityPreferences);
+  rpc CreateActivitySavedView(CreateActivitySavedViewRequest) returns (ActivitySavedView);
+  rpc DeleteActivitySavedView(DeleteActivitySavedViewRequest) returns (MutationResponse);
   rpc GetWorkspaceNotificationPreferences(NotificationPreferencesRequest) returns (WorkspaceNotificationPreferences);
   rpc SetWorkspaceNotificationPreferences(SetWorkspaceNotificationPreferencesRequest) returns (WorkspaceNotificationPreferences);
   rpc SetNotificationSchedule(SetNotificationScheduleRequest) returns (WorkspaceNotificationPreferences);

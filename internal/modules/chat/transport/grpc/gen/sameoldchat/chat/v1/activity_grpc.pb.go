@@ -23,6 +23,8 @@ const (
 	ActivityService_MutateActivity_FullMethodName                         = "/sameoldchat.chat.v1.ActivityService/MutateActivity"
 	ActivityService_GetActivityPreferences_FullMethodName                 = "/sameoldchat.chat.v1.ActivityService/GetActivityPreferences"
 	ActivityService_SetActivityPreferences_FullMethodName                 = "/sameoldchat.chat.v1.ActivityService/SetActivityPreferences"
+	ActivityService_CreateActivitySavedView_FullMethodName                = "/sameoldchat.chat.v1.ActivityService/CreateActivitySavedView"
+	ActivityService_DeleteActivitySavedView_FullMethodName                = "/sameoldchat.chat.v1.ActivityService/DeleteActivitySavedView"
 	ActivityService_GetWorkspaceNotificationPreferences_FullMethodName    = "/sameoldchat.chat.v1.ActivityService/GetWorkspaceNotificationPreferences"
 	ActivityService_SetWorkspaceNotificationPreferences_FullMethodName    = "/sameoldchat.chat.v1.ActivityService/SetWorkspaceNotificationPreferences"
 	ActivityService_SetNotificationSchedule_FullMethodName                = "/sameoldchat.chat.v1.ActivityService/SetNotificationSchedule"
@@ -40,6 +42,8 @@ type ActivityServiceClient interface {
 	MutateActivity(ctx context.Context, in *MutateActivityRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	GetActivityPreferences(ctx context.Context, in *ActivityPreferencesRequest, opts ...grpc.CallOption) (*ActivityPreferences, error)
 	SetActivityPreferences(ctx context.Context, in *SetActivityPreferencesRequest, opts ...grpc.CallOption) (*ActivityPreferences, error)
+	CreateActivitySavedView(ctx context.Context, in *CreateActivitySavedViewRequest, opts ...grpc.CallOption) (*ActivitySavedView, error)
+	DeleteActivitySavedView(ctx context.Context, in *DeleteActivitySavedViewRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	GetWorkspaceNotificationPreferences(ctx context.Context, in *NotificationPreferencesRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(ctx context.Context, in *SetWorkspaceNotificationPreferencesRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(ctx context.Context, in *SetNotificationScheduleRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
@@ -91,6 +95,26 @@ func (c *activityServiceClient) SetActivityPreferences(ctx context.Context, in *
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ActivityPreferences)
 	err := c.cc.Invoke(ctx, ActivityService_SetActivityPreferences_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) CreateActivitySavedView(ctx context.Context, in *CreateActivitySavedViewRequest, opts ...grpc.CallOption) (*ActivitySavedView, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActivitySavedView)
+	err := c.cc.Invoke(ctx, ActivityService_CreateActivitySavedView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *activityServiceClient) DeleteActivitySavedView(ctx context.Context, in *DeleteActivitySavedViewRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_DeleteActivitySavedView_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +199,8 @@ type ActivityServiceServer interface {
 	MutateActivity(context.Context, *MutateActivityRequest) (*MutationResponse, error)
 	GetActivityPreferences(context.Context, *ActivityPreferencesRequest) (*ActivityPreferences, error)
 	SetActivityPreferences(context.Context, *SetActivityPreferencesRequest) (*ActivityPreferences, error)
+	CreateActivitySavedView(context.Context, *CreateActivitySavedViewRequest) (*ActivitySavedView, error)
+	DeleteActivitySavedView(context.Context, *DeleteActivitySavedViewRequest) (*MutationResponse, error)
 	GetWorkspaceNotificationPreferences(context.Context, *NotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, *SetWorkspaceNotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(context.Context, *SetNotificationScheduleRequest) (*WorkspaceNotificationPreferences, error)
@@ -202,6 +228,12 @@ func (UnimplementedActivityServiceServer) GetActivityPreferences(context.Context
 }
 func (UnimplementedActivityServiceServer) SetActivityPreferences(context.Context, *SetActivityPreferencesRequest) (*ActivityPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetActivityPreferences not implemented")
+}
+func (UnimplementedActivityServiceServer) CreateActivitySavedView(context.Context, *CreateActivitySavedViewRequest) (*ActivitySavedView, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateActivitySavedView not implemented")
+}
+func (UnimplementedActivityServiceServer) DeleteActivitySavedView(context.Context, *DeleteActivitySavedViewRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteActivitySavedView not implemented")
 }
 func (UnimplementedActivityServiceServer) GetWorkspaceNotificationPreferences(context.Context, *NotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkspaceNotificationPreferences not implemented")
@@ -312,6 +344,42 @@ func _ActivityService_SetActivityPreferences_Handler(srv interface{}, ctx contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ActivityServiceServer).SetActivityPreferences(ctx, req.(*SetActivityPreferencesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_CreateActivitySavedView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateActivitySavedViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).CreateActivitySavedView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_CreateActivitySavedView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).CreateActivitySavedView(ctx, req.(*CreateActivitySavedViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ActivityService_DeleteActivitySavedView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteActivitySavedViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).DeleteActivitySavedView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_DeleteActivitySavedView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).DeleteActivitySavedView(ctx, req.(*DeleteActivitySavedViewRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -464,6 +532,14 @@ var ActivityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetActivityPreferences",
 			Handler:    _ActivityService_SetActivityPreferences_Handler,
+		},
+		{
+			MethodName: "CreateActivitySavedView",
+			Handler:    _ActivityService_CreateActivitySavedView_Handler,
+		},
+		{
+			MethodName: "DeleteActivitySavedView",
+			Handler:    _ActivityService_DeleteActivitySavedView_Handler,
 		},
 		{
 			MethodName: "GetWorkspaceNotificationPreferences",
