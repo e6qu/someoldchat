@@ -130,6 +130,11 @@ type OAuthToken struct {
 	ExpiresAtUnixNano           int64                  `protobuf:"varint,13,opt,name=expires_at_unix_nano,json=expiresAtUnixNano,proto3" json:"expires_at_unix_nano,omitempty"`
 	AuthedUserRefreshToken      string                 `protobuf:"bytes,14,opt,name=authed_user_refresh_token,json=authedUserRefreshToken,proto3" json:"authed_user_refresh_token,omitempty"`
 	AuthedUserExpiresAtUnixNano int64                  `protobuf:"varint,15,opt,name=authed_user_expires_at_unix_nano,json=authedUserExpiresAtUnixNano,proto3" json:"authed_user_expires_at_unix_nano,omitempty"`
+	IncomingWebhookChannel      string                 `protobuf:"bytes,16,opt,name=incoming_webhook_channel,json=incomingWebhookChannel,proto3" json:"incoming_webhook_channel,omitempty"`
+	IncomingWebhookChannelName  string                 `protobuf:"bytes,17,opt,name=incoming_webhook_channel_name,json=incomingWebhookChannelName,proto3" json:"incoming_webhook_channel_name,omitempty"`
+	IncomingWebhookId           string                 `protobuf:"bytes,18,opt,name=incoming_webhook_id,json=incomingWebhookId,proto3" json:"incoming_webhook_id,omitempty"`
+	IncomingWebhookUrl          string                 `protobuf:"bytes,19,opt,name=incoming_webhook_url,json=incomingWebhookUrl,proto3" json:"incoming_webhook_url,omitempty"`
+	IncomingWebhookConfigUrl    string                 `protobuf:"bytes,20,opt,name=incoming_webhook_config_url,json=incomingWebhookConfigUrl,proto3" json:"incoming_webhook_config_url,omitempty"`
 	unknownFields               protoimpl.UnknownFields
 	sizeCache                   protoimpl.SizeCache
 }
@@ -267,6 +272,41 @@ func (x *OAuthToken) GetAuthedUserExpiresAtUnixNano() int64 {
 		return x.AuthedUserExpiresAtUnixNano
 	}
 	return 0
+}
+
+func (x *OAuthToken) GetIncomingWebhookChannel() string {
+	if x != nil {
+		return x.IncomingWebhookChannel
+	}
+	return ""
+}
+
+func (x *OAuthToken) GetIncomingWebhookChannelName() string {
+	if x != nil {
+		return x.IncomingWebhookChannelName
+	}
+	return ""
+}
+
+func (x *OAuthToken) GetIncomingWebhookId() string {
+	if x != nil {
+		return x.IncomingWebhookId
+	}
+	return ""
+}
+
+func (x *OAuthToken) GetIncomingWebhookUrl() string {
+	if x != nil {
+		return x.IncomingWebhookUrl
+	}
+	return ""
+}
+
+func (x *OAuthToken) GetIncomingWebhookConfigUrl() string {
+	if x != nil {
+		return x.IncomingWebhookConfigUrl
+	}
+	return ""
 }
 
 type OpenIDConnectTokenRequest struct {
@@ -641,7 +681,7 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\fredirect_uri\x18\x04 \x01(\tR\vredirectUri\x12\x1b\n" +
 	"\tuser_only\x18\x05 \x01(\bR\buserOnly\x12#\n" +
 	"\rrefresh_token\x18\x06 \x01(\tR\frefreshToken\x12\x14\n" +
-	"\x05token\x18\a \x01(\tR\x05token\"\xcf\x04\n" +
+	"\x05token\x18\a \x01(\tR\x05token\"\xed\x06\n" +
 	"\n" +
 	"OAuthToken\x12!\n" +
 	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\x12\x1b\n" +
@@ -660,7 +700,12 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\rrefresh_token\x18\f \x01(\tR\frefreshToken\x12/\n" +
 	"\x14expires_at_unix_nano\x18\r \x01(\x03R\x11expiresAtUnixNano\x129\n" +
 	"\x19authed_user_refresh_token\x18\x0e \x01(\tR\x16authedUserRefreshToken\x12E\n" +
-	" authed_user_expires_at_unix_nano\x18\x0f \x01(\x03R\x1bauthedUserExpiresAtUnixNano\"\xfd\x01\n" +
+	" authed_user_expires_at_unix_nano\x18\x0f \x01(\x03R\x1bauthedUserExpiresAtUnixNano\x128\n" +
+	"\x18incoming_webhook_channel\x18\x10 \x01(\tR\x16incomingWebhookChannel\x12A\n" +
+	"\x1dincoming_webhook_channel_name\x18\x11 \x01(\tR\x1aincomingWebhookChannelName\x12.\n" +
+	"\x13incoming_webhook_id\x18\x12 \x01(\tR\x11incomingWebhookId\x120\n" +
+	"\x14incoming_webhook_url\x18\x13 \x01(\tR\x12incomingWebhookUrl\x12=\n" +
+	"\x1bincoming_webhook_config_url\x18\x14 \x01(\tR\x18incomingWebhookConfigUrl\"\xfd\x01\n" +
 	"\x19OpenIDConnectTokenRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
 	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\x12\x12\n" +

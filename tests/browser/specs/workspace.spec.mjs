@@ -3900,6 +3900,9 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   await reaction.click();
   expect((await reacted).status()).toBe(200);
 
+  // The huddle offers the conversation's canvas as its shared notes.
+  await expect(page.getByRole('link', { name: 'Open the huddle canvas' })).toBeVisible();
+
   // Leaving takes the session away with it, so no control is offered for a
   // connection this member no longer has.
   await page.getByRole('button', { name: 'Leave huddle' }).click();

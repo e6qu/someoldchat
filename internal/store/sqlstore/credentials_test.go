@@ -158,6 +158,39 @@ func TestSQLiteOAuthCodeIsHashedAndExpires(t *testing.T) {
 	}
 }
 
+// TestSQLiteOAuthCodeCarriesIncomingWebhookChannel proves the channel an install
+// chose survives the round trip from code creation to redemption on SQL, so the
+// service can mint the webhook the app asked for.
+func TestSQLiteOAuthCodeCarriesIncomingWebhookChannel(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "oauth-webhook.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	seedConversationFixture(t, ctx, s)
+	if err := s.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "U1", Name: "app", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("client-secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateOAuthCode(ctx, domain.OAuthCode{
+		Code: "hook-code", ClientID: "client", WorkspaceID: "T1", UserID: "U1",
+		BotID: "B1", BotUserID: "U1", BotScopes: []string{"incoming-webhook"},
+		IncomingWebhookChannel: "C1", RedirectURI: "https://example.test/callback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.ExchangeOAuthCode(ctx, "client", "client-secret", "hook-code", "https://example.test/callback", "xoxb-hook", domain.OAuthToken{TokenType: "bot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.IncomingWebhookChannel != "C1" {
+		t.Fatalf("token incoming webhook channel = %q, want C1", token.IncomingWebhookChannel)
+	}
+}
+
 func TestSQLiteOAuthBotGrantPersistsBotIdentity(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, filepath.Join(t.TempDir(), "oauth-bot.db"))

@@ -1764,6 +1764,40 @@ func TestSearchResolvesSlackModifiersAndPreservesDeterministicOrder(t *testing.T
 	}
 }
 
+// TestSearchFromMeResolvesToTheSearcher covers Slack's from:me, which names
+// whoever is searching. It used to resolve to no member and return nothing.
+func TestSearchFromMeResolvesToTheSearcher(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	for _, message := range []domain.Message{
+		{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "shared note", CreatedAt: time.Date(2025, 1, 5, 12, 0, 0, 0, time.UTC)},
+		{ID: "M2", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "shared note", CreatedAt: time.Date(2025, 1, 6, 12, 0, 0, 0, time.UTC)},
+	} {
+		if err := s.CreateMessage(ctx, message, events.Event{ID: domain.EventID("E" + string(message.ID)), WorkspaceID: "T1", Topic: "message.created", CreatedAt: message.CreatedAt}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages := Messages{Store: s}
+	mine, err := messages.SearchMessages(ctx, "T1", "U1", domain.MessageSearchRequest{Query: "note from:me", Page: domain.PageRequest{Limit: 10}})
+	if err != nil || mine.Total != 1 || mine.Messages[0].ID != "M1" {
+		t.Fatalf("from:me for U1 = %+v err=%v, want M1", mine, err)
+	}
+	excluded, err := messages.SearchMessages(ctx, "T1", "U1", domain.MessageSearchRequest{Query: "note -from:me", Page: domain.PageRequest{Limit: 10}})
+	if err != nil || excluded.Total != 1 || excluded.Messages[0].ID != "M2" {
+		t.Fatalf("-from:me for U1 = %+v err=%v, want M2", excluded, err)
+	}
+	theirs, err := messages.SearchMessages(ctx, "T1", "U2", domain.MessageSearchRequest{Query: "note from:me", Page: domain.PageRequest{Limit: 10}})
+	if err != nil || theirs.Total != 1 || theirs.Messages[0].ID != "M2" {
+		t.Fatalf("from:me for U2 = %+v err=%v, want M2", theirs, err)
+	}
+}
+
 func TestFileListingAndSearchApplyViewerVisibilityBeforePagination(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()

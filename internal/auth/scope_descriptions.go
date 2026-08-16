@@ -11,6 +11,7 @@ package auth
 var scopeDescriptions = map[Scope]string{
 	ScopeChatWrite:          "Send messages",
 	ScopeChatWriteCustomize: "Send messages with a customized name and icon",
+	ScopeIncomingWebhook:    "Post messages to a specific channel through an incoming webhook",
 	ScopeChannelsHistory:    "View messages and content in conversations it has been added to",
 
 	ScopeUsersRead:         "View people in the workspace",

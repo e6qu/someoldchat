@@ -52,6 +52,12 @@ type huddleView struct {
 	// exist only while the reader is joined.
 	ReactURL  string
 	Reactions []huddleReaction
+	// CanvasURL opens the conversation's own canvas — Slack's huddle canvas for a
+	// channel huddle is that same document, shared by everyone in the channel, so
+	// the huddle offers it as a place to take notes together rather than a second
+	// per-huddle document nobody else could find afterward. Empty when the reader
+	// cannot use it.
+	CanvasURL string
 	// InviteURL and Invitable exist while the reader is in the huddle: the
 	// people they may pull in are the conversation's members who are not
 	// already here. Empty when there is nobody left to invite.
@@ -135,6 +141,7 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 	if view.Joined {
 		view.ReactURL = "/app/huddle/react"
 		view.Reactions = huddleReactionChoices()
+		view.CanvasURL = channelCanvasURL(principal, conversation, true)
 		view.InviteURL = huddleActionURL("invite", string(conversation.ID))
 		inHuddle := make(map[domain.UserID]bool, len(call.Participants))
 		for _, participant := range call.Participants {
