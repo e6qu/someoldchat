@@ -4938,7 +4938,28 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				return []any{after.Schedule.Enabled, after.Schedule.Days, after.Schedule.StartMinute, after.Schedule.EndMinute, after.Schedule.TimeZone, invalidErr != nil, read.Schedule.Enabled}, nil
+				// A VIP is read back on the preferences and removed by the same
+				// operation; the ids are seeded, so compare them directly.
+				if err := chat.SetNotificationVIP(ctx, "T1", "U1", "U2", true); err != nil {
+					return nil, err
+				}
+				withVIP, err := chat.WorkspaceNotificationPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				selfErr := chat.SetNotificationVIP(ctx, "T1", "U1", "U1", true)
+				strangerErr := chat.SetNotificationVIP(ctx, "T1", "U1", "U-missing", true)
+				if err := chat.SetNotificationVIP(ctx, "T1", "U1", "U2", false); err != nil {
+					return nil, err
+				}
+				afterVIP, err := chat.WorkspaceNotificationPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					after.Schedule.Enabled, after.Schedule.Days, after.Schedule.StartMinute, after.Schedule.EndMinute, after.Schedule.TimeZone, invalidErr != nil, read.Schedule.Enabled,
+					len(withVIP.VIPs), len(withVIP.VIPs) == 1 && withVIP.VIPs[0] == "U2", selfErr != nil, strangerErr != nil, len(afterVIP.VIPs),
+				}, nil
 			},
 		},
 		{

@@ -28,6 +28,7 @@ const (
 	ActivityService_GetWorkspaceNotificationPreferences_FullMethodName    = "/sameoldchat.chat.v1.ActivityService/GetWorkspaceNotificationPreferences"
 	ActivityService_SetWorkspaceNotificationPreferences_FullMethodName    = "/sameoldchat.chat.v1.ActivityService/SetWorkspaceNotificationPreferences"
 	ActivityService_SetNotificationSchedule_FullMethodName                = "/sameoldchat.chat.v1.ActivityService/SetNotificationSchedule"
+	ActivityService_SetNotificationVIP_FullMethodName                     = "/sameoldchat.chat.v1.ActivityService/SetNotificationVIP"
 	ActivityService_GetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/GetConversationNotificationPreferences"
 	ActivityService_SetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/SetConversationNotificationPreferences"
 	ActivityService_GetThreadFollow_FullMethodName                        = "/sameoldchat.chat.v1.ActivityService/GetThreadFollow"
@@ -47,6 +48,7 @@ type ActivityServiceClient interface {
 	GetWorkspaceNotificationPreferences(ctx context.Context, in *NotificationPreferencesRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(ctx context.Context, in *SetWorkspaceNotificationPreferencesRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(ctx context.Context, in *SetNotificationScheduleRequest, opts ...grpc.CallOption) (*WorkspaceNotificationPreferences, error)
+	SetNotificationVIP(ctx context.Context, in *SetNotificationVIPRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	GetConversationNotificationPreferences(ctx context.Context, in *ConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(ctx context.Context, in *SetConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
 	GetThreadFollow(ctx context.Context, in *ThreadFollowRequest, opts ...grpc.CallOption) (*ThreadFollow, error)
@@ -151,6 +153,16 @@ func (c *activityServiceClient) SetNotificationSchedule(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *activityServiceClient) SetNotificationVIP(ctx context.Context, in *SetNotificationVIPRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ActivityService_SetNotificationVIP_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *activityServiceClient) GetConversationNotificationPreferences(ctx context.Context, in *ConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ConversationNotificationPreferences)
@@ -204,6 +216,7 @@ type ActivityServiceServer interface {
 	GetWorkspaceNotificationPreferences(context.Context, *NotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, *SetWorkspaceNotificationPreferencesRequest) (*WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(context.Context, *SetNotificationScheduleRequest) (*WorkspaceNotificationPreferences, error)
+	SetNotificationVIP(context.Context, *SetNotificationVIPRequest) (*MutationResponse, error)
 	GetConversationNotificationPreferences(context.Context, *ConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, *SetConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
 	GetThreadFollow(context.Context, *ThreadFollowRequest) (*ThreadFollow, error)
@@ -243,6 +256,9 @@ func (UnimplementedActivityServiceServer) SetWorkspaceNotificationPreferences(co
 }
 func (UnimplementedActivityServiceServer) SetNotificationSchedule(context.Context, *SetNotificationScheduleRequest) (*WorkspaceNotificationPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetNotificationSchedule not implemented")
+}
+func (UnimplementedActivityServiceServer) SetNotificationVIP(context.Context, *SetNotificationVIPRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetNotificationVIP not implemented")
 }
 func (UnimplementedActivityServiceServer) GetConversationNotificationPreferences(context.Context, *ConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversationNotificationPreferences not implemented")
@@ -438,6 +454,24 @@ func _ActivityService_SetNotificationSchedule_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ActivityService_SetNotificationVIP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetNotificationVIPRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).SetNotificationVIP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_SetNotificationVIP_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).SetNotificationVIP(ctx, req.(*SetNotificationVIPRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ActivityService_GetConversationNotificationPreferences_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ConversationNotificationPreferencesRequest)
 	if err := dec(in); err != nil {
@@ -552,6 +586,10 @@ var ActivityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetNotificationSchedule",
 			Handler:    _ActivityService_SetNotificationSchedule_Handler,
+		},
+		{
+			MethodName: "SetNotificationVIP",
+			Handler:    _ActivityService_SetNotificationVIP_Handler,
 		},
 		{
 			MethodName: "GetConversationNotificationPreferences",

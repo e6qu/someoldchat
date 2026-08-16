@@ -1379,6 +1379,33 @@ func TestConversationMemberPanelShowsPresenceAndStatus(t *testing.T) {
 		`<li class="conversation-member"><span class="presence `)
 }
 
+// TestMemberDirectoryMarksAndRemovesVIPs covers the VIP toggle: the directory
+// offers to mark another member, the toggle persists and flips its label, and
+// removing it returns the row to "Mark VIP".
+func TestMemberDirectoryMarksAndRemovesVIPs(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "builder", RealName: "Bob Builder"}); err != nil {
+		t.Fatal(err)
+	}
+	csrf := auth.CSRFToken("session")
+
+	requireContains(t, "mark VIP control", get(t, mux, "/app/members").Body.String(),
+		"Mark VIP", "/app/notifications/vips")
+
+	if r := postForm(t, mux, "/app/notifications/vips", url.Values{"_csrf": {csrf}, "target": {"U2"}, "add": {"true"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("mark VIP status=%d body=%s", r.Code, r.Body)
+	}
+	if prefs, err := (service.Messages{Store: s}).WorkspaceNotificationPreferences(context.Background(), "T1", "U1"); err != nil || len(prefs.VIPs) != 1 || prefs.VIPs[0] != "U2" {
+		t.Fatalf("VIPs after mark = %+v err=%v, want [U2]", prefs.VIPs, err)
+	}
+	requireContains(t, "VIP shown as marked", get(t, mux, "/app/members").Body.String(), "★ VIP")
+
+	if r := postForm(t, mux, "/app/notifications/vips", url.Values{"_csrf": {csrf}, "target": {"U2"}, "add": {"false"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("remove VIP status=%d body=%s", r.Code, r.Body)
+	}
+	requireMissing(t, "VIP removed", get(t, mux, "/app/members").Body.String(), "★ VIP")
+}
+
 // A search hit shows its author's current status beside their name, the same
 // projection the timeline makes, so a result reads like the message does.
 func TestSearchResultsProjectTheAuthorStatus(t *testing.T) {

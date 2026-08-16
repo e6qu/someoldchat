@@ -772,6 +772,11 @@ type Store interface {
 	LatestMessageTimestamps(context.Context, domain.WorkspaceID, []domain.ConversationID) (map[domain.ConversationID]domain.MessageTimestamp, error)
 	GetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceNotificationPreferences, events.Event) error
+	// SetNotificationVIP adds or removes one person from a member's VIP list —
+	// the people whose channel messages always reach them, even in a muted
+	// channel. It is its own operation so a preference or keyword write does not
+	// carry the list and race a concurrent toggle.
+	SetNotificationVIP(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, bool, events.Event) error
 	GetConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, domain.ConversationNotificationPreferences, events.Event) error
 	IsThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (bool, error)

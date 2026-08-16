@@ -122,6 +122,14 @@ message WorkspaceNotificationPreferences {
   bool activity_reminders = 6;
   bool browser_notifications = 7;
   NotificationSchedule schedule = 8;
+  repeated string vips = 9;
+}
+
+message SetNotificationVIPRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_id = 3;
+  bool add = 4;
 }
 
 message NotificationSchedule {
@@ -199,6 +207,7 @@ service ActivityService {
   rpc GetWorkspaceNotificationPreferences(NotificationPreferencesRequest) returns (WorkspaceNotificationPreferences);
   rpc SetWorkspaceNotificationPreferences(SetWorkspaceNotificationPreferencesRequest) returns (WorkspaceNotificationPreferences);
   rpc SetNotificationSchedule(SetNotificationScheduleRequest) returns (WorkspaceNotificationPreferences);
+  rpc SetNotificationVIP(SetNotificationVIPRequest) returns (MutationResponse);
   rpc GetConversationNotificationPreferences(ConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
   rpc SetConversationNotificationPreferences(SetConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
   rpc GetThreadFollow(ThreadFollowRequest) returns (ThreadFollow);

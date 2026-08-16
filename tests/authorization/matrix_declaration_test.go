@@ -442,6 +442,7 @@ func authorityMatrix() map[string]authority {
 		"SetFunctionPermission":                   authorityAnyMember,
 		"SetListAccess":                           authorityAnyMember,
 		"SetNotificationSchedule":                 authorityAnyMember,
+		"SetNotificationVIP":                      authorityAnyMember,
 		"SetSavedItemState":                       authorityAnyMember,
 		"SetSnooze":                               authorityAnyMember,
 		"SetThreadFollowed":                       authorityAnyMember,

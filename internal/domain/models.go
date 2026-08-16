@@ -1174,6 +1174,45 @@ type WorkspaceNotificationPreferences struct {
 	// says notifications are on while none arrive is worse than one that admits
 	// it is off.
 	Schedule NotificationSchedule
+	// VIPs are the people whose every channel message reaches this member, even
+	// in a channel they have muted or set to mentions only. It is the member's
+	// opinion of others — the first such per-target relation in this subsystem —
+	// so it belongs on the member's own preferences and is consulted for the
+	// author when a message fans out to them. Resolved when the preferences are
+	// read; changed through SetNotificationVIP, so the layout and keyword writes
+	// do not have to carry it.
+	VIPs []UserID
+}
+
+// ContainsUserID reports whether a user id appears in a list. It is the one
+// place the VIP membership test lives, so the memory and SQL fanout, which must
+// stay byte-identical, cannot drift on how a VIP is recognised.
+func ContainsUserID(ids []UserID, id UserID) bool {
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeUserIDs trims blanks and drops duplicates, keeping first-seen order,
+// so a stored VIP list is a set of real ids.
+func NormalizeUserIDs(ids []UserID) []UserID {
+	seen := make(map[UserID]struct{}, len(ids))
+	result := make([]UserID, 0, len(ids))
+	for _, id := range ids {
+		id = UserID(strings.TrimSpace(string(id)))
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
 }
 
 // NotificationSchedule is Slack's "allow notifications" window: some days, and

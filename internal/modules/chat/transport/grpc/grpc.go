@@ -5083,6 +5083,19 @@ func (r Remote) SetNotificationSchedule(ctx context.Context, workspaceID domain.
 	return decodeProtoWorkspaceNotificationPreferences(out)
 }
 
+func (r Remote) SetNotificationVIP(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, target domain.UserID, add bool) error {
+	out, err := r.activity.SetNotificationVIP(ctx, &chatv1.SetNotificationVIPRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), TargetId: string(target), Add: add,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed set notification VIP response was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders, browserNotifications bool) (domain.WorkspaceNotificationPreferences, error) {
 	out, err := r.activity.SetWorkspaceNotificationPreferences(ctx, &chatv1.SetWorkspaceNotificationPreferencesRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Level: string(level),
@@ -9261,6 +9274,13 @@ func (s *Server) SetNotificationSchedule(ctx context.Context, input *chatv1.SetN
 	return encodeProtoWorkspaceNotificationPreferences(preferences), nil
 }
 
+func (s *Server) SetNotificationVIP(ctx context.Context, input *chatv1.SetNotificationVIPRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SetNotificationVIP(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetId()), input.GetAdd()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) SetWorkspaceNotificationPreferences(ctx context.Context, input *chatv1.SetWorkspaceNotificationPreferencesRequest) (*chatv1.WorkspaceNotificationPreferences, error) {
 	preferences, err := s.implementation.SetWorkspaceNotificationPreferences(
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
@@ -11971,11 +11991,16 @@ func decodeProtoActivitySavedView(value *chatv1.ActivitySavedView) domain.Activi
 }
 
 func encodeProtoWorkspaceNotificationPreferences(value domain.WorkspaceNotificationPreferences) *chatv1.WorkspaceNotificationPreferences {
+	vips := make([]string, 0, len(value.VIPs))
+	for _, id := range value.VIPs {
+		vips = append(vips, string(id))
+	}
 	return &chatv1.WorkspaceNotificationPreferences{
 		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Level: string(value.Level),
 		Keywords: append([]string(nil), value.Keywords...), ActivityChannels: value.ActivityChannels, ActivityReminders: value.ActivityReminders,
 		BrowserNotifications: value.BrowserNotifications,
 		Schedule:             encodeProtoNotificationSchedule(value.Schedule),
+		Vips:                 vips,
 	}
 }
 
@@ -12015,6 +12040,10 @@ func decodeProtoWorkspaceNotificationPreferences(value *chatv1.WorkspaceNotifica
 		BrowserNotifications: value.GetBrowserNotifications(),
 		Schedule:             decodeProtoNotificationSchedule(value.GetSchedule()),
 	}
+	for _, id := range value.GetVips() {
+		preferences.VIPs = append(preferences.VIPs, domain.UserID(id))
+	}
+	preferences.VIPs = domain.NormalizeUserIDs(preferences.VIPs)
 	if !preferences.Valid() {
 		return domain.WorkspaceNotificationPreferences{}, errors.New("typed workspace notification preferences are invalid")
 	}

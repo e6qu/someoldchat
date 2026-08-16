@@ -3004,6 +3004,58 @@ func notificationScheduleRoundTrips(t *testing.T, open opener) {
 	}
 }
 
+// The VIP override lives inside the per-recipient fanout, which is written twice
+// — once in memory, once in SQL. This is where a drop would happen: a member who
+// muted a channel would keep hearing a VIP on one profile and stop on the other.
+// Both profiles must upgrade the muting VIP-holder's item and leave the plain
+// reader's suppressed, identically.
+func vipChannelMessagePiercesMuteOnEveryProfile(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	author := domain.UserID("UA" + f.suffix)
+	viaVIP := domain.UserID("UV" + f.suffix)
+	plain := domain.UserID("UP" + f.suffix)
+	for _, user := range []domain.UserID{author, viaVIP, plain} {
+		if err := f.repository.SeedUser(ctx, domain.User{ID: user, WorkspaceID: f.workspaceID, Name: string(user)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repository.SeedConversationMember(ctx, f.channelID, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// viaVIP marks the author a VIP and mutes the channel; plain does neither.
+	if err := f.repository.SetNotificationVIP(ctx, f.workspaceID, viaVIP, author, true, f.event("vip", "notification.vip_changed", string(viaVIP))); err != nil {
+		t.Fatal(err)
+	}
+	muted := domain.ConversationNotificationPreferences{WorkspaceID: f.workspaceID, UserID: viaVIP, Conversation: f.channelID, Level: domain.NotificationMute}
+	if err := f.repository.SetConversationNotificationPreferences(ctx, muted, f.event("mute", "conversation.notification_preferences_changed", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{
+		ID: domain.MessageID("M-vip-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: author, Text: "morning all", Attachments: "[]", CreatedAt: domain.MessageInstant(time.Unix(1_700_000_900, 0).UTC()),
+	}
+	if err := f.repository.CreateMessage(ctx, message, f.event("vip-message", "message.created", string(message.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
+	channelActivity := func(user domain.UserID) int {
+		t.Helper()
+		page, err := f.repository.ListActivity(ctx, f.workspaceID, user, domain.ActivityQuery{Kinds: []domain.ActivityKind{domain.ActivityChannel}, Page: domain.PageRequest{Limit: 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Items)
+	}
+	if got := channelActivity(viaVIP); got != 1 {
+		t.Fatalf("a VIP's channel message reached the muting member's Activity %d times, want 1", got)
+	}
+	if got := channelActivity(plain); got != 0 {
+		t.Fatalf("a non-VIP saw the channel message %d times, want 0 (default mentions-only suppresses it)", got)
+	}
+}
+
 // Assignment is state on the item and news in Activity, and the two profiles
 // resolve reachability differently — one joins the shared list predicate, the
 // other walks grants under a lock. The contract drives both, including the due

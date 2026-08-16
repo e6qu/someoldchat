@@ -499,6 +499,9 @@ type memberView struct {
 	AvatarURL     string
 	AuthorInitial string
 	IsSelf        bool
+	// IsVIP is whether the viewing member has marked this person a VIP, so the
+	// directory can offer to add or remove them.
+	IsVIP bool
 }
 
 type userGroupView struct {
@@ -2517,6 +2520,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 .person-copy{min-width:0}
 .person h3{font-size:16px;margin:0}
 .person p{margin:5px 0;color:var(--muted)}
+.person form{display:inline-block;margin:6px 8px 0 0}.vip-form button[aria-pressed=true]{border-color:var(--action);color:var(--action);font-weight:800}
 .person button{border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--text);padding:5px 10px}
 .presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}.status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px 9px}.profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.availability-form{margin:0 0 18px;padding:12px;border:1px solid var(--line);border-radius:8px}.availability-form label{display:flex;align-items:end;gap:8px}.availability-form select{min-width:150px}.scheduled-statuses{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}.scheduled-status{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px}.scheduled-status h4{margin:0}.scheduled-actions{display:flex;gap:8px;align-items:center}.danger{border:1px solid var(--danger);color:var(--danger);border-radius:5px;background:transparent;padding:8px 12px;font-weight:700}
 @media(max-width:720px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}}
@@ -2577,7 +2581,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
         {{range .Members}}
         <article class="person">
           <span class="person-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span>
-          <div class="person-copy"><h3><span class="presence {{.Presence}}" aria-hidden="true"></span>{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}</div>
+          <div class="person-copy"><h3><span class="presence {{.Presence}}" aria-hidden="true"></span>{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}{{if not .IsSelf}}<form class="vip-form" method="post" action="/app/notifications/vips"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target" value="{{.ID}}"><input type="hidden" name="add" value="{{if .IsVIP}}false{{else}}true{{end}}"><button type="submit" aria-pressed="{{if .IsVIP}}true{{else}}false{{end}}" aria-label="{{if .IsVIP}}Remove {{.Name}} as a VIP{{else}}Mark {{.Name}} as a VIP{{end}}">{{if .IsVIP}}★ VIP{{else}}☆ Mark VIP{{end}}</button></form>{{end}}</div>
         </article>
         {{else}}<p class="muted">No members available.</p>{{end}}
       </div>
@@ -4569,6 +4573,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/notifications/preferences", h.setWorkspaceNotifications)
 	mux.HandleFunc("POST /app/notifications/dnd", h.setNotificationSnooze)
 	mux.HandleFunc("POST /app/notifications/schedule", h.setNotificationSchedule)
+	mux.HandleFunc("POST /app/notifications/vips", h.setNotificationVIP)
 	mux.HandleFunc("GET /app/later", h.later)
 	mux.HandleFunc("GET /app/threads", h.threadsPage)
 	mux.HandleFunc("GET /app/unreads", h.unreadsPage)
@@ -7658,6 +7663,27 @@ func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Reques
 // The browser supplies its own zone, as it already does for a scheduled message
 // and a reminder: a schedule is a statement about the member's day, and the
 // server's clock is not their day.
+// setNotificationVIP toggles a person on the viewing member's VIP list from the
+// directory. Marking yourself or someone who is not here is refused; the page
+// returns to the directory either way.
+func (h Handler) setNotificationVIP(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the directory and try again.")
+	if !ok {
+		return
+	}
+	target := domain.UserID(strings.TrimSpace(fields["target"]))
+	if err := h.Messages.SetNotificationVIP(r.Context(), principal.WorkspaceID, principal.UserID, target, fields["add"] == "true"); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That VIP change was not saved", "Choose another member of this workspace and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/members")
+}
+
 func (h Handler) setNotificationSchedule(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
@@ -9785,6 +9811,14 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	if customEmoji, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID); err == nil {
 		emojiImages = customEmojiImages(customEmoji)
 	}
+	// The viewer's VIPs decide which directory rows offer "Remove VIP" instead of
+	// "Mark as VIP". A read failure leaves the toggles at "Mark", which is safe.
+	vips := map[domain.UserID]struct{}{}
+	if preferences, prefErr := h.Messages.WorkspaceNotificationPreferences(r.Context(), principal.WorkspaceID, principal.UserID); prefErr == nil {
+		for _, id := range preferences.VIPs {
+			vips[id] = struct{}{}
+		}
+	}
 	members := make([]memberView, 0, len(page.Users))
 	for _, user := range page.Users {
 		// A deactivated account is not a person to message: UserInfo already
@@ -9795,7 +9829,8 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		}
 		name := displayName(user)
 		isSelf := user.ID == principal.UserID
-		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: webPresence(user.Presence, isSelf), AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf})
+		_, isVIP := vips[user.ID]
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: webPresence(user.Presence, isSelf), AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf, IsVIP: isVIP})
 	}
 	profile := current.Profile
 	if submitted != nil {

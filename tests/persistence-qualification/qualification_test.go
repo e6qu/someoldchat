@@ -126,6 +126,7 @@ func runQualification(t *testing.T, open opener) {
 		{"a file description survives and belongs to its uploader", fileDescriptionBelongsToItsUploader},
 		{"a canvas share reaches Activity on every profile", canvasShareReachesActivity},
 		{"a notification schedule round-trips on every profile", notificationScheduleRoundTrips},
+		{"a VIP's channel message pierces mute on every profile", vipChannelMessagePiercesMuteOnEveryProfile},
 		{"an assigned list item reaches Activity on every profile", listAssignmentReachesActivity},
 		{"deleting a list item is all or nothing and survives in Activity", deletingAListItemIsAllOrNothingAndSurvivesInActivity},
 		{"removing a list column takes its cells with it", removingAListColumnTakesItsCellsWithIt},
