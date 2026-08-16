@@ -1406,6 +1406,51 @@ func TestMemberDirectoryMarksAndRemovesVIPs(t *testing.T) {
 	requireMissing(t, "VIP removed", get(t, mux, "/app/members").Body.String(), "★ VIP")
 }
 
+// TestSidebarSectionsOrganizeChannels covers the sidebar section lifecycle: a
+// member creates a section, moves a channel into it, collapses it, and deletes
+// it, and the channel returns to the default group.
+func TestSidebarSectionsOrganizeChannels(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+	messages := service.Messages{Store: s}
+
+	requireContains(t, "new section control", get(t, mux, "/app?channel=Cdev").Body.String(),
+		"New section", "/app/sidebar/sections/create")
+
+	if r := postForm(t, mux, "/app/sidebar/sections/create?channel=Cdev", url.Values{"_csrf": {csrf}, "name": {"Priorities"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", r.Code, r.Body)
+	}
+	sections, err := messages.SidebarSections(context.Background(), "T1", "U1")
+	if err != nil || len(sections) != 1 || sections[0].Name != "Priorities" {
+		t.Fatalf("sections after create = %+v err=%v", sections, err)
+	}
+	id := string(sections[0].ID)
+	requireContains(t, "section renders with management", get(t, mux, "/app?channel=Cdev").Body.String(),
+		`aria-label="Priorities"`, "Delete section")
+
+	if r := postForm(t, mux, "/app/sidebar/sections/assign?channel=Cdev", url.Values{"_csrf": {csrf}, "conversation": {"Cdev"}, "section": {id}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("assign status=%d body=%s", r.Code, r.Body)
+	}
+	if sections, _ := messages.SidebarSections(context.Background(), "T1", "U1"); len(sections[0].Conversations) != 1 || sections[0].Conversations[0] != "Cdev" {
+		t.Fatalf("section channels = %v, want [Cdev]", sections[0].Conversations)
+	}
+
+	if r := postForm(t, mux, "/app/sidebar/sections/collapse?channel=Cdev", url.Values{"_csrf": {csrf}, "section_id": {id}, "collapsed": {"true"}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("collapse status=%d body=%s", r.Code, r.Body)
+	}
+	if collapsed, _ := messages.SidebarSections(context.Background(), "T1", "U1"); !collapsed[0].Collapsed {
+		t.Fatal("section did not collapse")
+	}
+
+	if r := postForm(t, mux, "/app/sidebar/sections/delete?channel=Cdev", url.Values{"_csrf": {csrf}, "section_id": {id}}.Encode(), false); r.Code != http.StatusSeeOther {
+		t.Fatalf("delete status=%d body=%s", r.Code, r.Body)
+	}
+	requireMissing(t, "section gone", get(t, mux, "/app?channel=Cdev").Body.String(), `aria-label="Priorities"`)
+	if remaining, _ := messages.SidebarSections(context.Background(), "T1", "U1"); len(remaining) != 0 {
+		t.Fatalf("sections after delete = %+v, want none", remaining)
+	}
+}
+
 // A search hit shows its author's current status beside their name, the same
 // projection the timeline makes, so a result reads like the message does.
 func TestSearchResultsProjectTheAuthorStatus(t *testing.T) {

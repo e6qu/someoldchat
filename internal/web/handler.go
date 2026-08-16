@@ -394,6 +394,8 @@ type pageData struct {
 	Thread               messageList
 	ThreadTimestamp      string
 	Channels             []conversationView
+	SidebarSections      []sidebarSectionView
+	SectionOptions       []sidebarSectionOption
 	Directs              []conversationView
 	MoreChannelsURL      string
 	Channel              string
@@ -1638,6 +1640,14 @@ const workspaceRefinements = `<style>
 .new-channel input[type=text]{min-width:0;width:100%;border:1px solid #ffffff8a;border-radius:4px;background:#ffffff1f;color:#fff;padding:6px 7px}
 .new-channel .privacy{display:flex;grid-template-columns:none;align-items:center;gap:6px}
 .new-channel button{width:100%;border:0;border-radius:5px;background:#fff;color:var(--accent);font-weight:800;padding:6px 9px}
+.side-section-custom{margin-top:6px}.side-section-head{display:flex;align-items:center;gap:2px}
+.section-collapse{flex:1;min-width:0;margin:0}.section-collapse button{width:100%;text-align:left;border:0;background:transparent;color:#f5eaf6;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:5px 8px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-row{display:flex;align-items:center}.side-row .side-link{flex:1;min-width:0}
+.section-menu,.channel-menu{margin:0 4px 0 0}.section-menu>summary,.channel-menu>summary{list-style:none;cursor:pointer;color:#f5eaf6cc;padding:2px 6px;font-size:15px;line-height:1}.section-menu>summary::-webkit-details-marker,.channel-menu>summary::-webkit-details-marker{display:none}
+.section-menu form,.channel-menu form{display:grid;gap:4px;background:#241426;border:1px solid #ffffff33;border-radius:6px;padding:8px;margin:4px 6px}
+.section-menu label,.channel-menu label{display:grid;gap:3px;color:#f5eaf6;font-size:12px}
+.section-menu input[type=text],.channel-menu input[type=text]{min-width:0;border:1px solid #ffffff8a;border-radius:4px;background:#ffffff1f;color:#fff;padding:5px 6px}
+.section-menu button,.channel-menu button{border:0;border-radius:4px;background:#ffffff26;color:#fff;font-weight:700;padding:5px 8px;text-align:left;cursor:pointer;width:100%}
 .composer-wrap{background:var(--panel-strong);padding-top:7px;padding-bottom:12px}
 .composer-shortcuts{margin:0 0 4px 2px}
 .composer{border-color:var(--field-line);border-radius:9px;box-shadow:none;padding:8px 10px}
@@ -2055,13 +2065,32 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         {{if .ShowAuthAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
       </nav>
       {{if .Apps}}<nav class="side-section" aria-label="Apps"><div class="side-label">Apps</div>{{range .Apps}}<a class="side-link" href="/app/apps/{{.ID}}?channel={{$.Channel}}"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">{{.Name}}</span></a>{{end}}</nav>{{end}}
+      {{range .SidebarSections}}
+      <nav class="side-section side-section-custom" aria-label="{{.Name}}">
+        <div class="side-section-head">
+          <form class="section-collapse" method="post" action="/app/sidebar/sections/collapse?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="collapsed" value="{{if .Collapsed}}false{{else}}true{{end}}"><button type="submit" aria-expanded="{{if .Collapsed}}false{{else}}true{{end}}" aria-label="{{if .Collapsed}}Expand{{else}}Collapse{{end}} {{.Name}}"><span aria-hidden="true">{{if .Collapsed}}▸{{else}}▾{{end}}</span> {{.Name}}</button></form>
+          <details class="section-menu"><summary aria-label="Manage {{.Name}}"><span aria-hidden="true">⋯</span></summary>
+            {{if .CanUp}}<form method="post" action="/app/sidebar/sections/move?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="direction" value="up"><button type="submit">Move up</button></form>{{end}}
+            {{if .CanDown}}<form method="post" action="/app/sidebar/sections/move?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="direction" value="down"><button type="submit">Move down</button></form>{{end}}
+            <form method="post" action="/app/sidebar/sections/rename?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><label>Rename<input type="text" name="name" maxlength="80" value="{{.Name}}" required></label><button type="submit">Save name</button></form>
+            <form method="post" action="/app/sidebar/sections/delete?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><button type="submit">Delete section</button></form>
+          </details>
+        </div>
+        {{if not .Collapsed}}{{range .Channels}}
+        <div class="side-row">
+          <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>
+          <details class="channel-menu"><summary aria-label="Move {{.Name}} to a section"><span aria-hidden="true">⋯</span></summary><form method="post" action="/app/sidebar/sections/assign?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="conversation" value="{{.ID}}">{{range $.SectionOptions}}<button type="submit" name="section" value="{{.ID}}">Move to {{.Name}}</button>{{end}}<button type="submit" name="section" value="">Remove from section</button></form></details>
+        </div>
+        {{else}}<p class="side-empty">No channels here yet.</p>{{end}}{{end}}
+      </nav>
+      {{end}}
       <nav class="side-section" aria-label="Channels">
         <div class="side-label">Channels</div>
         {{range .Channels}}
-        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}">
-          <span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>
-          {{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
-        </a>
+        <div class="side-row">
+          <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>
+          {{if $.SectionOptions}}<details class="channel-menu"><summary aria-label="Move {{.Name}} to a section"><span aria-hidden="true">⋯</span></summary><form method="post" action="/app/sidebar/sections/assign?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="conversation" value="{{.ID}}">{{range $.SectionOptions}}<button type="submit" name="section" value="{{.ID}}">Move to {{.Name}}</button>{{end}}</form></details>{{end}}
+        </div>
         {{else}}<p class="side-empty">No channels available.</p>{{end}}
         {{if .CanCreate}}
         <details class="new-channel">
@@ -2074,6 +2103,14 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           </form>
         </details>
         {{end}}
+        <details class="new-channel new-section">
+          <summary>＋ New section</summary>
+          <form method="post" action="/app/sidebar/sections/create?channel={{.Channel}}">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+            <label for="new-section-name">Section name<input id="new-section-name" type="text" name="name" maxlength="80" placeholder="Priorities" required></label>
+            <button type="submit">Create section</button>
+          </form>
+        </details>
       </nav>
       {{if .Directs}}
       <nav class="side-section" aria-label="Direct messages">
@@ -4571,6 +4608,12 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/activity/preferences", h.setActivityPreferences)
 	mux.HandleFunc("POST /app/activity/views", h.createActivitySavedView)
 	mux.HandleFunc("POST /app/activity/views/delete", h.deleteActivitySavedView)
+	mux.HandleFunc("POST /app/sidebar/sections/create", h.createSidebarSection)
+	mux.HandleFunc("POST /app/sidebar/sections/rename", h.renameSidebarSection)
+	mux.HandleFunc("POST /app/sidebar/sections/delete", h.deleteSidebarSection)
+	mux.HandleFunc("POST /app/sidebar/sections/collapse", h.setSidebarSectionCollapsed)
+	mux.HandleFunc("POST /app/sidebar/sections/move", h.moveSidebarSection)
+	mux.HandleFunc("POST /app/sidebar/sections/assign", h.assignConversationToSidebarSection)
 	mux.HandleFunc("POST /app/activity/read", h.acknowledgeActivityReminders)
 	mux.HandleFunc("GET /app/notifications", h.notifications)
 	mux.HandleFunc("POST /app/notifications/preferences", h.setWorkspaceNotifications)
@@ -5536,6 +5579,11 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			for index := range conversations.Channels {
 				conversations.Channels[index].HasDraft = withDraft[domain.ConversationID(conversations.Channels[index].ID)]
 			}
+			for sectionIndex := range conversations.Sections {
+				for index := range conversations.Sections[sectionIndex].Channels {
+					conversations.Sections[sectionIndex].Channels[index].HasDraft = withDraft[domain.ConversationID(conversations.Sections[sectionIndex].Channels[index].ID)]
+				}
+			}
 			for index := range conversations.Directs {
 				conversations.Directs[index].HasDraft = withDraft[domain.ConversationID(conversations.Directs[index].ID)]
 			}
@@ -5562,6 +5610,8 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Thread:               thread,
 		ThreadTimestamp:      threadTimestamp,
 		Channels:             conversations.Channels,
+		SidebarSections:      conversations.Sections,
+		SectionOptions:       conversations.SectionOptions,
 		Directs:              conversations.Directs,
 		Channel:              string(channel),
 		ChannelName:          channelName,
@@ -6359,12 +6409,31 @@ func statusEmojiDisplay(shortcode string, customEmoji map[string]string) templat
 // sidebarView is the conversation list plus the one fact the page outside it
 // needs: whether the conversation being read still has unread messages, which
 // decides whether the page offers to mark it read.
+type sidebarSectionOption struct {
+	ID   string
+	Name string
+}
+
+// sidebarSectionView is one custom section in the channel sidebar: its channels
+// in order, whether it is shown collapsed, and whether it can move up or down
+// among the member's sections.
+type sidebarSectionView struct {
+	ID        string
+	Name      string
+	Collapsed bool
+	CanUp     bool
+	CanDown   bool
+	Channels  []conversationView
+}
+
 type sidebarView struct {
-	Channels      []conversationView
-	Directs       []conversationView
-	More          domain.Cursor
-	Notice        string
-	CurrentUnread int
+	Channels       []conversationView
+	Sections       []sidebarSectionView
+	SectionOptions []sidebarSectionOption
+	Directs        []conversationView
+	More           domain.Cursor
+	Notice         string
+	CurrentUnread  int
 }
 
 func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel domain.ConversationID, atLatest bool, cursor domain.Cursor) sidebarView {
@@ -6376,6 +6445,8 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 		Channels: make([]conversationView, 0, len(page.Conversations)),
 		Directs:  make([]conversationView, 0, len(page.Conversations)),
 	}
+	channelByID := make(map[domain.ConversationID]conversationView)
+	channelOrder := make([]domain.ConversationID, 0, len(page.Conversations))
 	resolved := 0
 	for _, conversation := range page.Conversations {
 		if conversation.ID == channel {
@@ -6388,7 +6459,8 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 			item.UnreadCount = 0
 		}
 		if !conversation.IsDirectOrGroup() {
-			view.Channels = append(view.Channels, item)
+			channelByID[conversation.ID] = item
+			channelOrder = append(channelOrder, conversation.ID)
 			continue
 		}
 		if resolved < directNameWindow && (conversation.Kind != domain.ConversationTypeMPIM || conversation.Name == "" || conversation.Name == "direct") {
@@ -6398,6 +6470,33 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 			}
 		}
 		view.Directs = append(view.Directs, item)
+	}
+	// Custom sections come first, each holding its assigned channels in order.
+	// A channel the member has left, or that scrolled past the window, simply
+	// falls out — the store keeps the assignment, the sidebar just does not draw
+	// what it cannot see.
+	assigned := make(map[domain.ConversationID]struct{})
+	if sections, err := h.Messages.SidebarSections(ctx, principal.WorkspaceID, principal.UserID); err == nil {
+		for index, section := range sections {
+			sectionView := sidebarSectionView{
+				ID: string(section.ID), Name: section.Name, Collapsed: section.Collapsed,
+				CanUp: index > 0, CanDown: index < len(sections)-1,
+			}
+			for _, id := range section.Conversations {
+				if item, ok := channelByID[id]; ok {
+					sectionView.Channels = append(sectionView.Channels, item)
+					assigned[id] = struct{}{}
+				}
+			}
+			view.Sections = append(view.Sections, sectionView)
+			view.SectionOptions = append(view.SectionOptions, sidebarSectionOption{ID: string(section.ID), Name: section.Name})
+		}
+	}
+	for _, id := range channelOrder {
+		if _, ok := assigned[id]; ok {
+			continue
+		}
+		view.Channels = append(view.Channels, channelByID[id])
 	}
 	if page.HasMore {
 		view.More = page.NextCursor
@@ -7491,6 +7590,141 @@ func (h Handler) deleteActivitySavedView(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.redirectMutation(w, r, activityPageURL(channel, "", "", false, false, ""))
+}
+
+func sidebarRedirect(channel string) string {
+	if channel == "" {
+		return "/app"
+	}
+	return "/app?channel=" + url.QueryEscape(channel)
+}
+
+func (h Handler) createSidebarSection(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the sidebar and try again.")
+	if !ok {
+		return
+	}
+	if _, err := h.Messages.CreateSidebarSection(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"]); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That section was not created", "Give the section a name, and check you have room for another.")
+		return
+	}
+	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))
+}
+
+func (h Handler) renameSidebarSection(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the sidebar and try again.")
+	if !ok {
+		return
+	}
+	if err := h.Messages.RenameSidebarSection(r.Context(), principal.WorkspaceID, principal.UserID, domain.SidebarSectionID(strings.TrimSpace(fields["section_id"])), fields["name"]); err != nil {
+		h.writeMutationError(w, r, http.StatusNotFound, "That section was not renamed", "It is no longer there, or the name is empty.")
+		return
+	}
+	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))
+}
+
+func (h Handler) deleteSidebarSection(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the sidebar and try again.")
+	if !ok {
+		return
+	}
+	if err := h.Messages.DeleteSidebarSection(r.Context(), principal.WorkspaceID, principal.UserID, domain.SidebarSectionID(strings.TrimSpace(fields["section_id"]))); err != nil {
+		h.writeMutationError(w, r, http.StatusNotFound, "That section was not removed", "It is no longer there.")
+		return
+	}
+	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))
+}
+
+func (h Handler) setSidebarSectionCollapsed(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the sidebar and try again.")
+	if !ok {
+		return
+	}
+	if err := h.Messages.SetSidebarSectionCollapsed(r.Context(), principal.WorkspaceID, principal.UserID, domain.SidebarSectionID(strings.TrimSpace(fields["section_id"])), fields["collapsed"] == "true"); err != nil {
+		h.writeMutationError(w, r, http.StatusNotFound, "That section was not changed", "It is no longer there.")
+		return
+	}
+	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))
+}
+
+// moveSidebarSection turns a one-step up/down into the full reorder the store
+// takes: it swaps the section with its neighbour and submits the new order.
+func (h Handler) moveSidebarSection(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the sidebar and try again.")
+	if !ok {
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	id := domain.SidebarSectionID(strings.TrimSpace(fields["section_id"]))
+	sections, err := h.Messages.SidebarSections(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "The sidebar is temporarily unavailable", "Reload and try again.")
+		return
+	}
+	order := make([]domain.SidebarSectionID, len(sections))
+	index := -1
+	for position, section := range sections {
+		order[position] = section.ID
+		if section.ID == id {
+			index = position
+		}
+	}
+	target := index - 1
+	if fields["direction"] == "down" {
+		target = index + 1
+	}
+	if index == -1 || target < 0 || target >= len(order) {
+		h.redirectMutation(w, r, sidebarRedirect(channel))
+		return
+	}
+	order[index], order[target] = order[target], order[index]
+	if err := h.Messages.ReorderSidebarSections(r.Context(), principal.WorkspaceID, principal.UserID, order); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That section was not moved", "Reload and try again.")
+		return
+	}
+	h.redirectMutation(w, r, sidebarRedirect(channel))
+}
+
+func (h Handler) assignConversationToSidebarSection(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the sidebar and try again.")
+	if !ok {
+		return
+	}
+	if err := h.Messages.AssignConversationToSidebarSection(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["conversation"])), domain.SidebarSectionID(strings.TrimSpace(fields["section"])), ""); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That channel was not moved", "Reload and try again.")
+		return
+	}
+	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))
 }
 
 func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Request) {
