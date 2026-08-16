@@ -24,6 +24,7 @@ type Service interface {
 	CreateAppFromManifest(context.Context, string, string, domain.WorkspaceID) (domain.App, domain.AppCredentials, error)
 	ExportAppManifest(context.Context, string, domain.AppID) (domain.App, string, error)
 	UpdateAppFromManifest(context.Context, string, domain.AppID, string) (domain.App, error)
+	SetAppDistribution(context.Context, string, domain.AppID, bool) (domain.App, error)
 	DeleteDeveloperApp(context.Context, string, domain.AppID) error
 	ListDeveloperApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.App, error)
 	ListWorkspaceApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.InstalledApp, error)

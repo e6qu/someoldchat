@@ -439,6 +439,24 @@ func (s *Store) UpdateApp(ctx context.Context, app domain.App, revision domain.A
 	})
 }
 
+func (s *Store) SetAppDistribution(ctx context.Context, appID domain.AppID, distribution string, at time.Time) error {
+	return underContention(ctx, func() error {
+		result, err := s.db.ExecContext(ctx, `UPDATE slack_apps SET distribution = ?, updated_at = ? WHERE id = ? AND deleted = 0`,
+			distribution, domain.NewStoredTime(at), appID)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
+}
+
 func (s *Store) DeleteApp(ctx context.Context, appID domain.AppID, ownerID domain.UserID, deletedAt time.Time) error {
 	if appID == "" || ownerID == "" || deletedAt.IsZero() {
 		return store.InvalidArgument("app deletion identity is required")

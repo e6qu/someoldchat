@@ -313,6 +313,19 @@ func (s *Store) UpdateApp(_ context.Context, app domain.App, revision domain.App
 	return nil
 }
 
+func (s *Store) SetAppDistribution(_ context.Context, appID domain.AppID, distribution string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, exists := s.apps[appID]
+	if !exists || app.Deleted {
+		return store.ErrNotFound
+	}
+	app.Distribution = distribution
+	app.UpdatedAt = at
+	s.apps[appID] = app
+	return nil
+}
+
 func (s *Store) DeleteApp(_ context.Context, appID domain.AppID, ownerID domain.UserID, deletedAt time.Time) error {
 	if appID == "" || ownerID == "" || deletedAt.IsZero() {
 		return store.InvalidArgument("app deletion identity is required")

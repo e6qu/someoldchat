@@ -10,6 +10,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -133,14 +134,14 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
     </aside>
     <section class="card" aria-labelledby="manifest-heading">
       <h2 id="manifest-heading">{{if .Selected}}Edit {{.Selected.Name}}{{else}}Create an app{{end}}</h2>
-      {{if .Selected}}<div class="meta"><span class="pill">{{.Selected.ID}}</span><span class="pill">Client {{.Selected.ClientID}}</span><span class="pill">Manifest v{{.Selected.ManifestVersion}}</span>{{if .Selected.SocketModeEnabled}}<span class="pill">Socket Mode</span>{{end}}{{if .Selected.TokenRotationEnabled}}<span class="pill">Token rotation</span>{{end}}</div>{{end}}
+      {{if .Selected}}<div class="meta"><span class="pill">{{.Selected.ID}}</span><span class="pill">Client {{.Selected.ClientID}}</span><span class="pill">Manifest v{{.Selected.ManifestVersion}}</span>{{if .Selected.SocketModeEnabled}}<span class="pill">Socket Mode</span>{{end}}{{if .Selected.TokenRotationEnabled}}<span class="pill">Token rotation</span>{{end}}{{if eq .Selected.Distribution "public"}}<span class="pill">Distributed</span>{{else}}<span class="pill">Private</span>{{end}}</div>{{end}}
       {{if .Problems}}<ul class="problems" aria-label="Manifest errors">{{range .Problems}}<li><strong>{{if .Pointer}}{{.Pointer}}: {{end}}</strong>{{.Message}}</li>{{end}}</ul>{{end}}
       <form method="post" action="{{if .Selected}}/app/developer/apps/update{{else}}/app/developer/apps/create{{end}}">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">{{if .Selected}}<input type="hidden" name="app_id" value="{{.Selected.ID}}">{{end}}
         <label class="field" for="manifest">App manifest (JSON)<textarea id="manifest" name="manifest" maxlength="1048576" spellcheck="false" required>{{.Manifest}}</textarea></label>
         <div class="actions"><button class="button" type="submit">{{if .Selected}}Save manifest{{else}}Create app{{end}}</button>{{if .InstallURL}}<a href="{{.InstallURL}}">Open install flow</a>{{end}}{{if .DatastoreURL}}<a href="{{.DatastoreURL}}">Manage hosted datastores</a>{{end}}{{if .DeliveryURL}}<a href="{{.DeliveryURL}}">View event delivery health</a>{{end}}</div>
       </form>
-      {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form><form method="post" action="/app/developer/apps/app-token/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Revoke app-level tokens</button></form>{{if .AppTokens}}<div class="app-tokens"><h3 id="app-tokens-heading">Issued app-level tokens</h3><table class="app-token-table" aria-labelledby="app-tokens-heading"><thead><tr><th scope="col">Token</th><th scope="col">Issued</th><th scope="col">Scopes</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>{{range .AppTokens}}<tr{{if .Revoked}} class="token-revoked"{{end}}><td><code>{{.ShortID}}…</code></td><td>{{.IssuedAt}}</td><td>{{if .Scopes}}{{.Scopes}}{{else}}—{{end}}</td><td>{{if .Revoked}}Revoked{{else}}Active{{end}}</td><td>{{if not .Revoked}}<form class="inline" method="post" action="/app/developer/apps/app-token/revoke-one"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{$.Selected.ID}}"><input type="hidden" name="token_id" value="{{.ID}}"><button class="button secondary" type="submit">Revoke</button></form>{{end}}</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}<form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
+      {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form><form method="post" action="/app/developer/apps/app-token/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Revoke app-level tokens</button></form>{{if .AppTokens}}<div class="app-tokens"><h3 id="app-tokens-heading">Issued app-level tokens</h3><table class="app-token-table" aria-labelledby="app-tokens-heading"><thead><tr><th scope="col">Token</th><th scope="col">Issued</th><th scope="col">Scopes</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>{{range .AppTokens}}<tr{{if .Revoked}} class="token-revoked"{{end}}><td><code>{{.ShortID}}…</code></td><td>{{.IssuedAt}}</td><td>{{if .Scopes}}{{.Scopes}}{{else}}—{{end}}</td><td>{{if .Revoked}}Revoked{{else}}Active{{end}}</td><td>{{if not .Revoked}}<form class="inline" method="post" action="/app/developer/apps/app-token/revoke-one"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{$.Selected.ID}}"><input type="hidden" name="token_id" value="{{.ID}}"><button class="button secondary" type="submit">Revoke</button></form>{{end}}</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}<div class="distribution"><h3 id="distribution-heading">Distribution</h3><p class="muted">{{if eq .Selected.Distribution "public"}}This app is distributed: it can be installed in any workspace through its install flow.{{else}}This app is private: only its development workspace can install it. Activating public distribution needs a redirect URL in the manifest.{{end}}</p><form method="post" action="/app/developer/apps/distribution"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}">{{if eq .Selected.Distribution "public"}}<input type="hidden" name="public" value="false"><button class="button secondary" type="submit">Deactivate public distribution</button>{{else}}<input type="hidden" name="public" value="true"><button class="button" type="submit">Activate public distribution</button>{{end}}</form></div><form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
     </section>
   </div>
 </main>
@@ -240,6 +241,28 @@ func (h Handler) deleteDeveloperApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/app/developer/apps", http.StatusSeeOther)
+}
+
+func (h Handler) setDeveloperAppDistribution(w http.ResponseWriter, r *http.Request) {
+	principal, _, ok := h.developerPrincipal(w, r)
+	if !ok {
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The app distribution was not changed.")
+	if !ok {
+		return
+	}
+	appID := strings.TrimSpace(fields["app_id"])
+	public := strings.TrimSpace(fields["public"]) == "true"
+	configuration, err := h.Messages.IssueAppConfigurationToken(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err == nil {
+		_, err = h.Messages.SetAppDistribution(r.Context(), configuration.Token, domain.AppID(appID), public)
+	}
+	if err != nil {
+		h.writeMutationError(w, r, developerAppStatus(err), "The app distribution was not changed", developerAppError(err))
+		return
+	}
+	http.Redirect(w, r, "/app/developer/apps?app="+url.QueryEscape(appID), http.StatusSeeOther)
 }
 
 func (h Handler) issueDeveloperConfigurationToken(w http.ResponseWriter, r *http.Request) {
@@ -415,6 +438,8 @@ func setDeveloperAppLinks(data *developerAppsData, app domain.App, manifest stri
 
 func developerAppStatus(err error) int {
 	switch {
+	case errors.Is(err, service.ErrAppNotDistributable):
+		return http.StatusBadRequest
 	case errors.Is(err, store.ErrNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrAlreadyExists):
@@ -428,6 +453,8 @@ func developerAppStatus(err error) int {
 
 func developerAppError(err error) string {
 	switch {
+	case errors.Is(err, service.ErrAppNotDistributable):
+		return "Add a redirect URL to the manifest before activating public distribution: an install has nowhere to return to without one."
 	case errors.Is(err, store.ErrNotFound):
 		return "That app is not available. It may have been deleted or belong to another developer."
 	case errors.Is(err, store.ErrConflict):

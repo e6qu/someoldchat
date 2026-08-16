@@ -62,6 +62,19 @@ func TestDeveloperAppConsoleCoversCreateEditInstallTokensAndDelete(t *testing.T)
 	}
 	requireContains(t, "updated app", updated.Body.String(), "Manifest saved", "Incident alerts", "Manifest v2")
 
+	// Distribution: the app is private and offers activation. Its manifest has a
+	// redirect URL, so activating succeeds and the state flips to distributed.
+	requireContains(t, "private app", updated.Body.String(), "Activate public distribution", "Private")
+	activate := postForm(t, mux, "/app/developer/apps/distribution", url.Values{"app_id": {string(appID)}, "public": {"true"}}.Encode(), false)
+	if activate.Code != http.StatusSeeOther {
+		t.Fatalf("activate distribution status=%d body=%s", activate.Code, activate.Body)
+	}
+	if stored, _, _ := repository.GetApp(context.Background(), appID); stored.Distribution != "public" {
+		t.Fatalf("distribution not activated: %q", stored.Distribution)
+	}
+	distributedPage := get(t, mux, "/app/developer/apps?app="+url.QueryEscape(string(appID)))
+	requireContains(t, "distributed app", distributedPage.Body.String(), "Distributed", "Deactivate public distribution")
+
 	appTokenResponse := postForm(t, mux, "/app/developer/apps/app-token", url.Values{"app_id": {string(appID)}}.Encode(), false)
 	if appTokenResponse.Code != http.StatusCreated {
 		t.Fatalf("app token status=%d body=%s", appTokenResponse.Code, appTokenResponse.Body)
