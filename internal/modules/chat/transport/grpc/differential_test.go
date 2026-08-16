@@ -1779,9 +1779,18 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// A participant's ephemeral reaction: a valid emoji is accepted, an
+				// unknown one is refused, a channel member outside the huddle (U3)
+				// may not send one, and neither may a workspace member outside the
+				// conversation (UA).
+				reacted := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, ":tada:")
+				reactUnknown := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, "not-an-emoji")
+				reactNonParticipant := chat.SendHuddleReaction(ctx, "T1", "U3", started.ID, "tada")
+				reactOutsider := chat.SendHuddleReaction(ctx, "T1", "UA", started.ID, "tada")
 				if _, err := chat.LeaveHuddle(ctx, "T1", "U2", "C1"); err != nil {
 					return nil, err
 				}
+				// U1 is still in it, but once it ends a reaction is refused too.
 				// U2 has gone, so U1 can no longer reach them through the call.
 				afterLeaving := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
 				ended, err := chat.EndHuddle(ctx, "T1", "U1", "C1")
@@ -1789,6 +1798,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				afterEnding := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
+				reactAfterEnding := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, "tada")
 				_, gone := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
 				return []any{
 					started.Title, len(started.Participants), len(joined.Participants), len(active.Participants),
@@ -1797,6 +1807,8 @@ func parityCases() []parityCase {
 					self != nil, outsider != nil, stranger != nil, unknownKind != nil,
 					empty != nil, oversized != nil, missingCall != nil,
 					afterLeaving != nil, afterEnding != nil,
+					reacted == nil, reactUnknown != nil, reactNonParticipant != nil,
+					reactOutsider != nil, reactAfterEnding != nil,
 					inviteMember == nil, inviteSelf != nil, inviteJoined != nil,
 					inviteOutsider != nil, inviteFromNonParticipant != nil,
 				}, nil

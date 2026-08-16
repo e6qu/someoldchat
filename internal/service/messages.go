@@ -8050,6 +8050,66 @@ func (m Messages) SendCallSignal(ctx context.Context, workspaceID domain.Workspa
 	return m.Store.AppendEvent(ctx, event)
 }
 
+// SendHuddleReaction broadcasts one participant's ephemeral emoji reaction to
+// the others in a running huddle. Like a WebRTC signal it is never stored — it
+// is a moment, not a record — but unlike a signal it reaches every participant
+// rather than one, so it is scoped to the huddle's conversation the way the
+// huddle's own lifecycle events are. Slack's huddle reactions float up and fade;
+// the durable side of this is deliberately nothing.
+func (m Messages) SendHuddleReaction(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, callID domain.CallID, name string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return err
+	}
+	reaction, err := m.huddleReactionEmoji(ctx, workspaceID, name)
+	if err != nil {
+		return err
+	}
+	call, err := m.Store.GetCall(ctx, workspaceID, callID)
+	if err != nil {
+		return err
+	}
+	// The huddle must be running and the sender in it, which is the same
+	// standing SendCallSignal requires: a reaction is not a way to reach a
+	// huddle nobody may see, or to keep reaching one after leaving.
+	if !call.EndedAt.IsZero() || !slices.Contains(call.Participants, actor) {
+		return ErrInvalidCall
+	}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("huddle.reaction",
+		events.String("call_id", string(callID)),
+		events.String("channel_id", string(call.ConversationID)),
+		events.String("user_id", string(actor)),
+		events.String("reaction", reaction),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.AppendEvent(ctx, event)
+}
+
+// huddleReactionEmoji validates that name is a standard reaction or a durable
+// workspace custom emoji and returns its normalized form — the same rule
+// AddReaction applies to a message reaction. A huddle reaction is ephemeral, so
+// the name is only validated, never stored.
+func (m Messages) huddleReactionEmoji(ctx context.Context, workspaceID domain.WorkspaceID, name string) (string, error) {
+	name = normalizeEmojiName(name)
+	if _, _, standard := slackemoji.ParseReactionName(name); standard {
+		return name, nil
+	}
+	if !validEmojiName(name) {
+		return "", ErrInvalidReaction
+	}
+	custom, err := m.Store.ListEmojis(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	for _, value := range custom {
+		if normalizeEmojiName(value.Name) == name {
+			return name, nil
+		}
+	}
+	return "", ErrInvalidReaction
+}
+
 func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic string, id domain.CallID, conversationID domain.ConversationID, at time.Time) (events.Event, error) {
 	return newEvent(workspaceID, actor, events.NewPayload(topic,
 		events.String("call_id", string(id)),

@@ -135,6 +135,39 @@ try{decoded=JSON.parse(detail.data)}catch(error){return}
 if(!decoded||decoded.call_id!==callID||!decoded.from_user_id)return;
 receive(decoded.from_user_id,decoded.signal,decoded.payload);
 });
+var reactURL=session.getAttribute('data-huddle-react');
+var reactionLayer=session.querySelector('[data-huddle-reactions]');
+var glyphMap={};
+var sendReaction=function(name){
+if(!reactURL||!name)return;
+var body=new URLSearchParams();
+body.set('_csrf',csrf);
+body.set('call_id',callID);
+body.set('reaction',name);
+fetch(reactURL,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()}).catch(function(){});
+};
+var floatReaction=function(glyph){
+if(!reactionLayer||!glyph)return;
+var bubble=document.createElement('span');
+bubble.className='huddle-reaction-bubble';
+bubble.textContent=glyph;
+bubble.style.left=(10+Math.floor(Math.random()*80))+'%';
+reactionLayer.appendChild(bubble);
+window.setTimeout(function(){bubble.remove()},2600);
+};
+Array.prototype.forEach.call(session.querySelectorAll('[data-huddle-react-name]'),function(button){
+var name=button.getAttribute('data-huddle-react-name');
+glyphMap[name]=button.textContent;
+button.addEventListener('click',function(){sendReaction(name)});
+});
+document.addEventListener('sameoldchat:event',function(event){
+var detail=event.detail;
+if(!detail||detail.type!=='huddle.reaction')return;
+var decoded=null;
+try{decoded=JSON.parse(detail.data)}catch(error){return}
+if(!decoded||decoded.call_id!==callID||!decoded.reaction)return;
+floatReaction(glyphMap[decoded.reaction]||(':'+decoded.reaction+':'));
+});
 var replaceOutgoing=function(track,kind){
 Object.keys(connections).forEach(function(id){
 var sender=connections[id].getSenders().filter(function(candidate){

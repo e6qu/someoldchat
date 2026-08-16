@@ -2684,16 +2684,24 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if err := s.DeleteView(ctx, "T1", "U1", firstView.ID, false, viewEvent("event-view-closed", "view.closed", now.Add(4*time.Second))); err != nil {
 		t.Fatal(err)
 	}
-	// A huddle is started, joined by a second person and then left by both, so
-	// all four huddle topics are emitted by real mutations rather than asserted
-	// from a list.
+	// A huddle is started, joined by a second person, carries a signal and a
+	// reaction, and is then left by both, so every huddle topic the page
+	// subscribes to is emitted by a real mutation rather than asserted from a
+	// list.
 	messages := service.Messages{Store: s}
-	if _, err := messages.StartHuddle(ctx, "T1", "U1", "Cdev", ""); err != nil {
+	call, err := messages.StartHuddle(ctx, "T1", "U1", "Cdev", "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "second"})
 	s.SeedConversationMember("Cdev", "U2")
 	if _, err := messages.JoinHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SendCallSignal(ctx, "T1", "U1", call.ID, "U2", domain.CallSignalOffer, "v=0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SendHuddleReaction(ctx, "T1", "U1", call.ID, "tada"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
@@ -5266,6 +5274,15 @@ func TestRemoteFilesAreVisibleAndNeverClaimToBeHosted(t *testing.T) {
 // claim, and the claim has changed: joining now connects the browser to each
 // other participant. The tripwire is rewritten rather than deleted, so it
 // guards the new claim as it guarded the old one.
+func activeHuddleCallID(t *testing.T, store *memory.Store) string {
+	t.Helper()
+	call, err := store.ActiveHuddle(context.Background(), "T1", "Cdev")
+	if err != nil {
+		t.Fatalf("active huddle: %v", err)
+	}
+	return string(call.ID)
+}
+
 func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	store, mux := browserWorkspace(t, auth.AllScopes())
 	ctx := context.Background()
@@ -5285,9 +5302,23 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 		"Huddle in", "Leave huddle", "End for everyone",
 		// The member who started the huddle is in it, so the media session and
 		// its controls are present rather than a note explaining their absence.
-		"huddle-media-session", "huddle-tiles",
-		"data-huddle-control=\"microphone\"", "data-huddle-control=\"camera\"", "data-huddle-control=\"screen\"")
+		"data-huddle-call=", "huddle-tiles",
+		"data-huddle-control=\"microphone\"", "data-huddle-control=\"camera\"", "data-huddle-control=\"screen\"",
+		// The huddle offers quick reactions to the joined member.
+		"data-huddle-react=\"/app/huddle/react\"", "data-huddle-react-name=\"tada\"")
 	requireMissing(t, "active huddle bar", active, "Start a huddle")
+
+	// A participant's reaction is accepted; it is ephemeral, so success is the
+	// acknowledgement and nothing durable to read back.
+	reacted := postForm(t, mux, "/app/huddle/react", url.Values{"_csrf": {auth.CSRFToken("session")}, "call_id": {activeHuddleCallID(t, store)}, "reaction": {"tada"}}.Encode(), false)
+	if reacted.Code != http.StatusOK {
+		t.Fatalf("react=%d: %s", reacted.Code, reacted.Body)
+	}
+	// An emoji the workspace does not hold is refused as the member's mistake.
+	badReaction := postForm(t, mux, "/app/huddle/react", url.Values{"_csrf": {auth.CSRFToken("session")}, "call_id": {activeHuddleCallID(t, store)}, "reaction": {"not-an-emoji"}}.Encode(), false)
+	if badReaction.Code != http.StatusBadRequest {
+		t.Fatalf("bad reaction=%d: %s", badReaction.Code, badReaction.Body)
+	}
 
 	// A second person joins through the service; the bar is a live fragment,
 	// so the participant list follows without a page load.
@@ -5309,7 +5340,7 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	requireContains(t, "after leaving", afterLeaving, "Join huddle")
 	// Somebody who is not in the huddle has no media session: the controls
 	// belong to a connection this reader does not have.
-	requireMissing(t, "after leaving", afterLeaving, "Start a huddle", "huddle-media-session")
+	requireMissing(t, "after leaving", afterLeaving, "Start a huddle", "data-huddle-call=")
 
 	if _, err := messages.LeaveHuddle(ctx, "T1", "U2", "Cdev"); err != nil {
 		t.Fatal(err)

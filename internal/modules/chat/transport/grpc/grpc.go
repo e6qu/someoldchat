@@ -277,6 +277,19 @@ func (r Remote) SendCallSignal(ctx context.Context, workspaceID domain.Workspace
 	return nil
 }
 
+func (r Remote) SendHuddleReaction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, callID domain.CallID, reaction string) error {
+	out, err := r.calls.SendHuddleReaction(ctx, &chatv1.HuddleReactionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), CallId: string(callID), Reaction: reaction,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed huddle reaction was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) InviteToHuddle(ctx context.Context, workspaceID domain.WorkspaceID, actor, invitee domain.UserID, conversationID domain.ConversationID) error {
 	out, err := r.calls.InviteToHuddle(ctx, &chatv1.HuddleInviteRequest{
 		WorkspaceId: string(workspaceID), UserId: string(actor), InviteeId: string(invitee), ConversationId: string(conversationID),
@@ -6149,6 +6162,14 @@ func (s *Server) SendCallSignal(ctx context.Context, input *chatv1.CallSignalReq
 	if err := s.implementation.SendCallSignal(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
 		domain.CallID(input.GetCallId()), domain.UserID(input.GetRecipientId()),
 		domain.CallSignalKind(input.GetKind()), input.GetPayload()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SendHuddleReaction(ctx context.Context, input *chatv1.HuddleReactionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SendHuddleReaction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.CallID(input.GetCallId()), input.GetReaction()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil

@@ -434,6 +434,7 @@ func authorityMatrix() map[string]authority {
 		"SearchMessages":                          authorityAnyMember,
 		"SearchPeople":                            authorityAnyMember,
 		"SendCallSignal":                          authorityAnyMember,
+		"SendHuddleReaction":                      authorityAnyMember,
 		"SendScheduledMessageNow":                 authorityAnyMember,
 		"SentMessages":                            authorityAnyMember,
 		"SetActivityPreferences":                  authorityAnyMember,

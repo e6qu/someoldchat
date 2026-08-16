@@ -298,6 +298,7 @@ type Service interface {
 	AssistantSearchAvailability(context.Context, domain.WorkspaceID, domain.UserID) (domain.AssistantSearchAvailability, error)
 	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	SendCallSignal(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, domain.UserID, domain.CallSignalKind, string) error
+	SendHuddleReaction(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, string) error
 	InviteToHuddle(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, domain.ConversationID) error
 	AdminRequestExport(context.Context, domain.WorkspaceID, domain.UserID, string, map[string]int64) error
 	RequestWorkflowStepResponsesExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, string) error

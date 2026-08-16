@@ -87,8 +87,16 @@ message CallSignalRequest {
   string payload = 6;
 }
 
+message HuddleReactionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string call_id = 3;
+  string reaction = 4;
+}
+
 service CallsService {
   rpc SendCallSignal(CallSignalRequest) returns (MutationResponse);
+  rpc SendHuddleReaction(HuddleReactionRequest) returns (MutationResponse);
   rpc InviteToHuddle(HuddleInviteRequest) returns (MutationResponse);
   rpc AddCall(AddCallRequest) returns (Call);
   rpc StartHuddle(HuddleRequest) returns (Call);

@@ -10,6 +10,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -46,6 +47,11 @@ type huddleView struct {
 	SelfID    string
 	PeerIDs   []string
 	SignalURL string
+	// ReactURL and Reactions drive ephemeral huddle reactions: the member sends
+	// one of the offered emoji and every participant sees it float and fade. They
+	// exist only while the reader is joined.
+	ReactURL  string
+	Reactions []huddleReaction
 	// InviteURL and Invitable exist while the reader is in the huddle: the
 	// people they may pull in are the conversation's members who are not
 	// already here. Empty when there is nobody left to invite.
@@ -56,6 +62,32 @@ type huddleView struct {
 type huddleInvitee struct {
 	ID   string
 	Name string
+}
+
+// huddleReaction is one quick-reaction button: Name is the colon-free shortcode
+// the server validates, Glyph is the emoji rendered on the button.
+type huddleReaction struct {
+	Name  string
+	Glyph string
+}
+
+// huddleReactionNames are the emoji the huddle bar offers as quick reactions —
+// the small standard set a huddle surfaces. Each must resolve to a glyph through
+// the shared catalog, so a name that does not is dropped rather than rendered as
+// an empty button, and the server validates the sent name the same way it
+// validates a message reaction.
+var huddleReactionNames = []string{"heart", "+1", "tada", "joy", "open_mouth", "raised_hands"}
+
+func huddleReactionChoices() []huddleReaction {
+	choices := make([]huddleReaction, 0, len(huddleReactionNames))
+	for _, name := range huddleReactionNames {
+		glyph, ok := slackemoji.ReactionUnicode(name)
+		if !ok {
+			continue
+		}
+		choices = append(choices, huddleReaction{Name: name, Glyph: glyph})
+	}
+	return choices
 }
 
 func huddleActionURL(action, channel string) string {
@@ -101,6 +133,8 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 		view.Participants = append(view.Participants, names.name(participant))
 	}
 	if view.Joined {
+		view.ReactURL = "/app/huddle/react"
+		view.Reactions = huddleReactionChoices()
 		view.InviteURL = huddleActionURL("invite", string(conversation.ID))
 		inHuddle := make(map[domain.UserID]bool, len(call.Participants))
 		for _, participant := range call.Participants {
@@ -247,6 +281,46 @@ func (h Handler) huddleSignal(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// The acknowledgement is one word and the caller retries the whole signal
 	// if it never arrives, so a failed write needs no separate report.
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+func (h Handler) huddleReact(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		writeJSONAuthError(w, err)
+		return
+	}
+	// Like huddleSignal this is a fetch endpoint, so it reports its own failures
+	// as JSON rather than pages while keeping the CSRF check decodeMutation would
+	// otherwise perform.
+	fields, err := decodeFormFields(w, r)
+	if err != nil {
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_reaction")
+		return
+	}
+	if err := auth.ValidateCSRF(r); err != nil {
+		writeJSONRefusal(w, http.StatusForbidden, "invalid_csrf")
+		return
+	}
+	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))
+	reaction := strings.TrimSpace(fields["reaction"])
+	if callID == "" || reaction == "" {
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_reaction")
+		return
+	}
+	if err := h.Messages.SendHuddleReaction(r.Context(), principal.WorkspaceID, principal.UserID, callID, reaction); err != nil {
+		// An invalid emoji is the member's mistake; anything else means the
+		// huddle ended or they left it, which the script treats the same way as a
+		// refused signal — it stops rather than surfacing an outage.
+		if errors.Is(err, service.ErrInvalidReaction) {
+			writeJSONRefusal(w, http.StatusBadRequest, "invalid_reaction")
+			return
+		}
+		writeJSONRefusal(w, http.StatusConflict, "reaction_refused")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 

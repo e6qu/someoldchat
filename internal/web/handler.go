@@ -161,6 +161,14 @@ var liveEventTopics = []string{
 	"huddle.joined",
 	"huddle.left",
 	"huddle.ended",
+	// The two ephemeral huddle topics ride the same live stream so the media
+	// script receives them as sameoldchat:event, but deliver() must not refresh a
+	// fragment for either — a signal or a reaction changes no rendered state, and
+	// refetching #huddle would tear the running media session down and rebuild
+	// it. huddle.signal was previously emitted by the server and listened for by
+	// nobody, so the WebRTC handshake never reached the peer it addressed.
+	"huddle.signal",
+	"huddle.reaction",
 }
 
 // ---------------------------------------------------------------------------
@@ -1562,6 +1570,14 @@ const workspaceRefinements = `<style>
 .huddle-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
 .huddle-actions button:hover{background:var(--hover)}
 .huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
+.huddle-media-session{position:relative}
+.huddle-reactions-bar{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.huddle-react{border:1px solid var(--field-line);border-radius:16px;background:var(--panel-strong);padding:2px 9px;font-size:16px;line-height:1.4;cursor:pointer}
+.huddle-react:hover{background:var(--hover)}
+.huddle-reactions{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.huddle-reaction-bubble{position:absolute;bottom:8px;font-size:26px;line-height:1;animation:huddle-float 2.6s ease-out forwards}
+@keyframes huddle-float{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1;transform:translateY(-12px) scale(1)}100%{opacity:0;transform:translateY(-120px) scale(1)}}
+@media (prefers-reduced-motion:reduce){.huddle-reaction-bubble{animation:huddle-fade 2.6s linear forwards}@keyframes huddle-fade{0%{opacity:1}100%{opacity:0}}}
 .channel-actions button:hover{background:var(--hover)}
 .channel-actions a{color:var(--muted);text-decoration:none;font-weight:600;font-size:13px}
 .channel-actions a:hover{color:var(--text);text-decoration:underline}
@@ -2504,13 +2520,17 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
     </form>
   </details>{{end}}
 </div>
-{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-peers="{{range $index, $peer := .PeerIDs}}{{if $index}},{{end}}{{$peer}}{{end}}" data-huddle-signal="{{.SignalURL}}" data-huddle-csrf="{{.CSRFToken}}">
+{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-peers="{{range $index, $peer := .PeerIDs}}{{if $index}},{{end}}{{$peer}}{{end}}" data-huddle-signal="{{.SignalURL}}" data-huddle-react="{{.ReactURL}}" data-huddle-csrf="{{.CSRFToken}}">
   <div class="huddle-controls">
     <button type="button" data-huddle-control="microphone" aria-pressed="false">Mute microphone</button>
     <button type="button" data-huddle-control="camera" aria-pressed="false">Turn on camera</button>
     <button type="button" data-huddle-control="screen" aria-pressed="false">Share screen</button>
   </div>
+  {{if .Reactions}}<div class="huddle-reactions-bar" role="group" aria-label="Send a reaction">
+    {{range .Reactions}}<button type="button" class="huddle-react" data-huddle-react-name="{{.Name}}" aria-label="React with :{{.Name}}:">{{.Glyph}}</button>{{end}}
+  </div>{{end}}
   <ul class="huddle-tiles" data-huddle-tiles aria-label="People in this huddle"></ul>
+  <div class="huddle-reactions" data-huddle-reactions aria-hidden="true"></div>
 </div>{{end}}
 {{else}}
 <div class="huddle-actions">
@@ -4433,6 +4453,7 @@ var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponen
 var deliver=function(event){
 if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
 try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
+if(event.type==='huddle.signal'||event.type==='huddle.reaction')return;
 if(event.type.indexOf('view.')===0){window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
@@ -4588,6 +4609,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/huddle/end", h.huddleMutation("ended", h.endHuddle, "Huddle ended"))
 	mux.HandleFunc("POST /app/huddle/invite", h.huddleInvite)
 	mux.HandleFunc("POST /app/huddle/signal", h.huddleSignal)
+	mux.HandleFunc("POST /app/huddle/react", h.huddleReact)
 	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
 	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)
 	mux.HandleFunc("POST /app/read/unread", h.markUnreadFromHere)

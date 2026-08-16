@@ -3882,6 +3882,15 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   // cannot see the tiles.
   await expect(page.locator('[data-huddle-status]')).not.toBeEmpty();
 
+  // A joined member is offered quick reactions and can send one. The float-and-
+  // fade display rides the live stream, whose timing is not asserted here; that
+  // the control renders and the send is accepted is the deterministic half.
+  const reaction = page.locator('[data-huddle-react-name="tada"]');
+  await expect(reaction).toBeVisible();
+  const reacted = page.waitForResponse((response) => response.url().endsWith('/app/huddle/react') && response.request().method() === 'POST');
+  await reaction.click();
+  expect((await reacted).status()).toBe(200);
+
   // Leaving takes the session away with it, so no control is offered for a
   // connection this member no longer has.
   await page.getByRole('button', { name: 'Leave huddle' }).click();
