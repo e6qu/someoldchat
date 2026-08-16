@@ -174,4 +174,13 @@ func TestDeactivatedMembersLoseTheirSidebarGuards(t *testing.T) {
 	if err := messages.AssignConversationToSidebarSection(ctx, "T1", "U1", "C1", section.ID, ""); err == nil {
 		t.Fatal("a deactivated member assigned a channel")
 	}
+	if err := messages.RenameSidebarSection(ctx, "T1", "U1", section.ID, "Renamed"); err == nil {
+		t.Fatal("a deactivated member renamed a section")
+	}
+	if err := messages.SetSidebarSectionCollapsed(ctx, "T1", "U1", section.ID, true); err == nil {
+		t.Fatal("a deactivated member collapsed a section")
+	}
+	if err := messages.ReorderSidebarSections(ctx, "T1", "U1", []domain.SidebarSectionID{section.ID}); err == nil {
+		t.Fatal("a deactivated member reordered sections")
+	}
 }
