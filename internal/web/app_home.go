@@ -25,6 +25,9 @@ type workspaceAppsData struct {
 	CanMessage    bool
 	Notice        string
 	WorkspaceName string
+	// ExternalProviders are the accounts a member may connect for the selected
+	// app, shown on its About tab. Empty unless the app declares any.
+	ExternalProviders []domain.ExternalAuthProvider
 }
 
 const workspaceAppsMarkup = `{{define "title"}}{{if .Selected}}{{.Selected.Name}}{{else}}Apps{{end}} · {{.WorkspaceName}}{{end}}
@@ -75,7 +78,7 @@ const workspaceAppsMarkup = `{{define "title"}}{{if .Selected}}{{.Selected.Name}
       <header class="apps-heading"><span class="app-avatar" aria-hidden="true">{{slice .Selected.Name 0 1}}</span><div><h1>{{.Selected.Name}}</h1><p>{{.Selected.BotDisplayName}}</p></div></header>
       <nav class="app-tabs" aria-label="{{.Selected.Name}}"><a class="app-tab" href="/app/apps/{{.Selected.ID}}?channel={{.Channel}}&tab=home"{{if eq .Tab "home"}} aria-current="page"{{end}}>Home</a>{{if and .Selected.MessagesTabEnabled .Selected.BotUserID .CanMessage}}<form class="app-tab-form" method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="users" value="{{.Selected.BotUserID}}"><button class="app-tab" type="submit">Messages</button></form>{{end}}<a class="app-tab" href="/app/apps/{{.Selected.ID}}?channel={{.Channel}}&tab=about"{{if eq .Tab "about"}} aria-current="page"{{end}}>About</a></nav>
       {{if .Notice}}<p class="notice app-notice" role="status">{{.Notice}}</p>{{end}}
-      {{if eq .Tab "about"}}<section class="app-about"><h2>About {{.Selected.Name}}</h2>{{if .Selected.Description}}<p>{{.Selected.Description}}</p>{{else}}<p class="muted">This app has not provided a description.</p>{{end}}<dl><dt>App ID</dt><dd><code>{{.Selected.ID}}</code></dd><dt>Bot name</dt><dd>{{.Selected.BotDisplayName}}</dd></dl></section>
+      {{if eq .Tab "about"}}<section class="app-about"><h2>About {{.Selected.Name}}</h2>{{if .Selected.Description}}<p>{{.Selected.Description}}</p>{{else}}<p class="muted">This app has not provided a description.</p>{{end}}<dl><dt>App ID</dt><dd><code>{{.Selected.ID}}</code></dd><dt>Bot name</dt><dd>{{.Selected.BotDisplayName}}</dd></dl>{{if .Notice}}<p class="notice" role="status">{{if eq .Notice "connected"}}Your account was connected.{{else if eq .Notice "connect_failed"}}The account could not be connected. Try again.{{else}}{{.Notice}}{{end}}</p>{{end}}{{if .ExternalProviders}}<div class="external-connections"><h3>Connect an account</h3><p class="muted">{{.Selected.Name}} can act with an account you connect at these services.</p><ul class="external-provider-list">{{range .ExternalProviders}}<li><span class="external-provider-name">{{.Name}}</span><form method="post" action="/app/apps/external-auth/start"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{$.Selected.ID}}"><input type="hidden" name="provider" value="{{.Name}}"><button class="button secondary" type="submit">Connect {{.Name}}</button></form></li>{{end}}</ul></div>{{end}}</section>
       {{else if .Published}}<form class="app-home" method="post" action="/app/apps/{{.Selected.ID}}/action?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.Home.ID}}">
         {{range $block := .Home.Blocks}}{{if eq $block.Kind "divider"}}<hr class="home-block divider">{{else}}<section class="home-block message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else if $block.Text}}<div>{{$block.Text}}</div>{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $cell := $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{$cell}}</th>{{else}}<td>{{$cell}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}{{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
           {{if $block.Actions}}<div class="home-actions" aria-label="App actions">{{range $action := $block.Actions}}
@@ -154,6 +157,12 @@ func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, pri
 	if data.Tab != "home" && data.Tab != "about" {
 		h.writePageError(w, http.StatusBadRequest, "That app tab is not available", "Open the app’s Home or About tab.")
 		return
+	}
+	if data.Tab == "about" {
+		if providers, err := h.Messages.AppExternalAuthProviders(r.Context(), principal.WorkspaceID, principal.UserID, data.Selected.ID); err == nil {
+			data.ExternalProviders = providers
+		}
+		data.Notice = strings.TrimSpace(r.URL.Query().Get("notice"))
 	}
 	if data.Tab == "home" {
 		if !data.Selected.HomeTabEnabled {

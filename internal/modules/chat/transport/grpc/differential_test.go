@@ -6622,6 +6622,24 @@ func parityCases() []parityCase {
 				if _, err := chat.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.AccessToken); !errors.Is(err, service.ErrInvalidOAuth) {
 					return nil, fmt.Errorf("rotating token accepted by oauth.v2.exchange: %w", err)
 				}
+				// External auth: the owner declares a provider, any member lists it
+				// (without its secret) and begins a connect flow, and a callback with
+				// no valid state is refused. The sealed state carries a random nonce,
+				// so the authorize URL differs between compositions and is compared by
+				// its stable parts, not byte for byte.
+				if err := chat.SetAppExternalAuthProvider(ctx, configuration.Token, app.ID, domain.ExternalAuthProviderConfig{Name: "acme", ClientID: "ext-cid", ClientSecret: "ext-secret", AuthorizationURL: "https://acme.test/authorize", TokenURL: "https://acme.test/token", Scopes: []string{"read"}}); err != nil {
+					return nil, err
+				}
+				externalProviders, err := chat.AppExternalAuthProviders(ctx, "T1", "U1", app.ID)
+				if err != nil {
+					return nil, err
+				}
+				authorizeURL, err := chat.StartExternalAuthConnection(ctx, "T1", "U1", app.ID, "acme", "https://chat.example/external/callback")
+				if err != nil {
+					return nil, err
+				}
+				strayConnect := chat.CompleteExternalAuthConnection(ctx, "T1", "U1", app.ID, "acme", "code", "not-a-state", "https://chat.example/external/callback")
+				_, missingProvider := chat.StartExternalAuthConnection(ctx, "T1", "U1", app.ID, "nope", "https://chat.example/external/callback")
 				rotated, err := chat.RotateAppConfigurationToken(ctx, configuration.RefreshToken)
 				if err != nil {
 					return nil, err
@@ -6632,6 +6650,8 @@ func parityCases() []parityCase {
 				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), len(listed), revokeOneErr == nil, revokedCount, strangerRevoke != nil, updated.Name, updated.ManifestVersion, distributed.Distribution, reprivatized.Distribution, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
 					v1Token.AccessToken != "", string(v1Token.TokenType), len(v1Token.Scopes) > 0,
 					openID.IDToken != "", openID.AccessToken != "",
+					len(externalProviders), externalProviders[0].Name, externalProviders[0].ClientID, externalProviders[0].ClientSecretCiphertext == "",
+					strings.Contains(authorizeURL, "acme.test/authorize"), strings.Contains(authorizeURL, "client_id=ext-cid"), strayConnect != nil, missingProvider != nil,
 					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName, revoked.Revoked}, nil
 			},
 		},

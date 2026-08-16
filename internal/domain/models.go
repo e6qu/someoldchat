@@ -2764,6 +2764,35 @@ type ExternalAuthToken struct {
 	CreatedAt   time.Time
 }
 
+// ExternalAuthProvider is an OAuth provider an app declares so its members can
+// connect an account with a service outside this deployment. The client secret
+// is stored encrypted and never crosses the public boundary, the same way an
+// app's signing secret does not. AuthorizationURL and TokenURL are the
+// provider's own OAuth endpoints; the connect flow redirects to the first and
+// exchanges the returned code at the second.
+type ExternalAuthProvider struct {
+	AppID                  AppID
+	Name                   string
+	ClientID               string
+	ClientSecretCiphertext string
+	AuthorizationURL       string
+	TokenURL               string
+	Scopes                 []string
+	CreatedAt              time.Time
+}
+
+// ExternalAuthProviderConfig is the plaintext an owner supplies to declare a
+// provider: the client secret is sealed on the way into storage, so it appears
+// here and nowhere the value is read back.
+type ExternalAuthProviderConfig struct {
+	Name             string
+	ClientID         string
+	ClientSecret     string
+	AuthorizationURL string
+	TokenURL         string
+	Scopes           []string
+}
+
 // AssistantSearchAvailability is what an assistant may search here.
 type AssistantSearchAvailability struct {
 	Enabled           bool

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,43 @@ func TestSQLiteAppConfigurationTokenRotationIsOneTimeAndHashed(t *testing.T) {
 	}
 	if err := s.RotateAppConfigurationToken(ctx, "refresh-one", "access-replay", "refresh-replay", next); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("refresh replay error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// TestSQLiteExternalAuthProviders round-trips a declared provider, keeping its
+// sealed secret out of the list and reading it back only on the single get.
+func TestSQLiteExternalAuthProviders(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "external-auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	app := domain.App{ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Example", ClientID: "client", SigningSecretHash: "sh", SigningSecretCiphertext: "v1.s", VerificationTokenHash: "vh", VerificationTokenCiphertext: "v1.v", ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now}
+	if err := s.CreateApp(ctx, app, domain.AppManifestRevision{AppID: "A1", Version: 1, Manifest: `{"display_information":{"name":"Example"}}`, CreatedBy: "U1", CreatedAt: now}, domain.OAuthClient{ID: "client", SecretHash: "client-hash", AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	provider := domain.ExternalAuthProvider{AppID: "A1", Name: "acme", ClientID: "cid", ClientSecretCiphertext: "v1.sealed", AuthorizationURL: "https://acme.test/a", TokenURL: "https://acme.test/t", Scopes: []string{"read", "write"}, CreatedAt: now}
+	if err := s.SetExternalAuthProvider(ctx, provider); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListExternalAuthProviders(ctx, "A1")
+	if err != nil || len(list) != 1 || list[0].Name != "acme" || list[0].ClientID != "cid" || list[0].ClientSecretCiphertext != "" || strings.Join(list[0].Scopes, " ") != "read write" {
+		t.Fatalf("list = %+v err=%v", list, err)
+	}
+	got, err := s.GetExternalAuthProvider(ctx, "A1", "acme")
+	if err != nil || got.ClientSecretCiphertext != "v1.sealed" || got.TokenURL != "https://acme.test/t" {
+		t.Fatalf("get = %+v err=%v", got, err)
+	}
+	if _, err := s.GetExternalAuthProvider(ctx, "A1", "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing provider = %v, want ErrNotFound", err)
 	}
 }
 

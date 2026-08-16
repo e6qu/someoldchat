@@ -33,10 +33,25 @@ var (
 	// redirect URL: an install has nowhere to return to, so Slack does not let
 	// distribution activate until one exists, and neither does this.
 	ErrAppNotDistributable = errors.New("app cannot be distributed without a redirect URL")
+	// ErrInvalidExternalAuthProvider is a malformed external OAuth provider
+	// declaration: a name, client id, and https authorization and token URLs are
+	// the minimum an app needs before a member can connect an account.
+	ErrInvalidExternalAuthProvider = errors.New("external authentication provider is invalid")
+	// ErrExternalAuthConnection is a connect flow that could not complete: the
+	// state did not verify, or the provider refused the code exchange.
+	ErrExternalAuthConnection = errors.New("external authentication connection failed")
 )
 
 func appSigningSecretAssociatedData(appID domain.AppID) string {
 	return "app:" + string(appID) + ":signing-secret"
+}
+
+func externalAuthProviderAssociatedData(appID domain.AppID, name string) string {
+	return "app:" + string(appID) + ":external-auth:" + name
+}
+
+func externalAuthTokenAssociatedData(appID domain.AppID, provider string) string {
+	return "app:" + string(appID) + ":external-token:" + provider
 }
 
 func appVerificationTokenAssociatedData(appID domain.AppID) string {

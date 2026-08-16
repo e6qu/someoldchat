@@ -52,6 +52,16 @@ views render current Block Kit, dispatch interactions, preserve app/workspace/
 user identity, and show a recoverable app-specific failure when publication or
 delivery fails.
 
+Where an app declares external authentication providers, its About tab offers a
+member a control to connect an account with each. Connecting redirects to the
+provider's own OAuth page, carries a state bound to the member, app, provider
+and workspace, and stores the resulting credential encrypted; the credential's
+secret is never returned. A stray or forged callback cannot mint a connection
+for anyone but the member who began it, and a failed exchange returns to the
+About tab with a notice rather than an error page. The provider's client secret,
+supplied by the app owner in the developer console, is stored sealed and never
+shown again.
+
 ## APP-04 — Invoke global and message shortcuts
 
 Global shortcuts appear in Slack's shortcuts browser and app surfaces according

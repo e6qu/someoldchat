@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 171
+const schemaVersion = 172
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3332,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 172 {
+		// An app's declared external OAuth providers. The client secret is stored
+		// as sealed ciphertext, never in the clear, the same way an app's signing
+		// secret is. Created in the ladder so the reference to slack_apps resolves
+		// on PostgreSQL.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_external_auth_providers (
+			app_id TEXT NOT NULL REFERENCES slack_apps(id), name TEXT NOT NULL,
+			client_id TEXT NOT NULL, client_secret_ciphertext TEXT NOT NULL DEFAULT '',
+			authorization_url TEXT NOT NULL, token_url TEXT NOT NULL,
+			scopes TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL,
+			PRIMARY KEY (app_id, name)
+		)`); err != nil {
+			return fmt.Errorf("migrate external auth providers: %w", err)
 		}
 	}
 	if version < 171 {
@@ -7691,6 +7706,66 @@ func (s *Store) DeleteExternalAuthToken(ctx context.Context, workspace domain.Wo
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) SetExternalAuthProvider(ctx context.Context, value domain.ExternalAuthProvider) error {
+	scopes, err := json.Marshal(value.Scopes)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO app_external_auth_providers(app_id, name, client_id, client_secret_ciphertext, authorization_url, token_url, scopes, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(app_id, name) DO UPDATE SET client_id = excluded.client_id, client_secret_ciphertext = excluded.client_secret_ciphertext, authorization_url = excluded.authorization_url, token_url = excluded.token_url, scopes = excluded.scopes`,
+		value.AppID, value.Name, value.ClientID, value.ClientSecretCiphertext, value.AuthorizationURL, value.TokenURL, string(scopes), value.CreatedAt.UTC().UnixNano())
+	if err != nil {
+		return classify(err)
+	}
+	if changed, err := result.RowsAffected(); err == nil && changed == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListExternalAuthProviders(ctx context.Context, appID domain.AppID) ([]domain.ExternalAuthProvider, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT app_id, name, client_id, authorization_url, token_url, scopes, created_at FROM app_external_auth_providers WHERE app_id = ? ORDER BY name`, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	providers := make([]domain.ExternalAuthProvider, 0)
+	for rows.Next() {
+		var value domain.ExternalAuthProvider
+		var scopes string
+		var created int64
+		if err := rows.Scan(&value.AppID, &value.Name, &value.ClientID, &value.AuthorizationURL, &value.TokenURL, &scopes, &created); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(scopes), &value.Scopes); err != nil {
+			return nil, err
+		}
+		value.CreatedAt = timeFromUnixNanoOrZero(created)
+		providers = append(providers, value)
+	}
+	return providers, rows.Err()
+}
+
+func (s *Store) GetExternalAuthProvider(ctx context.Context, appID domain.AppID, name string) (domain.ExternalAuthProvider, error) {
+	var value domain.ExternalAuthProvider
+	var scopes string
+	var created int64
+	err := s.db.QueryRowContext(ctx, `SELECT app_id, name, client_id, client_secret_ciphertext, authorization_url, token_url, scopes, created_at FROM app_external_auth_providers WHERE app_id = ? AND name = ?`, appID, name).
+		Scan(&value.AppID, &value.Name, &value.ClientID, &value.ClientSecretCiphertext, &value.AuthorizationURL, &value.TokenURL, &scopes, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ExternalAuthProvider{}, store.ErrNotFound
+	}
+	if err != nil {
+		return domain.ExternalAuthProvider{}, err
+	}
+	if err := json.Unmarshal([]byte(scopes), &value.Scopes); err != nil {
+		return domain.ExternalAuthProvider{}, err
+	}
+	value.CreatedAt = timeFromUnixNanoOrZero(created)
+	return value, nil
 }
 
 func (s *Store) GetAnomalyAllowList(ctx context.Context, workspace domain.WorkspaceID) (domain.AnomalyAllowList, error) {

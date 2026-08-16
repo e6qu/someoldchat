@@ -137,6 +137,8 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_external_upload", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalUpload},
 	{key: "service.invalid_app_manifest", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppManifest},
 	{key: "service.app_not_distributable", code: codes.InvalidArgument, sentinel: service.ErrAppNotDistributable},
+	{key: "service.invalid_external_auth_provider", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalAuthProvider},
+	{key: "service.external_auth_connection", code: codes.FailedPrecondition, sentinel: service.ErrExternalAuthConnection},
 	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
 	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
 	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreQuery},

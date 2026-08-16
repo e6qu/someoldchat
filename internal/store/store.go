@@ -370,6 +370,15 @@ type Store interface {
 	// DeleteExternalAuthToken removes one, or every one the app holds when the
 	// identifier is empty.
 	DeleteExternalAuthToken(context.Context, domain.WorkspaceID, domain.AppID, string, events.Event) error
+	// SetExternalAuthProvider records or replaces an app's declared OAuth provider,
+	// keyed by app and provider name.
+	SetExternalAuthProvider(context.Context, domain.ExternalAuthProvider) error
+	// ListExternalAuthProviders reports an app's declared providers in a stable
+	// order, without their secrets.
+	ListExternalAuthProviders(context.Context, domain.AppID) ([]domain.ExternalAuthProvider, error)
+	// GetExternalAuthProvider reads one declared provider, including its sealed
+	// client secret, which the connect flow needs to exchange a code.
+	GetExternalAuthProvider(context.Context, domain.AppID, string) (domain.ExternalAuthProvider, error)
 	// GetAnomalyAllowList reports what audit is told not to flag. A workspace
 	// that has set nothing answers an empty list rather than not found: an
 	// empty allow list is the state a workspace starts in.
