@@ -753,17 +753,18 @@ func (m Messages) InspectOAuthAuthorization(ctx context.Context, request domain.
 		return domain.OAuthAuthorization{}, ErrInvalidOAuth
 	}
 	return domain.OAuthAuthorization{
-		AppID:               app.ID,
-		AppName:             app.Name,
-		ClientID:            app.ClientID,
-		WorkspaceID:         request.WorkspaceID,
-		UserID:              request.UserID,
-		RedirectURI:         redirectURI,
-		BotScopes:           botScopes,
-		UserScopes:          userScopes,
-		State:               request.State,
-		CodeChallenge:       request.CodeChallenge,
-		CodeChallengeMethod: request.CodeChallengeMethod,
+		AppID:                  app.ID,
+		AppName:                app.Name,
+		ClientID:               app.ClientID,
+		WorkspaceID:            request.WorkspaceID,
+		UserID:                 request.UserID,
+		RedirectURI:            redirectURI,
+		BotScopes:              botScopes,
+		UserScopes:             userScopes,
+		State:                  request.State,
+		IncomingWebhookChannel: request.IncomingWebhookChannel,
+		CodeChallenge:          request.CodeChallenge,
+		CodeChallengeMethod:    request.CodeChallengeMethod,
 	}, nil
 }
 
@@ -771,6 +772,27 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 	authorization, err := m.InspectOAuthAuthorization(ctx, request)
 	if err != nil {
 		return domain.OAuthAuthorization{}, err
+	}
+	// An install that asks to post through an incoming webhook must name the
+	// channel it will post to, and it must be one the installer can reach — a
+	// member cannot grant an app posting rights in a channel they cannot see. The
+	// channel is validated now, at consent, so the redemption later has only to
+	// mint the hook. A channel named without the scope is ignored rather than
+	// stored, so it cannot smuggle a webhook the app never requested.
+	if authorization.WantsIncomingWebhook() {
+		channel := authorization.IncomingWebhookChannel
+		if channel == "" {
+			return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		}
+		if err := m.requireConversationMembership(ctx, authorization.WorkspaceID, authorization.UserID, channel); err != nil {
+			return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		}
+		conversation, err := m.Store.GetConversation(ctx, channel)
+		if err != nil || conversation.WorkspaceID != authorization.WorkspaceID || conversation.IsDirectOrGroup() || conversation.Archived {
+			return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		}
+	} else {
+		authorization.IncomingWebhookChannel = ""
 	}
 	code, err := credentialSecret("code-")
 	if err != nil {
@@ -794,18 +816,19 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 		authorization.BotUserID = botUserID
 	}
 	grant := domain.OAuthCode{
-		Code:                code,
-		ClientID:            authorization.ClientID,
-		WorkspaceID:         authorization.WorkspaceID,
-		UserID:              authorization.UserID,
-		Scopes:              append(append([]string(nil), authorization.BotScopes...), authorization.UserScopes...),
-		BotID:               authorization.BotID,
-		BotUserID:           authorization.BotUserID,
-		BotScopes:           authorization.BotScopes,
-		UserScopes:          authorization.UserScopes,
-		RedirectURI:         authorization.RedirectURI,
-		CodeChallenge:       authorization.CodeChallenge,
-		CodeChallengeMethod: authorization.CodeChallengeMethod,
+		Code:                   code,
+		ClientID:               authorization.ClientID,
+		WorkspaceID:            authorization.WorkspaceID,
+		UserID:                 authorization.UserID,
+		Scopes:                 append(append([]string(nil), authorization.BotScopes...), authorization.UserScopes...),
+		BotID:                  authorization.BotID,
+		BotUserID:              authorization.BotUserID,
+		BotScopes:              authorization.BotScopes,
+		UserScopes:             authorization.UserScopes,
+		RedirectURI:            authorization.RedirectURI,
+		IncomingWebhookChannel: authorization.IncomingWebhookChannel,
+		CodeChallenge:          authorization.CodeChallenge,
+		CodeChallengeMethod:    authorization.CodeChallengeMethod,
 	}
 	if err := m.Store.CreateOAuthAuthorization(ctx, botUser, bot, grant); err != nil {
 		return domain.OAuthAuthorization{}, err

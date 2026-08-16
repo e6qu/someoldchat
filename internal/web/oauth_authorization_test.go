@@ -96,6 +96,112 @@ func TestOAuthAuthorizationConsentCreatesRedeemableBotGrant(t *testing.T) {
 	}
 }
 
+// TestOAuthAuthorizationOffersAndBindsAnIncomingWebhookChannel drives the
+// install-time webhook flow through the browser consent screen: the app that
+// asks for the incoming-webhook scope gets a channel picker, choosing one mints
+// a working hook the oauth.v2.access exchange hands back, and the consent
+// refuses a grant that names no channel or one the installer cannot reach.
+func TestOAuthAuthorizationOffersAndBindsAnIncomingWebhookChannel(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	if err := repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedConversationMember("C1", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedConversation(domain.Conversation{ID: "Cother", WorkspaceID: "T1", Name: "secret", Kind: domain.ConversationTypePrivate}); err != nil {
+		t.Fatal(err)
+	}
+	messages := service.Messages{Store: repository, AppCredentialKey: []byte(strings.Repeat("k", 32))}
+	configuration, err := messages.IssueAppConfigurationToken(ctx, "T1", "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"display_information":{"name":"Hook App"},"oauth_config":{"redirect_urls":["https://client.example/callback"],"scopes":{"bot":["chat:write","incoming-webhook"]}},"settings":{"socket_mode_enabled":true}}`
+	_, credentials, err := messages.CreateAppFromManifest(ctx, configuration.Token, manifest, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := "browser-session"
+	if err := repository.SeedSession(ctx, session, domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	browser, err := auth.NewBrowser(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(messages, browser, repository, "C1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	// The consent screen offers a channel picker for the webhook scope.
+	query := url.Values{"client_id": {credentials.ClientID}, "redirect_uri": {"https://client.example/callback"}, "scope": {"chat:write,incoming-webhook"}, "state": {"opaque-state"}, "response_type": {"code"}}
+	request := httptest.NewRequest(http.MethodGet, "https://chat.example/oauth/v2/authorize?"+query.Encode(), nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if body := response.Body.String(); response.Code != http.StatusOK || !strings.Contains(body, "Where its webhook posts") || !strings.Contains(body, `name="incoming_webhook_channel"`) || !strings.Contains(body, `value="C1"`) {
+		t.Fatalf("consent status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	approve := func(channel string) *httptest.ResponseRecorder {
+		form := url.Values{"_csrf": {auth.CSRFToken(session)}, "decision": {"approve"}, "client_id": {credentials.ClientID}, "redirect_uri": {"https://client.example/callback"}, "scope": {"chat:write,incoming-webhook"}, "state": {"opaque-state"}}
+		if channel != "" {
+			form.Set("incoming_webhook_channel", channel)
+		}
+		post := httptest.NewRequest(http.MethodPost, "https://chat.example/oauth/v2/authorize", strings.NewReader(form.Encode()))
+		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		post.Header.Set("Sec-Fetch-Site", "same-origin")
+		post.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, post)
+		return rec
+	}
+
+	// A grant that names no channel, or one the installer is not in, is refused
+	// rather than minting a hook they could not have posted to by hand.
+	if rec := approve(""); rec.Code == http.StatusFound {
+		t.Fatal("a webhook install with no channel was approved")
+	}
+	if rec := approve("Cother"); rec.Code == http.StatusFound {
+		t.Fatal("a webhook install to a channel the installer cannot reach was approved")
+	}
+
+	// The real grant carries the chosen channel through to a minted hook.
+	rec := approve("C1")
+	if rec.Code != http.StatusFound {
+		t.Fatalf("approval status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := redirect.Query().Get("code")
+	if code == "" {
+		t.Fatalf("approval redirect carried no code: %s", redirect)
+	}
+	token, err := messages.OAuthV2Exchange(ctx, credentials.ClientID, credentials.ClientSecret, code, "https://client.example/callback", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.IncomingWebhookURL == "" || token.IncomingWebhookChannel != "C1" || token.IncomingWebhookChannelName != "general" {
+		t.Fatalf("exchanged token webhook fields = %+v", token)
+	}
+	if member, _ := repository.IsConversationMember(ctx, "C1", token.UserID); !member {
+		t.Fatal("the app bot was not added to the webhook channel")
+	}
+}
+
 func TestOAuthAuthorizationRejectsUnregisteredRedirectWithoutRedirecting(t *testing.T) {
 	ctx := context.Background()
 	repository := memory.New()

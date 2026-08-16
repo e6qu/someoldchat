@@ -520,6 +520,31 @@ func TestOAuthV2AccessHTTPExchangesCode(t *testing.T) {
 	}
 }
 
+// TestOAuthV2ResponseIncludesIncomingWebhook covers the install-time webhook
+// shape Slack's oauth.v2.access returns: an install that minted a hook hands its
+// coordinates back, and one that did not carries no incoming_webhook at all.
+func TestOAuthV2ResponseIncludesIncomingWebhook(t *testing.T) {
+	token := domain.OAuthToken{
+		AccessToken: "xoxb-1", AppID: "A1", WorkspaceID: "T1", UserID: "Ubot", InstallerID: "U1",
+		TokenType: domain.TokenBot, Scopes: []string{"incoming-webhook"},
+		IncomingWebhookChannel: "C1", IncomingWebhookChannelName: "general", IncomingWebhookID: "WH1",
+		IncomingWebhookURL:       "https://hooks.slack.com/services/T1/A1/whsec_abc",
+		IncomingWebhookConfigURL: "https://hooks.slack.com/services/T1/A1",
+	}
+	hook, ok := oauthV2TokenResponse(token, false)["incoming_webhook"].(map[string]any)
+	if !ok {
+		t.Fatal("bot install with a webhook carried no incoming_webhook")
+	}
+	if hook["channel"] != "#general" || hook["channel_id"] != domain.ConversationID("C1") ||
+		hook["url"] != "https://hooks.slack.com/services/T1/A1/whsec_abc" ||
+		hook["configuration_url"] != "https://hooks.slack.com/services/T1/A1" {
+		t.Fatalf("incoming_webhook = %+v", hook)
+	}
+	if _, present := oauthV2TokenResponse(domain.OAuthToken{TokenType: domain.TokenBot}, false)["incoming_webhook"]; present {
+		t.Fatal("a token with no webhook still carried an incoming_webhook")
+	}
+}
+
 func TestOAuthV2UserAccessReturnsUserGrantOnly(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/oauth.v2.user.access", strings.NewReader(url.Values{
 		"client_id":     {"oauth-client"},

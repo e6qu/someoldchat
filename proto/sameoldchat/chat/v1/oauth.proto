@@ -30,6 +30,11 @@ message OAuthToken {
   int64 expires_at_unix_nano = 13;
   string authed_user_refresh_token = 14;
   int64 authed_user_expires_at_unix_nano = 15;
+  string incoming_webhook_channel = 16;
+  string incoming_webhook_channel_name = 17;
+  string incoming_webhook_id = 18;
+  string incoming_webhook_url = 19;
+  string incoming_webhook_config_url = 20;
 }
 
 message OpenIDConnectTokenRequest {

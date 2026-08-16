@@ -576,18 +576,19 @@ type ExternalIdentity struct {
 }
 
 type OAuthCode struct {
-	Code                string
-	ClientID            string
-	WorkspaceID         WorkspaceID
-	UserID              UserID
-	Scopes              []string
-	BotID               BotID
-	BotUserID           UserID
-	BotScopes           []string
-	UserScopes          []string
-	RedirectURI         string
-	CodeChallenge       string
-	CodeChallengeMethod string
+	Code                   string
+	ClientID               string
+	WorkspaceID            WorkspaceID
+	UserID                 UserID
+	Scopes                 []string
+	BotID                  BotID
+	BotUserID              UserID
+	BotScopes              []string
+	UserScopes             []string
+	RedirectURI            string
+	IncomingWebhookChannel ConversationID
+	CodeChallenge          string
+	CodeChallengeMethod    string
 }
 
 type OAuthToken struct {
@@ -607,6 +608,16 @@ type OAuthToken struct {
 	AuthedUserRefreshToken string
 	AuthedUserExpiresAt    time.Time
 	CodeVerifier           string
+	// The incoming-webhook fields are populated only when the install requested
+	// the incoming-webhook scope and chose a channel: the exchange mints the
+	// webhook and the oauth.v2.access response hands its coordinates back, the
+	// one time the app ever sees the URL. IncomingWebhookChannel travels from the
+	// consumed code; the rest are the freshly created hook.
+	IncomingWebhookChannel     ConversationID
+	IncomingWebhookChannelName string
+	IncomingWebhookID          IncomingWebhookID
+	IncomingWebhookURL         string
+	IncomingWebhookConfigURL   string
 }
 
 // OAuthRefreshGrant is the durable, one-time capability behind a rotating
@@ -629,32 +640,49 @@ type OAuthRefreshGrant struct {
 }
 
 type OAuthAuthorizationRequest struct {
-	ClientID            string
-	WorkspaceID         WorkspaceID
-	UserID              UserID
-	RedirectURI         string
-	BotScopes           []string
-	UserScopes          []string
-	State               string
-	CodeChallenge       string
-	CodeChallengeMethod string
+	ClientID    string
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	RedirectURI string
+	BotScopes   []string
+	UserScopes  []string
+	State       string
+	// IncomingWebhookChannel is the channel the installer chose for the app's
+	// incoming webhook. It is meaningful only when the requested scopes include
+	// incoming-webhook, and it must be a channel the installer can reach.
+	IncomingWebhookChannel ConversationID
+	CodeChallenge          string
+	CodeChallengeMethod    string
 }
 
 type OAuthAuthorization struct {
-	AppID               AppID
-	AppName             string
-	ClientID            string
-	WorkspaceID         WorkspaceID
-	UserID              UserID
-	RedirectURI         string
-	BotScopes           []string
-	UserScopes          []string
-	State               string
-	Code                string
-	BotID               BotID
-	BotUserID           UserID
-	CodeChallenge       string
-	CodeChallengeMethod string
+	AppID                  AppID
+	AppName                string
+	ClientID               string
+	WorkspaceID            WorkspaceID
+	UserID                 UserID
+	RedirectURI            string
+	BotScopes              []string
+	UserScopes             []string
+	State                  string
+	Code                   string
+	BotID                  BotID
+	BotUserID              UserID
+	IncomingWebhookChannel ConversationID
+	CodeChallenge          string
+	CodeChallengeMethod    string
+}
+
+// WantsIncomingWebhook reports whether this authorization requests the
+// incoming-webhook scope, which is what makes the installer's channel choice
+// meaningful. Slack asks for the channel only when the scope is present.
+func (a OAuthAuthorization) WantsIncomingWebhook() bool {
+	for _, scope := range a.BotScopes {
+		if scope == "incoming-webhook" {
+			return true
+		}
+	}
+	return false
 }
 
 type OpenIDToken struct {

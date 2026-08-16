@@ -2600,6 +2600,16 @@ func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any
 	} else {
 		response["authed_user"] = map[string]any{"id": token.InstallerID}
 	}
+	// An install that requested the incoming-webhook scope and chose a channel
+	// gets the minted hook back here, the one time the app ever sees its URL.
+	if token.IncomingWebhookURL != "" {
+		response["incoming_webhook"] = map[string]any{
+			"channel":           "#" + token.IncomingWebhookChannelName,
+			"channel_id":        token.IncomingWebhookChannel,
+			"url":               token.IncomingWebhookURL,
+			"configuration_url": token.IncomingWebhookConfigURL,
+		}
+	}
 	return response
 }
 

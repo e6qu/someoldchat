@@ -1197,16 +1197,25 @@ type errorData struct {
 }
 
 type oauthConsentData struct {
-	Action              string
-	AppName             string
-	BotScopes           []scopeConsentView
-	UserScopes          []scopeConsentView
+	Action     string
+	AppName    string
+	BotScopes  []scopeConsentView
+	UserScopes []scopeConsentView
+	// WebhookChannels is non-empty only when the app requested the
+	// incoming-webhook scope: the installer must pick which channel the hook
+	// posts to, chosen from the channels they can reach.
+	WebhookChannels     []oauthWebhookChannel
 	CSRFToken           string
 	ClientID            string
 	RedirectURI         string
 	State               string
 	CodeChallenge       string
 	CodeChallengeMethod string
+}
+
+type oauthWebhookChannel struct {
+	ID   string
+	Name string
 }
 
 // scopeConsentView is one requested scope on the install-consent screen: the
@@ -2745,6 +2754,7 @@ const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldC
 .scope-list{margin:0;padding:0;list-style:none;display:grid;gap:7px}.scope-list li{border:1px solid var(--line);border-radius:7px;padding:9px 11px;background:var(--panel);display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}.scope-token{font-size:12px;color:var(--muted)}
 .oauth-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}.oauth-actions button{border-radius:6px;padding:9px 15px;font-weight:800}
 .deny{border:1px solid var(--field-line);background:var(--panel-strong);color:var(--text)}.approve{border:0;background:var(--ok);color:var(--on-strong)}
+.webhook-channel{display:grid;gap:5px;margin-top:6px;font-weight:600}.webhook-channel select{padding:7px 9px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text)}
 </style>{{end}}
 {{define "content"}}<main class="oauth-shell"><section class="oauth-card" aria-labelledby="oauth-title">
 <h1 id="oauth-title">Authorize {{.AppName}}</h1><p>This app is asking to access your SameOldChat workspace. Review every permission before continuing.</p>
@@ -2759,7 +2769,9 @@ const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldC
 <input type="hidden" name="state" value="{{.State}}">
 <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
 <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
-<div class="oauth-actions"><button class="deny" type="submit" name="decision" value="deny">Cancel</button><button class="approve" type="submit" name="decision" value="approve">Allow</button></div>
+{{if .WebhookChannels}}<h2>Where its webhook posts</h2><p>This app will post to the channel you choose here.</p>
+<label class="webhook-channel">Channel<select name="incoming_webhook_channel" required>{{range .WebhookChannels}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>{{end}}
+<div class="oauth-actions"><button class="deny" type="submit" name="decision" value="deny" formnovalidate>Cancel</button><button class="approve" type="submit" name="decision" value="approve">Allow</button></div>
 </form></section></main>{{end}}`
 
 var oauthConsentTemplate = mustPage(oauthConsentMarkup)
@@ -5110,11 +5122,16 @@ func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, auth.ErrNoToken)
 		return
 	}
+	var webhookChannels []oauthWebhookChannel
+	if value.WantsIncomingWebhook() {
+		webhookChannels = h.installerWebhookChannels(r.Context(), principal)
+	}
 	h.writeHTML(w, oauthConsentTemplate, oauthConsentData{
 		Action:              r.URL.Path,
 		AppName:             value.AppName,
 		BotScopes:           scopeConsentViews(value.BotScopes),
 		UserScopes:          scopeConsentViews(value.UserScopes),
+		WebhookChannels:     webhookChannels,
 		CSRFToken:           auth.CSRFToken(sessionCookie.Value),
 		ClientID:            value.ClientID,
 		RedirectURI:         value.RedirectURI,
@@ -5153,16 +5170,37 @@ func (h Handler) completeOAuthAuthorization(w http.ResponseWriter, r *http.Reque
 
 func oauthAuthorizationRequest(principal auth.Principal, fields map[string]string) domain.OAuthAuthorizationRequest {
 	return domain.OAuthAuthorizationRequest{
-		ClientID:            strings.TrimSpace(fields["client_id"]),
-		WorkspaceID:         principal.WorkspaceID,
-		UserID:              principal.UserID,
-		RedirectURI:         strings.TrimSpace(fields["redirect_uri"]),
-		BotScopes:           splitOAuthScopes(fields["scope"]),
-		UserScopes:          splitOAuthScopes(fields["user_scope"]),
-		State:               strings.TrimSpace(fields["state"]),
-		CodeChallenge:       strings.TrimSpace(fields["code_challenge"]),
-		CodeChallengeMethod: strings.TrimSpace(fields["code_challenge_method"]),
+		ClientID:               strings.TrimSpace(fields["client_id"]),
+		WorkspaceID:            principal.WorkspaceID,
+		UserID:                 principal.UserID,
+		RedirectURI:            strings.TrimSpace(fields["redirect_uri"]),
+		BotScopes:              splitOAuthScopes(fields["scope"]),
+		UserScopes:             splitOAuthScopes(fields["user_scope"]),
+		State:                  strings.TrimSpace(fields["state"]),
+		IncomingWebhookChannel: domain.ConversationID(strings.TrimSpace(fields["incoming_webhook_channel"])),
+		CodeChallenge:          strings.TrimSpace(fields["code_challenge"]),
+		CodeChallengeMethod:    strings.TrimSpace(fields["code_challenge_method"]),
 	}
+}
+
+// installerWebhookChannels lists the channels the installer may point an
+// incoming webhook at — the non-direct conversations they are in, since a member
+// can only grant an app posting rights where they can post themselves. An error
+// yields an empty list, which the consent screen renders as "no channel to
+// choose", refusing the grant rather than guessing one.
+func (h Handler) installerWebhookChannels(ctx context.Context, principal auth.Principal) []oauthWebhookChannel {
+	page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{Limit: conversationWindow})
+	if err != nil {
+		return nil
+	}
+	channels := make([]oauthWebhookChannel, 0, len(page.Conversations))
+	for _, conversation := range page.Conversations {
+		if conversation.IsDirectOrGroup() || conversation.Archived {
+			continue
+		}
+		channels = append(channels, oauthWebhookChannel{ID: string(conversation.ID), Name: conversationName(conversation)})
+	}
+	return channels
 }
 
 func splitOAuthScopes(raw string) []string {

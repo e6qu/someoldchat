@@ -2050,18 +2050,19 @@ func (x *AppMutationResponse) GetApp() *DeveloperApp {
 }
 
 type OAuthAuthorizationRequest struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	ClientId            string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	WorkspaceId         string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId              string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	RedirectUri         string                 `protobuf:"bytes,4,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
-	BotScopes           []string               `protobuf:"bytes,5,rep,name=bot_scopes,json=botScopes,proto3" json:"bot_scopes,omitempty"`
-	UserScopes          []string               `protobuf:"bytes,6,rep,name=user_scopes,json=userScopes,proto3" json:"user_scopes,omitempty"`
-	State               string                 `protobuf:"bytes,7,opt,name=state,proto3" json:"state,omitempty"`
-	CodeChallenge       string                 `protobuf:"bytes,8,opt,name=code_challenge,json=codeChallenge,proto3" json:"code_challenge,omitempty"`
-	CodeChallengeMethod string                 `protobuf:"bytes,9,opt,name=code_challenge_method,json=codeChallengeMethod,proto3" json:"code_challenge_method,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	ClientId               string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	WorkspaceId            string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId                 string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	RedirectUri            string                 `protobuf:"bytes,4,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
+	BotScopes              []string               `protobuf:"bytes,5,rep,name=bot_scopes,json=botScopes,proto3" json:"bot_scopes,omitempty"`
+	UserScopes             []string               `protobuf:"bytes,6,rep,name=user_scopes,json=userScopes,proto3" json:"user_scopes,omitempty"`
+	State                  string                 `protobuf:"bytes,7,opt,name=state,proto3" json:"state,omitempty"`
+	CodeChallenge          string                 `protobuf:"bytes,8,opt,name=code_challenge,json=codeChallenge,proto3" json:"code_challenge,omitempty"`
+	CodeChallengeMethod    string                 `protobuf:"bytes,9,opt,name=code_challenge_method,json=codeChallengeMethod,proto3" json:"code_challenge_method,omitempty"`
+	IncomingWebhookChannel string                 `protobuf:"bytes,10,opt,name=incoming_webhook_channel,json=incomingWebhookChannel,proto3" json:"incoming_webhook_channel,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *OAuthAuthorizationRequest) Reset() {
@@ -2157,24 +2158,32 @@ func (x *OAuthAuthorizationRequest) GetCodeChallengeMethod() string {
 	return ""
 }
 
+func (x *OAuthAuthorizationRequest) GetIncomingWebhookChannel() string {
+	if x != nil {
+		return x.IncomingWebhookChannel
+	}
+	return ""
+}
+
 type OAuthAuthorization struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	AppId               string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	AppName             string                 `protobuf:"bytes,2,opt,name=app_name,json=appName,proto3" json:"app_name,omitempty"`
-	ClientId            string                 `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	WorkspaceId         string                 `protobuf:"bytes,4,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId              string                 `protobuf:"bytes,5,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	RedirectUri         string                 `protobuf:"bytes,6,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
-	BotScopes           []string               `protobuf:"bytes,7,rep,name=bot_scopes,json=botScopes,proto3" json:"bot_scopes,omitempty"`
-	UserScopes          []string               `protobuf:"bytes,8,rep,name=user_scopes,json=userScopes,proto3" json:"user_scopes,omitempty"`
-	State               string                 `protobuf:"bytes,9,opt,name=state,proto3" json:"state,omitempty"`
-	Code                string                 `protobuf:"bytes,10,opt,name=code,proto3" json:"code,omitempty"`
-	BotId               string                 `protobuf:"bytes,11,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
-	BotUserId           string                 `protobuf:"bytes,12,opt,name=bot_user_id,json=botUserId,proto3" json:"bot_user_id,omitempty"`
-	CodeChallenge       string                 `protobuf:"bytes,13,opt,name=code_challenge,json=codeChallenge,proto3" json:"code_challenge,omitempty"`
-	CodeChallengeMethod string                 `protobuf:"bytes,14,opt,name=code_challenge_method,json=codeChallengeMethod,proto3" json:"code_challenge_method,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	AppId                  string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	AppName                string                 `protobuf:"bytes,2,opt,name=app_name,json=appName,proto3" json:"app_name,omitempty"`
+	ClientId               string                 `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	WorkspaceId            string                 `protobuf:"bytes,4,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId                 string                 `protobuf:"bytes,5,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	RedirectUri            string                 `protobuf:"bytes,6,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
+	BotScopes              []string               `protobuf:"bytes,7,rep,name=bot_scopes,json=botScopes,proto3" json:"bot_scopes,omitempty"`
+	UserScopes             []string               `protobuf:"bytes,8,rep,name=user_scopes,json=userScopes,proto3" json:"user_scopes,omitempty"`
+	State                  string                 `protobuf:"bytes,9,opt,name=state,proto3" json:"state,omitempty"`
+	Code                   string                 `protobuf:"bytes,10,opt,name=code,proto3" json:"code,omitempty"`
+	BotId                  string                 `protobuf:"bytes,11,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	BotUserId              string                 `protobuf:"bytes,12,opt,name=bot_user_id,json=botUserId,proto3" json:"bot_user_id,omitempty"`
+	CodeChallenge          string                 `protobuf:"bytes,13,opt,name=code_challenge,json=codeChallenge,proto3" json:"code_challenge,omitempty"`
+	CodeChallengeMethod    string                 `protobuf:"bytes,14,opt,name=code_challenge_method,json=codeChallengeMethod,proto3" json:"code_challenge_method,omitempty"`
+	IncomingWebhookChannel string                 `protobuf:"bytes,15,opt,name=incoming_webhook_channel,json=incomingWebhookChannel,proto3" json:"incoming_webhook_channel,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *OAuthAuthorization) Reset() {
@@ -2301,6 +2310,13 @@ func (x *OAuthAuthorization) GetCodeChallenge() string {
 func (x *OAuthAuthorization) GetCodeChallengeMethod() string {
 	if x != nil {
 		return x.CodeChallengeMethod
+	}
+	return ""
+}
+
+func (x *OAuthAuthorization) GetIncomingWebhookChannel() string {
+	if x != nil {
+		return x.IncomingWebhookChannel
 	}
 	return ""
 }
@@ -3514,7 +3530,7 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x05count\x18\x04 \x01(\x03R\x05count\"Z\n" +
 	"\x13AppMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x123\n" +
-	"\x03app\x18\x02 \x01(\v2!.sameoldchat.chat.v1.DeveloperAppR\x03app\"\xc8\x02\n" +
+	"\x03app\x18\x02 \x01(\v2!.sameoldchat.chat.v1.DeveloperAppR\x03app\"\x82\x03\n" +
 	"\x19OAuthAuthorizationRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -3526,7 +3542,9 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"userScopes\x12\x14\n" +
 	"\x05state\x18\a \x01(\tR\x05state\x12%\n" +
 	"\x0ecode_challenge\x18\b \x01(\tR\rcodeChallenge\x122\n" +
-	"\x15code_challenge_method\x18\t \x01(\tR\x13codeChallengeMethod\"\xbe\x03\n" +
+	"\x15code_challenge_method\x18\t \x01(\tR\x13codeChallengeMethod\x128\n" +
+	"\x18incoming_webhook_channel\x18\n" +
+	" \x01(\tR\x16incomingWebhookChannel\"\xf8\x03\n" +
 	"\x12OAuthAuthorization\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x19\n" +
 	"\bapp_name\x18\x02 \x01(\tR\aappName\x12\x1b\n" +
@@ -3544,7 +3562,8 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x06bot_id\x18\v \x01(\tR\x05botId\x12\x1e\n" +
 	"\vbot_user_id\x18\f \x01(\tR\tbotUserId\x12%\n" +
 	"\x0ecode_challenge\x18\r \x01(\tR\rcodeChallenge\x122\n" +
-	"\x15code_challenge_method\x18\x0e \x01(\tR\x13codeChallengeMethod\"\xd5\x01\n" +
+	"\x15code_challenge_method\x18\x0e \x01(\tR\x13codeChallengeMethod\x128\n" +
+	"\x18incoming_webhook_channel\x18\x0f \x01(\tR\x16incomingWebhookChannel\"\xd5\x01\n" +
 	"\x16ExternalAuthTokenValue\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12!\n" +

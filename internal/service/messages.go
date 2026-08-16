@@ -2991,6 +2991,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 			return domain.OAuthToken{}, err
 		}
 	}
+	token = m.createInstallIncomingWebhook(ctx, token)
 	return token, nil
 }
 
@@ -8509,6 +8510,68 @@ func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID do
 		return domain.IncomingWebhook{}, "", err
 	}
 	return value, secret, nil
+}
+
+// incomingWebhookURL is the address an app posts to trigger its webhook. It
+// matches the shape admin incoming-webhook creation returns, so an app sees one
+// URL scheme however the hook was minted.
+func incomingWebhookURL(workspaceID domain.WorkspaceID, appID domain.AppID, secret string) string {
+	return "https://hooks.slack.com/services/" + string(workspaceID) + "/" + string(appID) + "/" + secret
+}
+
+// createInstallIncomingWebhook mints the incoming webhook an install asked for,
+// once its code is redeemed. The installer chose the channel at consent and was
+// a member of it, so the app's freshly installed bot is added there — the hook
+// posts as that bot, and postMessageAs requires the author to be in the channel
+// for the post to land. A failure here does not fail the installation: the app
+// is installed and the token is valid, so the webhook is simply absent from the
+// oauth.v2.access response rather than turning a completed install into an
+// error, the same way any post-install step reports a soft failure by its
+// absence.
+func (m Messages) createInstallIncomingWebhook(ctx context.Context, token domain.OAuthToken) domain.OAuthToken {
+	if token.IncomingWebhookChannel == "" || token.AppID == "" || token.WorkspaceID == "" || !slices.Contains(token.Scopes, "incoming-webhook") {
+		return token
+	}
+	conversation, err := m.Store.GetConversation(ctx, token.IncomingWebhookChannel)
+	if err != nil || conversation.WorkspaceID != token.WorkspaceID || conversation.IsDirectOrGroup() || conversation.Archived {
+		return token
+	}
+	bot, err := m.Store.GetBotByApp(ctx, token.WorkspaceID, token.AppID)
+	if err != nil || bot.Deleted || bot.UserID == "" {
+		return token
+	}
+	member, err := m.Store.IsConversationMember(ctx, token.IncomingWebhookChannel, bot.UserID)
+	if err != nil {
+		return token
+	}
+	if !member {
+		event, eventErr := newEvent(token.WorkspaceID, bot.UserID, events.NewPayload("conversation.member_added",
+			events.String("channel_id", string(token.IncomingWebhookChannel)),
+			events.String("user_id", string(bot.UserID))), time.Now().UTC())
+		if eventErr != nil {
+			return token
+		}
+		if err := m.Store.AddConversationMember(ctx, token.IncomingWebhookChannel, bot.UserID, event); err != nil {
+			return token
+		}
+	}
+	secret, err := domain.PublicID("whsec_")
+	if err != nil {
+		return token
+	}
+	id, err := domain.NewIncomingWebhookID()
+	if err != nil {
+		return token
+	}
+	webhook := domain.IncomingWebhook{ID: id, WorkspaceID: token.WorkspaceID, AppID: token.AppID, ConversationID: token.IncomingWebhookChannel, UserID: bot.UserID, SecretHash: domain.HashToken(secret), Enabled: true, CreatedAt: time.Now().UTC()}
+	if err := m.Store.CreateIncomingWebhook(ctx, webhook); err != nil {
+		return token
+	}
+	token.IncomingWebhookID = id
+	token.IncomingWebhookChannelName = conversation.Name
+	token.IncomingWebhookURL = incomingWebhookURL(token.WorkspaceID, token.AppID, secret)
+	token.IncomingWebhookConfigURL = "https://hooks.slack.com/services/" + string(token.WorkspaceID) + "/" + string(token.AppID)
+	return token
 }
 
 func (m Messages) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, webhookID domain.IncomingWebhookID, enabled bool) error {

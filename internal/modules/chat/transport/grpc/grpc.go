@@ -4222,19 +4222,24 @@ func (r Remote) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecret
 
 func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
 	token := domain.OAuthToken{
-		AccessToken:            value.GetAccessToken(),
-		ClientID:               value.GetClientId(),
-		AppID:                  domain.AppID(value.GetAppId()),
-		WorkspaceID:            domain.WorkspaceID(value.GetWorkspaceId()),
-		UserID:                 domain.UserID(value.GetUserId()),
-		InstallerID:            domain.UserID(value.GetInstallerId()),
-		BotID:                  domain.BotID(value.GetBotId()),
-		Scopes:                 append([]string(nil), value.GetScopes()...),
-		TokenType:              domain.TokenType(value.GetTokenType()),
-		AuthedUserAccessToken:  value.GetAuthedUserAccessToken(),
-		AuthedUserScopes:       append([]string(nil), value.GetAuthedUserScopes()...),
-		RefreshToken:           value.GetRefreshToken(),
-		AuthedUserRefreshToken: value.GetAuthedUserRefreshToken(),
+		AccessToken:                value.GetAccessToken(),
+		ClientID:                   value.GetClientId(),
+		AppID:                      domain.AppID(value.GetAppId()),
+		WorkspaceID:                domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID:                     domain.UserID(value.GetUserId()),
+		InstallerID:                domain.UserID(value.GetInstallerId()),
+		BotID:                      domain.BotID(value.GetBotId()),
+		Scopes:                     append([]string(nil), value.GetScopes()...),
+		TokenType:                  domain.TokenType(value.GetTokenType()),
+		AuthedUserAccessToken:      value.GetAuthedUserAccessToken(),
+		AuthedUserScopes:           append([]string(nil), value.GetAuthedUserScopes()...),
+		RefreshToken:               value.GetRefreshToken(),
+		AuthedUserRefreshToken:     value.GetAuthedUserRefreshToken(),
+		IncomingWebhookChannel:     domain.ConversationID(value.GetIncomingWebhookChannel()),
+		IncomingWebhookChannelName: value.GetIncomingWebhookChannelName(),
+		IncomingWebhookID:          domain.IncomingWebhookID(value.GetIncomingWebhookId()),
+		IncomingWebhookURL:         value.GetIncomingWebhookUrl(),
+		IncomingWebhookConfigURL:   value.GetIncomingWebhookConfigUrl(),
 	}
 	if value.GetExpiresAtUnixNano() != 0 {
 		token.ExpiresAt = time.Unix(0, value.GetExpiresAtUnixNano()).UTC()
@@ -8193,19 +8198,24 @@ func (s *Server) ExchangeOAuthV2Token(ctx context.Context, input *chatv1.OAuthEx
 
 func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
 	token := &chatv1.OAuthToken{
-		AccessToken:            value.AccessToken,
-		ClientId:               value.ClientID,
-		AppId:                  string(value.AppID),
-		WorkspaceId:            string(value.WorkspaceID),
-		UserId:                 string(value.UserID),
-		InstallerId:            string(value.InstallerID),
-		BotId:                  string(value.BotID),
-		Scopes:                 value.Scopes,
-		TokenType:              string(value.TokenType),
-		AuthedUserAccessToken:  value.AuthedUserAccessToken,
-		AuthedUserScopes:       value.AuthedUserScopes,
-		RefreshToken:           value.RefreshToken,
-		AuthedUserRefreshToken: value.AuthedUserRefreshToken,
+		AccessToken:                value.AccessToken,
+		ClientId:                   value.ClientID,
+		AppId:                      string(value.AppID),
+		WorkspaceId:                string(value.WorkspaceID),
+		UserId:                     string(value.UserID),
+		InstallerId:                string(value.InstallerID),
+		BotId:                      string(value.BotID),
+		Scopes:                     value.Scopes,
+		TokenType:                  string(value.TokenType),
+		AuthedUserAccessToken:      value.AuthedUserAccessToken,
+		AuthedUserScopes:           value.AuthedUserScopes,
+		RefreshToken:               value.RefreshToken,
+		AuthedUserRefreshToken:     value.AuthedUserRefreshToken,
+		IncomingWebhookChannel:     string(value.IncomingWebhookChannel),
+		IncomingWebhookChannelName: value.IncomingWebhookChannelName,
+		IncomingWebhookId:          string(value.IncomingWebhookID),
+		IncomingWebhookUrl:         value.IncomingWebhookURL,
+		IncomingWebhookConfigUrl:   value.IncomingWebhookConfigURL,
 	}
 	if !value.ExpiresAt.IsZero() {
 		token.ExpiresAtUnixNano = value.ExpiresAt.UTC().UnixNano()
@@ -14137,23 +14147,23 @@ func decodeProtoInstalledApp(value *chatv1.InstalledApp) (domain.InstalledApp, e
 }
 
 func encodeProtoOAuthAuthorizationRequest(value domain.OAuthAuthorizationRequest) *chatv1.OAuthAuthorizationRequest {
-	return &chatv1.OAuthAuthorizationRequest{ClientId: value.ClientID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), RedirectUri: value.RedirectURI, BotScopes: value.BotScopes, UserScopes: value.UserScopes, State: value.State, CodeChallenge: value.CodeChallenge, CodeChallengeMethod: value.CodeChallengeMethod}
+	return &chatv1.OAuthAuthorizationRequest{ClientId: value.ClientID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), RedirectUri: value.RedirectURI, BotScopes: value.BotScopes, UserScopes: value.UserScopes, State: value.State, IncomingWebhookChannel: string(value.IncomingWebhookChannel), CodeChallenge: value.CodeChallenge, CodeChallengeMethod: value.CodeChallengeMethod}
 }
 
 func decodeProtoOAuthAuthorizationRequest(value *chatv1.OAuthAuthorizationRequest) (domain.OAuthAuthorizationRequest, error) {
 	if value == nil || value.GetClientId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" {
 		return domain.OAuthAuthorizationRequest{}, errors.New("typed oauth authorization request is incomplete")
 	}
-	return domain.OAuthAuthorizationRequest{ClientID: value.GetClientId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), RedirectURI: value.GetRedirectUri(), BotScopes: append([]string(nil), value.GetBotScopes()...), UserScopes: append([]string(nil), value.GetUserScopes()...), State: value.GetState(), CodeChallenge: value.GetCodeChallenge(), CodeChallengeMethod: value.GetCodeChallengeMethod()}, nil
+	return domain.OAuthAuthorizationRequest{ClientID: value.GetClientId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), RedirectURI: value.GetRedirectUri(), BotScopes: append([]string(nil), value.GetBotScopes()...), UserScopes: append([]string(nil), value.GetUserScopes()...), State: value.GetState(), IncomingWebhookChannel: domain.ConversationID(value.GetIncomingWebhookChannel()), CodeChallenge: value.GetCodeChallenge(), CodeChallengeMethod: value.GetCodeChallengeMethod()}, nil
 }
 
 func encodeProtoOAuthAuthorization(value domain.OAuthAuthorization) *chatv1.OAuthAuthorization {
-	return &chatv1.OAuthAuthorization{AppId: string(value.AppID), AppName: value.AppName, ClientId: value.ClientID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), RedirectUri: value.RedirectURI, BotScopes: value.BotScopes, UserScopes: value.UserScopes, State: value.State, Code: value.Code, BotId: string(value.BotID), BotUserId: string(value.BotUserID), CodeChallenge: value.CodeChallenge, CodeChallengeMethod: value.CodeChallengeMethod}
+	return &chatv1.OAuthAuthorization{AppId: string(value.AppID), AppName: value.AppName, ClientId: value.ClientID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), RedirectUri: value.RedirectURI, BotScopes: value.BotScopes, UserScopes: value.UserScopes, State: value.State, Code: value.Code, BotId: string(value.BotID), BotUserId: string(value.BotUserID), IncomingWebhookChannel: string(value.IncomingWebhookChannel), CodeChallenge: value.CodeChallenge, CodeChallengeMethod: value.CodeChallengeMethod}
 }
 
 func decodeProtoOAuthAuthorization(value *chatv1.OAuthAuthorization) (domain.OAuthAuthorization, error) {
 	if value == nil || value.GetAppId() == "" || value.GetAppName() == "" || value.GetClientId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetRedirectUri() == "" {
 		return domain.OAuthAuthorization{}, errors.New("typed oauth authorization is incomplete")
 	}
-	return domain.OAuthAuthorization{AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), ClientID: value.GetClientId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), RedirectURI: value.GetRedirectUri(), BotScopes: append([]string(nil), value.GetBotScopes()...), UserScopes: append([]string(nil), value.GetUserScopes()...), State: value.GetState(), Code: value.GetCode(), BotID: domain.BotID(value.GetBotId()), BotUserID: domain.UserID(value.GetBotUserId()), CodeChallenge: value.GetCodeChallenge(), CodeChallengeMethod: value.GetCodeChallengeMethod()}, nil
+	return domain.OAuthAuthorization{AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), ClientID: value.GetClientId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), RedirectURI: value.GetRedirectUri(), BotScopes: append([]string(nil), value.GetBotScopes()...), UserScopes: append([]string(nil), value.GetUserScopes()...), State: value.GetState(), Code: value.GetCode(), BotID: domain.BotID(value.GetBotId()), BotUserID: domain.UserID(value.GetBotUserId()), IncomingWebhookChannel: domain.ConversationID(value.GetIncomingWebhookChannel()), CodeChallenge: value.GetCodeChallenge(), CodeChallengeMethod: value.GetCodeChallengeMethod()}, nil
 }

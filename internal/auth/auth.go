@@ -26,6 +26,7 @@ type Scope string
 const (
 	ScopeChatWrite               Scope = "chat:write"
 	ScopeChatWriteCustomize      Scope = "chat:write.customize"
+	ScopeIncomingWebhook         Scope = "incoming-webhook"
 	ScopeChannelsHistory         Scope = "channels:history"
 	ScopeUsersRead               Scope = "users:read"
 	ScopeUsersReadEmail          Scope = "users:read.email"
@@ -506,6 +507,7 @@ var allScopes = []Scope{
 	ScopeConversationsConnectManage,
 	ScopeChatWrite,
 	ScopeChatWriteCustomize,
+	ScopeIncomingWebhook,
 	ScopeChannelsHistory,
 	ScopeUsersRead,
 	ScopeUsersReadEmail,

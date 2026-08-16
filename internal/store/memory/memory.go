@@ -5690,6 +5690,9 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	token.Scopes = append([]string(nil), tokenScopes...)
 	token.TokenType = tokenType
 	token.CodeVerifier = ""
+	// The channel the installer chose travels from the consumed code so the
+	// service can mint the incoming webhook the exchange promised.
+	token.IncomingWebhookChannel = grant.IncomingWebhookChannel
 	return token, nil
 }
 

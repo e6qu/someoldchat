@@ -26,6 +26,14 @@ Refresh/replay cannot install twice or reveal a token. Denial, changed scopes,
 wrong workspace, disabled distribution, invalid state/code, and concurrent
 installation have distinct outcomes.
 
+The incoming-webhook channel selection is implemented: an app that requests the
+`incoming-webhook` scope shows a picker of the channels the installer can reach,
+and approving mints a webhook bound to the chosen channel — the app's bot is
+added there so the hook's posts land — whose URL `oauth.v2.access` returns once,
+in an `incoming_webhook` object. The installer must be a member of the channel
+they name; a channel named without the scope is ignored; and a hook the mint
+could not complete is absent from the response rather than failing the install.
+
 ## APP-03 — Use an app bot and App Home
 
 Bot messages are visibly app/bot-authored and honor Slack's channel membership,
