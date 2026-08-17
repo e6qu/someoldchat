@@ -19,18 +19,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PresenceService_UserInfo_FullMethodName                  = "/sameoldchat.chat.v1.PresenceService/UserInfo"
-	PresenceService_UserByEmail_FullMethodName               = "/sameoldchat.chat.v1.PresenceService/UserByEmail"
-	PresenceService_SetUserProfile_FullMethodName            = "/sameoldchat.chat.v1.PresenceService/SetUserProfile"
-	PresenceService_ScheduleUserStatus_FullMethodName        = "/sameoldchat.chat.v1.PresenceService/ScheduleUserStatus"
-	PresenceService_ScheduledUserStatuses_FullMethodName     = "/sameoldchat.chat.v1.PresenceService/ScheduledUserStatuses"
-	PresenceService_UpdateScheduledUserStatus_FullMethodName = "/sameoldchat.chat.v1.PresenceService/UpdateScheduledUserStatus"
-	PresenceService_DeleteScheduledUserStatus_FullMethodName = "/sameoldchat.chat.v1.PresenceService/DeleteScheduledUserStatus"
-	PresenceService_SetUserPresence_FullMethodName           = "/sameoldchat.chat.v1.PresenceService/SetUserPresence"
-	PresenceService_DoNotDisturbInfo_FullMethodName          = "/sameoldchat.chat.v1.PresenceService/DoNotDisturbInfo"
-	PresenceService_SetSnooze_FullMethodName                 = "/sameoldchat.chat.v1.PresenceService/SetSnooze"
-	PresenceService_EndSnooze_FullMethodName                 = "/sameoldchat.chat.v1.PresenceService/EndSnooze"
-	PresenceService_EndDND_FullMethodName                    = "/sameoldchat.chat.v1.PresenceService/EndDND"
+	PresenceService_UserInfo_FullMethodName                    = "/sameoldchat.chat.v1.PresenceService/UserInfo"
+	PresenceService_SetWorkspaceProfileField_FullMethodName    = "/sameoldchat.chat.v1.PresenceService/SetWorkspaceProfileField"
+	PresenceService_WorkspaceProfileFields_FullMethodName      = "/sameoldchat.chat.v1.PresenceService/WorkspaceProfileFields"
+	PresenceService_DeleteWorkspaceProfileField_FullMethodName = "/sameoldchat.chat.v1.PresenceService/DeleteWorkspaceProfileField"
+	PresenceService_SetUserProfileFields_FullMethodName        = "/sameoldchat.chat.v1.PresenceService/SetUserProfileFields"
+	PresenceService_UserProfileFields_FullMethodName           = "/sameoldchat.chat.v1.PresenceService/UserProfileFields"
+	PresenceService_UserByEmail_FullMethodName                 = "/sameoldchat.chat.v1.PresenceService/UserByEmail"
+	PresenceService_SetUserProfile_FullMethodName              = "/sameoldchat.chat.v1.PresenceService/SetUserProfile"
+	PresenceService_ScheduleUserStatus_FullMethodName          = "/sameoldchat.chat.v1.PresenceService/ScheduleUserStatus"
+	PresenceService_ScheduledUserStatuses_FullMethodName       = "/sameoldchat.chat.v1.PresenceService/ScheduledUserStatuses"
+	PresenceService_UpdateScheduledUserStatus_FullMethodName   = "/sameoldchat.chat.v1.PresenceService/UpdateScheduledUserStatus"
+	PresenceService_DeleteScheduledUserStatus_FullMethodName   = "/sameoldchat.chat.v1.PresenceService/DeleteScheduledUserStatus"
+	PresenceService_SetUserPresence_FullMethodName             = "/sameoldchat.chat.v1.PresenceService/SetUserPresence"
+	PresenceService_DoNotDisturbInfo_FullMethodName            = "/sameoldchat.chat.v1.PresenceService/DoNotDisturbInfo"
+	PresenceService_SetSnooze_FullMethodName                   = "/sameoldchat.chat.v1.PresenceService/SetSnooze"
+	PresenceService_EndSnooze_FullMethodName                   = "/sameoldchat.chat.v1.PresenceService/EndSnooze"
+	PresenceService_EndDND_FullMethodName                      = "/sameoldchat.chat.v1.PresenceService/EndDND"
 )
 
 // PresenceServiceClient is the client API for PresenceService service.
@@ -38,6 +43,11 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PresenceServiceClient interface {
 	UserInfo(ctx context.Context, in *UserRequest, opts ...grpc.CallOption) (*User, error)
+	SetWorkspaceProfileField(ctx context.Context, in *SetWorkspaceProfileFieldRequest, opts ...grpc.CallOption) (*ProfileFieldDefinition, error)
+	WorkspaceProfileFields(ctx context.Context, in *WorkspaceProfileFieldsRequest, opts ...grpc.CallOption) (*WorkspaceProfileFieldsResponse, error)
+	DeleteWorkspaceProfileField(ctx context.Context, in *DeleteWorkspaceProfileFieldRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	SetUserProfileFields(ctx context.Context, in *SetUserProfileFieldsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	UserProfileFields(ctx context.Context, in *UserProfileFieldsRequest, opts ...grpc.CallOption) (*UserProfileFieldsResponse, error)
 	UserByEmail(ctx context.Context, in *UserByEmailRequest, opts ...grpc.CallOption) (*User, error)
 	SetUserProfile(ctx context.Context, in *SetUserProfileRequest, opts ...grpc.CallOption) (*User, error)
 	ScheduleUserStatus(ctx context.Context, in *ScheduleUserStatusRequest, opts ...grpc.CallOption) (*ScheduledStatus, error)
@@ -63,6 +73,56 @@ func (c *presenceServiceClient) UserInfo(ctx context.Context, in *UserRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(User)
 	err := c.cc.Invoke(ctx, PresenceService_UserInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) SetWorkspaceProfileField(ctx context.Context, in *SetWorkspaceProfileFieldRequest, opts ...grpc.CallOption) (*ProfileFieldDefinition, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProfileFieldDefinition)
+	err := c.cc.Invoke(ctx, PresenceService_SetWorkspaceProfileField_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) WorkspaceProfileFields(ctx context.Context, in *WorkspaceProfileFieldsRequest, opts ...grpc.CallOption) (*WorkspaceProfileFieldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspaceProfileFieldsResponse)
+	err := c.cc.Invoke(ctx, PresenceService_WorkspaceProfileFields_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) DeleteWorkspaceProfileField(ctx context.Context, in *DeleteWorkspaceProfileFieldRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, PresenceService_DeleteWorkspaceProfileField_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) SetUserProfileFields(ctx context.Context, in *SetUserProfileFieldsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, PresenceService_SetUserProfileFields_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) UserProfileFields(ctx context.Context, in *UserProfileFieldsRequest, opts ...grpc.CallOption) (*UserProfileFieldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserProfileFieldsResponse)
+	err := c.cc.Invoke(ctx, PresenceService_UserProfileFields_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +244,11 @@ func (c *presenceServiceClient) EndDND(ctx context.Context, in *DoNotDisturbRequ
 // for forward compatibility.
 type PresenceServiceServer interface {
 	UserInfo(context.Context, *UserRequest) (*User, error)
+	SetWorkspaceProfileField(context.Context, *SetWorkspaceProfileFieldRequest) (*ProfileFieldDefinition, error)
+	WorkspaceProfileFields(context.Context, *WorkspaceProfileFieldsRequest) (*WorkspaceProfileFieldsResponse, error)
+	DeleteWorkspaceProfileField(context.Context, *DeleteWorkspaceProfileFieldRequest) (*MutationResponse, error)
+	SetUserProfileFields(context.Context, *SetUserProfileFieldsRequest) (*MutationResponse, error)
+	UserProfileFields(context.Context, *UserProfileFieldsRequest) (*UserProfileFieldsResponse, error)
 	UserByEmail(context.Context, *UserByEmailRequest) (*User, error)
 	SetUserProfile(context.Context, *SetUserProfileRequest) (*User, error)
 	ScheduleUserStatus(context.Context, *ScheduleUserStatusRequest) (*ScheduledStatus, error)
@@ -206,6 +271,21 @@ type UnimplementedPresenceServiceServer struct{}
 
 func (UnimplementedPresenceServiceServer) UserInfo(context.Context, *UserRequest) (*User, error) {
 	return nil, status.Error(codes.Unimplemented, "method UserInfo not implemented")
+}
+func (UnimplementedPresenceServiceServer) SetWorkspaceProfileField(context.Context, *SetWorkspaceProfileFieldRequest) (*ProfileFieldDefinition, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetWorkspaceProfileField not implemented")
+}
+func (UnimplementedPresenceServiceServer) WorkspaceProfileFields(context.Context, *WorkspaceProfileFieldsRequest) (*WorkspaceProfileFieldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WorkspaceProfileFields not implemented")
+}
+func (UnimplementedPresenceServiceServer) DeleteWorkspaceProfileField(context.Context, *DeleteWorkspaceProfileFieldRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteWorkspaceProfileField not implemented")
+}
+func (UnimplementedPresenceServiceServer) SetUserProfileFields(context.Context, *SetUserProfileFieldsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetUserProfileFields not implemented")
+}
+func (UnimplementedPresenceServiceServer) UserProfileFields(context.Context, *UserProfileFieldsRequest) (*UserProfileFieldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UserProfileFields not implemented")
 }
 func (UnimplementedPresenceServiceServer) UserByEmail(context.Context, *UserByEmailRequest) (*User, error) {
 	return nil, status.Error(codes.Unimplemented, "method UserByEmail not implemented")
@@ -274,6 +354,96 @@ func _PresenceService_UserInfo_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PresenceServiceServer).UserInfo(ctx, req.(*UserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_SetWorkspaceProfileField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetWorkspaceProfileFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).SetWorkspaceProfileField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_SetWorkspaceProfileField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).SetWorkspaceProfileField(ctx, req.(*SetWorkspaceProfileFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_WorkspaceProfileFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceProfileFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).WorkspaceProfileFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_WorkspaceProfileFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).WorkspaceProfileFields(ctx, req.(*WorkspaceProfileFieldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_DeleteWorkspaceProfileField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteWorkspaceProfileFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).DeleteWorkspaceProfileField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_DeleteWorkspaceProfileField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).DeleteWorkspaceProfileField(ctx, req.(*DeleteWorkspaceProfileFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_SetUserProfileFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetUserProfileFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).SetUserProfileFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_SetUserProfileFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).SetUserProfileFields(ctx, req.(*SetUserProfileFieldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_UserProfileFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserProfileFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).UserProfileFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_UserProfileFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).UserProfileFields(ctx, req.(*UserProfileFieldsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -486,6 +656,26 @@ var PresenceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UserInfo",
 			Handler:    _PresenceService_UserInfo_Handler,
+		},
+		{
+			MethodName: "SetWorkspaceProfileField",
+			Handler:    _PresenceService_SetWorkspaceProfileField_Handler,
+		},
+		{
+			MethodName: "WorkspaceProfileFields",
+			Handler:    _PresenceService_WorkspaceProfileFields_Handler,
+		},
+		{
+			MethodName: "DeleteWorkspaceProfileField",
+			Handler:    _PresenceService_DeleteWorkspaceProfileField_Handler,
+		},
+		{
+			MethodName: "SetUserProfileFields",
+			Handler:    _PresenceService_SetUserProfileFields_Handler,
+		},
+		{
+			MethodName: "UserProfileFields",
+			Handler:    _PresenceService_UserProfileFields_Handler,
 		},
 		{
 			MethodName: "UserByEmail",

@@ -637,6 +637,54 @@ func TestAdminPageDecidesPendingInvitationsAndAppRequests(t *testing.T) {
 	}
 }
 
+// TestAdminDefinesAndRemovesCustomProfileField covers the workspace-settings
+// custom-field surface: an administrator adds a field, sees it listed, and
+// removes it, and an options_list with no options is refused.
+func TestAdminDefinesAndRemovesCustomProfileField(t *testing.T) {
+	handler, store := newAuthAdminTestHandlerWithRole(t, allAdminScopes(), domain.WorkspaceRoleAdmin)
+	ctx := context.Background()
+	page := func() string {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/app/admin/settings", nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+
+	define := httptest.NewRecorder()
+	handler.ServeHTTP(define, adminMutationRequest(http.MethodPost, "/app/admin/settings/profile-fields", "label=Pronouns&type=text&hint=How+to+refer+to+you"))
+	if define.Code != http.StatusOK {
+		t.Fatalf("define status=%d body=%s", define.Code, define.Body.String())
+	}
+	if listed := page(); !strings.Contains(listed, "Pronouns") || !strings.Contains(listed, "Custom profile fields") {
+		t.Fatalf("settings page missing the field: %s", listed)
+	}
+	fields, err := store.ListWorkspaceProfileFields(ctx, "T1")
+	if err != nil || len(fields) != 1 {
+		t.Fatalf("fields=%+v err=%v", fields, err)
+	}
+
+	// An options_list with no options is refused.
+	bad := httptest.NewRecorder()
+	handler.ServeHTTP(bad, adminMutationRequest(http.MethodPost, "/app/admin/settings/profile-fields", "label=Team&type=options_list"))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("empty options status=%d body=%s", bad.Code, bad.Body.String())
+	}
+
+	remove := httptest.NewRecorder()
+	handler.ServeHTTP(remove, adminMutationRequest(http.MethodPost, "/app/admin/settings/profile-fields/delete", "field_id="+string(fields[0].ID)))
+	if remove.Code != http.StatusOK {
+		t.Fatalf("remove status=%d body=%s", remove.Code, remove.Body.String())
+	}
+	if remaining, err := store.ListWorkspaceProfileFields(ctx, "T1"); err != nil || len(remaining) != 0 {
+		t.Fatalf("fields after remove=%+v err=%v", remaining, err)
+	}
+}
+
 // A decision that empties a row with nothing else on screen leaves the
 // administrator unsure which button landed.
 func TestAdminDecisionRedirectsWithANotice(t *testing.T) {

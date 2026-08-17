@@ -635,6 +635,26 @@ func TestListItemActionReturnsToTheViewItWasTakenFrom(t *testing.T) {
 	}
 }
 
+// TestMemberEditsCustomProfileFieldFromTheDirectory covers the member side of
+// custom profile fields: the directory shows an input for each workspace field,
+// and saving one persists the value, which then shows pre-filled.
+func TestMemberEditsCustomProfileFieldFromTheDirectory(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SetWorkspaceProfileField(ctx, domain.ProfileFieldDefinition{WorkspaceID: "T1", ID: "Xf01", Label: "Pronouns", Type: domain.ProfileFieldText, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	page := get(t, mux, "/app/members").Body.String()
+	requireContains(t, "directory shows the custom field", page, "Pronouns", `name="field:Xf01"`)
+
+	saved := postForm(t, mux, "/app/profile", url.Values{"_csrf": {auth.CSRFToken("session")}, "display_name": {"alice"}, "field:Xf01": {"she/her"}}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save profile = %d: %s", saved.Code, saved.Body)
+	}
+	after := get(t, mux, "/app/members").Body.String()
+	requireContains(t, "directory shows the saved value", after, `value="she/her"`)
+}
+
 // TestListWithoutAGroupableColumnOffersNoBoard covers the fallback: a list whose
 // only column is free text has nothing a lane can stand for, so no board is
 // offered and asking for one by URL falls back to the list rather than drawing a

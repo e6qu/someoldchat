@@ -157,6 +157,17 @@ func NewLaterReminderID() (LaterReminderID, error) {
 	return LaterReminderID(value), err
 }
 
+// NewProfileFieldID mints a custom-profile-field identifier. Slack names these
+// Xf…; the prefix is what a client keys the value object by, so it is preserved
+// and upper-cased like the other public IDs.
+func NewProfileFieldID() (ProfileFieldID, error) {
+	value, err := PublicID("Xf")
+	if err != nil {
+		return "", err
+	}
+	return ProfileFieldID("Xf" + strings.ToUpper(value[2:])), nil
+}
+
 // ActivityIDFor returns the stable identity of a notification-producing fact.
 //
 // Message delivery, reaction delivery, and reminder delivery are committed in

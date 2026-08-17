@@ -57,6 +57,7 @@ var (
 	ErrInvalidFile                   = errors.New("file metadata is invalid")
 	ErrInvalidSearch                 = errors.New("search query is invalid")
 	ErrInvalidProfile                = errors.New("user profile is invalid")
+	ErrInvalidProfileField           = errors.New("custom profile field definition is invalid")
 	ErrInvalidScheduledStatus        = errors.New("scheduled status is invalid")
 	ErrScheduledStatusLimit          = errors.New("five statuses are already scheduled")
 	ErrInvalidPresence               = errors.New("user presence is invalid")

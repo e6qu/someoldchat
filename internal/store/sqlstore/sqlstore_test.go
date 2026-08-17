@@ -1333,6 +1333,62 @@ func TestSQLiteRemindersAreDurable(t *testing.T) {
 	}
 }
 
+func TestSQLiteProfileFieldsAreDurable(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, memoryDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	team := domain.ProfileFieldDefinition{WorkspaceID: "T1", ID: "Xf02", Ordering: 2, Label: "Team", Hint: "Your team", Type: domain.ProfileFieldOptionsList, PossibleValues: []string{"red", "blue"}, IsHidden: true, CreatedAt: now}
+	pronouns := domain.ProfileFieldDefinition{WorkspaceID: "T1", ID: "Xf01", Ordering: 1, Label: "Pronouns", Type: domain.ProfileFieldText, CreatedAt: now}
+	if err := s.SetWorkspaceProfileField(ctx, team); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWorkspaceProfileField(ctx, pronouns); err != nil {
+		t.Fatal(err)
+	}
+
+	// Listing is ordered by ordering, and every column round-trips.
+	fields, err := s.ListWorkspaceProfileFields(ctx, "T1")
+	if err != nil || len(fields) != 2 || fields[0].ID != "Xf01" || fields[1].ID != "Xf02" {
+		t.Fatalf("fields=%+v err=%v", fields, err)
+	}
+	if got := fields[1]; got.Label != "Team" || got.Type != domain.ProfileFieldOptionsList || len(got.PossibleValues) != 2 || !got.IsHidden || got.Ordering != 2 {
+		t.Fatalf("options field round-trip=%+v", got)
+	}
+	if got, err := s.GetWorkspaceProfileField(ctx, "T1", "Xf01"); err != nil || got.Label != "Pronouns" {
+		t.Fatalf("get=%+v err=%v", got, err)
+	}
+
+	// A member's values upsert and clear.
+	if err := s.SetUserProfileFieldValues(ctx, "T1", "U1", []domain.UserProfileFieldValue{{FieldID: "Xf01", Value: "she/her"}, {FieldID: "Xf02", Value: "blue", Alt: "Blue team"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetUserProfileFieldValues(ctx, "T1", "U1", []domain.UserProfileFieldValue{{FieldID: "Xf01", Value: ""}}); err != nil {
+		t.Fatal(err)
+	}
+	values, err := s.ListUserProfileFieldValues(ctx, "T1", "U1")
+	if err != nil || len(values) != 1 || values[0].FieldID != "Xf02" || values[0].Value != "blue" || values[0].Alt != "Blue team" {
+		t.Fatalf("values after clear=%+v err=%v", values, err)
+	}
+
+	// Deleting a field removes it and every value under it.
+	if err := s.DeleteWorkspaceProfileField(ctx, "T1", "Xf02"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetWorkspaceProfileField(ctx, "T1", "Xf02"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("get after delete err=%v, want ErrNotFound", err)
+	}
+	if remaining, err := s.ListUserProfileFieldValues(ctx, "T1", "U1"); err != nil || len(remaining) != 0 {
+		t.Fatalf("values after field delete=%+v err=%v", remaining, err)
+	}
+}
+
 func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, memoryDSN(t))

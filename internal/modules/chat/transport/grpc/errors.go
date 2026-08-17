@@ -82,6 +82,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_file", code: codes.InvalidArgument, sentinel: service.ErrInvalidFile},
 	{key: "service.invalid_search", code: codes.InvalidArgument, sentinel: service.ErrInvalidSearch},
 	{key: "service.invalid_profile", code: codes.InvalidArgument, sentinel: service.ErrInvalidProfile},
+	{key: "service.invalid_profile_field", code: codes.InvalidArgument, sentinel: service.ErrInvalidProfileField},
 	{key: "service.invalid_scheduled_status", code: codes.InvalidArgument, sentinel: service.ErrInvalidScheduledStatus},
 	{key: "service.invalid_presence", code: codes.InvalidArgument, sentinel: service.ErrInvalidPresence},
 	{key: "service.invalid_snooze", code: codes.InvalidArgument, sentinel: service.ErrInvalidSnooze},
