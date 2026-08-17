@@ -470,7 +470,11 @@ type pageData struct {
 	// window that cannot hold it. These were two fields assigned the same
 	// value, which is one drift away from the pager and the composer
 	// disagreeing about where "latest" is.
-	LatestURL         string
+	LatestURL string
+	// NewerURL pages one window forward from a jumped or permalinked position,
+	// the counterpart of OlderURL. LatestURL jumps straight to the present;
+	// NewerURL keeps the reader's place and moves forward a screen at a time.
+	NewerURL          string
 	MarkReadURL       string
 	MarkReadTimestamp string
 	AtLatest          bool
@@ -2224,7 +2228,8 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         {{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}
         <div id="huddle" data-fragment="{{.HuddleURL}}" data-live="true">{{template "huddle" .Huddle}}</div>
         <section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>
-        {{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
+        {{if .NewerURL}}<p class="pager pager-newer"><a href="{{.NewerURL}}">Show newer messages</a></p>{{end}}
+        {{if .LatestURL}}<p class="pager pager-latest"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
       </div>
       {{if .ThreadTimestamp}}
       <aside class="thread" aria-labelledby="thread-heading">
@@ -5410,6 +5415,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	principal := reader.principal
 	channel := h.requestChannel(r)
 	before := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("before")))
+	after := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("after")))
 	threadTimestamp := strings.TrimSpace(r.URL.Query().Get("thread"))
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
@@ -5433,7 +5439,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		h.writeStoreError(w, err, "The workspace identity is temporarily unavailable.")
 		return
 	}
-	history, err := h.historyWindow(r.Context(), principal, channel, before)
+	history, err := h.historyWindow(r.Context(), principal, channel, before, after)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidCursor) {
 			h.writePageError(w, http.StatusBadRequest, "That history link is not valid", "The link you followed does not point at a place in this conversation. Open the channel to read the latest messages.")
@@ -5808,6 +5814,9 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if history.OlderCursor != "" {
 		data.OlderURL = appURL(string(channel), threadTimestamp, string(history.OlderCursor), "", "")
 	}
+	if history.NewerCursor != "" {
+		data.NewerURL = appAfterURL(string(channel), threadTimestamp, string(history.NewerCursor))
+	}
 	if !history.AtLatest {
 		data.LatestURL = appURL(string(channel), threadTimestamp, "", "", "")
 	}
@@ -5835,6 +5844,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 	channel := h.requestChannel(r)
 	threadTimestamp := strings.TrimSpace(r.URL.Query().Get("thread"))
 	before := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("before")))
+	after := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("after")))
 	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
 		h.writeFragmentError(w, err, "the conversation is temporarily unavailable")
@@ -5859,7 +5869,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		}
 		messages = replies.Messages
 	} else {
-		history, historyErr := h.historyWindow(r.Context(), principal, channel, before)
+		history, historyErr := h.historyWindow(r.Context(), principal, channel, before, after)
 		if historyErr != nil {
 			if errors.Is(historyErr, domain.ErrInvalidCursor) {
 				secureHeaders(w, workspaceContentSecurityPolicy)
@@ -5886,10 +5896,24 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 type historyView struct {
 	Messages    []domain.Message
 	OlderCursor domain.Cursor
+	// NewerCursor is where the next window forward begins — the newest message in
+	// this window, read after by an ascending request. It is empty for a window
+	// that is already at the latest message, where there is nothing newer to page
+	// to.
+	NewerCursor domain.Cursor
 	AtLatest    bool
 }
 
-func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, channel domain.ConversationID, end domain.Cursor) (historyView, error) {
+// historyWindow reads one screen of a conversation. Without a cursor it reads
+// the latest window; `end` reads the window ending just before it (paging
+// older); `start` reads the window beginning just after it (paging newer, the
+// forward scroll from a jumped or permalinked message). Every window reports
+// both directions it can still be paged, so a reader who jumped in can move
+// forward as well as back.
+func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, channel domain.ConversationID, end, start domain.Cursor) (historyView, error) {
+	if start != "" {
+		return h.historyWindowForward(ctx, principal, channel, start)
+	}
 	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{
 		Limit:      timelineWindow,
 		Cursor:     end,
@@ -5913,8 +5937,57 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 		}
 		view.OlderCursor = cursor
 	}
+	// A window that ends before a cursor is by construction not the latest, so
+	// there are newer messages to page forward to, beginning at this window's
+	// newest message.
+	if end != "" && len(newestFirst) > 0 {
+		cursor, cursorErr := domain.NewMessageCursor(newestFirst[0])
+		if cursorErr != nil {
+			return historyView{}, cursorErr
+		}
+		view.NewerCursor = cursor
+	}
 	slices.Reverse(newestFirst)
 	view.Messages = newestFirst
+	return view, nil
+}
+
+// historyWindowForward reads the window of messages immediately after a cursor,
+// ascending, for the "show newer messages" pager. Reaching the end makes the
+// window the latest one, so it goes live again.
+func (h Handler) historyWindowForward(ctx context.Context, principal auth.Principal, channel domain.ConversationID, start domain.Cursor) (historyView, error) {
+	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{
+		Limit:      timelineWindow,
+		Cursor:     start,
+		Descending: false,
+	})
+	if err != nil {
+		return historyView{}, err
+	}
+	oldestFirst := make([]domain.Message, 0, timelineWindow)
+	for _, message := range page.Messages {
+		if len(oldestFirst) == timelineWindow {
+			break
+		}
+		oldestFirst = append(oldestFirst, message)
+	}
+	view := historyView{AtLatest: !page.HasMore, Messages: oldestFirst}
+	if len(oldestFirst) > 0 {
+		// There is always older history to page back to — at least the cursor this
+		// window began after — so the window's oldest message anchors it.
+		older, olderErr := domain.NewMessageCursor(oldestFirst[0])
+		if olderErr != nil {
+			return historyView{}, olderErr
+		}
+		view.OlderCursor = older
+		if page.HasMore {
+			newer, newerErr := domain.NewMessageCursor(oldestFirst[len(oldestFirst)-1])
+			if newerErr != nil {
+				return historyView{}, newerErr
+			}
+			view.NewerCursor = newer
+		}
+	}
 	return view, nil
 }
 
@@ -13384,6 +13457,22 @@ func messageAnchor(id domain.MessageID) string {
 
 func formatTime(value time.Time) string {
 	return value.UTC().Format("Jan 2, 15:04 UTC")
+}
+
+// appAfterURL is the forward counterpart of appURL's before form: it pages to
+// the window beginning just after a cursor. It is its own helper rather than a
+// sixth appURL parameter because only the timeline's newer pager needs it, and
+// widening appURL would touch every one of its callers for a field they never
+// set.
+func appAfterURL(channel, thread, after string) string {
+	query := url.Values{"channel": {channel}}
+	if thread != "" {
+		query.Set("thread", thread)
+	}
+	if after != "" {
+		query.Set("after", after)
+	}
+	return "/app?" + query.Encode()
 }
 
 func appURL(channel, thread, before, anchor, conversations string) string {
