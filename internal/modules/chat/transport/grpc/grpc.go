@@ -733,11 +733,11 @@ func (r Remote) RecentSearches(ctx context.Context, workspaceID domain.Workspace
 	return values, nil
 }
 
-func (r Remote) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, title, mimeType string, size int64, source io.Reader) (domain.File, error) {
+func (r Remote) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, title, mimeType, fileType string, size int64, source io.Reader) (domain.File, error) {
 	if source == nil {
 		return domain.File{}, errors.New("file upload requires a source")
 	}
-	header := &chatv1.UploadFileRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Title: title, MimeType: mimeType, Size: size}
+	header := &chatv1.UploadFileRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Title: title, MimeType: mimeType, FileType: fileType, Size: size}
 	stream, err := r.chat.UploadFile(ctx)
 	if err != nil {
 		return domain.File{}, err
@@ -10070,7 +10070,7 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 				_ = writer.CloseWithError(failure)
 			}
 		}()
-		file, uploadErr := s.implementation.UploadFile(stream.Context(), domain.WorkspaceID(header.GetWorkspaceId()), domain.UserID(header.GetUserId()), header.GetName(), header.GetTitle(), header.GetMimeType(), header.GetSize(), reader)
+		file, uploadErr := s.implementation.UploadFile(stream.Context(), domain.WorkspaceID(header.GetWorkspaceId()), domain.UserID(header.GetUserId()), header.GetName(), header.GetTitle(), header.GetMimeType(), header.GetFileType(), header.GetSize(), reader)
 		result <- uploadResult{file: file, err: uploadErr}
 		if uploadErr != nil {
 			_ = writer.CloseWithError(uploadErr)
@@ -11753,7 +11753,7 @@ func encodeProtoFile(value domain.File) *chatv1.File {
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader),
 		Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size,
 		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, PublicToken: value.PublicToken,
-		SharedChannels: conversationStrings(value.SharedChannels), Description: value.Description,
+		SharedChannels: conversationStrings(value.SharedChannels), Description: value.Description, FileType: value.FileType,
 	}
 }
 
@@ -11771,7 +11771,7 @@ func decodeProtoFile(value *chatv1.File) (domain.File, error) {
 	if err != nil {
 		return domain.File{}, errors.New("typed file created_at is invalid")
 	}
-	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels()), Description: value.GetDescription()}, nil
+	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels()), Description: value.GetDescription(), FileType: value.GetFileType()}, nil
 }
 
 func encodeProtoFilePage(page domain.FilePage) *chatv1.FilePage {

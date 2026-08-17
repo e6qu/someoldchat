@@ -584,7 +584,7 @@ func (m Messages) RevokeOIDCSessions(ctx context.Context, workspaceID domain.Wor
 	return m.Store.RevokeOIDCSessions(ctx, workspaceID, provider, subject, sid, tokenID, expiresAt, event)
 }
 
-func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, title, mimeType string, size int64, source io.Reader) (domain.File, error) {
+func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, title, mimeType, fileType string, size int64, source io.Reader) (domain.File, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.File{}, err
 	}
@@ -608,7 +608,7 @@ func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.File{}, err
 	}
-	file := domain.File{ID: id, WorkspaceID: workspaceID, Uploader: userID, Name: name, Title: title, MIMEType: mimeType, BlobKey: string(workspaceID) + "/" + string(id), Size: size, CreatedAt: time.Now().UTC()}
+	file := domain.File{ID: id, WorkspaceID: workspaceID, Uploader: userID, Name: name, Title: title, MIMEType: mimeType, FileType: strings.TrimSpace(fileType), BlobKey: string(workspaceID) + "/" + string(id), Size: size, CreatedAt: time.Now().UTC()}
 	if _, err := m.Blob.Put(ctx, file.BlobKey, size, source); err != nil {
 		if errors.Is(err, blob.ErrUnavailable) {
 			return domain.File{}, ErrBlobUnavailable

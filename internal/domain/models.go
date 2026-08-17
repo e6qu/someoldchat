@@ -1956,10 +1956,29 @@ type File struct {
 	// pinned Web API snapshot predates the alt_txt parameter that carries it,
 	// so this is first-party durable state rather than an invented API field —
 	// the same standing as recent searches and Later.
-	Description    string
+	Description string
+	// FileType is the syntax language of a snippet — the text a member typed
+	// inline rather than a file they uploaded. It is empty for an ordinary hosted
+	// upload and non-empty (defaulting to "text") for a snippet, which is what
+	// makes it the discriminator: only the content= path ever sets it.
+	FileType       string
 	CreatedAt      time.Time
 	Deleted        bool
 	SharedChannels []ConversationID
+}
+
+// IsSnippet reports whether this file is an inline text/code snippet rather than
+// an uploaded file. Slack calls the two modes "snippet" and "hosted".
+func (f File) IsSnippet() bool {
+	return strings.TrimSpace(f.FileType) != ""
+}
+
+// Mode is the Slack file mode: a snippet the member typed, or a hosted upload.
+func (f File) Mode() string {
+	if f.IsSnippet() {
+		return "snippet"
+	}
+	return "hosted"
 }
 
 // imageMIMEPrefix is the whole test for whether a file is shown rather than

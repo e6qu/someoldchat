@@ -366,7 +366,7 @@ func TestRemoteStreamsFileAndUsesMetadataMethods(t *testing.T) {
 	remote := servedRemote(t, service.Messages{Store: store, Blob: blobs}, store)
 	ctx := context.Background()
 	content := bytes.Repeat([]byte("file-content-"), 10000)
-	file, err := remote.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", int64(len(content)), bytes.NewReader(content))
+	file, err := remote.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", int64(len(content)), bytes.NewReader(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -621,7 +621,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	}
 	shortContext, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	if _, err := remote.UploadFile(shortContext, "T1", "U1", "missing.txt", "Missing", "text/plain", 1, bytes.NewReader([]byte("x"))); err == nil {
+	if _, err := remote.UploadFile(shortContext, "T1", "U1", "missing.txt", "Missing", "text/plain", "", 1, bytes.NewReader([]byte("x"))); err == nil {
 		t.Fatal("upload without blob storage unexpectedly succeeded")
 	}
 	message, err := remote.Post(ctx, "T1", "U1", "C1", "hello", "", "")

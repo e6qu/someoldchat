@@ -635,6 +635,48 @@ func TestListItemActionReturnsToTheViewItWasTakenFrom(t *testing.T) {
 	}
 }
 
+// TestSnippetRendersInlineInTheTimeline covers a code snippet shared into a
+// channel showing in place as a code block with its text and syntax, rather than
+// only as a download link.
+func TestSnippetRendersInlineInTheTimeline(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"})
+	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("Cdev", "U1")
+	if err := s.SeedSession(ctx, "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	objects, err := blob.NewFilesystem(t.TempDir(), 100<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := service.Messages{Store: s, Blob: objects, AppCredentialKey: []byte(strings.Repeat("k", 32))}
+	code := "print('hello, snippet')"
+	file, err := messages.UploadFile(ctx, "T1", "U1", "greeting.py", "greeting", "text/plain", "python", int64(len(code)), strings.NewReader(code))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", file.ID, []domain.ConversationID{"Cdev"}, "look at this", ""); err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewBrowser(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(messages, authenticator, s, "Cdev", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "snippet renders inline", body,
+		`class="message-snippet"`, `data-filetype="python"`, "print(&#39;hello, snippet&#39;)")
+}
+
 // TestMemberEditsCustomProfileFieldFromTheDirectory covers the member side of
 // custom profile fields: the directory shows an input for each workspace field,
 // and saving one persists the value, which then shows pre-filled.

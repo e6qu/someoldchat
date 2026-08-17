@@ -76,8 +76,14 @@ test-postgres:
 test:
 	GOCACHE=$(GOCACHE) go test ./...
 
+# -timeout is raised above Go's 10m default because the race detector makes the
+# largest packages several times slower: internal/store/sqlstore alone runs its
+# hundreds of SQLite cases in ~4m unraced and comfortably over 4m raced, which on
+# a slower CI runner crosses 10m and times the whole gate out on a package that
+# is not hung, only instrumented. 30m gives every package headroom without
+# hiding a genuine hang, which would still be caught long before it.
 test-race:
-	GOCACHE=$(GOCACHE) go test -race ./...
+	GOCACHE=$(GOCACHE) go test -race -timeout=30m ./...
 
 test-load:
 	GOCACHE=$(GOCACHE) go test ./tests/load -count=1

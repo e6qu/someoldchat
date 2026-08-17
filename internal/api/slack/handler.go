@@ -8790,11 +8790,17 @@ func slackFileTypeMatches(types []string, file domain.File) bool {
 			if mime == "application/zip" || mime == "application/x-zip-compressed" {
 				return true
 			}
-		case "spaces", "gdocs", "snippets":
-			// Slack Posts, Google Docs and snippets are authored inside Slack, not
-			// uploaded, and this system produces none of them. `snippets` used to
-			// match every text/* upload, which returned ordinary .txt and .csv
-			// files for a filter that asks for something else entirely.
+		case "snippets":
+			// A snippet is the inline text a member typed, told apart from an
+			// ordinary text upload by its syntax file type. It used to match every
+			// text/* upload, which returned ordinary .txt and .csv files for a
+			// filter that asks for something else entirely.
+			if file.IsSnippet() {
+				return true
+			}
+		case "spaces", "gdocs":
+			// Slack Posts and Google Docs are authored inside Slack, not uploaded,
+			// and this system produces none of them.
 		}
 	}
 	return false
@@ -8860,7 +8866,16 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = filename
 	}
-	file, err := h.Messages.UploadFile(r.Context(), principal.WorkspaceID, principal.UserID, filename, title, mimeType, stat.Size(), source)
+	// A content= upload is an inline snippet the member typed, not a file they
+	// picked, so it carries a syntax file type — the filetype argument, or "text"
+	// when none is given. A multipart file upload carries none and stays hosted.
+	fileType := ""
+	if strings.TrimSpace(fields["content"]) != "" {
+		if fileType = strings.TrimSpace(fields["filetype"]); fileType == "" {
+			fileType = "text"
+		}
+	}
+	file, err := h.Messages.UploadFile(r.Context(), principal.WorkspaceID, principal.UserID, filename, title, mimeType, fileType, stat.Size(), source)
 	if err != nil {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
@@ -9248,14 +9263,20 @@ func copyUploadPart(destination *os.File, source io.Reader) error {
 }
 
 func fileResponse(file domain.File) map[string]any {
+	// A snippet's file type is the syntax the member chose; a hosted file's is
+	// read from its name, the way Slack derives it. A snippet is editable and
+	// carries mode "snippet"; a hosted upload is neither.
 	fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Name)), ".")
+	if file.IsSnippet() {
+		fileType = file.FileType
+	}
 	result := map[string]any{
 		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
 		"size": file.Size, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
 		"user": file.Uploader, "is_public": file.PublicToken != "", "team_id": file.WorkspaceID,
-		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "mode": "hosted",
+		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "mode": file.Mode(),
 		"is_external": false, "external_type": "", "public_url_shared": file.PublicToken != "",
-		"editable": false, "display_as_bot": false,
+		"editable": file.IsSnippet(), "display_as_bot": false,
 	}
 	if !file.Deleted {
 		result["url_private"] = "/api/files/" + url.PathEscape(string(file.ID))

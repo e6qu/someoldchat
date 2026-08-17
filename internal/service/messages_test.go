@@ -1343,7 +1343,7 @@ func TestPublicFileSharingStreamsOnlyWhileTokenIsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := Messages{Store: s, Blob: objects}
-	file, err := messages.UploadFile(context.Background(), "T1", "U1", "a.txt", "A", "text/plain", 5, bytes.NewReader([]byte("hello")))
+	file, err := messages.UploadFile(context.Background(), "T1", "U1", "a.txt", "A", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1703,7 +1703,7 @@ func TestUploadFileKeepsBytesExternalAndMetadataDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := Messages{Store: s, Blob: objects}
-	file, err := messages.UploadFile(context.Background(), "T1", "U1", "notes.txt", "Notes", "text/plain", 7, bytes.NewReader([]byte("content")))
+	file, err := messages.UploadFile(context.Background(), "T1", "U1", "notes.txt", "Notes", "text/plain", "", 7, bytes.NewReader([]byte("content")))
 	if err != nil {
 		t.Fatal(err)
 	}

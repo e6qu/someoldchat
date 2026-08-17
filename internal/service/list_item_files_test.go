@@ -45,7 +45,7 @@ func listFileWorld(t *testing.T) (context.Context, Messages, *memory.Store, doma
 
 func uploadTestFile(t *testing.T, ctx context.Context, messages Messages, user domain.UserID, name string) domain.File {
 	t.Helper()
-	file, err := messages.UploadFile(ctx, "T1", user, name, name, "image/png", 4, bytes.NewReader([]byte("data")))
+	file, err := messages.UploadFile(ctx, "T1", user, name, name, "image/png", "", 4, bytes.NewReader([]byte("data")))
 	if err != nil {
 		t.Fatalf("upload %s: %v", name, err)
 	}

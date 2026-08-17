@@ -3758,7 +3758,7 @@ func TestFileMetadataEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := service.Messages{Store: s, Blob: blobs}
-	file, err := messages.UploadFile(context.Background(), "T1", "U1", "a.txt", "A", "text/plain", 3, strings.NewReader("abc"))
+	file, err := messages.UploadFile(context.Background(), "T1", "U1", "a.txt", "A", "text/plain", "", 3, strings.NewReader("abc"))
 	if err != nil {
 		t.Fatal(err)
 	}

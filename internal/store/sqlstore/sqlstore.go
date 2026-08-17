@@ -302,7 +302,8 @@ CREATE TABLE IF NOT EXISTS files (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id),
  name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE,
  size INTEGER NOT NULL, created_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, public_token TEXT NOT NULL DEFAULT '',
- name_folded TEXT NOT NULL DEFAULT '', title_folded TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT ''
+ name_folded TEXT NOT NULL DEFAULT '', title_folded TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+ file_type TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS external_uploads (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id),
@@ -560,7 +561,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 173
+const schemaVersion = 174
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3333,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 174 {
+		// The syntax file type of a snippet — the inline text a member typed. It
+		// is empty for an ordinary hosted upload, which is what tells the two
+		// modes apart. Added by ALTER for existing databases; a fresh one gets it
+		// from the base schema.
+		columns, err := s.tableColumns(ctx, db, "files")
+		if err != nil {
+			return err
+		}
+		if !columns["file_type"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE files ADD COLUMN file_type TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate file snippet type: %w", err)
+			}
 		}
 	}
 	if version < 173 {
@@ -16298,7 +16314,7 @@ func (s *Store) DetachListItemFile(ctx context.Context, workspace domain.Workspa
 // Read authority is the service's; here it is a join returned as data.
 func (s *Store) ListItemFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, listID domain.ListID, itemID domain.ListItemID) ([]domain.File, error) {
 	_ = user
-	rows, err := s.db.QueryContext(ctx, `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description
+	rows, err := s.db.QueryContext(ctx, `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description, f.file_type
 		FROM list_item_files lif JOIN files f ON f.id = lif.file_id
 		WHERE lif.list_id = ? AND lif.item_id = ? AND lif.workspace_id = ? AND f.deleted = 0 ORDER BY lif.id`, listID, itemID, workspace)
 	if err != nil {
@@ -16309,7 +16325,7 @@ func (s *Store) ListItemFiles(ctx context.Context, workspace domain.WorkspaceID,
 		var file domain.File
 		var created string
 		var deleted int
-		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description); err != nil {
+		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description, &file.FileType); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -18740,7 +18756,7 @@ func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.E
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, name_folded, title_folded, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt), domain.FoldSearchText(file.Name), domain.FoldSearchText(file.Title), file.Description); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, name_folded, title_folded, description, file_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt), domain.FoldSearchText(file.Name), domain.FoldSearchText(file.Title), file.Description, file.FileType); err != nil {
 		return err
 	}
 	seen := make(map[domain.ConversationID]struct{}, len(file.SharedChannels))
@@ -18862,7 +18878,7 @@ func (s *Store) GetFile(ctx context.Context, id domain.FileID) (domain.File, err
 	var file domain.File
 	var created string
 	var deleted int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, public_token, description FROM files WHERE id = ? AND deleted = 0`, id).Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, public_token, description, file_type FROM files WHERE id = ? AND deleted = 0`, id).Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description, &file.FileType)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.File{}, store.ErrNotFound
 	}
@@ -18980,7 +18996,7 @@ func (s *Store) GetPublicFile(ctx context.Context, token string) (domain.File, e
 	var file domain.File
 	var created string
 	var deleted int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, public_token, description FROM files WHERE public_token = ? AND public_token <> '' AND deleted = 0`, token).Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, public_token, description, file_type FROM files WHERE public_token = ? AND public_token <> '' AND deleted = 0`, token).Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description, &file.FileType)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.File{}, store.ErrNotFound
 	}
@@ -19000,7 +19016,7 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 	if err != nil {
 		return domain.FilePage{}, err
 	}
-	query := `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, public_token, description FROM files WHERE workspace_id = ? AND deleted = 0`
+	query := `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, public_token, description, file_type FROM files WHERE workspace_id = ? AND deleted = 0`
 	args := []any{workspace}
 	if after != "" {
 		query += ` AND id > ?`
@@ -19018,7 +19034,7 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 		var file domain.File
 		var created string
 		var deleted int
-		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description); err != nil {
+		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description, &file.FileType); err != nil {
 			return domain.FilePage{}, err
 		}
 		file.CreatedAt, err = domain.ParseStoredTime(created)
@@ -19053,7 +19069,7 @@ func (s *Store) ListVisibleFiles(ctx context.Context, workspace domain.Workspace
 	if err != nil {
 		return domain.FilePage{}, err
 	}
-	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description
+	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description, f.file_type
 		FROM files f WHERE f.workspace_id = ? AND f.deleted = 0 AND ` + visibleFilePredicate("f")
 	args := []any{workspace, user, user}
 	if after != "" {
@@ -19133,7 +19149,7 @@ func (s *Store) SearchFiles(ctx context.Context, workspace domain.WorkspaceID, u
 	if search.Direction == domain.SearchDirectionDescending {
 		direction = "DESC"
 	}
-	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description
+	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description, f.file_type
 		FROM files f WHERE ` + where + ` ORDER BY f.created_at ` + direction + `, f.id ` + direction + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any(nil), args...), search.Count, (search.Page-1)*search.Count)
 	values, err := s.readFiles(ctx, query, queryArgs...)
@@ -19219,7 +19235,7 @@ func (s *Store) readFiles(ctx context.Context, query string, args ...any) ([]dom
 		var file domain.File
 		var created string
 		var deleted int
-		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description); err != nil {
+		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description, &file.FileType); err != nil {
 			return nil, err
 		}
 		file.CreatedAt, err = domain.ParseStoredTime(created)
@@ -19614,7 +19630,7 @@ func (s *Store) hydrateMessageFiles(ctx context.Context, messages []domain.Messa
 		placeholders = append(placeholders, "?")
 		messages[index].Files = nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT mf.message_id, f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description
+	rows, err := s.db.QueryContext(ctx, `SELECT mf.message_id, f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description, f.file_type
 		FROM message_files mf JOIN files f ON f.id = mf.file_id
 		WHERE mf.message_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY mf.message_id, mf.position`, arguments...)
 	if err != nil {
@@ -19631,7 +19647,7 @@ func (s *Store) hydrateMessageFiles(ctx context.Context, messages []domain.Messa
 		var file domain.File
 		var created string
 		var deleted int
-		if err := rows.Scan(&messageID, &file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description); err != nil {
+		if err := rows.Scan(&messageID, &file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken, &file.Description, &file.FileType); err != nil {
 			rows.Close()
 			return err
 		}
@@ -21338,7 +21354,7 @@ func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.
 			return store.ErrConflict
 		}
 		file := files[index]
-		if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, name_folded, title_folded, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt), domain.FoldSearchText(file.Name), domain.FoldSearchText(file.Title), file.Description); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, name_folded, title_folded, description, file_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt), domain.FoldSearchText(file.Name), domain.FoldSearchText(file.Title), file.Description, file.FileType); err != nil {
 			return classify(err)
 		}
 		for _, channel := range channels {

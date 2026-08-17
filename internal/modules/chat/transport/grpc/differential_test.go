@@ -3095,7 +3095,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if _, err := chat.UploadFile(ctx, "T1", "U1", "parity.txt", "Parity notes", "text/plain", 5, bytes.NewReader([]byte("notes"))); err != nil {
+				if _, err := chat.UploadFile(ctx, "T1", "U1", "parity.txt", "Parity notes", "text/plain", "", 5, bytes.NewReader([]byte("notes"))); err != nil {
 					return nil, err
 				}
 				files, err := chat.SearchFiles(ctx, "T1", "U1", domain.FileSearchRequest{
@@ -3331,7 +3331,7 @@ func parityCases() []parityCase {
 			name:         "upload without blob storage",
 			wantSentinel: service.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", 5, bytes.NewReader([]byte("hello")))
+				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 				return nil, err
 			},
 		},
@@ -3349,7 +3349,7 @@ func parityCases() []parityCase {
 			blobs:        true,
 			wantSentinel: storepkg.ErrNotFound,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.UploadFile(ctx, "T1", "U-missing", "notes.txt", "", "text/plain", 5, bytes.NewReader([]byte("hello")))
+				_, err := chat.UploadFile(ctx, "T1", "U-missing", "notes.txt", "", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 				return nil, err
 			},
 		},
@@ -3357,7 +3357,7 @@ func parityCases() []parityCase {
 			name:         "upload with an empty title while blob storage is down",
 			wantSentinel: service.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "", "text/plain", 5, bytes.NewReader([]byte("hello")))
+				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 				return nil, err
 			},
 		},
@@ -4808,7 +4808,7 @@ func parityCases() []parityCase {
 			blobs: true,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				content := bytes.Repeat([]byte("chunked-"), 20000)
-				file, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", int64(len(content)), bytes.NewReader(content))
+				file, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", int64(len(content)), bytes.NewReader(content))
 				if err != nil {
 					return nil, err
 				}
@@ -5488,7 +5488,7 @@ func parityCases() []parityCase {
 				if err := chat.SetListAccess(ctx, "T1", "U1", list.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
 					return nil, err
 				}
-				file, err := chat.UploadFile(ctx, "T1", "U1", "logo.png", "The logo", "image/png", 4, bytes.NewReader([]byte("data")))
+				file, err := chat.UploadFile(ctx, "T1", "U1", "logo.png", "The logo", "image/png", "", 4, bytes.NewReader([]byte("data")))
 				if err != nil {
 					return nil, err
 				}
