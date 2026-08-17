@@ -292,6 +292,13 @@ type fileView struct {
 	// would be a button that always fails — the universal contract forbids a
 	// control that does not do what its name promises.
 	DeleteURL string
+	// IsSnippet marks an inline text/code snippet the member typed, shown in
+	// place as a code block rather than linked as a download. FileType is its
+	// syntax and SnippetContent its text (truncated for display when very long).
+	IsSnippet        bool
+	FileType         string
+	SnippetContent   string
+	SnippetTruncated bool
 }
 
 type reactionView struct {
@@ -1832,10 +1839,12 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
     </div>
     {{if $message.DisplayText}}<p class="message-text">{{$message.DisplayText}}</p>{{end}}
     {{if $message.Files}}<div class="message-files" aria-label="Shared files">{{range $file := $message.Files}}
-      <div class="message-file{{if $file.IsImage}} is-image{{end}}">
+      <div class="message-file{{if $file.IsImage}} is-image{{end}}{{if $file.IsSnippet}} is-snippet{{end}}">
         {{if $file.IsImage}}<a class="message-image-link" href="{{$file.DownloadURL}}"><img class="message-image" src="{{$file.DownloadURL}}" alt="{{$file.AccessibleName}}" loading="lazy"></a>
+        {{else if $file.IsSnippet}}<span class="message-file-icon" aria-hidden="true">{{if $file.FileType}}{{$file.FileType}}{{else}}snippet{{end}}</span>
         {{else}}<span class="message-file-icon" aria-hidden="true">FILE</span>{{end}}
         <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span>{{if and $file.IsImage (not $file.AccessibleName)}}<span class="message-file-meta undescribed">No description yet</span>{{end}}</span>
+        {{if $file.IsSnippet}}<pre class="message-snippet"{{if $file.FileType}} data-filetype="{{$file.FileType}}"{{end}}><code>{{$file.SnippetContent}}</code></pre>{{if $file.SnippetTruncated}}<span class="message-file-meta">Truncated — download for the full snippet.</span>{{end}}{{end}}
         {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{if $file.DeleteURL}}<details class="file-delete"><summary>Delete file</summary>
           <form method="post" action="{{$file.DeleteURL}}" hx-post="{{$file.DeleteURL}}">
             <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
@@ -6305,6 +6314,19 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 				IsImage:        file.IsImage() && !file.Deleted,
 				Description:    file.Description,
 				AccessibleName: file.AccessibleName(),
+				IsSnippet:      file.IsSnippet() && !file.Deleted,
+				FileType:       file.FileType,
+			}
+			if fileItem.IsSnippet {
+				// A snippet is shown in place as a code block, so its text is read
+				// here. A read failure falls back to the download link rather than
+				// failing the whole timeline.
+				if content, truncated, err := h.readSnippet(ctx, principal, file.ID); err == nil {
+					fileItem.SnippetContent = content
+					fileItem.SnippetTruncated = truncated
+				} else {
+					fileItem.IsSnippet = false
+				}
 			}
 			if !file.Deleted && file.Uploader == principal.UserID && principal.HasScope(auth.ScopeFilesWrite) {
 				fileItem.DeleteURL = mutationURL("/app/files/delete", channel, timestamp, threadTimestamp, before) + "&file=" + url.QueryEscape(string(file.ID))
@@ -11267,6 +11289,29 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-SameOldChat-Draft-Cleanup", "failed")
 	}
 	h.redirectMutation(w, r, h.viewURL(r, string(thread)))
+}
+
+// maxInlineSnippetBytes bounds how much of a snippet is rendered in the
+// timeline. A snippet longer than this shows its opening and a note that it is
+// truncated, with the full text behind the download link.
+const maxInlineSnippetBytes = 32 * 1024
+
+// readSnippet reads a snippet file's text for inline rendering, capped so a
+// large file cannot bloat one timeline page.
+func (h Handler) readSnippet(ctx context.Context, principal auth.Principal, id domain.FileID) (string, bool, error) {
+	_, reader, err := h.Messages.OpenFile(ctx, principal.WorkspaceID, principal.UserID, id)
+	if err != nil {
+		return "", false, err
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(io.LimitReader(reader, maxInlineSnippetBytes+1))
+	if err != nil {
+		return "", false, err
+	}
+	if len(data) > maxInlineSnippetBytes {
+		return string(data[:maxInlineSnippetBytes]), true, nil
+	}
+	return string(data), false, nil
 }
 
 func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {

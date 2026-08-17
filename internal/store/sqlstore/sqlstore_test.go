@@ -1007,6 +1007,48 @@ func TestSQLiteCallsAreDurable(t *testing.T) {
 	}
 }
 
+// TestSQLiteSnippetFileTypeIsDurable covers the snippet discriminator surviving
+// a reopen: a snippet keeps its syntax file type, and an ordinary upload keeps
+// none, so the two modes stay apart across restarts.
+func TestSQLiteSnippetFileTypeIsDurable(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "snippet.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(1700000000, 0).UTC()
+	snippet := domain.File{ID: "Fsnip", WorkspaceID: "T1", Uploader: "U1", Name: "greeting.py", Title: "greeting", MIMEType: "text/plain", BlobKey: "T1/Fsnip", FileType: "python", CreatedAt: created}
+	hosted := domain.File{ID: "Fhost", WorkspaceID: "T1", Uploader: "U1", Name: "photo.bin", Title: "photo", MIMEType: "application/octet-stream", BlobKey: "T1/Fhost", CreatedAt: created}
+	for _, file := range []domain.File{snippet, hosted} {
+		if err := s.CreateFile(ctx, file, events.Event{ID: domain.EventID("EF" + string(file.ID)), WorkspaceID: "T1", Topic: "file.created", CreatedAt: created}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	got, err := s.GetFile(ctx, "Fsnip")
+	if err != nil || got.FileType != "python" || !got.IsSnippet() {
+		t.Fatalf("snippet after reopen=%+v err=%v", got, err)
+	}
+	plain, err := s.GetFile(ctx, "Fhost")
+	if err != nil || plain.FileType != "" || plain.IsSnippet() {
+		t.Fatalf("hosted after reopen=%+v err=%v", plain, err)
+	}
+}
+
 func TestSQLitePublicFileSharingIsDurable(t *testing.T) {
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "public-file.db")

@@ -613,6 +613,50 @@ func TestFilesUploadSharesIntoChannels(t *testing.T) {
 	}
 }
 
+// TestFilesUploadCreatesSnippetFromContent covers content= uploads becoming
+// editable snippets: the file carries mode "snippet", editable true, and the
+// syntax file type the caller asked for, distinct from an ordinary hosted upload.
+func TestFilesUploadCreatesSnippetFromContent(t *testing.T) {
+	handler := storedTokenUploadHandler(t)
+	form := url.Values{"token": {"token"}, "content": {"print('hi')"}, "filetype": {"python"}, "filename": {"greeting.py"}, "title": {"greeting"}}.Encode()
+	request := httptest.NewRequest(http.MethodPost, "/api/files.upload", strings.NewReader(form))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var snippet struct {
+		OK   bool `json:"ok"`
+		File struct {
+			Mode     string `json:"mode"`
+			Editable bool   `json:"editable"`
+			FileType string `json:"filetype"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &snippet); err != nil || !snippet.OK || snippet.File.Mode != "snippet" || !snippet.File.Editable || snippet.File.FileType != "python" {
+		t.Fatalf("content upload: status=%d body=%s", response.Code, response.Body)
+	}
+
+	// A content= upload without a filetype defaults to a text snippet, still a
+	// snippet rather than a hosted file.
+	form = url.Values{"token": {"token"}, "content": {"just words"}, "filename": {"note.txt"}, "title": {"note"}}.Encode()
+	request = httptest.NewRequest(http.MethodPost, "/api/files.upload", strings.NewReader(form))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if err := json.Unmarshal(response.Body.Bytes(), &snippet); err != nil || snippet.File.Mode != "snippet" || snippet.File.FileType != "text" {
+		t.Fatalf("default snippet: status=%d body=%s", response.Code, response.Body)
+	}
+
+	// A multipart file upload stays a hosted file, editable false.
+	contentType, body := multipartUpload(t, map[string]string{"token": "token", "filename": "photo.txt", "title": "note"}, "file", "photo.txt", []byte("hello"))
+	request = httptest.NewRequest(http.MethodPost, "/api/files.upload", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", contentType)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if err := json.Unmarshal(response.Body.Bytes(), &snippet); err != nil || snippet.File.Mode != "hosted" || snippet.File.Editable {
+		t.Fatalf("hosted upload: status=%d body=%s", response.Code, response.Body)
+	}
+}
+
 func TestMultipartUploadsAcceptATokenInTheRequestBody(t *testing.T) {
 	handler := storedTokenUploadHandler(t)
 	contentType, body := multipartUpload(t, map[string]string{"token": "token", "filename": "note.txt", "title": "note"}, "file", "note.txt", []byte("hello"))

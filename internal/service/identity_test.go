@@ -264,7 +264,7 @@ func TestUploadedFileTypeIsDecidedByItsBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 			messages := Messages{Store: s, Blob: objects}
-			file, err := messages.UploadFile(ctx, "T1", "U1", "f.bin", "f", testCase.declared, int64(len(testCase.content)), bytes.NewReader(testCase.content))
+			file, err := messages.UploadFile(ctx, "T1", "U1", "f.bin", "f", testCase.declared, "", int64(len(testCase.content)), bytes.NewReader(testCase.content))
 			if err != nil {
 				t.Fatal(err)
 			}

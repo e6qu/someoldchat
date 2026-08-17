@@ -35,6 +35,7 @@ type File struct {
 	PublicToken    string                 `protobuf:"bytes,10,opt,name=public_token,json=publicToken,proto3" json:"public_token,omitempty"`
 	SharedChannels []string               `protobuf:"bytes,11,rep,name=shared_channels,json=sharedChannels,proto3" json:"shared_channels,omitempty"`
 	Description    string                 `protobuf:"bytes,12,opt,name=description,proto3" json:"description,omitempty"`
+	FileType       string                 `protobuf:"bytes,13,opt,name=file_type,json=fileType,proto3" json:"file_type,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -149,6 +150,13 @@ func (x *File) GetSharedChannels() []string {
 func (x *File) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *File) GetFileType() string {
+	if x != nil {
+		return x.FileType
 	}
 	return ""
 }
@@ -1799,6 +1807,7 @@ type UploadFileRequest struct {
 	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
 	MimeType      string                 `protobuf:"bytes,5,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
 	Size          int64                  `protobuf:"varint,6,opt,name=size,proto3" json:"size,omitempty"`
+	FileType      string                 `protobuf:"bytes,7,opt,name=file_type,json=fileType,proto3" json:"file_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1873,6 +1882,13 @@ func (x *UploadFileRequest) GetSize() int64 {
 		return x.Size
 	}
 	return 0
+}
+
+func (x *UploadFileRequest) GetFileType() string {
+	if x != nil {
+		return x.FileType
+	}
+	return ""
 }
 
 type DownloadFileRequest struct {
@@ -2633,7 +2649,7 @@ var File_sameoldchat_chat_v1_files_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/files.proto\x12\x13sameoldchat.chat.v1\x1a\"sameoldchat/chat/v1/presence.proto\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xd7\x02\n" +
+	"\x1fsameoldchat/chat/v1/files.proto\x12\x13sameoldchat.chat.v1\x1a\"sameoldchat/chat/v1/presence.proto\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xf4\x02\n" +
 	"\x04File\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1a\n" +
@@ -2648,7 +2664,8 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\fpublic_token\x18\n" +
 	" \x01(\tR\vpublicToken\x12'\n" +
 	"\x0fshared_channels\x18\v \x03(\tR\x0esharedChannels\x12 \n" +
-	"\vdescription\x18\f \x01(\tR\vdescription\"\x8d\x01\n" +
+	"\vdescription\x18\f \x01(\tR\vdescription\x12\x1b\n" +
+	"\tfile_type\x18\r \x01(\tR\bfileType\"\x8d\x01\n" +
 	"\bFilePage\x12/\n" +
 	"\x05files\x18\x01 \x03(\v2\x19.sameoldchat.chat.v1.FileR\x05files\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -2799,14 +2816,15 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\tdirection\x18\a \x01(\tR\tdirection\x12'\n" +
 	"\x0fconversation_id\x18\b \x01(\tR\x0econversationId\"$\n" +
 	"\x12DeleteFileResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xaa\x01\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xc7\x01\n" +
 	"\x11UploadFileRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05title\x18\x04 \x01(\tR\x05title\x12\x1b\n" +
 	"\tmime_type\x18\x05 \x01(\tR\bmimeType\x12\x12\n" +
-	"\x04size\x18\x06 \x01(\x03R\x04size\"j\n" +
+	"\x04size\x18\x06 \x01(\x03R\x04size\x12\x1b\n" +
+	"\tfile_type\x18\a \x01(\tR\bfileType\"j\n" +
 	"\x13DownloadFileRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +

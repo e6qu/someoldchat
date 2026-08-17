@@ -447,21 +447,25 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestMultipartUploadsAcceptATokenInTheRequestBody
       - go-test:internal/api/slack:TestFilesUploadSharesIntoChannels
+      - go-test:internal/api/slack:TestFilesUploadCreatesSnippetFromContent
     deviations:
       - >-
-        The route hosts a file and shares it — honoring the documented channels,
-        initial_comment, and thread_ts arguments, every destination validated
-        before any share — but does not yet accept content-based editable
-        (snippet) uploads.
+        The route hosts a file, shares it (honoring channels, initial_comment,
+        and thread_ts, every destination validated before any share), and accepts
+        content= uploads as editable snippets carrying mode "snippet", the syntax
+        file type, and inline rendering. A snippet's response omits Slack's
+        preview/lines fields, editing an existing snippet's text is not offered,
+        and a content= upload still requires a filename.
     audit:
       downgraded_from: behavior-compatible
       reason: >-
-        File hosting and channel sharing are implemented and covered by service,
-        Slack-handler, and differential-seam tests, but content-based editable
-        snippet uploads remain unimplemented.
+        Hosting, channel sharing, and snippet creation and rendering are
+        implemented and covered by service, Slack-handler, differential-seam, and
+        web tests; only the snippet preview response fields, in-place editing, and
+        filename-optional content uploads remain.
       evidence:
         - source:internal/api/slack/handler.go
-        - go-test:internal/api/slack:TestFilesUploadSharesIntoChannels
+        - go-test:internal/api/slack:TestFilesUploadCreatesSnippetFromContent
         - https://docs.slack.dev/reference/methods/files.upload/
   - method: files.getUploadURLExternal
     status: behavior-compatible

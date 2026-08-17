@@ -329,7 +329,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	qualificationFile, err := messages.UploadFile(context.Background(), "T1", "U1", "qualification.txt", "qualification file", "text/plain", int64(len("qualification file")), strings.NewReader("qualification file"))
+	qualificationFile, err := messages.UploadFile(context.Background(), "T1", "U1", "qualification.txt", "qualification file", "text/plain", "", int64(len("qualification file")), strings.NewReader("qualification file"))
 	if err != nil {
 		panic(err)
 	}

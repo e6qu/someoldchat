@@ -241,7 +241,7 @@ func (h Handler) attachFileToListItem(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That file could not be opened", "Choose the file again and retry.")
 		return
 	}
-	file, uploadErr := h.Messages.UploadFile(r.Context(), principal.WorkspaceID, principal.UserID, name, title, mimeType, header.Size, source)
+	file, uploadErr := h.Messages.UploadFile(r.Context(), principal.WorkspaceID, principal.UserID, name, title, mimeType, "", header.Size, source)
 	closeErr := source.Close()
 	if uploadErr == nil {
 		uploadErr = closeErr

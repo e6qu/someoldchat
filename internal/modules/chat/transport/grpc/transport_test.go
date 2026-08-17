@@ -196,7 +196,7 @@ func (p panickingChat) Post(context.Context, domain.WorkspaceID, domain.UserID, 
 	return domain.Message{}, nil
 }
 
-func (p panickingChat) UploadFile(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, int64, io.Reader) (domain.File, error) {
+func (p panickingChat) UploadFile(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int64, io.Reader) (domain.File, error) {
 	panic("upload handler panicked")
 }
 
@@ -235,7 +235,7 @@ func TestAPanicInAnUploadGoroutineBecomesAnErrorAndTheProcessKeepsServing(t *tes
 	ctx := context.Background()
 
 	content := bytes.Repeat([]byte("upload-"), 32<<10)
-	_, err := remote.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", int64(len(content)), bytes.NewReader(content))
+	_, err := remote.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", int64(len(content)), bytes.NewReader(content))
 	if err == nil {
 		t.Fatal("a panicking upload answered without an error")
 	}
@@ -821,7 +821,7 @@ func TestTheServerReportsTheDomainClassOnEveryStreamingPath(t *testing.T) {
 	// failure has to travel back through the client stream.
 	withoutBlobs := seededStore(t)
 	unavailable, _ := serve(t, service.Messages{Store: withoutBlobs}, withoutBlobs, Observer{})
-	if _, err := unavailable.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", 5, bytes.NewReader([]byte("hello"))); !errors.Is(err, service.ErrBlobUnavailable) {
+	if _, err := unavailable.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", 5, bytes.NewReader([]byte("hello"))); !errors.Is(err, service.ErrBlobUnavailable) {
 		t.Fatalf("upload error = %v, want service.ErrBlobUnavailable", err)
 	}
 
