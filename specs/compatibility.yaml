@@ -557,13 +557,14 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - Display name, status, expiration, image URL, and workspace-defined custom fields are settable through the profile object's fields map, each validated against its field's declared type; the single-field name/value form is not accepted.
+      - Display name, status, expiration, image URL, and workspace-defined custom fields are settable, both through the profile object's fields map and through the single-field name/value form (a standard field or a custom field id), each validated against its field's declared type. Standard Slack profile fields this deployment does not store (first/last/real name, phone, title, pronouns) are refused rather than silently dropped.
       - Admin editing of another user, paid-plan restrictions, method-specific rate limits, and all token-type rules remain unqualified.
     audit:
       downgraded_from: behavior-compatible
-      reason: The editable profile including custom fields is implemented and tested, but admin editing of another user, the name/value form, rate limits, and token-type rules are not qualified.
+      reason: The editable profile including custom fields and the name/value form is implemented and tested, but admin editing of another user, rate limits, and token-type rules are not qualified.
       evidence:
         - source:internal/api/slack/handler.go
+        - go-test:internal/api/slack:TestUserProfileSetSingleFieldNameValueForm
         - go-test:internal/api/slack:TestCustomProfileFieldsThroughTeamAndUserProfile
         - source:internal/service/messages.go
         - https://docs.slack.dev/reference/methods/users.profile.set/
