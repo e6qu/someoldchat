@@ -1132,8 +1132,25 @@ func TestTimelineRendersTheNewestMessagesWithWorkingPagination(t *testing.T) {
 	if previous.Code != http.StatusOK {
 		t.Fatalf("older history status=%d body=%s", previous.Code, previous.Body)
 	}
-	requireContains(t, "older history", previous.Body.String(), "note-031", "note-080", "Jump to the latest messages", "Show older messages")
+	requireContains(t, "older history", previous.Body.String(), "note-031", "note-080", "Jump to the latest messages", "Show older messages", "Show newer messages")
 	requireMissing(t, "older history", previous.Body.String(), "note-130", "note-081")
+
+	// The jumped-back window is not the latest, so it pages forward as well as
+	// back. "Show newer messages" returns a screen toward the present, beginning
+	// just after this window's newest message.
+	newer := regexp.MustCompile(`<a href="(/app\?after=[^"]+)">Show newer messages</a>`).FindStringSubmatch(previous.Body.String())
+	if newer == nil {
+		t.Fatalf("no newer-history link on a jumped window: %s", previous.Body)
+	}
+	forward := get(t, mux, strings.ReplaceAll(newer[1], "&amp;", "&"))
+	if forward.Code != http.StatusOK {
+		t.Fatalf("newer history status=%d body=%s", forward.Code, forward.Body)
+	}
+	// note-080 was the newest of the older window; forward lands on the latest
+	// window (note-081..note-130), which is at the present again, so it offers no
+	// further "newer" pager, only older.
+	requireContains(t, "newer history", forward.Body.String(), "note-081", "note-130", "Show older messages")
+	requireMissing(t, "newer history", forward.Body.String(), "note-031", "note-080", "Show newer messages", "Jump to the latest messages")
 }
 
 // TestUnknownChannelIsReportedAsNotFound covers the defect that answered a

@@ -219,11 +219,11 @@ Implemented evidence:
   becomes a reusable tab, resolving to the same multi-kind query a single filter
   builds. Each view is its maker's own, deleted through its own control, and
   read back on the preferences the layout rides on.
-- Slack Connect and canvas-share invitations and VIP and section notifications
-  depend on product models not yet implemented — VIP a per-person preference,
-  sections the sidebar-sections feature that does not exist yet.
-  Internal public/private channel additions are implemented in Invitations;
-  unsupported invitation types are not fabricated;
+- VIP notifications (a per-person preference) and section notifications (on the
+  member's custom sidebar sections) are implemented and carried in the Activity
+  fanout. Internal public/private channel additions are implemented in
+  Invitations; Slack Connect and canvas-share invitation types are not
+  fabricated;
 - schema version 107 creates the durable Activity store but does not backfill
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with
@@ -234,9 +234,10 @@ Implemented evidence:
   span whenever the match was in the title — every `to:`/link/specific
   emoji/`hasmy:` modifier, prefix `*`, section-valued `in:`, Slack's natural
   month/year date forms, participant-accurate `with:` thread semantics, `to:`,
-  `hasmy:`, prefix `*`, or history on both sides of an opened hit — the result
-  window ends at the message it names, so a reader cannot scroll forward into
-  newer messages without navigating again;
+  `hasmy:`, prefix `*`, or history on both sides of an opened hit — a result or
+  permalink window ends at the message it names but is paged forward toward the
+  present with a "show newer messages" pager, the counterpart of paging older,
+  and reaching the present makes the window live again;
 - the Slack APIs retain documented compatibility deviations for relevance
   scoring, highlight markers, cursor pagination on file/combined legacy
   results, match projection detail, and full tier rate limiting;
