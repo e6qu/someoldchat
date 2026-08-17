@@ -36,12 +36,12 @@ func (t ProfileFieldType) Valid() bool {
 // team.profile.get lists these definitions so a client can label the values it
 // reads from users.profile.get.
 type ProfileFieldDefinition struct {
-	WorkspaceID    WorkspaceID
-	ID             ProfileFieldID
-	Ordering       int
-	Label          string
-	Hint           string
-	Type           ProfileFieldType
+	WorkspaceID WorkspaceID
+	ID          ProfileFieldID
+	Ordering    int
+	Label       string
+	Hint        string
+	Type        ProfileFieldType
 	// PossibleValues are the allowed values of an options_list field and are
 	// empty for every other type.
 	PossibleValues []string
