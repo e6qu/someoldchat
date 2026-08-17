@@ -1706,6 +1706,15 @@ func parityCases() []parityCase {
 				}
 				_, somebodyElse := chat.ReminderInfo(ctx, "T1", "U2", created.ID)
 				_, missing := chat.ReminderInfo(ctx, "T1", "U1", "Rm-nobody")
+				// A reminder U1 set for U2 belongs to U2; U1 completing it must be
+				// refused as cannot_complete_others in both compositions, and the
+				// sentinel has to survive the seam as itself rather than collapsing
+				// to a generic not_found.
+				forOther, err := chat.AddReminder(ctx, "T1", "U1", "U2", "call the vet", due)
+				if err != nil {
+					return nil, err
+				}
+				completingOther := chat.CompleteReminder(ctx, "T1", "U1", forOther.ID)
 				if err := chat.CompleteReminder(ctx, "T1", "U1", created.ID); err != nil {
 					return nil, err
 				}
@@ -1723,7 +1732,8 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{read.Text, read.Time.Equal(due), len(listed.Reminders), len(after.Reminders),
-					somebodyElse != nil, missing != nil, completedTwice != nil, deletedTwice != nil}, nil
+					somebodyElse != nil, missing != nil, completedTwice != nil, deletedTwice != nil,
+					errors.Is(completingOther, service.ErrReminderOwnedByOther)}, nil
 			},
 		},
 		{

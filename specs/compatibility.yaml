@@ -1130,14 +1130,14 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
-    deviations:
-      - The cannot_complete_recurring and cannot_complete_others behavioral paths are not implemented.
     audit:
       downgraded_from: behavior-compatible
-      reason: Official SDK CRUD qualification does not exercise the method's current recurring and ownership error contract.
+      reason: The recurring and ownership error contract is implemented — cannot_complete_recurring for a recurring reminder and cannot_complete_others for another member's — and covered by service, Slack-handler, and differential-seam tests, but no official SDK exercises reminders.complete's error paths, so the method stays sdk-compatible rather than behavior-compatible.
       evidence:
         - journey:specs/journeys/06-later-and-reminders.md
         - source:internal/service/messages.go
+        - go-test:internal/api/slack:TestReminderCompleteRefusesOthersAndRecurring
+        - go-test:internal/service:TestCompleteReminderDistinguishesOthersAndRecurring
   - method: reminders.delete
     status: sdk-compatible
     provenance: slack-api-specs-openapi

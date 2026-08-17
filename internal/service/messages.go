@@ -66,6 +66,8 @@ var (
 	ErrInvalidActivitySavedView      = errors.New("activity saved view arguments are invalid")
 	ErrInvalidSidebarSection         = errors.New("sidebar section arguments are invalid")
 	ErrReminderTimeInPast            = errors.New("reminder time is in the past")
+	ErrReminderRecurring             = errors.New("a recurring reminder cannot be marked complete")
+	ErrReminderOwnedByOther          = errors.New("a reminder can only be completed by the member it is for")
 	ErrScheduledTimeInPast           = errors.New("scheduled message time is in the past")
 	ErrScheduledTimeTooFar           = errors.New("scheduled message time is more than 120 days away")
 	ErrScheduledTooMany              = errors.New("too many messages are scheduled in the channel window")
@@ -6998,6 +7000,21 @@ func (m Messages) Reminders(ctx context.Context, workspaceID domain.WorkspaceID,
 func (m Messages) CompleteReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.ReminderID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
+	}
+	// Slack distinguishes three refusals the user-scoped store call alone
+	// collapses into one not_found: a reminder that belongs to another member
+	// (cannot_complete_others) and a recurring reminder (cannot_complete_recurring)
+	// are both told apart from a reminder that does not exist. The reminder is
+	// resolved workspace-scoped so ownership can be judged rather than hidden.
+	reminder, err := m.Store.ReminderInWorkspace(ctx, workspaceID, reminderID)
+	if err != nil {
+		return err
+	}
+	if reminder.User != userID {
+		return ErrReminderOwnedByOther
+	}
+	if reminder.Recurring {
+		return ErrReminderRecurring
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.completed", events.String("reminder_id", string(reminderID)), events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {

@@ -90,6 +90,13 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_activity_saved_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidActivitySavedView},
 	{key: "service.invalid_sidebar_section", code: codes.InvalidArgument, sentinel: service.ErrInvalidSidebarSection},
 	{key: "service.reminder_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrReminderTimeInPast},
+	// FailedPrecondition and PermissionDenied: the request is well formed, but a
+	// recurring reminder is the wrong state to complete and another member's
+	// reminder is not the caller's to complete. They must survive the seam as
+	// themselves so reminders.complete answers cannot_complete_recurring and
+	// cannot_complete_others rather than a generic not_found.
+	{key: "service.reminder_recurring", code: codes.FailedPrecondition, sentinel: service.ErrReminderRecurring},
+	{key: "service.reminder_owned_by_other", code: codes.PermissionDenied, sentinel: service.ErrReminderOwnedByOther},
 	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
 	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},
 	{key: "service.scheduled_too_many", code: codes.ResourceExhausted, sentinel: service.ErrScheduledTooMany},

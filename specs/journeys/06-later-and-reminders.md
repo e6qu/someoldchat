@@ -98,6 +98,15 @@ recurrence, token-type-dependent targeting, delivery, and live-Slack outcomes
 require separate behavioral and differential evidence before the ledger can
 claim more.
 
+`reminders.complete` implements the error contract Slack documents: a recurring
+reminder answers `cannot_complete_recurring` and another member's reminder
+answers `cannot_complete_others`, each told apart from a reminder that does not
+exist rather than collapsed into `not_found`. Because `reminders.add` reads
+`time` as an absolute epoch and does not parse recurring phrasing, a recurring
+reminder arises only from stored state here; the completion guard nonetheless
+enforces the invariant that such a reminder is never marked done as if it were a
+one-off.
+
 ## Evidence
 
 - REMIND-04 and REMIND-API-01 are not browser journeys, for two different

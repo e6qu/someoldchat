@@ -97,6 +97,8 @@ service.missing_stream_recipient_user
 service.not_in_conversation
 service.not_workspace_admin
 service.oauth_app_mismatch
+service.reminder_owned_by_other
+service.reminder_recurring
 service.reminder_time_in_past
 service.retention_not_supported
 service.scheduled_status_limit

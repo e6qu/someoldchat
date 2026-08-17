@@ -7810,7 +7810,18 @@ func (h Handler) completeReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.CompleteReminder(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
-		writeError(w, mapServiceError(err, "not_found"))
+		switch {
+		case errors.Is(err, service.ErrReminderRecurring):
+			// reminders.complete refuses a recurring reminder: it has no single
+			// occurrence to mark done.
+			writeError(w, "cannot_complete_recurring")
+		case errors.Is(err, service.ErrReminderOwnedByOther):
+			// A reminder belongs to the member it is for; another member cannot
+			// complete it, and Slack says so rather than hiding it as not_found.
+			writeError(w, "cannot_complete_others")
+		default:
+			writeError(w, mapServiceError(err, "not_found"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

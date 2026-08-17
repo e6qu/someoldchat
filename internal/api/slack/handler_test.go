@@ -4397,6 +4397,53 @@ func TestRemindersLifecycle(t *testing.T) {
 	}
 }
 
+// TestReminderCompleteRefusesOthersAndRecurring covers reminders.complete's two
+// documented refusals that a bare not_found used to hide: completing another
+// member's reminder is cannot_complete_others, and completing a recurring one is
+// cannot_complete_recurring.
+func TestReminderCompleteRefusesOthersAndRecurring(t *testing.T) {
+	handler, s := testHandlerWithStore()
+	post := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	due := time.Now().UTC().Add(time.Hour).Unix()
+
+	// The bot-token principal U1 sets a reminder for U2, which therefore belongs
+	// to U2. U1 completing it is cannot_complete_others.
+	addOther := post("/api/reminders.add", "text=call+the+vet&time="+strconv.FormatInt(due, 10)+"&user=U2")
+	var forOther struct {
+		Reminder struct {
+			ID string `json:"id"`
+		} `json:"reminder"`
+	}
+	if err := json.Unmarshal(addOther.Body.Bytes(), &forOther); err != nil || forOther.Reminder.ID == "" {
+		t.Fatalf("add for U2 body=%s err=%v", addOther.Body, err)
+	}
+	if envelope := decodeEnvelope(t, post("/api/reminders.complete", "reminder="+forOther.Reminder.ID)); envelope.OK || envelope.Error != "cannot_complete_others" {
+		t.Fatalf("complete other's reminder body=%+v, want cannot_complete_others", envelope)
+	}
+
+	// A recurring reminder owned by U1 cannot be completed. AddReminder never
+	// mints one, so it is written directly into the store the fixture exposes.
+	recurring := domain.Reminder{WorkspaceID: "T1", ID: "Rm-standup", Creator: "U1", User: "U1", Text: "daily standup", Time: time.Unix(due, 0).UTC(), Recurring: true}
+	if err := s.CreateReminder(context.Background(), recurring, events.Event{ID: "E-recur", WorkspaceID: "T1", Topic: "reminder.created", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("seed recurring reminder: %v", err)
+	}
+	if envelope := decodeEnvelope(t, post("/api/reminders.complete", "reminder=Rm-standup")); envelope.OK || envelope.Error != "cannot_complete_recurring" {
+		t.Fatalf("complete recurring reminder body=%+v, want cannot_complete_recurring", envelope)
+	}
+
+	// A reminder that does not exist is still not_found.
+	if envelope := decodeEnvelope(t, post("/api/reminders.complete", "reminder=Rm-nobody")); envelope.OK || envelope.Error != "not_found" {
+		t.Fatalf("complete missing reminder body=%+v, want not_found", envelope)
+	}
+}
+
 func TestScheduledMessageLifecycle(t *testing.T) {
 	handler := testHandler()
 	postAt := time.Now().UTC().Add(time.Hour).Unix()

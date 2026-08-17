@@ -8790,6 +8790,16 @@ func (s *Store) GetReminder(_ context.Context, workspace domain.WorkspaceID, use
 	return reminder, nil
 }
 
+func (s *Store) ReminderInWorkspace(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID) (domain.Reminder, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	reminder, ok := s.reminders[id]
+	if !ok || reminder.WorkspaceID != workspace {
+		return domain.Reminder{}, store.ErrNotFound
+	}
+	return reminder, nil
+}
+
 func (s *Store) ListReminders(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.ReminderPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.ReminderPage{}, err

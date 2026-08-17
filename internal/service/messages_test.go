@@ -83,6 +83,64 @@ func TestGuestCanCreatePersonalButNotChannelReminder(t *testing.T) {
 	}
 }
 
+// TestCompleteReminderDistinguishesOthersAndRecurring covers reminders.complete's
+// three refusals, which a user-scoped store lookup alone collapses into one
+// not_found: another member's reminder is cannot_complete_others, a recurring
+// reminder is cannot_complete_recurring, and only a genuinely absent reminder is
+// not_found. A member's own one-off still completes.
+func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s}
+	due := time.Now().UTC().Add(time.Hour)
+
+	// A member's own one-off reminder completes.
+	own, err := messages.AddReminder(ctx, "T1", "U1", "U1", "water the plants", due)
+	if err != nil {
+		t.Fatalf("add own reminder: %v", err)
+	}
+	if err := messages.CompleteReminder(ctx, "T1", "U1", own.ID); err != nil {
+		t.Fatalf("complete own reminder: %v", err)
+	}
+
+	// A reminder U1 sets for U2 belongs to U2; U1 cannot complete it.
+	forOther, err := messages.AddReminder(ctx, "T1", "U1", "U2", "call the vet", due)
+	if err != nil {
+		t.Fatalf("add reminder for U2: %v", err)
+	}
+	if err := messages.CompleteReminder(ctx, "T1", "U1", forOther.ID); !errors.Is(err, ErrReminderOwnedByOther) {
+		t.Fatalf("complete other's reminder error = %v, want %v", err, ErrReminderOwnedByOther)
+	}
+	// The refusal did not complete it: U2 can still see it as outstanding.
+	if outstanding, infoErr := messages.ReminderInfo(ctx, "T1", "U2", forOther.ID); infoErr != nil || !outstanding.CompleteAt.IsZero() {
+		t.Fatalf("U2 reminder after refusal: complete=%v err=%v", outstanding.CompleteAt, infoErr)
+	}
+
+	// A recurring reminder cannot be marked complete. AddReminder never mints one,
+	// so it is written directly — the store carries the recurring flag and column.
+	recurring := domain.Reminder{WorkspaceID: "T1", ID: "Rm-standup", Creator: "U1", User: "U1", Text: "daily standup", Time: due, Recurring: true}
+	if err := s.CreateReminder(ctx, recurring, events.Event{ID: "E-recur", WorkspaceID: "T1", Topic: "reminder.created", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("seed recurring reminder: %v", err)
+	}
+	if err := messages.CompleteReminder(ctx, "T1", "U1", recurring.ID); !errors.Is(err, ErrReminderRecurring) {
+		t.Fatalf("complete recurring reminder error = %v, want %v", err, ErrReminderRecurring)
+	}
+
+	// A reminder that does not exist is still not_found, not one of the above.
+	if err := messages.CompleteReminder(ctx, "T1", "U1", "Rm-nobody"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("complete missing reminder error = %v, want %v", err, store.ErrNotFound)
+	}
+}
+
 func TestPostMessageRejectsArchivedConversation(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
