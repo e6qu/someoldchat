@@ -280,9 +280,10 @@ table, calendar, and any filtered view render over the whole list up to a bound.
 An item opens on its own page, where it can be commented on the same way a canvas
 can: read access to the list is enough to leave a comment, only its author deletes
 it, and the comment crosses the chat seam with a parity case comparing it across
-both compositions. Templates, item attachments, and full notification/workflow
-effects remain gaps; an item action taken from a board lane or table row returns to
-the list layout for now.
+both compositions. Item attachments are implemented — a list editor uploads a
+file onto an item and every reader of the list can download it — as are list
+record workflow triggers and returning an item action taken from a board lane or
+table row to the view it was taken from. List templates remain the gap.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered
