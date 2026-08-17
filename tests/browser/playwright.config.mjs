@@ -5,6 +5,15 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: process.env.CI ? 'line' : 'list',
+  // Every assertion here settles in well under a second locally; these timeouts
+  // are generous only so a loaded or degraded CI runner does not fail a correct
+  // render that was merely slow to arrive. This is the browser counterpart of the
+  // race gate's raised per-package timeout: the default 5s expect and 30s test
+  // bounds are too tight when the shared runner is under load — a navigation or a
+  // freshly-created control can take several seconds to appear — and a genuine
+  // hang still fails, only later.
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
   use: {
     baseURL: 'http://127.0.0.1:18080',
     trace: 'retain-on-failure',
