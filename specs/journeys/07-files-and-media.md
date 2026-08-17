@@ -27,7 +27,11 @@ transfer never becomes a successful file.
 
 Legacy `files.upload` behavior is retained only at its explicitly recorded
 compatibility level and MUST not be used as evidence for the current external
-flow.
+flow. It hosts a file and shares it into the channels named, posting
+`initial_comment` as each share message and threading under `thread_ts`; every
+destination is validated before any share, so a request naming a channel the
+uploader cannot post to shares into none of them rather than some. Content-based
+editable (snippet) uploads remain unimplemented, recorded in the ledger.
 
 ## FILE-03 — Render and inspect a file
 

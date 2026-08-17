@@ -72,6 +72,19 @@ message ShareFileRequest {
   string thread_timestamp = 5;
 }
 
+message ShareUploadedFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+  repeated string channels = 4;
+  string initial_comment = 5;
+  string thread_timestamp = 6;
+}
+
+message ShareUploadedFileResponse {
+  repeated string channels = 1;
+}
+
 message EphemeralMessage {
   string workspace_id = 1;
   string conversation_id = 2;
@@ -300,6 +313,7 @@ service MessagesService {
   rpc Post(PostRequest) returns (Message);
   rpc PostWithBlocks(PostWithBlocksRequest) returns (Message);
   rpc ShareFile(ShareFileRequest) returns (Message);
+  rpc ShareUploadedFile(ShareUploadedFileRequest) returns (ShareUploadedFileResponse);
   rpc PostEphemeral(PostEphemeralRequest) returns (EphemeralMessage);
   rpc ListEphemeral(EphemeralMessagesRequest) returns (EphemeralMessagesResponse);
   rpc Update(UpdateRequest) returns (Message);

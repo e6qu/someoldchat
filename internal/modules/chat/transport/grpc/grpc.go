@@ -406,6 +406,25 @@ func (r Remote) ShareFile(ctx context.Context, workspaceID domain.WorkspaceID, u
 	return decodeProtoMessage(out)
 }
 
+func (r Remote) ShareUploadedFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, channels []domain.ConversationID, initialComment string, threadTimestamp domain.MessageTimestamp) ([]domain.ConversationID, error) {
+	encoded := make([]string, 0, len(channels))
+	for _, channel := range channels {
+		encoded = append(encoded, string(channel))
+	}
+	out, err := r.messages.ShareUploadedFile(ctx, &chatv1.ShareUploadedFileRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), FileId: string(fileID),
+		Channels: encoded, InitialComment: initialComment, ThreadTimestamp: string(threadTimestamp),
+	})
+	if err != nil {
+		return nil, err
+	}
+	shared := make([]domain.ConversationID, 0, len(out.GetChannels()))
+	for _, channel := range out.GetChannels() {
+		shared = append(shared, domain.ConversationID(channel))
+	}
+	return shared, nil
+}
+
 func (r Remote) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
 	out, err := r.messages.Unfurl(ctx, &chatv1.UnfurlRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Unfurls: unfurls})
 	if err != nil {
@@ -8333,6 +8352,22 @@ func (s *Server) ShareFile(ctx context.Context, input *chatv1.ShareFileRequest) 
 		return nil, mapError(err)
 	}
 	return encodeProtoMessage(value), nil
+}
+
+func (s *Server) ShareUploadedFile(ctx context.Context, input *chatv1.ShareUploadedFileRequest) (*chatv1.ShareUploadedFileResponse, error) {
+	channels := make([]domain.ConversationID, 0, len(input.GetChannels()))
+	for _, channel := range input.GetChannels() {
+		channels = append(channels, domain.ConversationID(channel))
+	}
+	shared, err := s.implementation.ShareUploadedFile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileID(input.GetFileId()), channels, input.GetInitialComment(), domain.MessageTimestamp(input.GetThreadTimestamp()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make([]string, 0, len(shared))
+	for _, channel := range shared {
+		encoded = append(encoded, string(channel))
+	}
+	return &chatv1.ShareUploadedFileResponse{Channels: encoded}, nil
 }
 
 func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chatv1.Message, error) {
