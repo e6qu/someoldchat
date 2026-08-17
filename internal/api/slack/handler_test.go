@@ -4449,6 +4449,51 @@ func TestCustomProfileFieldsThroughTeamAndUserProfile(t *testing.T) {
 	}
 }
 
+// TestUserProfileSetSingleFieldNameValueForm covers users.profile.set's
+// documented alternative to the profile object: name/value sets one field,
+// standard or custom, and refuses a field this deployment does not store.
+func TestUserProfileSetSingleFieldNameValueForm(t *testing.T) {
+	handler, s := testHandlerWithStore()
+	if err := s.SetWorkspaceProfileField(context.Background(), domain.ProfileFieldDefinition{
+		WorkspaceID: "T1", ID: "Xf01", Label: "Pronouns", Type: domain.ProfileFieldText, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+
+	// A standard field through name/value.
+	set := post(url.Values{"name": {"display_name"}, "value": {"Ada Lovelace"}}.Encode())
+	if set.Code != http.StatusOK || !strings.Contains(set.Body.String(), `"display_name":"Ada Lovelace"`) {
+		t.Fatalf("name/value display_name: status=%d body=%s", set.Code, set.Body)
+	}
+
+	// A custom field through name/value, keyed by field id.
+	custom := post(url.Values{"name": {"Xf01"}, "value": {"she/her"}}.Encode())
+	if custom.Code != http.StatusOK || !strings.Contains(custom.Body.String(), `"Xf01"`) || !strings.Contains(custom.Body.String(), `"she/her"`) {
+		t.Fatalf("name/value custom field: status=%d body=%s", custom.Code, custom.Body)
+	}
+
+	// A standard Slack field this deployment does not store is refused, not dropped.
+	if envelope := decodeEnvelope(t, post(url.Values{"name": {"first_name"}, "value": {"Ada"}}.Encode())); envelope.OK || envelope.Error != "invalid_arg_name" {
+		t.Fatalf("unsupported standard field body=%+v, want invalid_arg_name", envelope)
+	}
+	// An undefined custom field id is refused by the service.
+	if envelope := decodeEnvelope(t, post(url.Values{"name": {"Xf-nope"}, "value": {"x"}}.Encode())); envelope.OK || envelope.Error != "invalid_profile" {
+		t.Fatalf("undefined custom field body=%+v, want invalid_profile", envelope)
+	}
+	// Neither profile nor name is still invalid_arg_name.
+	if envelope := decodeEnvelope(t, post(url.Values{"value": {"x"}}.Encode())); envelope.OK || envelope.Error != "invalid_arg_name" {
+		t.Fatalf("no field body=%+v, want invalid_arg_name", envelope)
+	}
+}
+
 // TestReminderCompleteRefusesOthersAndRecurring covers reminders.complete's two
 // documented refusals that a bare not_found used to hide: completing another
 // member's reminder is cannot_complete_others, and completing a recurring one is

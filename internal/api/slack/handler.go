@@ -6351,11 +6351,20 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if strings.TrimSpace(fields["profile"]) == "" {
+	// users.profile.set takes either a whole profile object or the single-field
+	// name/value form Slack documents as its alternative. The name/value form maps
+	// a standard field the same way the object does, and treats any other name as
+	// a custom profile field id — the field the workspace defined — so setting one
+	// custom value needs no JSON.
+	var profileFields decodedProfile
+	if raw := strings.TrimSpace(fields["profile"]); raw != "" {
+		profileFields, err = decodeProfileJSON(raw)
+	} else if name := strings.TrimSpace(fields["name"]); name != "" {
+		profileFields, err = singleFieldProfile(name, fields["value"])
+	} else {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	profileFields, err := decodeProfileJSON(fields["profile"])
 	if err != nil {
 		writeError(w, "invalid_arg_name")
 		return
@@ -11138,6 +11147,33 @@ func decodeProfileJSON(raw string) (decodedProfile, error) {
 	}
 	if len(values) == 0 && result.StatusExpiration == nil && acknowledged == 0 && !result.HasFields {
 		return decodedProfile{}, errors.New("profile must contain at least one supported field")
+	}
+	return result, nil
+}
+
+// singleFieldProfile builds the same decodedProfile the profile object produces,
+// from the name/value form. A standard field name sets that field; a name Slack's
+// object also carries but this deployment does not store is refused rather than
+// silently dropped; any other name is a custom profile field id, whose value the
+// service validates against the workspace's definition.
+func singleFieldProfile(name, value string) (decodedProfile, error) {
+	result := decodedProfile{Strings: map[string]string{}}
+	switch name {
+	case "display_name", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
+		result.Strings[name] = value
+	case "status_expiration":
+		seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || seconds < 0 {
+			return decodedProfile{}, errors.New("status_expiration must be a non-negative integer")
+		}
+		result.StatusExpiration = &seconds
+	case "first_name", "last_name", "real_name", "phone", "skype", "title", "pronouns", "start_date", "email":
+		// Standard Slack profile fields this deployment does not store. Refusing is
+		// honest — accepting and dropping would report a change that did not happen.
+		return decodedProfile{}, fmt.Errorf("profile field %s is not settable here", name)
+	default:
+		result.HasFields = true
+		result.Fields = []domain.UserProfileFieldValue{{FieldID: domain.ProfileFieldID(name), Value: value}}
 	}
 	return result, nil
 }
