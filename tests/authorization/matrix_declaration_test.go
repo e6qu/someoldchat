@@ -474,6 +474,7 @@ func authorityMatrix() map[string]authority {
 		"SetWorkflowTrigger":                      authorityAnyMember,
 		"SetWorkspaceNotificationPreferences":     authorityAnyMember,
 		"ShareFile":                               authorityAnyMember,
+		"ShareUploadedFile":                       authorityAnyMember,
 		"ShareFilePublic":                         authorityAnyMember,
 		"ShareRemoteFile":                         authorityAnyMember,
 		"Stars":                                   authorityAnyMember,

@@ -22,6 +22,7 @@ const (
 	MessagesService_Post_FullMethodName                           = "/sameoldchat.chat.v1.MessagesService/Post"
 	MessagesService_PostWithBlocks_FullMethodName                 = "/sameoldchat.chat.v1.MessagesService/PostWithBlocks"
 	MessagesService_ShareFile_FullMethodName                      = "/sameoldchat.chat.v1.MessagesService/ShareFile"
+	MessagesService_ShareUploadedFile_FullMethodName              = "/sameoldchat.chat.v1.MessagesService/ShareUploadedFile"
 	MessagesService_PostEphemeral_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/PostEphemeral"
 	MessagesService_ListEphemeral_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/ListEphemeral"
 	MessagesService_Update_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Update"
@@ -50,6 +51,7 @@ type MessagesServiceClient interface {
 	Post(ctx context.Context, in *PostRequest, opts ...grpc.CallOption) (*Message, error)
 	PostWithBlocks(ctx context.Context, in *PostWithBlocksRequest, opts ...grpc.CallOption) (*Message, error)
 	ShareFile(ctx context.Context, in *ShareFileRequest, opts ...grpc.CallOption) (*Message, error)
+	ShareUploadedFile(ctx context.Context, in *ShareUploadedFileRequest, opts ...grpc.CallOption) (*ShareUploadedFileResponse, error)
 	PostEphemeral(ctx context.Context, in *PostEphemeralRequest, opts ...grpc.CallOption) (*EphemeralMessage, error)
 	ListEphemeral(ctx context.Context, in *EphemeralMessagesRequest, opts ...grpc.CallOption) (*EphemeralMessagesResponse, error)
 	Update(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*Message, error)
@@ -103,6 +105,16 @@ func (c *messagesServiceClient) ShareFile(ctx context.Context, in *ShareFileRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Message)
 	err := c.cc.Invoke(ctx, MessagesService_ShareFile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) ShareUploadedFile(ctx context.Context, in *ShareUploadedFileRequest, opts ...grpc.CallOption) (*ShareUploadedFileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShareUploadedFileResponse)
+	err := c.cc.Invoke(ctx, MessagesService_ShareUploadedFile_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +318,7 @@ type MessagesServiceServer interface {
 	Post(context.Context, *PostRequest) (*Message, error)
 	PostWithBlocks(context.Context, *PostWithBlocksRequest) (*Message, error)
 	ShareFile(context.Context, *ShareFileRequest) (*Message, error)
+	ShareUploadedFile(context.Context, *ShareUploadedFileRequest) (*ShareUploadedFileResponse, error)
 	PostEphemeral(context.Context, *PostEphemeralRequest) (*EphemeralMessage, error)
 	ListEphemeral(context.Context, *EphemeralMessagesRequest) (*EphemeralMessagesResponse, error)
 	Update(context.Context, *UpdateRequest) (*Message, error)
@@ -342,6 +355,9 @@ func (UnimplementedMessagesServiceServer) PostWithBlocks(context.Context, *PostW
 }
 func (UnimplementedMessagesServiceServer) ShareFile(context.Context, *ShareFileRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method ShareFile not implemented")
+}
+func (UnimplementedMessagesServiceServer) ShareUploadedFile(context.Context, *ShareUploadedFileRequest) (*ShareUploadedFileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ShareUploadedFile not implemented")
 }
 func (UnimplementedMessagesServiceServer) PostEphemeral(context.Context, *PostEphemeralRequest) (*EphemeralMessage, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostEphemeral not implemented")
@@ -470,6 +486,24 @@ func _MessagesService_ShareFile_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MessagesServiceServer).ShareFile(ctx, req.(*ShareFileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_ShareUploadedFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShareUploadedFileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).ShareUploadedFile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_ShareUploadedFile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).ShareUploadedFile(ctx, req.(*ShareUploadedFileRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -834,6 +868,10 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ShareFile",
 			Handler:    _MessagesService_ShareFile_Handler,
+		},
+		{
+			MethodName: "ShareUploadedFile",
+			Handler:    _MessagesService_ShareUploadedFile_Handler,
 		},
 		{
 			MethodName: "PostEphemeral",

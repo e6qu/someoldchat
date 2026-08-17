@@ -1782,6 +1782,36 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// files.upload's sharing: a hosted file is shared into several channels
+			// with an initial comment. The refusals must match — a missing file and
+			// a threaded share into more than one channel are both refused whole,
+			// leaving nothing half-shared — across both compositions.
+			name: "an uploaded file shares into channels identically",
+			// The file is seeded rather than uploaded because the differential
+			// harness hosts no blob store; sharing is what is under test here.
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, target.CreateFile(context.Background(), domain.File{
+					ID: "Fshare", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt",
+					Title: "Report", MIMEType: "text/plain", BlobKey: "share", Size: 6,
+					CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
+				}, events.Event{ID: "EFshare", WorkspaceID: "T1", Topic: "file.created", CreatedAt: time.Unix(1_700_000_000, 0).UTC()}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				shared, err := chat.ShareUploadedFile(ctx, "T1", "U1", "Fshare", []domain.ConversationID{"C1", "C2"}, "here is the report", "")
+				if err != nil {
+					return nil, err
+				}
+				_, missing := chat.ShareUploadedFile(ctx, "T1", "U1", "F-nobody", []domain.ConversationID{"C1"}, "", "")
+				_, threadMany := chat.ShareUploadedFile(ctx, "T1", "U1", "Fshare", []domain.ConversationID{"C1", "C2"}, "", "123.456")
+				first := ""
+				if len(shared) > 0 {
+					first = string(shared[0])
+				}
+				return []any{len(shared), first, missing != nil, threadMany != nil}, nil
+			},
+		},
+		{
 			// The whole huddle lifecycle, including the signalling that carries
 			// WebRTC between two browsers. The refusals matter most: a signal
 			// is how one member reaches another's machine, so both compositions

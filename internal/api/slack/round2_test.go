@@ -692,9 +692,11 @@ func TestOperationsNameCodesTheirOwnEnumDeclares(t *testing.T) {
 	}
 }
 
-// files.upload's sharing refusal was raised inside the spool shared with
-// users.setPhoto, whose enum declares bad_image, too_large and not_found and no
-// invalid_channel at all.
+// users.setPhoto shares the upload spool with files.upload but a different error
+// enum — bad_image, too_large and not_found, and no invalid_channel at all — so
+// a `channels` field on a photo upload must never answer with files.upload's
+// channel code. files.upload's own honoring of channels is covered by
+// TestFilesUploadSharesIntoChannels and TestMultipartUploadsAcceptATokenInTheRequestBody.
 func TestUsersSetPhotoDoesNotBorrowFilesUploadsChannelCode(t *testing.T) {
 	handler, _ := testHandlerWithStoredTokenAuth(auth.ScopeUsersProfileWrite, auth.ScopeFilesWrite)
 	contentType, body := multipartUpload(t, map[string]string{"token": "token", "channels": "C1"}, "image", "photo.png", []byte("\x89PNG\r\n\x1a\n"))
@@ -704,15 +706,6 @@ func TestUsersSetPhotoDoesNotBorrowFilesUploadsChannelCode(t *testing.T) {
 	handler.ServeHTTP(result, request)
 	if code := errorCode(t, result); code == "invalid_channel" {
 		t.Fatalf("users.setPhoto emitted files.upload's invalid_channel: %s", result.Body)
-	}
-	// files.upload still refuses the sharing arguments it cannot honour.
-	contentType, body = multipartUpload(t, map[string]string{"token": "token", "channels": "C1"}, "file", "f.txt", []byte("hello"))
-	request = httptest.NewRequest(http.MethodPost, "/api/files.upload", bytes.NewReader(body))
-	request.Header.Set("Content-Type", contentType)
-	result = httptest.NewRecorder()
-	handler.ServeHTTP(result, request)
-	if code := errorCode(t, result); code != "invalid_channel" {
-		t.Fatalf("files.upload: want invalid_channel, got %q (%s)", code, result.Body)
 	}
 }
 

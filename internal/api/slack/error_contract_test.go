@@ -549,6 +549,70 @@ func storedTokenUploadHandler(t *testing.T) http.Handler {
 	return mux
 }
 
+// TestFilesUploadSharesIntoChannels covers files.upload honoring its documented
+// channels/initial_comment/thread_ts sharing arguments: the hosted file is
+// shared into each named channel, the initial comment becomes the share
+// message's text, and the file object reports the channels shared into.
+func TestFilesUploadSharesIntoChannels(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "random"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C2", "U1")
+	if err := s.SeedToken(ctx, "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()}); err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewStored(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: s, Blob: blobs}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	contentType, body := multipartUpload(t, map[string]string{"token": "token", "filename": "report.txt", "title": "Report", "channels": "C1,C2", "initial_comment": "here is the report"}, "file", "report.txt", []byte("hello!"))
+	request := httptest.NewRequest(http.MethodPost, "/api/files.upload", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", contentType)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	var uploaded struct {
+		OK   bool `json:"ok"`
+		File struct {
+			ID       string   `json:"id"`
+			Channels []string `json:"channels"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &uploaded); err != nil || !uploaded.OK || len(uploaded.File.Channels) != 2 {
+		t.Fatalf("files.upload with channels: status=%d body=%s", response.Code, response.Body)
+	}
+	// The initial comment landed as a message carrying the file in each channel.
+	for _, channel := range []domain.ConversationID{"C1", "C2"} {
+		page, listErr := s.ListMessages(ctx, channel, domain.PageRequest{Limit: 10})
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		found := false
+		for _, message := range page.Messages {
+			if message.Text == "here is the report" && len(message.Files) == 1 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("no share message in %s: %+v", channel, page.Messages)
+		}
+	}
+}
+
 func TestMultipartUploadsAcceptATokenInTheRequestBody(t *testing.T) {
 	handler := storedTokenUploadHandler(t)
 	contentType, body := multipartUpload(t, map[string]string{"token": "token", "filename": "note.txt", "title": "note"}, "file", "note.txt", []byte("hello"))
@@ -569,16 +633,17 @@ func TestMultipartUploadsAcceptATokenInTheRequestBody(t *testing.T) {
 	if !uploaded.OK || uploaded.File.ID == "" {
 		t.Fatalf("files.upload with a body token: status=%d body=%s", response.Code, response.Body)
 	}
-	// files.upload declares channels/initial_comment/thread_ts but this path cannot
-	// share, so the request is refused with the code the enum declares rather than
-	// accepted and silently dropped.
+	// files.upload now honors channels, so a channel the uploader cannot reach —
+	// here one that does not exist in this fixture — is refused rather than
+	// silently dropped. (Successful sharing is covered in
+	// TestFilesUploadSharesIntoChannels, which has channels to share into.)
 	contentType, body = multipartUpload(t, map[string]string{"token": "token", "filename": "n.txt", "title": "n", "channels": "C1"}, "file", "n.txt", []byte("hello"))
 	request = httptest.NewRequest(http.MethodPost, "/api/files.upload", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", contentType)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if envelope := decodeEnvelope(t, response); envelope.OK || envelope.Error != "invalid_channel" {
-		t.Fatalf("sharing on upload: body=%+v, want invalid_channel", envelope)
+		t.Fatalf("sharing into an unreachable channel: body=%+v, want invalid_channel", envelope)
 	}
 	// A body token that is not a real token must still be a clean auth failure.
 	// `invalid_auth`, not `not_authed`: a credential was presented and this

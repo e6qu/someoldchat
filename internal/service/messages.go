@@ -8438,13 +8438,22 @@ func (m Messages) ShareFile(ctx context.Context, workspaceID domain.WorkspaceID,
 		}
 		threadTimestampValue = threadTimestamp
 	}
+	return m.createFileShareMessage(ctx, workspaceID, userID, file, conversationID, "", threadTimestampValue)
+}
+
+// createFileShareMessage posts one message that shares a file into a
+// conversation, carrying optional text (an initial comment) and joining a
+// thread when asked. It is the inner mutation ShareFile and the files.upload
+// sharing path share, retrying on the one-microsecond clock collision the public
+// timestamp can hit.
+func (m Messages) createFileShareMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, file domain.File, conversationID domain.ConversationID, text string, threadTimestamp domain.MessageTimestamp) (domain.Message, error) {
 	id, err := domain.NewMessageID()
 	if err != nil {
 		return domain.Message{}, err
 	}
 	message := domain.Message{
 		ID: id, WorkspaceID: workspaceID, Conversation: conversationID, AuthorID: userID,
-		ThreadTimestamp: threadTimestampValue, CreatedAt: domain.MessageInstant(time.Now()),
+		Text: text, ThreadTimestamp: threadTimestamp, CreatedAt: domain.MessageInstant(time.Now()),
 		Files: []domain.File{file},
 	}
 	for {
@@ -8460,7 +8469,7 @@ func (m Messages) ShareFile(ctx context.Context, workspaceID domain.WorkspaceID,
 		if eventErr != nil {
 			return domain.Message{}, eventErr
 		}
-		if err := m.Store.CreateFileShareMessage(ctx, []domain.FileID{fileID}, message, []events.Event{messageEvent, shareEvent}); errors.Is(err, store.ErrMessageTimestampTaken) {
+		if err := m.Store.CreateFileShareMessage(ctx, []domain.FileID{file.ID}, message, []events.Event{messageEvent, shareEvent}); errors.Is(err, store.ErrMessageTimestampTaken) {
 			message.CreatedAt = message.CreatedAt.Add(time.Microsecond)
 			continue
 		} else if err != nil {
@@ -8468,6 +8477,68 @@ func (m Messages) ShareFile(ctx context.Context, workspaceID domain.WorkspaceID,
 		}
 		return m.Store.GetMessage(ctx, message.ID)
 	}
+}
+
+// ShareUploadedFile shares an already-hosted file into one or more channels, the
+// way files.upload's channels/initial_comment/thread_ts arguments do. Every
+// destination is validated before any share is posted — membership, the
+// workspace, that the channel is not archived, and that a threaded reply names a
+// real parent — so the request is refused whole rather than sharing into some
+// channels and failing on the next. It returns the channels shared into, in
+// order, for the file object's share list.
+func (m Messages) ShareUploadedFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, channels []domain.ConversationID, initialComment string, threadTimestamp domain.MessageTimestamp) ([]domain.ConversationID, error) {
+	// Standing is judged before the arguments, so a caller who is not a member of
+	// the workspace is refused for who they are rather than told which argument
+	// was malformed.
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	if fileID == "" {
+		return nil, ErrInvalidFile
+	}
+	channels = normalizeFileShareChannels(channels)
+	if len(channels) == 0 || len(channels) > 100 || (threadTimestamp != "" && len(channels) != 1) {
+		return nil, ErrInvalidFile
+	}
+	if messagePayloadTooLong("", initialComment) {
+		return nil, ErrInvalidMessage
+	}
+	file, err := m.Store.GetFile(ctx, fileID)
+	if err != nil || file.WorkspaceID != workspaceID || file.Uploader != userID || file.Deleted {
+		return nil, store.ErrNotFound
+	}
+	for _, channel := range channels {
+		if err := m.requireConversationMembership(ctx, workspaceID, userID, channel); err != nil {
+			return nil, err
+		}
+		conversation, err := m.Store.GetConversation(ctx, channel)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return nil, store.ErrNotFound
+		}
+		if conversation.Archived {
+			return nil, ErrConversationAlreadyArchived
+		}
+	}
+	threadTimestampValue := domain.MessageTimestamp("")
+	if threadTimestamp != "" {
+		createdAt, parseErr := domain.ParseMessageTimestamp(threadTimestamp)
+		if parseErr != nil {
+			return nil, ErrInvalidTimestamp
+		}
+		parent, lookupErr := m.Store.GetMessageByCreatedAt(ctx, channels[0], createdAt)
+		if lookupErr != nil || parent.WorkspaceID != workspaceID {
+			return nil, store.ErrNotFound
+		}
+		threadTimestampValue = threadTimestamp
+	}
+	shared := make([]domain.ConversationID, 0, len(channels))
+	for _, channel := range channels {
+		if _, err := m.createFileShareMessage(ctx, workspaceID, userID, file, channel, initialComment, threadTimestampValue); err != nil {
+			return shared, err
+		}
+		shared = append(shared, channel)
+	}
+	return shared, nil
 }
 
 func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, conversationID domain.ConversationID, botUserID domain.UserID) (domain.IncomingWebhook, string, error) {

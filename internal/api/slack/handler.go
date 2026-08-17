@@ -8846,23 +8846,6 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// files.upload declares channels, initial_comment and thread_ts, and
-	// files.completeUploadExternal implements exactly that sharing behaviour, but
-	// this path does not route through it. Rejecting is correct only because the
-	// alternative — accepting and dropping the arguments — would report success for
-	// a file that was never shared. /files.upload enumerates `invalid_channel`,
-	// which is the closest declared code for a sharing request it cannot honour.
-	//
-	// The check lives here and not in spoolUpload because spoolUpload is shared
-	// with users.setPhoto, whose enum declares bad_image, too_large and not_found
-	// and no invalid_channel at all — so `POST /api/users.setPhoto` carrying a
-	// `channels` field was answered with a code that operation does not declare.
-	for _, unsupported := range []string{"initial_comment", "channels", "thread_ts"} {
-		if strings.TrimSpace(fields[unsupported]) != "" {
-			writeError(w, "invalid_channel")
-			return
-		}
-	}
 	// A spool-file failure is a server-side failure. `upload_failed` is in no pinned
 	// enum; /users.setPhoto declares `fatal_error` and /files.upload declares no
 	// server-side code at all, so the pinned spec does not settle files.upload and
@@ -8881,6 +8864,25 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
+	}
+	// files.upload shares the hosted file into any channels the caller named,
+	// posting initial_comment as each share message and threading it under
+	// thread_ts. Every destination is validated before any share, so a bad
+	// channel refuses the whole request rather than leaving the file half-shared.
+	if channels := parseIDList[domain.ConversationID](fields["channels"]); len(channels) > 0 {
+		shared, shareErr := h.Messages.ShareUploadedFile(r.Context(), principal.WorkspaceID, principal.UserID, file.ID, channels, fields["initial_comment"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
+		if shareErr != nil {
+			if errors.Is(shareErr, service.ErrConversationAlreadyArchived) {
+				// As in files.completeUploadExternal: the current reference does not
+				// enumerate is_archived, and names a channel that cannot accept the
+				// share message posting_to_channel_denied.
+				writeError(w, "posting_to_channel_denied")
+				return
+			}
+			writeError(w, mapServiceError(shareErr, "invalid_channel"))
+			return
+		}
+		file.SharedChannels = shared
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
 }
