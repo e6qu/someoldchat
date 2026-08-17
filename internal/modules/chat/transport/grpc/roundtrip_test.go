@@ -458,6 +458,8 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: throughInfallible(encodeProtoExternalAuthProvider, decodeProtoExternalAuthProvider),
 		},
+		"ProfileFieldDefinition":    {sample: &domain.ProfileFieldDefinition{}, through: throughInfallible(encodeProtoProfileField, decodeProtoProfileField)},
+		"UserProfileFieldValue":     {sample: &domain.UserProfileFieldValue{}, through: throughInfallible(encodeProtoProfileFieldValue, decodeProtoProfileFieldValue)},
 		"InstalledApp":              {sample: &domain.InstalledApp{}, through: through(encodeProtoInstalledApp, decodeProtoInstalledApp)},
 		"OAuthAuthorizationRequest": {sample: &domain.OAuthAuthorizationRequest{}, through: through(encodeProtoOAuthAuthorizationRequest, decodeProtoOAuthAuthorizationRequest)},
 		"OAuthAuthorization":        {sample: &domain.OAuthAuthorization{}, through: through(encodeProtoOAuthAuthorization, decodeProtoOAuthAuthorization)},

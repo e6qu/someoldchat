@@ -320,6 +320,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestTeamProfileGet
+      - go-test:internal/api/slack:TestCustomProfileFieldsThroughTeamAndUserProfile
   - method: emoji.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -529,13 +530,14 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - Core identity, image, status, and expiration fields are returned, but custom profile fields, labels, and the full paid-plan profile schema are not implemented.
+      - Core identity, image, status, expiration, and workspace-defined custom fields are returned; a hidden field is filtered from a reader who is neither its owner nor an administrator. Labels for the custom fields are read separately through team.profile.get.
       - Current rate limits and every user-token/bot-token visibility variation have not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible
-      reason: The previous claim covered a fixed profile subset and SDK decoding, not Slack's complete profile schema and visibility contract.
+      reason: Custom fields are implemented and covered by tests, but rate limits and the full user-token/bot-token visibility contract are not differentially qualified.
       evidence:
         - source:internal/api/slack/handler.go
+        - go-test:internal/api/slack:TestCustomProfileFieldsThroughTeamAndUserProfile
         - go-test:internal/api/slack:TestOAuthV2UserAccessReturnsUserGrantOnly
         - https://docs.slack.dev/reference/methods/users.profile.get/
   - method: users.profile.set
@@ -548,13 +550,14 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - Display name, status, expiration, and image URL fields are supported, but Slack's complete editable profile and custom-field surface is not.
+      - Display name, status, expiration, image URL, and workspace-defined custom fields are settable through the profile object's fields map, each validated against its field's declared type; the single-field name/value form is not accepted.
       - Admin editing of another user, paid-plan restrictions, method-specific rate limits, and all token-type rules remain unqualified.
     audit:
       downgraded_from: behavior-compatible
-      reason: The previous claim promoted a durable profile subset and official SDK calls to full Slack behavioral compatibility.
+      reason: The editable profile including custom fields is implemented and tested, but admin editing of another user, the name/value form, rate limits, and token-type rules are not qualified.
       evidence:
         - source:internal/api/slack/handler.go
+        - go-test:internal/api/slack:TestCustomProfileFieldsThroughTeamAndUserProfile
         - source:internal/service/messages.go
         - https://docs.slack.dev/reference/methods/users.profile.set/
 

@@ -269,6 +269,11 @@ type Service interface {
 	AdminTeamUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, domain.PageRequest) (domain.UserPage, error)
 	UserByEmail(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.User, error)
 	SetUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile) (domain.User, error)
+	SetWorkspaceProfileField(context.Context, domain.WorkspaceID, domain.UserID, domain.ProfileFieldDefinition) (domain.ProfileFieldDefinition, error)
+	WorkspaceProfileFields(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.ProfileFieldDefinition, error)
+	DeleteWorkspaceProfileField(context.Context, domain.WorkspaceID, domain.UserID, domain.ProfileFieldID) error
+	SetUserProfileFields(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, []domain.UserProfileFieldValue) error
+	UserProfileFields(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) ([]domain.UserProfileFieldValue, error)
 	ScheduleUserStatus(context.Context, domain.WorkspaceID, domain.UserID, string, string, time.Time, time.Time) (domain.ScheduledStatus, error)
 	ScheduledUserStatuses(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.ScheduledStatus, error)
 	UpdateScheduledUserStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledStatusID, string, string, time.Time, time.Time) (domain.ScheduledStatus, error)

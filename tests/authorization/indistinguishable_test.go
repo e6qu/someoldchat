@@ -35,6 +35,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"AcceptSharedInvite":                      {},
 		"AddBookmark":                             {},
 		"StartExternalAuthConnection":             {},
+		"DeleteWorkspaceProfileField":             {},
 		"AddListColumn":                           {},
 		"AddReaction":                             {},
 		"AddUserGroupChannels":                    {},
@@ -176,4 +177,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // the missing section is reached before any standing check. The other sidebar
 // operations distinguish — a create/read/rename/reorder/assign reaches a
 // validation or ownership branch that a holder and a stranger do not share.
-const indistinguishableRefusalCeiling = 99
+const indistinguishableRefusalCeiling = 100

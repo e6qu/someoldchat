@@ -139,6 +139,8 @@ type Store struct {
 	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
 	externalAuthTokens            map[string]domain.ExternalAuthToken
 	externalAuthProviders         map[string]domain.ExternalAuthProvider
+	workspaceProfileFields        map[string]domain.ProfileFieldDefinition
+	userProfileFieldValues        map[string]map[domain.ProfileFieldID]domain.UserProfileFieldValue
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
@@ -363,6 +365,8 @@ func New() *Store {
 		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
 		externalAuthTokens:            make(map[string]domain.ExternalAuthToken),
 		externalAuthProviders:         make(map[string]domain.ExternalAuthProvider),
+		workspaceProfileFields:        make(map[string]domain.ProfileFieldDefinition),
+		userProfileFieldValues:        make(map[string]map[domain.ProfileFieldID]domain.UserProfileFieldValue),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
@@ -2178,6 +2182,103 @@ func (s *Store) GetExternalAuthProvider(_ context.Context, appID domain.AppID, n
 		return domain.ExternalAuthProvider{}, store.ErrNotFound
 	}
 	return value, nil
+}
+
+func workspaceProfileFieldKey(workspace domain.WorkspaceID, id domain.ProfileFieldID) string {
+	return string(workspace) + "\x00" + string(id)
+}
+
+func userProfileFieldValuesKey(workspace domain.WorkspaceID, user domain.UserID) string {
+	return string(workspace) + "\x00" + string(user)
+}
+
+func (s *Store) SetWorkspaceProfileField(_ context.Context, value domain.ProfileFieldDefinition) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[value.WorkspaceID]; !exists {
+		return store.ErrNotFound
+	}
+	s.workspaceProfileFields[workspaceProfileFieldKey(value.WorkspaceID, value.ID)] = value
+	return nil
+}
+
+func (s *Store) ListWorkspaceProfileFields(_ context.Context, workspace domain.WorkspaceID) ([]domain.ProfileFieldDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	fields := make([]domain.ProfileFieldDefinition, 0)
+	for _, value := range s.workspaceProfileFields {
+		if value.WorkspaceID != workspace {
+			continue
+		}
+		fields = append(fields, value)
+	}
+	sort.Slice(fields, func(left, right int) bool {
+		if fields[left].Ordering != fields[right].Ordering {
+			return fields[left].Ordering < fields[right].Ordering
+		}
+		return fields[left].ID < fields[right].ID
+	})
+	return fields, nil
+}
+
+func (s *Store) GetWorkspaceProfileField(_ context.Context, workspace domain.WorkspaceID, id domain.ProfileFieldID) (domain.ProfileFieldDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.workspaceProfileFields[workspaceProfileFieldKey(workspace, id)]
+	if !exists {
+		return domain.ProfileFieldDefinition{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) DeleteWorkspaceProfileField(_ context.Context, workspace domain.WorkspaceID, id domain.ProfileFieldID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaceProfileFields[workspaceProfileFieldKey(workspace, id)]; !exists {
+		return store.ErrNotFound
+	}
+	delete(s.workspaceProfileFields, workspaceProfileFieldKey(workspace, id))
+	// The values under the removed field go with it, so no member keeps a value
+	// for a field that no longer exists.
+	for _, values := range s.userProfileFieldValues {
+		delete(values, id)
+	}
+	return nil
+}
+
+func (s *Store) SetUserProfileFieldValues(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, values []domain.UserProfileFieldValue) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := userProfileFieldValuesKey(workspace, user)
+	current := s.userProfileFieldValues[key]
+	if current == nil {
+		current = make(map[domain.ProfileFieldID]domain.UserProfileFieldValue)
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value.Value) == "" {
+			delete(current, value.FieldID)
+			continue
+		}
+		current[value.FieldID] = value
+	}
+	if len(current) == 0 {
+		delete(s.userProfileFieldValues, key)
+		return nil
+	}
+	s.userProfileFieldValues[key] = current
+	return nil
+}
+
+func (s *Store) ListUserProfileFieldValues(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.UserProfileFieldValue, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	current := s.userProfileFieldValues[userProfileFieldValuesKey(workspace, user)]
+	values := make([]domain.UserProfileFieldValue, 0, len(current))
+	for _, value := range current {
+		values = append(values, value)
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].FieldID < values[right].FieldID })
+	return values, nil
 }
 
 func (s *Store) DeleteExternalAuthToken(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, id string, event events.Event) error {

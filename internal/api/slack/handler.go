@@ -2832,11 +2832,37 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.authenticate(r, auth.ScopeUsersProfileRead); err != nil {
+	principal, err := h.authenticate(r, auth.ScopeUsersProfileRead)
+	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": map[string]any{"fields": []map[string]any{}}})
+	definitions, err := h.Messages.WorkspaceProfileFields(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "invalid_auth"))
+		return
+	}
+	fields := make([]map[string]any, 0, len(definitions))
+	for _, definition := range definitions {
+		fields = append(fields, profileFieldDefinitionResponse(definition))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": map[string]any{"fields": fields}})
+}
+
+// profileFieldDefinitionResponse shapes one custom field definition the way
+// team.profile.get reports it: possible_values carries an options_list's menu
+// and is null for every other type, and options is null because this deployment
+// declares no per-option protection metadata.
+func profileFieldDefinitionResponse(definition domain.ProfileFieldDefinition) map[string]any {
+	var possibleValues any
+	if definition.Type == domain.ProfileFieldOptionsList {
+		possibleValues = definition.PossibleValues
+	}
+	return map[string]any{
+		"id": definition.ID, "ordering": definition.Ordering, "label": definition.Label,
+		"hint": definition.Hint, "type": string(definition.Type),
+		"possible_values": possibleValues, "options": nil, "is_hidden": definition.IsHidden,
+	}
 }
 
 func (h Handler) teamBillableInfo(w http.ResponseWriter, r *http.Request) {
@@ -6062,7 +6088,33 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
+	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, requested)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	profile["fields"] = customFields
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profile})
+}
+
+// profileFieldValues reads a member's custom profile field values for a Slack
+// profile response, keyed by field id the way users.profile.get reports them. A
+// member with none set is reported as null, which is what Slack returns rather
+// than an empty object, and hidden fields the reader may not see are already
+// filtered by the service.
+func (h Handler) profileFieldValues(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID) (any, error) {
+	values, err := h.Messages.UserProfileFields(ctx, workspaceID, actorID, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	fields := make(map[string]any, len(values))
+	for _, value := range values {
+		fields[string(value.FieldID)] = map[string]any{"value": value.Value, "alt": value.Alt}
+	}
+	return fields, nil
 }
 
 func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
@@ -6354,10 +6406,26 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
+	if profileFields.HasFields {
+		if err := h.Messages.SetUserProfileFields(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profileFields.Fields); err != nil {
+			if errors.Is(err, service.ErrInvalidProfile) {
+				writeError(w, "invalid_profile")
+				return
+			}
+			writeError(w, mapServiceError(err, "user_not_found"))
+			return
+		}
+	}
 	responseProfile := profileResponse(user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
+	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	responseProfile["fields"] = customFields
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": responseProfile})
 }
 
@@ -10803,7 +10871,7 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
 		return invalidReason
 	}
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {
@@ -10986,6 +11054,11 @@ const maxRequestBody = 4 << 20
 type decodedProfile struct {
 	Strings          map[string]string
 	StatusExpiration *int64
+	// Fields carries custom profile field values when the request set them; it is
+	// nil when the profile JSON had no fields object, so a request touching only
+	// standard fields does not clear a member's custom values.
+	Fields    []domain.UserProfileFieldValue
+	HasFields bool
 }
 
 func decodeProfileJSON(raw string) (decodedProfile, error) {
@@ -11020,11 +11093,27 @@ func decodeProfileJSON(raw string) (decodedProfile, error) {
 				return decodedProfile{}, fmt.Errorf("profile field %s must be a boolean", name)
 			}
 			acknowledged++
+		case "fields":
+			// Custom profile field values, keyed by field id, each an object with a
+			// value and an optional alt. An empty object clears nothing and simply
+			// sets no field; an id whose definition does not accept the value is
+			// refused by the service.
+			var custom map[string]struct {
+				Value string `json:"value"`
+				Alt   string `json:"alt"`
+			}
+			if err := json.Unmarshal(value, &custom); err != nil {
+				return decodedProfile{}, errors.New("profile field fields must be an object of field values")
+			}
+			result.HasFields = true
+			for id, entry := range custom {
+				result.Fields = append(result.Fields, domain.UserProfileFieldValue{FieldID: domain.ProfileFieldID(id), Value: entry.Value, Alt: entry.Alt})
+			}
 		default:
 			return decodedProfile{}, fmt.Errorf("unsupported profile field %s", name)
 		}
 	}
-	if len(values) == 0 && result.StatusExpiration == nil && acknowledged == 0 {
+	if len(values) == 0 && result.StatusExpiration == nil && acknowledged == 0 && !result.HasFields {
 		return decodedProfile{}, errors.New("profile must contain at least one supported field")
 	}
 	return result, nil

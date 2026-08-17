@@ -560,7 +560,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 172
+const schemaVersion = 173
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3332,6 +3332,29 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 173 {
+		// A workspace's custom profile field definitions and each member's values
+		// for them. Definitions reference workspaces so the FK resolves on
+		// PostgreSQL; values carry no cross-table FK because a value is validated
+		// against its definition in the service and cleaned up with the definition
+		// there, keeping the memory and SQL stores symmetric.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workspace_profile_fields (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), field_id TEXT NOT NULL,
+			ordering INTEGER NOT NULL DEFAULT 0, label TEXT NOT NULL, hint TEXT NOT NULL DEFAULT '',
+			type TEXT NOT NULL, possible_values TEXT NOT NULL DEFAULT '[]',
+			is_hidden INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, field_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate workspace profile fields: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_profile_field_values (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL,
+			field_id TEXT NOT NULL, value TEXT NOT NULL DEFAULT '', alt TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (workspace_id, user_id, field_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate user profile field values: %w", err)
 		}
 	}
 	if version < 172 {
@@ -7766,6 +7789,135 @@ func (s *Store) GetExternalAuthProvider(ctx context.Context, appID domain.AppID,
 	}
 	value.CreatedAt = timeFromUnixNanoOrZero(created)
 	return value, nil
+}
+
+func (s *Store) SetWorkspaceProfileField(ctx context.Context, value domain.ProfileFieldDefinition) error {
+	options, err := json.Marshal(value.PossibleValues)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO workspace_profile_fields(workspace_id, field_id, ordering, label, hint, type, possible_values, is_hidden, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id, field_id) DO UPDATE SET ordering = excluded.ordering, label = excluded.label, hint = excluded.hint, type = excluded.type, possible_values = excluded.possible_values, is_hidden = excluded.is_hidden`,
+		value.WorkspaceID, value.ID, value.Ordering, value.Label, value.Hint, string(value.Type), string(options), boolInt(value.IsHidden), value.CreatedAt.UTC().UnixNano())
+	if err != nil {
+		return classify(err)
+	}
+	if changed, err := result.RowsAffected(); err == nil && changed == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListWorkspaceProfileFields(ctx context.Context, workspace domain.WorkspaceID) ([]domain.ProfileFieldDefinition, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, field_id, ordering, label, hint, type, possible_values, is_hidden, created_at FROM workspace_profile_fields WHERE workspace_id = ? ORDER BY ordering, field_id`, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	fields := make([]domain.ProfileFieldDefinition, 0)
+	for rows.Next() {
+		value, err := scanWorkspaceProfileField(rows)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, value)
+	}
+	return fields, rows.Err()
+}
+
+func (s *Store) GetWorkspaceProfileField(ctx context.Context, workspace domain.WorkspaceID, id domain.ProfileFieldID) (domain.ProfileFieldDefinition, error) {
+	value, err := scanWorkspaceProfileField(s.db.QueryRowContext(ctx, `SELECT workspace_id, field_id, ordering, label, hint, type, possible_values, is_hidden, created_at FROM workspace_profile_fields WHERE workspace_id = ? AND field_id = ?`, workspace, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ProfileFieldDefinition{}, store.ErrNotFound
+	}
+	if err != nil {
+		return domain.ProfileFieldDefinition{}, err
+	}
+	return value, nil
+}
+
+// scanWorkspaceProfileField reads one row into a definition. rowScanner covers
+// both a *sql.Row and a *sql.Rows so the list and single-row reads share it.
+func scanWorkspaceProfileField(scanner rowScanner) (domain.ProfileFieldDefinition, error) {
+	var value domain.ProfileFieldDefinition
+	var fieldType, options string
+	var hidden int64
+	var created int64
+	if err := scanner.Scan(&value.WorkspaceID, &value.ID, &value.Ordering, &value.Label, &value.Hint, &fieldType, &options, &hidden, &created); err != nil {
+		return domain.ProfileFieldDefinition{}, err
+	}
+	value.Type = domain.ProfileFieldType(fieldType)
+	if err := json.Unmarshal([]byte(options), &value.PossibleValues); err != nil {
+		return domain.ProfileFieldDefinition{}, err
+	}
+	value.IsHidden = hidden != 0
+	value.CreatedAt = timeFromUnixNanoOrZero(created)
+	return value, nil
+}
+
+func (s *Store) DeleteWorkspaceProfileField(ctx context.Context, workspace domain.WorkspaceID, id domain.ProfileFieldID) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM workspace_profile_fields WHERE workspace_id = ? AND field_id = ?`, workspace, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err == nil && changed == 0 {
+		return store.ErrNotFound
+	}
+	// The values under the removed field go with it in the same transaction, so
+	// no member keeps a value for a field that no longer exists.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_profile_field_values WHERE workspace_id = ? AND field_id = ?`, workspace, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SetUserProfileFieldValues(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, values []domain.UserProfileFieldValue) error {
+	if len(values) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, value := range values {
+		if strings.TrimSpace(value.Value) == "" {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM user_profile_field_values WHERE workspace_id = ? AND user_id = ? AND field_id = ?`, workspace, user, value.FieldID); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_profile_field_values(workspace_id, user_id, field_id, value, alt)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(workspace_id, user_id, field_id) DO UPDATE SET value = excluded.value, alt = excluded.alt`,
+			workspace, user, value.FieldID, value.Value, value.Alt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListUserProfileFieldValues(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) ([]domain.UserProfileFieldValue, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT field_id, value, alt FROM user_profile_field_values WHERE workspace_id = ? AND user_id = ? ORDER BY field_id`, workspace, user)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.UserProfileFieldValue, 0)
+	for rows.Next() {
+		var value domain.UserProfileFieldValue
+		if err := rows.Scan(&value.FieldID, &value.Value, &value.Alt); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
 }
 
 func (s *Store) GetAnomalyAllowList(ctx context.Context, workspace domain.WorkspaceID) (domain.AnomalyAllowList, error) {

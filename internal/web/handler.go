@@ -537,6 +537,18 @@ type membersData struct {
 	MoreMembersURL string
 	Scheduled      []scheduledStatusView
 	DraftScheduled scheduledStatusView
+	// ProfileFields are the workspace's custom profile fields, each carrying this
+	// member's current value so the edit form shows what is already set.
+	ProfileFields []memberProfileFieldView
+}
+
+type memberProfileFieldView struct {
+	ID      string
+	Label   string
+	Hint    string
+	Type    string
+	Options []string
+	Value   string
 }
 
 type scheduledStatusView struct {
@@ -2626,6 +2638,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
         <label class="field" for="status_expiration_local">Remove status after<input id="status_expiration_local" type="datetime-local" data-status-expiration-local><small>Leave blank to keep the status until you clear it.</small></label>
         <input type="hidden" name="status_expiration" value="{{.StatusExpires}}" data-status-expiration>
         <label class="field" for="avatar_url">Profile photo URL<input id="avatar_url" type="url" maxlength="2048" name="avatar_url" value="{{.AvatarURL}}" placeholder="https://example.com/avatar.jpg"><small>Leave blank to use your initial.</small></label>
+        {{range $field := .ProfileFields}}<label class="field" for="field-{{$field.ID}}">{{$field.Label}}{{if eq $field.Type "options_list"}}<select id="field-{{$field.ID}}" name="field:{{$field.ID}}"><option value="">—</option>{{range $field.Options}}<option value="{{.}}"{{if eq . $field.Value}} selected{{end}}>{{.}}</option>{{end}}</select>{{else}}<input id="field-{{$field.ID}}" type="{{if eq $field.Type "date"}}date{{else if eq $field.Type "link"}}url{{else}}text{{end}}" maxlength="255" name="field:{{$field.ID}}" value="{{$field.Value}}">{{end}}{{if $field.Hint}}<small>{{$field.Hint}}</small>{{end}}</label>{{end}}
         <div class="profile-actions"><button class="save" type="submit">Save changes</button>{{if .Profile.StatusText}}<button class="secondary" type="submit" name="clear_status" value="true">Clear status</button>{{end}}</div>
       </form>
       <section class="scheduled-statuses" aria-labelledby="scheduled-statuses-heading">
@@ -4606,6 +4619,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
 	mux.HandleFunc("POST /app/admin/settings/disconnect", h.workspaceDisconnectTeam)
 	mux.HandleFunc("POST /app/admin/settings/retention", h.workspaceRetentionSet)
+	mux.HandleFunc("POST /app/admin/settings/profile-fields", h.workspaceProfileFieldSet)
+	mux.HandleFunc("POST /app/admin/settings/profile-fields/delete", h.workspaceProfileFieldDelete)
 	mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
 	mux.HandleFunc("POST /app/admin/invites/approve", h.authInviteRequestDecision(true))
 	mux.HandleFunc("POST /app/admin/invites/deny", h.authInviteRequestDecision(false))
@@ -10235,6 +10250,20 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreMembersURL = "/app/members?" + url.Values{"cursor": {string(page.NextCursor)}}.Encode()
 	}
+	if definitions, fieldsErr := h.Messages.WorkspaceProfileFields(r.Context(), principal.WorkspaceID, principal.UserID); fieldsErr == nil && len(definitions) > 0 {
+		values := map[domain.ProfileFieldID]string{}
+		if stored, valuesErr := h.Messages.UserProfileFields(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); valuesErr == nil {
+			for _, value := range stored {
+				values[value.FieldID] = value.Value
+			}
+		}
+		for _, definition := range definitions {
+			data.ProfileFields = append(data.ProfileFields, memberProfileFieldView{
+				ID: string(definition.ID), Label: definition.Label, Hint: definition.Hint,
+				Type: string(definition.Type), Options: definition.PossibleValues, Value: values[definition.ID],
+			})
+		}
+	}
 	h.writeHTML(w, membersTemplate, data, status, "member rendering unavailable")
 }
 
@@ -10293,6 +10322,25 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		h.renderMembers(w, r, principal, &profile, nil, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
 		return
+	}
+	// Custom profile field values ride the same form, each under a field:<id>
+	// name. An empty value clears the field; a value its type does not accept is
+	// reported without losing the standard fields already saved.
+	var customValues []domain.UserProfileFieldValue
+	for name, value := range fields {
+		if id, ok := strings.CutPrefix(name, "field:"); ok {
+			customValues = append(customValues, domain.UserProfileFieldValue{FieldID: domain.ProfileFieldID(id), Value: value})
+		}
+	}
+	if len(customValues) > 0 {
+		if err := h.Messages.SetUserProfileFields(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, customValues); err != nil {
+			if errors.Is(err, service.ErrInvalidProfile) {
+				h.renderMembers(w, r, principal, &profile, nil, "Your name and status were saved, but a custom field value was not accepted. A date must be a real calendar date and a link must be a web address.", http.StatusBadRequest)
+				return
+			}
+			h.renderMembers(w, r, principal, &profile, nil, "Your custom profile fields could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
 }

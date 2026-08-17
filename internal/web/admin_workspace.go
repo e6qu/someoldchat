@@ -50,7 +50,32 @@ type workspaceSettingsData struct {
 	ExternalTeams []workspaceConnectionView
 	Options       []workspaceDiscoverabilityOption
 	Channels      []workspaceDefaultChannelOption
-	CanWrite      bool
+	// ProfileFields are the custom profile fields members can fill in, and
+	// FieldTypeOptions are the kinds a new one can be.
+	ProfileFields    []profileFieldView
+	FieldTypeOptions []profileFieldTypeOption
+	CanWrite         bool
+}
+
+type profileFieldView struct {
+	ID      string
+	Label   string
+	Hint    string
+	Type    string
+	Options string
+	Hidden  bool
+}
+
+type profileFieldTypeOption struct {
+	Value string
+	Label string
+}
+
+var profileFieldTypeChoices = []profileFieldTypeOption{
+	{Value: string(domain.ProfileFieldText), Label: "Text"},
+	{Value: string(domain.ProfileFieldDate), Label: "Date"},
+	{Value: string(domain.ProfileFieldLink), Label: "Link"},
+	{Value: string(domain.ProfileFieldOptionsList), Label: "Options list"},
 }
 
 type workspaceConnectionView struct {
@@ -125,6 +150,20 @@ const workspaceSettingsMarkup = `{{define "title"}}Workspace settings · SameOld
 <p class="read-only">{{.RetentionSummary}}</p>
 {{if .RetentionSweptAt}}<p class="read-only">Last swept <time datetime="{{.RetentionSweptMachine}}" data-local-time>{{.RetentionSweptAt}}</time>. A conversation is swept about once a day; if this is much older, the retention worker is not running.</p>{{else}}<p class="read-only">Nothing has been swept yet.</p>{{end}}
 <p class="read-only">A channel can be given a shorter limit of its own from its conversation details. Canvases and lists are not covered by retention here and are kept indefinitely.</p>
+</section>
+<section class="card" aria-labelledby="profile-fields-heading">
+<div class="section-head"><h2 id="profile-fields-heading">Custom profile fields</h2><p>Fields every member can fill in on their profile. A hidden field's value is visible only to the member and to administrators; everyone else does not see it at all.</p></div>
+{{if .ProfileFields}}<ul class="connections">{{range .ProfileFields}}<li class="connection"><span class="connection-name">{{.Label}} <span class="status">{{.Type}}{{if .Hidden}} · hidden{{end}}{{if .Options}} · {{.Options}}{{end}}</span></span>{{if $.CanWrite}}<form method="post" action="/app/admin/settings/profile-fields/delete"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="field_id" value="{{.ID}}"><button class="toggle" type="submit">Remove {{.Label}}</button></form>{{end}}</li>{{end}}</ul>
+{{else}}<p class="read-only">No custom profile fields yet.</p>{{end}}
+{{if .CanWrite}}<form class="setup" method="post" action="/app/admin/settings/profile-fields">
+<input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label>Label<input name="label" maxlength="64" required></label>
+<label>Hint<input name="hint" maxlength="255"></label>
+<label>Type<select name="type">{{range .FieldTypeOptions}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select></label>
+<label>Options<input name="options" placeholder="comma, separated"><span class="read-only">options list only</span></label>
+<label class="inline-form"><input type="checkbox" name="hidden" value="true"> Hidden from other members</label>
+<button class="toggle" type="submit">Add field</button>
+</form>{{end}}
 </section>
 <section class="card" aria-labelledby="connect-heading">
 <div class="section-head"><h2 id="connect-heading">Connected organizations</h2><p>Organizations this workspace shares channels with. Disconnecting one ends its access to every shared channel at once, not just the one you are looking at.</p></div>
@@ -260,6 +299,15 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 			data.Channels = append(data.Channels, workspaceDefaultChannelOption{ID: option.ID, Name: option.Name, Selected: selected})
 		}
 	}
+	data.FieldTypeOptions = profileFieldTypeChoices
+	if definitions, fieldsErr := h.Messages.WorkspaceProfileFields(r.Context(), principal.WorkspaceID, principal.UserID); fieldsErr == nil {
+		for _, definition := range definitions {
+			data.ProfileFields = append(data.ProfileFields, profileFieldView{
+				ID: string(definition.ID), Label: definition.Label, Hint: definition.Hint, Type: string(definition.Type),
+				Options: strings.Join(definition.PossibleValues, ", "), Hidden: definition.IsHidden,
+			})
+		}
+	}
 	if connections, connectErr := h.Messages.ExternalTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: searchFilterOptionLimit}); connectErr == nil {
 		for _, team := range connections.Teams {
 			name := strings.TrimSpace(team.Name)
@@ -311,6 +359,54 @@ func (h Handler) workspaceRetentionSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirectSettings(w, r, "Retention saved")
+}
+
+// workspaceProfileFieldSet defines or replaces a custom profile field. An
+// options_list carries its options as a comma-separated list; every other type
+// carries none.
+func (h Handler) workspaceProfileFieldSet(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.workspaceSettingsMutation(w, r, "")
+	if !ok {
+		return
+	}
+	definition := domain.ProfileFieldDefinition{
+		ID:       domain.ProfileFieldID(strings.TrimSpace(fields["field_id"])),
+		Label:    strings.TrimSpace(fields["label"]),
+		Hint:     strings.TrimSpace(fields["hint"]),
+		Type:     domain.ProfileFieldType(strings.TrimSpace(fields["type"])),
+		IsHidden: strings.TrimSpace(fields["hidden"]) == "true",
+	}
+	if definition.Type == domain.ProfileFieldOptionsList {
+		for _, option := range strings.Split(fields["options"], ",") {
+			if trimmed := strings.TrimSpace(option); trimmed != "" {
+				definition.PossibleValues = append(definition.PossibleValues, trimmed)
+			}
+		}
+	}
+	if _, err := h.Messages.SetWorkspaceProfileField(r.Context(), principal.WorkspaceID, principal.UserID, definition); err != nil {
+		if errors.Is(err, service.ErrInvalidProfileField) {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_profile_field", Title: "Request rejected", Message: "A field needs a label and a type, and an options list needs at least one option."})
+			return
+		}
+		h.writeAuthAdminProblem(w, r, workspaceSettingsProblem(err, "The custom field was not saved."))
+		return
+	}
+	h.redirectSettings(w, r, "Custom field saved")
+}
+
+// workspaceProfileFieldDelete removes a custom profile field and every member's
+// value for it.
+func (h Handler) workspaceProfileFieldDelete(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.workspaceSettingsMutation(w, r, "")
+	if !ok {
+		return
+	}
+	id := domain.ProfileFieldID(strings.TrimSpace(fields["field_id"]))
+	if err := h.Messages.DeleteWorkspaceProfileField(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
+		h.writeAuthAdminProblem(w, r, workspaceSettingsProblem(err, "The custom field was not removed. It may already be gone."))
+		return
+	}
+	h.redirectSettings(w, r, "Custom field removed")
 }
 
 // workspaceDisconnectTeam ends a connection with one organization everywhere.

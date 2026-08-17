@@ -69,6 +69,7 @@ service.invalid_oauth
 service.invalid_oauth_client
 service.invalid_presence
 service.invalid_profile
+service.invalid_profile_field
 service.invalid_reaction
 service.invalid_reminder
 service.invalid_remote_file

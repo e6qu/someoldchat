@@ -4397,6 +4397,58 @@ func TestRemindersLifecycle(t *testing.T) {
 	}
 }
 
+// TestCustomProfileFieldsThroughTeamAndUserProfile covers the custom-field
+// surface: team.profile.get reports a workspace's field definitions, and
+// users.profile.set/get carry a member's values, validated against those
+// definitions.
+func TestCustomProfileFieldsThroughTeamAndUserProfile(t *testing.T) {
+	handler, s := testHandlerWithStore()
+	if err := s.SetWorkspaceProfileField(context.Background(), domain.ProfileFieldDefinition{
+		WorkspaceID: "T1", ID: "Xf01", Ordering: 1, Label: "Pronouns", Hint: "How to refer to you", Type: domain.ProfileFieldText, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	post := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+
+	// team.profile.get reports the definition.
+	team := get("/api/team.profile.get").Body.String()
+	if !strings.Contains(team, `"Xf01"`) || !strings.Contains(team, `"Pronouns"`) || !strings.Contains(team, `"type":"text"`) {
+		t.Fatalf("team.profile.get = %s", team)
+	}
+
+	// users.profile.set carries a custom field value.
+	set := post("/api/users.profile.set", url.Values{"profile": {`{"fields":{"Xf01":{"value":"she/her","alt":""}}}`}}.Encode())
+	setBody := set.Body.String()
+	if set.Code != http.StatusOK || !strings.Contains(setBody, `"she/her"`) {
+		t.Fatalf("users.profile.set = %d %s", set.Code, setBody)
+	}
+
+	// users.profile.get returns the stored value under fields.
+	profile := get("/api/users.profile.get").Body.String()
+	if !strings.Contains(profile, `"Xf01"`) || !strings.Contains(profile, `"she/her"`) {
+		t.Fatalf("users.profile.get = %s", profile)
+	}
+
+	// A value for a field nobody defined is refused as invalid_profile.
+	if envelope := decodeEnvelope(t, post("/api/users.profile.set", url.Values{"profile": {`{"fields":{"Xf-nope":{"value":"x"}}}`}}.Encode())); envelope.OK || envelope.Error != "invalid_profile" {
+		t.Fatalf("undefined field body=%+v, want invalid_profile", envelope)
+	}
+}
+
 // TestReminderCompleteRefusesOthersAndRecurring covers reminders.complete's two
 // documented refusals that a bare not_found used to hide: completing another
 // member's reminder is cannot_complete_others, and completing a recurring one is

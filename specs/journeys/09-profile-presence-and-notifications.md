@@ -20,6 +20,19 @@ profile. Image upload supports preview/crop where Slack does, exact file
 validation, replacement, cache invalidation, and removal without exposing an
 uncommitted image.
 
+Custom profile fields are the workspace's, not the member's. A workspace
+administrator defines them from workspace settings — a label, a type (text,
+date, link, or an options list), an optional hint, and whether the field is
+hidden — and `team.profile.get` reports those definitions so a client can label
+the values. A member fills in their own values from the profile editor, and each
+value is validated against its field's type: a date must be a calendar date, a
+link a web address, and an options-list value one the field offers. `users.profile.set`
+carries the same values through the profile object's `fields` map, and
+`users.profile.get` returns them. A hidden field's value is visible only to the
+member it belongs to and to administrators; every other reader does not see the
+field at all, in HTML and in API payloads alike, not merely hidden by CSS.
+Deleting a field removes it and every member's value for it.
+
 ## STATUS-01 — Set and clear a status
 
 1. From the profile control, the member opens **Update your status**. The

@@ -3011,6 +3011,91 @@ func (r Remote) SetUserProfile(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoUser(out)
 }
 
+func (r Remote) SetWorkspaceProfileField(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, definition domain.ProfileFieldDefinition) (domain.ProfileFieldDefinition, error) {
+	out, err := r.presence.SetWorkspaceProfileField(ctx, &chatv1.SetWorkspaceProfileFieldRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Field: encodeProtoProfileField(definition),
+	})
+	if err != nil {
+		return domain.ProfileFieldDefinition{}, err
+	}
+	return decodeProtoProfileField(out), nil
+}
+
+func (r Remote) WorkspaceProfileFields(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.ProfileFieldDefinition, error) {
+	out, err := r.presence.WorkspaceProfileFields(ctx, &chatv1.WorkspaceProfileFieldsRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	fields := make([]domain.ProfileFieldDefinition, 0, len(out.GetFields()))
+	for _, field := range out.GetFields() {
+		fields = append(fields, decodeProtoProfileField(field))
+	}
+	return fields, nil
+}
+
+func (r Remote) DeleteWorkspaceProfileField(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ProfileFieldID) error {
+	out, err := r.presence.DeleteWorkspaceProfileField(ctx, &chatv1.DeleteWorkspaceProfileFieldRequest{WorkspaceId: string(workspaceID), UserId: string(userID), FieldId: string(id)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "profile field deletion")
+}
+
+func (r Remote) SetUserProfileFields(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, values []domain.UserProfileFieldValue) error {
+	encoded := make([]*chatv1.UserProfileFieldValue, 0, len(values))
+	for _, value := range values {
+		encoded = append(encoded, encodeProtoProfileFieldValue(value))
+	}
+	out, err := r.presence.SetUserProfileFields(ctx, &chatv1.SetUserProfileFieldsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Values: encoded})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "profile field values")
+}
+
+func (r Remote) UserProfileFields(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) ([]domain.UserProfileFieldValue, error) {
+	out, err := r.presence.UserProfileFields(ctx, &chatv1.UserProfileFieldsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.UserProfileFieldValue, 0, len(out.GetValues()))
+	for _, value := range out.GetValues() {
+		values = append(values, decodeProtoProfileFieldValue(value))
+	}
+	return values, nil
+}
+
+func encodeProtoProfileField(value domain.ProfileFieldDefinition) *chatv1.ProfileFieldDefinition {
+	return &chatv1.ProfileFieldDefinition{
+		WorkspaceId: string(value.WorkspaceID), FieldId: string(value.ID), Ordering: int64(value.Ordering),
+		Label: value.Label, Hint: value.Hint, Type: string(value.Type),
+		PossibleValues: value.PossibleValues, IsHidden: value.IsHidden, CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
+	}
+}
+
+func decodeProtoProfileField(value *chatv1.ProfileFieldDefinition) domain.ProfileFieldDefinition {
+	if value == nil {
+		return domain.ProfileFieldDefinition{}
+	}
+	return domain.ProfileFieldDefinition{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ProfileFieldID(value.GetFieldId()),
+		Ordering: int(value.GetOrdering()), Label: value.GetLabel(), Hint: value.GetHint(),
+		Type: domain.ProfileFieldType(value.GetType()), PossibleValues: append([]string(nil), value.GetPossibleValues()...),
+		IsHidden: value.GetIsHidden(), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
+	}
+}
+
+func encodeProtoProfileFieldValue(value domain.UserProfileFieldValue) *chatv1.UserProfileFieldValue {
+	return &chatv1.UserProfileFieldValue{FieldId: string(value.FieldID), Value: value.Value, Alt: value.Alt}
+}
+
+func decodeProtoProfileFieldValue(value *chatv1.UserProfileFieldValue) domain.UserProfileFieldValue {
+	if value == nil {
+		return domain.UserProfileFieldValue{}
+	}
+	return domain.UserProfileFieldValue{FieldID: domain.ProfileFieldID(value.GetFieldId()), Value: value.GetValue(), Alt: value.GetAlt()}
+}
+
 func (r Remote) ScheduleUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, statusText, statusEmoji string, startsAt, endsAt time.Time) (domain.ScheduledStatus, error) {
 	out, err := r.presence.ScheduleUserStatus(ctx, &chatv1.ScheduleUserStatusRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), StatusText: statusText, StatusEmoji: statusEmoji,
@@ -9717,6 +9802,56 @@ func (s *Server) UserByEmail(ctx context.Context, input *chatv1.UserByEmailReque
 
 func (s *Server) SetUserProfile(ctx context.Context, input *chatv1.SetUserProfileRequest) (*chatv1.User, error) {
 	return s.setUserProfileProto(ctx, input)
+}
+
+func (s *Server) SetWorkspaceProfileField(ctx context.Context, input *chatv1.SetWorkspaceProfileFieldRequest) (*chatv1.ProfileFieldDefinition, error) {
+	value, err := s.implementation.SetWorkspaceProfileField(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), decodeProtoProfileField(input.GetField()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoProfileField(value), nil
+}
+
+func (s *Server) WorkspaceProfileFields(ctx context.Context, input *chatv1.WorkspaceProfileFieldsRequest) (*chatv1.WorkspaceProfileFieldsResponse, error) {
+	values, err := s.implementation.WorkspaceProfileFields(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	fields := make([]*chatv1.ProfileFieldDefinition, 0, len(values))
+	for _, value := range values {
+		fields = append(fields, encodeProtoProfileField(value))
+	}
+	return &chatv1.WorkspaceProfileFieldsResponse{Fields: fields}, nil
+}
+
+func (s *Server) DeleteWorkspaceProfileField(ctx context.Context, input *chatv1.DeleteWorkspaceProfileFieldRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteWorkspaceProfileField(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ProfileFieldID(input.GetFieldId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SetUserProfileFields(ctx context.Context, input *chatv1.SetUserProfileFieldsRequest) (*chatv1.MutationResponse, error) {
+	values := make([]domain.UserProfileFieldValue, 0, len(input.GetValues()))
+	for _, value := range input.GetValues() {
+		values = append(values, decodeProtoProfileFieldValue(value))
+	}
+	if err := s.implementation.SetUserProfileFields(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), values); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) UserProfileFields(ctx context.Context, input *chatv1.UserProfileFieldsRequest) (*chatv1.UserProfileFieldsResponse, error) {
+	values, err := s.implementation.UserProfileFields(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]*chatv1.UserProfileFieldValue, 0, len(values))
+	for _, value := range values {
+		result = append(result, encodeProtoProfileFieldValue(value))
+	}
+	return &chatv1.UserProfileFieldsResponse{Values: result}, nil
 }
 
 func (s *Server) ScheduleUserStatus(ctx context.Context, input *chatv1.ScheduleUserStatusRequest) (*chatv1.ScheduledStatus, error) {

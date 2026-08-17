@@ -1737,6 +1737,51 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Custom profile fields end to end: an administrator defines one, a
+			// member sets and reads a value, a non-administrator is refused the
+			// definition, and deleting the field takes its values with it. Both
+			// compositions must define, validate, and refuse identically.
+			name: "custom profile fields are defined, set, read, and deleted identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				defined, err := chat.SetWorkspaceProfileField(ctx, "T1", "UA", domain.ProfileFieldDefinition{Label: "Pronouns", Type: domain.ProfileFieldText, Ordering: 1})
+				if err != nil {
+					return nil, err
+				}
+				definitions, err := chat.WorkspaceProfileFields(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetUserProfileFields(ctx, "T1", "U2", "U2", []domain.UserProfileFieldValue{{FieldID: defined.ID, Value: "she/her"}}); err != nil {
+					return nil, err
+				}
+				values, err := chat.UserProfileFields(ctx, "T1", "U2", "U2")
+				if err != nil {
+					return nil, err
+				}
+				// A plain member cannot define a field, and a value a definition
+				// does not accept is refused.
+				_, memberDefine := chat.SetWorkspaceProfileField(ctx, "T1", "U2", domain.ProfileFieldDefinition{Label: "Nope", Type: domain.ProfileFieldText})
+				badValue := chat.SetUserProfileFields(ctx, "T1", "U2", "U2", []domain.UserProfileFieldValue{{FieldID: "Xf-nope", Value: "x"}})
+				if err := chat.DeleteWorkspaceProfileField(ctx, "T1", "UA", defined.ID); err != nil {
+					return nil, err
+				}
+				afterDelete, err := chat.WorkspaceProfileFields(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				remaining, err := chat.UserProfileFields(ctx, "T1", "U2", "U2")
+				if err != nil {
+					return nil, err
+				}
+				valueText := ""
+				if len(values) == 1 {
+					valueText = values[0].Value
+				}
+				return []any{defined.Label, string(defined.Type), len(definitions), len(values), valueText,
+					memberDefine != nil, badValue != nil, len(afterDelete), len(remaining)}, nil
+			},
+		},
+		{
 			// The whole huddle lifecycle, including the signalling that carries
 			// WebRTC between two browsers. The refusals matter most: a signal
 			// is how one member reaches another's machine, so both compositions

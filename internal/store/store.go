@@ -379,6 +379,25 @@ type Store interface {
 	// GetExternalAuthProvider reads one declared provider, including its sealed
 	// client secret, which the connect flow needs to exchange a code.
 	GetExternalAuthProvider(context.Context, domain.AppID, string) (domain.ExternalAuthProvider, error)
+	// SetWorkspaceProfileField records or replaces a workspace's custom profile
+	// field definition, keyed by workspace and field id.
+	SetWorkspaceProfileField(context.Context, domain.ProfileFieldDefinition) error
+	// ListWorkspaceProfileFields reports a workspace's field definitions in a
+	// stable order (by ordering then id), so team.profile.get and validation read
+	// the same list.
+	ListWorkspaceProfileFields(context.Context, domain.WorkspaceID) ([]domain.ProfileFieldDefinition, error)
+	// GetWorkspaceProfileField reads one field definition, used to validate a
+	// value a member sets against the field's type.
+	GetWorkspaceProfileField(context.Context, domain.WorkspaceID, domain.ProfileFieldID) (domain.ProfileFieldDefinition, error)
+	// DeleteWorkspaceProfileField removes a field definition and every member's
+	// value for it, so a deleted field leaves no orphaned values behind.
+	DeleteWorkspaceProfileField(context.Context, domain.WorkspaceID, domain.ProfileFieldID) error
+	// SetUserProfileFieldValues upserts a member's values for custom fields; a
+	// value that is empty clears that field for the member.
+	SetUserProfileFieldValues(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserProfileFieldValue) error
+	// ListUserProfileFieldValues reports a member's set custom-field values in a
+	// stable order (by field id).
+	ListUserProfileFieldValues(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.UserProfileFieldValue, error)
 	// GetAnomalyAllowList reports what audit is told not to flag. A workspace
 	// that has set nothing answers an empty list rather than not found: an
 	// empty allow list is the state a workspace starts in.

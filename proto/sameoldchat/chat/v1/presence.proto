@@ -125,8 +125,69 @@ message SetSnoozeRequest {
   int64 minutes = 3;
 }
 
+message ProfileFieldDefinition {
+  string workspace_id = 1;
+  string field_id = 2;
+  int64 ordering = 3;
+  string label = 4;
+  string hint = 5;
+  string type = 6;
+  repeated string possible_values = 7;
+  bool is_hidden = 8;
+  int64 created_at_unix_nano = 9;
+}
+
+message SetWorkspaceProfileFieldRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  ProfileFieldDefinition field = 3;
+}
+
+message WorkspaceProfileFieldsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message WorkspaceProfileFieldsResponse {
+  repeated ProfileFieldDefinition fields = 1;
+}
+
+message DeleteWorkspaceProfileFieldRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string field_id = 3;
+}
+
+message UserProfileFieldValue {
+  string field_id = 1;
+  string value = 2;
+  string alt = 3;
+}
+
+message SetUserProfileFieldsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+  repeated UserProfileFieldValue values = 4;
+}
+
+message UserProfileFieldsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+}
+
+message UserProfileFieldsResponse {
+  repeated UserProfileFieldValue values = 1;
+}
+
 service PresenceService {
   rpc UserInfo(UserRequest) returns (User);
+  rpc SetWorkspaceProfileField(SetWorkspaceProfileFieldRequest) returns (ProfileFieldDefinition);
+  rpc WorkspaceProfileFields(WorkspaceProfileFieldsRequest) returns (WorkspaceProfileFieldsResponse);
+  rpc DeleteWorkspaceProfileField(DeleteWorkspaceProfileFieldRequest) returns (MutationResponse);
+  rpc SetUserProfileFields(SetUserProfileFieldsRequest) returns (MutationResponse);
+  rpc UserProfileFields(UserProfileFieldsRequest) returns (UserProfileFieldsResponse);
   rpc UserByEmail(UserByEmailRequest) returns (User);
   rpc SetUserProfile(SetUserProfileRequest) returns (User);
   rpc ScheduleUserStatus(ScheduleUserStatusRequest) returns (ScheduledStatus);
