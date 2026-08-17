@@ -98,7 +98,10 @@ has, and it is why the huddle is honest about being small rather than claiming
 Slack's capacity.
 
 Screen sharing is offered where the browser provides `getDisplayMedia`.
-Reactions, captions, and the huddle canvas remain unimplemented.
+Reactions are implemented — a participant sends one of the huddle's quick emoji
+and every participant sees it float and fade — and the huddle canvas is the
+channel's own canvas, offered from the huddle bar. Captions remain unimplemented
+because they need speech-to-text this deployment hosts nowhere.
 
 The peer-to-peer handshake completing between two browsers is not covered by the
 browser suite: the harness authenticates one session, so it can drive one

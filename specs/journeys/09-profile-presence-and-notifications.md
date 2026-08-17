@@ -180,10 +180,12 @@ that does nothing:
 - Official SDK tests exercise `users.profile.*`, `users.setPresence`, and
   `dnd.*` with user tokens and permission/error variants.
 - Controlled live-Slack comparison for advance status scheduling remains
-  required. Browser/push/email/sound delivery, per-platform timing and
-  appearance, notification schedules, group-DM overrides, urgent sender
-  override, VIPs, and notification deep-link reconciliation are explicit gaps;
-  the web UI does not claim those controls.
+  required. Notification schedules and VIP routing into Activity (a marked
+  person's messages reach you even in a muted channel) are implemented.
+  Browser/push/email/sound delivery, per-platform timing and appearance,
+  group-DM notification overrides, and notification deep-link reconciliation are
+  explicit gaps that need a mobile client, a mail server, or an audio channel to
+  deliver against; the web UI does not claim the controls it lacks.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |
