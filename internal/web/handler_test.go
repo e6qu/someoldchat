@@ -579,6 +579,62 @@ func TestListBoardViewGroupsItemsIntoLanes(t *testing.T) {
 		"Group by", "ship it", "fix bug", "triage later")
 }
 
+// TestListItemActionReturnsToTheViewItWasTakenFrom covers the board and table
+// return path: an item action taken while looking at a lane or a table row lands
+// back on that view, not the plain list, because the action form carries the
+// view it was rendered in and the mutation redirects to it.
+func TestListItemActionReturnsToTheViewItWasTakenFrom(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateList(ctx, "T1", "U1", "Launch", "", "[]", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Status", domain.ListColumnSelect, []string{"open", "done"}); err != nil {
+		t.Fatal(err)
+	}
+	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/lists/" + string(value.ID)
+	csrf := auth.CSRFToken("session")
+
+	// The board renders the item's action forms carrying view=board, so a toggle
+	// returns to the board rather than the plain list.
+	board := get(t, mux, target+"?view=board").Body.String()
+	requireContains(t, "board carries the return view", board,
+		`<input type="hidden" name="return" value="view=board">`)
+	toggled := postForm(t, mux, target+"/items/"+string(item.ID)+"/toggle",
+		url.Values{"_csrf": {csrf}, "return": {"view=board"}, "archived": {"true"}}.Encode(), false)
+	if toggled.Code != http.StatusSeeOther || toggled.Header().Get("Location") != target+"?view=board" {
+		t.Fatalf("toggle from board = %d %q, want %s?view=board", toggled.Code, toggled.Header().Get("Location"), target)
+	}
+
+	// Adding an item from the same view stays there too, from the create form's
+	// ViewQuery. The typed title lands under the primary column ("task"), so the
+	// quick-add works on a structured list rather than being rejected as a cell
+	// under an undeclared "title" column.
+	created := postForm(t, mux, target+"/items/create",
+		url.Values{"_csrf": {csrf}, "return": {"view=board"}, "title": {"another"}}.Encode(), false)
+	if created.Code != http.StatusSeeOther || created.Header().Get("Location") != target+"?view=board" {
+		t.Fatalf("create from board = %d %q, want %s?view=board", created.Code, created.Header().Get("Location"), target)
+	}
+	requireContains(t, "quick-added item shows on the board", get(t, mux, target+"?view=board").Body.String(), "another")
+
+	// A forged return value cannot redirect off the list: only known view keys
+	// survive, and an unknown one is dropped to the plain list.
+	forged := postForm(t, mux, target+"/items/"+string(item.ID)+"/toggle",
+		url.Values{"_csrf": {csrf}, "return": {"view=board&next=https://evil.test"}, "archived": {"false"}}.Encode(), false)
+	if forged.Code != http.StatusSeeOther || forged.Header().Get("Location") != target+"?view=board" {
+		t.Fatalf("forged return = %d %q, want %s?view=board", forged.Code, forged.Header().Get("Location"), target)
+	}
+}
+
 // TestListWithoutAGroupableColumnOffersNoBoard covers the fallback: a list whose
 // only column is free text has nothing a lane can stand for, so no board is
 // offered and asking for one by URL falls back to the list rather than drawing a
