@@ -1321,6 +1321,16 @@ func TestSQLiteRemindersAreDurable(t *testing.T) {
 	if err != nil || got.Text != "check-in" || !got.Time.Equal(due) {
 		t.Fatalf("reminder=%+v err=%v", got, err)
 	}
+	// ReminderInWorkspace resolves the reminder regardless of owner so
+	// reminders.complete can tell another member's reminder from a missing one,
+	// but a reminder in another workspace stays invisible.
+	workspaceScoped, err := s.ReminderInWorkspace(ctx, "T1", id)
+	if err != nil || workspaceScoped.User != "U1" {
+		t.Fatalf("workspace-scoped reminder=%+v err=%v", workspaceScoped, err)
+	}
+	if _, err := s.ReminderInWorkspace(ctx, "T2", id); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-workspace reminder err=%v, want ErrNotFound", err)
+	}
 }
 
 func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {

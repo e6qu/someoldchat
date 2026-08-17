@@ -16485,6 +16485,24 @@ func (s *Store) GetReminder(ctx context.Context, workspace domain.WorkspaceID, u
 	return reminder, nil
 }
 
+func (s *Store) ReminderInWorkspace(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID) (domain.Reminder, error) {
+	var reminder domain.Reminder
+	var due, complete, recurring int64
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Reminder{}, store.ErrNotFound
+	}
+	if err != nil {
+		return domain.Reminder{}, err
+	}
+	reminder.Time = time.Unix(due, 0).UTC()
+	if complete != 0 {
+		reminder.CompleteAt = time.Unix(complete, 0).UTC()
+	}
+	reminder.Recurring = recurring != 0
+	return reminder, nil
+}
+
 func (s *Store) ListReminders(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.ReminderPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.ReminderPage{}, err

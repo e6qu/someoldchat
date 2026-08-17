@@ -999,6 +999,11 @@ type Store interface {
 	DeleteBookmark(context.Context, domain.WorkspaceID, domain.ConversationID, domain.BookmarkID, events.Event) error
 	CreateReminder(context.Context, domain.Reminder, events.Event) error
 	GetReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) (domain.Reminder, error)
+	// ReminderInWorkspace resolves a reminder by id within a workspace regardless
+	// of which member it belongs to, so a caller can tell a reminder owned by
+	// another member apart from one that does not exist. A reminder in a different
+	// workspace stays invisible (ErrNotFound), preserving tenant isolation.
+	ReminderInWorkspace(context.Context, domain.WorkspaceID, domain.ReminderID) (domain.Reminder, error)
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
