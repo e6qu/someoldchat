@@ -618,7 +618,7 @@ func TestFilesUploadSharesIntoChannels(t *testing.T) {
 // syntax file type the caller asked for, distinct from an ordinary hosted upload.
 func TestFilesUploadCreatesSnippetFromContent(t *testing.T) {
 	handler := storedTokenUploadHandler(t)
-	form := url.Values{"token": {"token"}, "content": {"print('hi')"}, "filetype": {"python"}, "filename": {"greeting.py"}, "title": {"greeting"}}.Encode()
+	form := url.Values{"token": {"token"}, "content": {"print('one')\nprint('two')\nprint('three')"}, "filetype": {"python"}, "filename": {"greeting.py"}, "title": {"greeting"}}.Encode()
 	request := httptest.NewRequest(http.MethodPost, "/api/files.upload", strings.NewReader(form))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response := httptest.NewRecorder()
@@ -626,24 +626,32 @@ func TestFilesUploadCreatesSnippetFromContent(t *testing.T) {
 	var snippet struct {
 		OK   bool `json:"ok"`
 		File struct {
-			Mode     string `json:"mode"`
-			Editable bool   `json:"editable"`
-			FileType string `json:"filetype"`
+			Name      string `json:"name"`
+			Mode      string `json:"mode"`
+			Editable  bool   `json:"editable"`
+			FileType  string `json:"filetype"`
+			Preview   string `json:"preview"`
+			Lines     int    `json:"lines"`
+			LinesMore int    `json:"lines_more"`
 		} `json:"file"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &snippet); err != nil || !snippet.OK || snippet.File.Mode != "snippet" || !snippet.File.Editable || snippet.File.FileType != "python" {
 		t.Fatalf("content upload: status=%d body=%s", response.Code, response.Body)
 	}
+	// The snippet carries a preview and its line count.
+	if snippet.File.Lines != 3 || !strings.Contains(snippet.File.Preview, "print('one')") {
+		t.Fatalf("snippet preview/lines: %+v", snippet.File)
+	}
 
-	// A content= upload without a filetype defaults to a text snippet, still a
-	// snippet rather than a hosted file.
-	form = url.Values{"token": {"token"}, "content": {"just words"}, "filename": {"note.txt"}, "title": {"note"}}.Encode()
+	// A content= upload without a filename is accepted — Slack synthesizes one —
+	// named after its title, and without a filetype defaults to a text snippet.
+	form = url.Values{"token": {"token"}, "content": {"just words"}, "title": {"note"}}.Encode()
 	request = httptest.NewRequest(http.MethodPost, "/api/files.upload", strings.NewReader(form))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if err := json.Unmarshal(response.Body.Bytes(), &snippet); err != nil || snippet.File.Mode != "snippet" || snippet.File.FileType != "text" {
-		t.Fatalf("default snippet: status=%d body=%s", response.Code, response.Body)
+	if err := json.Unmarshal(response.Body.Bytes(), &snippet); err != nil || snippet.File.Mode != "snippet" || snippet.File.FileType != "text" || snippet.File.Name != "note" {
+		t.Fatalf("default-named snippet: status=%d body=%s", response.Code, response.Body)
 	}
 
 	// A multipart file upload stays a hosted file, editable false.

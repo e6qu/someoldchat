@@ -453,16 +453,17 @@ operations:
         The route hosts a file, shares it (honoring channels, initial_comment,
         and thread_ts, every destination validated before any share), and accepts
         content= uploads as editable snippets carrying mode "snippet", the syntax
-        file type, and inline rendering. A snippet's response omits Slack's
-        preview/lines fields, editing an existing snippet's text is not offered,
-        and a content= upload still requires a filename.
+        file type, inline rendering, a synthesized name when none is given, and a
+        preview with line counts. The preview's exact byte bound is a stable local
+        choice rather than Slack's unobservable one, and editing an existing
+        snippet's text in place is not offered.
     audit:
       downgraded_from: behavior-compatible
       reason: >-
-        Hosting, channel sharing, and snippet creation and rendering are
-        implemented and covered by service, Slack-handler, differential-seam, and
-        web tests; only the snippet preview response fields, in-place editing, and
-        filename-optional content uploads remain.
+        Hosting, channel sharing, and snippet creation, naming, preview, and
+        rendering are implemented and covered by service, Slack-handler,
+        differential-seam, and web tests; only in-place editing of a snippet's
+        text and the exact preview byte bound remain.
       evidence:
         - source:internal/api/slack/handler.go
         - go-test:internal/api/slack:TestFilesUploadCreatesSnippetFromContent

@@ -32,10 +32,12 @@ flow. It hosts a file and shares it into the channels named, posting
 destination is validated before any share, so a request naming a channel the
 uploader cannot post to shares into none of them rather than some. A `content=`
 upload is an editable snippet the member typed: it carries mode "snippet", the
-syntax file type the request named (or "text"), and renders in place in the
-timeline as a code block rather than only as a download link. The snippet
-response omits Slack's preview/lines fields and editing an existing snippet's
-text is not offered, both recorded in the ledger.
+syntax file type the request named (or "text"), a name synthesized from its
+title when none is given, a preview with line counts, and it renders in place in
+the timeline as a code block rather than only as a download link. The preview's
+exact byte bound is a stable local choice rather than Slack's unobservable one,
+and editing an existing snippet's text in place is not offered — both recorded
+in the ledger.
 
 ## FILE-03 — Render and inspect a file
 

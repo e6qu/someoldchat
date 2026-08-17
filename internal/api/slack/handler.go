@@ -8402,7 +8402,9 @@ func (h Handler) fileInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
+	response := fileResponse(file)
+	h.addSnippetFields(r.Context(), principal, response, file)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
 }
 
 func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
@@ -8908,7 +8910,9 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		file.SharedChannels = shared
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
+	response := fileResponse(file)
+	h.addSnippetFields(r.Context(), principal, response, file)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
 }
 
 func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
@@ -9224,7 +9228,15 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (uploadSpool, map[strin
 		filename = filepath.Base(strings.TrimSpace(fields["filename"]))
 	}
 	if filename == "" || filename == "." || filename == string(filepath.Separator) {
-		return cleanup(errors.New("filename is required"))
+		// A content= upload is an inline snippet the member typed; Slack
+		// synthesizes a name when none is given rather than refusing, so a snippet
+		// is named after its title, or "untitled" when it has neither. A file-part
+		// upload still requires a real filename, which is what names its bytes.
+		if strings.TrimSpace(fields["content"]) != "" {
+			filename = defaultSnippetFilename(fields["title"])
+		} else {
+			return cleanup(errors.New("filename is required"))
+		}
 	}
 	fieldMIME := strings.TrimSpace(fields["mime_type"])
 	if fieldMIME != "" && mimeType != "" && fieldMIME != mimeType {
@@ -9298,6 +9310,65 @@ func fileResponse(file domain.File) map[string]any {
 		result["channels"] = file.SharedChannels
 	}
 	return result
+}
+
+// defaultSnippetFilename names a content= snippet the caller left unnamed. Slack
+// synthesizes one rather than refusing; the title is the natural choice, falling
+// back to "untitled".
+func defaultSnippetFilename(title string) string {
+	base := filepath.Base(strings.TrimSpace(title))
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return "untitled"
+	}
+	return base
+}
+
+// snippetPreviewLimit bounds the lead of a snippet's text carried in the file
+// response. Slack returns a bounded preview with a truncation flag and a line
+// count; the exact byte bound Slack uses is not observable here, so a stable
+// value is chosen and the truncation flag stays honest about it.
+const snippetPreviewLimit = 200
+
+// addSnippetFields augments a snippet's file response with the preview and line
+// counts Slack carries for one, read through the access-checked OpenFile. A read
+// failure leaves the fields absent rather than failing the response — the file
+// object is still valid without them.
+func (h Handler) addSnippetFields(ctx context.Context, principal auth.Principal, response map[string]any, file domain.File) {
+	if !file.IsSnippet() {
+		return
+	}
+	_, reader, err := h.Messages.OpenFile(ctx, principal.WorkspaceID, principal.UserID, file.ID)
+	if err != nil {
+		return
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(io.LimitReader(reader, maxUploadBytes))
+	if err != nil {
+		return
+	}
+	text := string(data)
+	lines := 0
+	if text != "" {
+		lines = strings.Count(text, "\n") + 1
+	}
+	preview := text
+	truncated := false
+	if len(preview) > snippetPreviewLimit {
+		preview = preview[:snippetPreviewLimit]
+		truncated = true
+	}
+	previewLines := 0
+	if preview != "" {
+		previewLines = strings.Count(preview, "\n") + 1
+	}
+	linesMore := lines - previewLines
+	if linesMore < 0 {
+		linesMore = 0
+	}
+	response["preview"] = preview
+	response["preview_is_truncated"] = truncated
+	response["lines"] = lines
+	response["lines_more"] = linesMore
 }
 
 func normalizeReactionFields(fields map[string]string) (domain.ConversationID, domain.MessageTimestamp, string, error) {
