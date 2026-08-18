@@ -22,6 +22,36 @@
 //
 // The ceiling only shrinks.
 //
+// The exhaustive audit took this list from 103 to 68. It closed every operation
+// the fixture can reach as the holder: the list-item operations once the list
+// gained a row; the message reactions once the holder had one of its own; the
+// posting, scheduling, draft, role, retention and notification operations once
+// the probe supplied the one string, level, role, duration or future instant
+// each needed; the operations on the caller's own scheduled status, saved item,
+// Activity view, sidebar section and draft once those were seeded owned by the
+// holder; and the user-group channel and channel-canvas operations once given a
+// channel to act on. Each is backed by the probe reaching its success where a
+// caller below membership is refused for standing, so a deleted guard is caught.
+//
+// What remains is three kinds of residue, named rather than counted as covered:
+//   - Structural: an operation owner-only on an object the fixture gives the
+//     member (DeleteCanvas, SetListAccess), a developer-app operation the fixture
+//     app's member owner shadows (the IssueDeveloperAppToken family), a
+//     second-organization action (AcceptSharedInvite), an enterprise-grid team
+//     relationship a single workspace cannot form (AdminAddUserGroupTeams), or a
+//     per-(message,user) pin or star whose add and remove share the one probe
+//     timestamp (RemovePin, RemoveStar). Closing these would distort the fixture
+//     other operations depend on.
+//   - Complex-state buildable: the workflow state machine (RunWorkflow,
+//     DeleteWorkflow, WebhookTriggerURL with its sealed secret, the interactive
+//     run and function operations) and the incoming-webhook, app-request and
+//     app-resolution admin operations. Each needs a multi-step object graph in a
+//     particular state; they are a further batch of the same audit, not a
+//     different problem.
+//   - Payload buildable: the view and interaction operations (PublishView,
+//     SubmitView, DispatchSlashCommand) whose front door is a block-kit or
+//     interaction payload the probe does not yet synthesize.
+//
 // AcceptSharedInvite and DeclineSharedInvite are a structural residue rather
 // than a fixture gap: they are the invited organization's action, refused by a
 // caller who is not in the target workspace, and every member this fixture holds
@@ -112,37 +142,23 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // app, which several other cases depend on. This is a new operation joining the
 // set, not existing ground lost.
 //
-// CommentOnListItem and DeleteListItemComment join for the same reasons their
-// canvas siblings did: commenting and deleting a comment answer a holder who
-// cannot reach the fixture's list exactly as they answer a stranger, and the
-// author-only delete rule lives in the store's write rather than the service.
-// ListItemComments, like CanvasComments, is not here — a holder with list access
-// reads an empty page where a stranger is refused, so its refusal does
-// distinguish.
+// DeleteListItemComment stays for the reason its canvas sibling does: its
+// author-only delete rule lives in the store's write rather than the service, so
+// with no comment by the holder on the fixture's item it answers the holder and a
+// stranger alike with not-found. CommentOnListItem left the set once the list
+// gained a row the holder could comment on. ListItemComments, like CanvasComments,
+// was never here — a holder with list access reads an empty page where a stranger
+// is refused, so its refusal distinguishes.
 //
-// AttachFileToListItem and DetachFileFromListItem join for the same structural
-// reason: with no attachment on the fixture's item, both answer the holder and a
-// stranger with the same not-found, since the missing object is reached before
-// any standing check. ListItemFiles is not here — like ListItemComments a holder
-// reads an empty list where a stranger is refused, so its refusal distinguishes.
+// DetachFileFromListItem stays for the same structural reason RemovePin does: an
+// attach and a detach share the one file id the probe hands out, so seeding an
+// attachment for the detach to find would make AttachFileToListItem — which left
+// the set once the item existed — answer "already attached" for the same holder.
 //
-// ListDeveloperAppTokens and RevokeDeveloperAppToken join their siblings
-// IssueDeveloperAppToken and RevokeDeveloperAppTokens: the fixture's app is owned
-// by U-member while the matrix holder is U-owner, so an owner-only developer-app
-// operation refuses the holder and a stranger alike with not-found. Unlike the
-// bulk sibling that lists distinguish here — a holder listing an app they do not
-// own is refused, not shown an empty list — because the not-found is reached at
-// the ownership check, before any token is read.
-//
-// DeleteActivitySavedView joins because the fixture has no saved view: deleting
-// one answers a member who holds none exactly as it answers a stranger, both
-// not-found, since the missing view is reached before any standing check.
-// CreateActivitySavedView is not here — a member creates their own view where a
-// stranger is refused, so its outcome distinguishes.
-// DeleteSidebarSection and SetSidebarSectionCollapsed join for the same reason
-// their saved-view sibling did: with no section on the fixture, both answer a
-// member who holds none exactly as they answer a stranger, not-found, because
-// the missing section is reached before any standing check. The other sidebar
-// operations distinguish — a create/read/rename/reorder/assign reaches a
-// validation or ownership branch that a holder and a stranger do not share.
+// The developer-app-token family (IssueDeveloperAppToken, RevokeDeveloperAppToken,
+// RevokeDeveloperAppTokens, ListDeveloperAppTokens) stays because the fixture's
+// one app is owned by U-member while the matrix holder is U-owner, so an owner-only
+// developer-app operation refuses the holder and a stranger alike with not-found.
+// Re-owning the fixture app would distort the cases that depend on a member-owned
+// app.
 const indistinguishableRefusalCeiling = 68
