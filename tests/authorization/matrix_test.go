@@ -373,6 +373,8 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureSavedItemID)
 	case reflect.TypeOf(domain.ScheduledStatusID("")):
 		return reflect.ValueOf(fixtureScheduledStatusID)
+	case reflect.TypeOf(domain.ListDownloadID("")):
+		return reflect.ValueOf(fixtureListDownloadID)
 	case reflect.TypeOf(domain.ActivitySavedViewID("")):
 		return reflect.ValueOf(fixtureActivityViewID)
 	case reflect.TypeOf(domain.SidebarSectionID("")):
@@ -448,6 +450,14 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		// check matches and the manager reaches the delete rather than a conflict.
 		if method == "DeleteWorkflow" {
 			return reflect.ValueOf(uint64(1))
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(int64(0)):
+		// The version the fixture canvas holds a revision at, so
+		// RestoreCanvasRevision finds one to restore rather than answering the
+		// holder and a stranger alike with not-found.
+		if method == "RestoreCanvasRevision" {
+			return reflect.ValueOf(int64(1))
 		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.AutomationPermission{}):
@@ -631,6 +641,19 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("list access", repository.SetListAccess(ctx, domain.ListAccess{
 		ListID: fixtureListID, EntityType: domain.GrantUser, EntityID: "U-owner", Access: domain.AccessWrite,
 	}, event("E-list-access", "list.access_set")))
+	// One edit to the canvas by the holder (now that it has a write grant), so a
+	// revision exists at version 1 for RestoreCanvasRevision to restore. Without
+	// a revision, restoring answers the holder and a stranger alike with the same
+	// not-found.
+	if err := (service.Messages{Store: repository}).EditCanvas(ctx, "T1", "U-owner", fixtureCanvasID,
+		`[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"revised"}}]`); err != nil {
+		t.Fatalf("seed canvas revision: %v", err)
+	}
+	// A finished list download, so GetListDownload has one to return to a member.
+	seed("list download", repository.CreateListDownload(ctx, domain.ListDownload{
+		ID: fixtureListDownloadID, ListID: fixtureListID, WorkspaceID: "T1", Status: "ready",
+		URL: "https://example.test/download.csv", CreatedAt: at,
+	}, event("E-list-download", "list.download_created")))
 	// A row in that list, so the operations that read, update, assign, comment on,
 	// attach a file to, or delete an item have one the holder — granted write on
 	// the list above — can reach, while a caller below membership is refused at
@@ -888,6 +911,7 @@ const (
 	fixtureScheduledStatusID domain.ScheduledStatusID   = "F-scheduled-status"
 	fixtureActivityViewID    domain.ActivitySavedViewID = "F-activity-view"
 	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
+	fixtureListDownloadID    domain.ListDownloadID      = "F-list-download"
 )
 
 func requireSeed(t *testing.T, err error) {

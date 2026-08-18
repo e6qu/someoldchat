@@ -211,8 +211,8 @@ Absent, and named on the page rather than rendered as an inert control:
   refusal still cannot tell the two apart are named in
   `refusalDoesNotDistinguishTheHolder` under a ceiling that only shrinks. What
   shrinks it is a fixture rich enough for each operation to find its object: an
-  exhaustive audit took that ceiling from 103 to 66 and the surviving-guard
-  ceiling from 82 to 77, closing every operation the fixture can reach as the
+  exhaustive audit took that ceiling from 103 to 64 and the surviving-guard
+  ceiling from 82 to 76, closing every operation the fixture can reach as the
   holder — the list-item, message-reaction, posting, scheduling, draft, role,
   retention, notification, own-scheduled-status, own-saved-item, own-Activity-view,
   own-sidebar-section, own-draft, user-group-channel, channel-canvas, workflow
