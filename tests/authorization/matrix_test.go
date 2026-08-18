@@ -324,6 +324,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.ConversationID("")):
+		// ConvertGroupDirectToPrivate needs a DM or group DM, not the seeded
+		// channel, so it alone is handed the group direct message; every other
+		// operation keeps the channel it can act on.
+		if method == "ConvertGroupDirectToPrivate" {
+			return reflect.ValueOf(fixtureGroupDMID)
+		}
 		return reflect.ValueOf(domain.ConversationID("C1"))
 	case reflect.TypeOf(domain.CanvasID("")):
 		return reflect.ValueOf(fixtureCanvasID)
@@ -526,6 +532,12 @@ func fixtureStringArgument(method string) reflect.Value {
 		// A column name; paired with the real column type above, the holder's
 		// write grant carries the add to success.
 		return reflect.ValueOf("Status")
+	case "RemoveListColumn":
+		// The key of the column the fixture list carries, so the remove finds one.
+		return reflect.ValueOf("priority")
+	case "ConvertGroupDirectToPrivate":
+		// The name for the new private channel the group DM becomes.
+		return reflect.ValueOf("converted-channel")
 	case "PostEphemeral", "ScheduleMessage", "SaveDraft":
 		// Message text, the only free string these take, so a member posting to
 		// the seeded conversation reaches success.
@@ -627,6 +639,9 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}, event("E-canvas", "canvas.created")))
 	seed("list", repository.CreateList(ctx, domain.List{
 		ID: fixtureListID, WorkspaceID: "T1", OwnerID: "U-member", Name: "fixture list",
+		// One column, so RemoveListColumn has one to remove; keyed "priority" so it
+		// does not collide with the "Status" column AddListColumn adds.
+		Schema:  `[{"id":"priority","key":"priority","name":"Priority","type":"text"}]`,
 		Version: 1, CreatedAt: at, UpdatedAt: at,
 	}, event("E-list", "list.created")))
 	// The holder the differential asks is the workspace owner, and a document
@@ -864,6 +879,14 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	if _, err := (service.Messages{Store: repository}).CreateConversationCanvas(ctx, "T1", "U-owner", "C1", "channel canvas", `{"type":"markdown","markdown":"x"}`); err != nil {
 		t.Fatalf("seed conversation canvas: %v", err)
 	}
+	// A group direct message the holder belongs to, so ConvertGroupDirectToPrivate
+	// — which needs a DM or group DM, not the seeded channel — reaches success as
+	// the holder while a caller below membership is refused for standing.
+	seed("group dm", repository.SeedConversation(domain.Conversation{
+		ID: fixtureGroupDMID, WorkspaceID: "T1", Kind: domain.ConversationTypeMPIM, Name: "fixture-mpim",
+	}))
+	seed("group dm member owner", repository.SeedConversationMember(fixtureGroupDMID, "U-owner"))
+	seed("group dm member", repository.SeedConversationMember(fixtureGroupDMID, "U-member"))
 }
 
 // fixtureMessageTimestamp names the one seeded message.
@@ -912,6 +935,7 @@ const (
 	fixtureActivityViewID    domain.ActivitySavedViewID = "F-activity-view"
 	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
 	fixtureListDownloadID    domain.ListDownloadID      = "F-list-download"
+	fixtureGroupDMID         domain.ConversationID      = "Cmpim"
 )
 
 func requireSeed(t *testing.T, err error) {

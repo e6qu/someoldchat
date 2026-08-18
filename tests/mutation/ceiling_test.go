@@ -42,7 +42,7 @@ package mutation
 // Activity view and sidebar section, and the seeded conversation's own canvas —
 // and handing the probe the one valid string, id, slice, level, role, duration
 // or instant each operation needs — moved refusalDoesNotDistinguishTheHolder
-// from 103 to 64 and this number with it, a batch at a time, as each batch of
+// from 103 to 62 and this number with it, a batch at a time, as each batch of
 // the audit landed.
 //
 // 78 to 77: the workflow batch handed the probe the owner's workflow version and
@@ -52,4 +52,8 @@ package mutation
 // 77 to 76: seeding the fixture canvas a revision and the list a finished
 // download made RestoreCanvasRevision's write-access guard load-bearing where it
 // used to run on to not-found.
-const survivingGuardCeiling = 76
+//
+// 76 to 75: giving the fixture list a column and the workspace a group direct
+// message made RemoveListColumn and ConvertGroupDirectToPrivate reach their front
+// doors, so one more guard is caught where it used to run on to not-found.
+const survivingGuardCeiling = 75

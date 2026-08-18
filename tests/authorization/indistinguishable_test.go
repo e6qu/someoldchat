@@ -22,7 +22,7 @@
 //
 // The ceiling only shrinks.
 //
-// The exhaustive audit took this list from 103 to 64. It closed every operation
+// The exhaustive audit took this list from 103 to 62. It closed every operation
 // the fixture can reach as the holder: the list-item operations once the list
 // gained a row; the message reactions once the holder had one of its own; the
 // posting, scheduling, draft, role, retention and notification operations once
@@ -31,10 +31,12 @@
 // Activity view, sidebar section and draft once those were seeded owned by the
 // holder; the user-group channel and channel-canvas operations once given a
 // channel to act on; the workflow delete and trigger-permission operations once
-// handed the owner's workflow version and a valid permission; and the canvas
+// handed the owner's workflow version and a valid permission; the canvas
 // revision restore and list download once the fixture held a revision and a
-// finished download. Each is backed by the probe reaching its success where a
-// caller below membership is refused for standing, so a deleted guard is caught.
+// finished download; and the list-column removal and group-DM-to-private
+// conversion once the list carried a column and the workspace a group direct
+// message. Each is backed by the probe reaching its success where a caller below
+// membership is refused for standing, so a deleted guard is caught.
 //
 // What remains is three kinds of residue, named rather than counted as covered:
 //   - Structural: an operation owner-only on an object the fixture gives the
@@ -91,7 +93,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"CloseView":                               {},
 		"CompleteFunction":                        {},
 		"CompleteWorkflowButton":                  {},
-		"ConvertGroupDirectToPrivate":             {},
 		"CurrentModalView":                        {},
 		"DeclineSharedInvite":                     {},
 		"DeleteCanvas":                            {},
@@ -113,7 +114,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"ListEphemeralMessages":                   {},
 		"OpenAppHome":                             {},
 		"PostEphemeralWithBlocksAndAttachments":   {},
-		"RemoveListColumn":                        {},
 		"RemovePin":                               {},
 		"RemoveStar":                              {},
 		"RunWorkflow":                             {},
@@ -161,4 +161,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // developer-app operation refuses the holder and a stranger alike with not-found.
 // Re-owning the fixture app would distort the cases that depend on a member-owned
 // app.
-const indistinguishableRefusalCeiling = 64
+const indistinguishableRefusalCeiling = 62
