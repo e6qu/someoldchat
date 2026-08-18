@@ -34,4 +34,14 @@ package mutation
 // that makes DeleteListItemComment load-bearing was applied to the pre-existing
 // DeleteCanvasComment too, which was surviving for the identical reason, so one
 // operation left the set as one joined it.
-const survivingGuardCeiling = 82
+//
+// 82 to 78: the authorization audit made the matrix's probe reach each
+// operation's own front door as the holder, so a deleted guard is now caught by
+// a distinguishing answer where it used to run on to "not found". Seeding a list
+// row, a holder-owned reaction, scheduled status, saved item and draft, an
+// Activity view and sidebar section, and the seeded conversation's own canvas —
+// and handing the probe the one valid string, id, slice, level, role, duration
+// or instant each operation needs — moved refusalDoesNotDistinguishTheHolder
+// from 103 to 68 and this number with it, four operations at a time, as each
+// batch of the audit landed.
+const survivingGuardCeiling = 78
