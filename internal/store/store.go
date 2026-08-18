@@ -1189,6 +1189,16 @@ type Store interface {
 	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
 	ListLists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
 	SearchLists(context.Context, domain.WorkspaceID, domain.UserID, domain.ListSearch) (domain.ListPage, error)
+	// CreateListTemplate records a reusable list definition for a workspace.
+	CreateListTemplate(context.Context, domain.ListTemplate) error
+	// ListListTemplates reports a workspace's templates in a stable order (newest
+	// first), so the create-a-list surface offers the same set every time.
+	ListListTemplates(context.Context, domain.WorkspaceID) ([]domain.ListTemplate, error)
+	// GetListTemplate reads one template, which creating a list from it needs.
+	GetListTemplate(context.Context, domain.WorkspaceID, domain.ListTemplateID) (domain.ListTemplate, error)
+	// DeleteListTemplate removes a template; the lists already made from it are
+	// unaffected, since instantiation copies rather than references.
+	DeleteListTemplate(context.Context, domain.WorkspaceID, domain.ListTemplateID) error
 	UpdateList(context.Context, domain.List, events.Event) error
 	// RemoveListColumn drops one column from a list and the cells under it, in
 	// one transaction. A schema that no longer declares a column while items

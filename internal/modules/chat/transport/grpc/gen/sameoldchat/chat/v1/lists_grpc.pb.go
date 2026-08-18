@@ -20,6 +20,10 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ListsService_CreateList_FullMethodName             = "/sameoldchat.chat.v1.ListsService/CreateList"
+	ListsService_SaveListAsTemplate_FullMethodName     = "/sameoldchat.chat.v1.ListsService/SaveListAsTemplate"
+	ListsService_WorkspaceListTemplates_FullMethodName = "/sameoldchat.chat.v1.ListsService/WorkspaceListTemplates"
+	ListsService_CreateListFromTemplate_FullMethodName = "/sameoldchat.chat.v1.ListsService/CreateListFromTemplate"
+	ListsService_DeleteListTemplate_FullMethodName     = "/sameoldchat.chat.v1.ListsService/DeleteListTemplate"
 	ListsService_GetList_FullMethodName                = "/sameoldchat.chat.v1.ListsService/GetList"
 	ListsService_GetListAccess_FullMethodName          = "/sameoldchat.chat.v1.ListsService/GetListAccess"
 	ListsService_ListGrants_FullMethodName             = "/sameoldchat.chat.v1.ListsService/ListGrants"
@@ -52,6 +56,10 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ListsServiceClient interface {
 	CreateList(ctx context.Context, in *CreateListRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	SaveListAsTemplate(ctx context.Context, in *SaveListAsTemplateRequest, opts ...grpc.CallOption) (*ListTemplate, error)
+	WorkspaceListTemplates(ctx context.Context, in *WorkspaceListTemplatesRequest, opts ...grpc.CallOption) (*ListTemplatesResponse, error)
+	CreateListFromTemplate(ctx context.Context, in *CreateListFromTemplateRequest, opts ...grpc.CallOption) (*ListResponse, error)
+	DeleteListTemplate(ctx context.Context, in *DeleteListTemplateRequest, opts ...grpc.CallOption) (*ListOKResponse, error)
 	GetList(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	GetListAccess(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListAccessResponse, error)
 	ListGrants(ctx context.Context, in *ListItemRequest, opts ...grpc.CallOption) (*ListGrantsResponse, error)
@@ -91,6 +99,46 @@ func (c *listsServiceClient) CreateList(ctx context.Context, in *CreateListReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListResponse)
 	err := c.cc.Invoke(ctx, ListsService_CreateList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) SaveListAsTemplate(ctx context.Context, in *SaveListAsTemplateRequest, opts ...grpc.CallOption) (*ListTemplate, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTemplate)
+	err := c.cc.Invoke(ctx, ListsService_SaveListAsTemplate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) WorkspaceListTemplates(ctx context.Context, in *WorkspaceListTemplatesRequest, opts ...grpc.CallOption) (*ListTemplatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTemplatesResponse)
+	err := c.cc.Invoke(ctx, ListsService_WorkspaceListTemplates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) CreateListFromTemplate(ctx context.Context, in *CreateListFromTemplateRequest, opts ...grpc.CallOption) (*ListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListResponse)
+	err := c.cc.Invoke(ctx, ListsService_CreateListFromTemplate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *listsServiceClient) DeleteListTemplate(ctx context.Context, in *DeleteListTemplateRequest, opts ...grpc.CallOption) (*ListOKResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOKResponse)
+	err := c.cc.Invoke(ctx, ListsService_DeleteListTemplate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -352,6 +400,10 @@ func (c *listsServiceClient) DetachFileFromListItem(ctx context.Context, in *Det
 // for forward compatibility.
 type ListsServiceServer interface {
 	CreateList(context.Context, *CreateListRequest) (*ListResponse, error)
+	SaveListAsTemplate(context.Context, *SaveListAsTemplateRequest) (*ListTemplate, error)
+	WorkspaceListTemplates(context.Context, *WorkspaceListTemplatesRequest) (*ListTemplatesResponse, error)
+	CreateListFromTemplate(context.Context, *CreateListFromTemplateRequest) (*ListResponse, error)
+	DeleteListTemplate(context.Context, *DeleteListTemplateRequest) (*ListOKResponse, error)
 	GetList(context.Context, *ListItemRequest) (*ListResponse, error)
 	GetListAccess(context.Context, *ListItemRequest) (*ListAccessResponse, error)
 	ListGrants(context.Context, *ListItemRequest) (*ListGrantsResponse, error)
@@ -388,6 +440,18 @@ type UnimplementedListsServiceServer struct{}
 
 func (UnimplementedListsServiceServer) CreateList(context.Context, *CreateListRequest) (*ListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateList not implemented")
+}
+func (UnimplementedListsServiceServer) SaveListAsTemplate(context.Context, *SaveListAsTemplateRequest) (*ListTemplate, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveListAsTemplate not implemented")
+}
+func (UnimplementedListsServiceServer) WorkspaceListTemplates(context.Context, *WorkspaceListTemplatesRequest) (*ListTemplatesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WorkspaceListTemplates not implemented")
+}
+func (UnimplementedListsServiceServer) CreateListFromTemplate(context.Context, *CreateListFromTemplateRequest) (*ListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateListFromTemplate not implemented")
+}
+func (UnimplementedListsServiceServer) DeleteListTemplate(context.Context, *DeleteListTemplateRequest) (*ListOKResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteListTemplate not implemented")
 }
 func (UnimplementedListsServiceServer) GetList(context.Context, *ListItemRequest) (*ListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetList not implemented")
@@ -498,6 +562,78 @@ func _ListsService_CreateList_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ListsServiceServer).CreateList(ctx, req.(*CreateListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_SaveListAsTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveListAsTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).SaveListAsTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_SaveListAsTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).SaveListAsTemplate(ctx, req.(*SaveListAsTemplateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_WorkspaceListTemplates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceListTemplatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).WorkspaceListTemplates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_WorkspaceListTemplates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).WorkspaceListTemplates(ctx, req.(*WorkspaceListTemplatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_CreateListFromTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateListFromTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).CreateListFromTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_CreateListFromTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).CreateListFromTemplate(ctx, req.(*CreateListFromTemplateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ListsService_DeleteListTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteListTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ListsServiceServer).DeleteListTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ListsService_DeleteListTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ListsServiceServer).DeleteListTemplate(ctx, req.(*DeleteListTemplateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -962,6 +1098,22 @@ var ListsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateList",
 			Handler:    _ListsService_CreateList_Handler,
+		},
+		{
+			MethodName: "SaveListAsTemplate",
+			Handler:    _ListsService_SaveListAsTemplate_Handler,
+		},
+		{
+			MethodName: "WorkspaceListTemplates",
+			Handler:    _ListsService_WorkspaceListTemplates_Handler,
+		},
+		{
+			MethodName: "CreateListFromTemplate",
+			Handler:    _ListsService_CreateListFromTemplate_Handler,
+		},
+		{
+			MethodName: "DeleteListTemplate",
+			Handler:    _ListsService_DeleteListTemplate_Handler,
 		},
 		{
 			MethodName: "GetList",

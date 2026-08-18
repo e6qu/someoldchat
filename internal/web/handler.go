@@ -586,8 +586,17 @@ type documentsData struct {
 	CanWrite  bool
 	Canvases  []documentCardView
 	Lists     []documentCardView
+	// Templates are the workspace's saved list templates, offered as a starting
+	// point when creating a list and managed (removed) here. Empty for canvases.
+	Templates []listTemplateView
 	MoreURL   string
 	Notice    string
+}
+
+type listTemplateView struct {
+	ID   string
+	Name string
+	Kind string
 }
 
 type documentCardView struct {
@@ -3127,7 +3136,8 @@ const documentsMarkup = `{{define "title"}}{{.Title}} · SameOldChat{{end}}
 {{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><h1>{{.Title}}</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
 <div class="heading"><div><h2>{{.Title}}</h2><p>{{if eq .Kind "canvas"}}Create, read, and revise shared workspace documents.{{else}}Track work in persisted, structured rows.{{end}}</p></div></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-{{if .CanWrite}}<details class="create"><summary>Create {{if eq .Kind "canvas"}}a canvas{{else}}a list{{end}}</summary><form method="post" action="/app/{{if eq .Kind "canvas"}}canvases{{else}}lists{{end}}/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input name="title" maxlength="255" required></label>{{if eq .Kind "canvas"}}<label>Content<textarea name="body" maxlength="100000" placeholder="Start writing…"></textarea></label>{{else}}<label><span><input type="checkbox" name="todo_mode" value="true"> Use as a to-do list</span></label>{{end}}<button type="submit">Create</button></form></details>{{end}}
+{{if .CanWrite}}<details class="create"><summary>Create {{if eq .Kind "canvas"}}a canvas{{else}}a list{{end}}</summary><form method="post" action="/app/{{if eq .Kind "canvas"}}canvases{{else}}lists{{end}}/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input name="title" maxlength="255" required></label>{{if eq .Kind "canvas"}}<label>Content<textarea name="body" maxlength="100000" placeholder="Start writing…"></textarea></label>{{else}}{{if .Templates}}<label>Start from<select name="template"><option value="">Blank list</option>{{range .Templates}}<option value="{{.ID}}">{{.Name}} ({{.Kind}})</option>{{end}}</select><small>A template brings its columns and starter rows; a name is still required.</small></label>{{end}}<label><span><input type="checkbox" name="todo_mode" value="true"> Use as a to-do list</span></label>{{end}}<button type="submit">Create</button></form></details>{{end}}
+{{if and (eq .Kind "list") .Templates}}<details class="create"><summary>Templates ({{len .Templates}})</summary><ul class="connections">{{range .Templates}}<li class="connection"><span class="connection-name">{{.Name}} <span class="status">{{.Kind}}</span></span>{{if $.CanWrite}}<form method="post" action="/app/lists/templates/delete"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="template" value="{{.ID}}"><button type="submit">Remove {{.Name}}</button></form>{{end}}</li>{{end}}</ul></details>{{end}}
 <div class="grid">{{if eq .Kind "canvas"}}{{range .Canvases}}<a class="card" href="{{.URL}}"><h3>{{.Title}}</h3><p>{{.Preview}}</p><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></a>{{else}}<p class="empty">No canvases yet.</p>{{end}}{{else}}{{range .Lists}}<a class="card" href="{{.URL}}"><h3>{{.Title}}</h3><p>{{.Preview}}</p><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></a>{{else}}<p class="empty">No lists yet.</p>{{end}}{{end}}</div>
 {{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more</a></p>{{end}}</main>{{end}}`
 
@@ -3237,6 +3247,9 @@ const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
 <span id="column-options-hint" class="muted">Comma separated, and required for a Select column.</span>
 <button type="submit">Add column</button></form>
 <p class="read-only">A column is added to the end. Removing one is not offered here: it would have to remove that value from every item, which is a deletion worth asking for deliberately.</p>
+</details>
+<details class="save-template"><summary>Save as a template</summary><form method="post" action="/app/lists/{{.ID}}/save-template"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label for="template-name">Template name</label><input id="template-name" name="name" maxlength="255" required><label><span><input type="checkbox" name="include_records" value="true"> Include the current rows as starter items</span></label><button type="submit">Save template</button></form>
+<p class="read-only">A template captures this list's columns for the whole workspace. Its rows are copied only if you ask.</p>
 </details>{{end}}
 {{if .BoardActive}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the board groups the first 1,000.</p>{{end}}<div class="board">{{range .Lanes}}<section class="lane" aria-label="{{.Label}} ({{.Count}} item{{if ne .Count 1}}s{{end}})"><h3 class="lane-head">{{.Label}} <span class="lane-count">{{.Count}}</span></h3><ul class="items lane-items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">None</li>{{end}}</ul></section>{{end}}</div>{{else if .TableActive}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the table shows the first 1,000.</p>{{end}}<div class="table-wrap"><table class="list-table"><thead><tr>{{range .TableHeaders}}<th scope="col" aria-sort="{{if eq .Sorted "asc"}}ascending{{else if eq .Sorted "desc"}}descending{{else}}none{{end}}"><a href="{{.URL}}">{{.Name}}{{if eq .Sorted "asc"}} <span aria-hidden="true">▲</span>{{else if eq .Sorted "desc"}} <span aria-hidden="true">▼</span>{{end}}</a></th>{{end}}<th scope="col">Assignee</th><th scope="col">Due</th><th scope="col">Open</th>{{if .CanWrite}}<th scope="col">Actions</th>{{end}}</tr></thead><tbody>{{range .Items}}{{$row := .}}<tr{{if .Archived}} class="archived"{{end}}>{{range .Cells}}<td>{{if .Value}}{{.Value}}{{else}}—{{end}}</td>{{end}}<td>{{if .AssigneeName}}{{.AssigneeName}}{{else}}—{{end}}</td><td{{if .Overdue}} class="overdue"{{end}}>{{if .DueDate}}{{.DueDate}}{{else}}—{{end}}</td><td><a class="item-open" href="/app/lists/{{.ListID}}/items/{{.ID}}">Open</a></td>{{if $.CanWrite}}<td><div class="row-actions"><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form><details class="item-assign"><summary>{{if .AssigneeName}}Reassign{{else}}Assign{{end}}</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/assign"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}"><label for="tassignee-{{.ID}}">Assign to</label><select id="tassignee-{{.ID}}" name="assignee"><option value="">Nobody</option>{{range $row.Members}}<option value="{{.ID}}"{{if eq .ID $row.AssigneeID}} selected{{end}}>{{.Name}}</option>{{end}}</select><label for="tdue-{{.ID}}">Due</label><input id="tdue-{{.ID}}" type="date" name="due" value="{{.DueDate}}"><button type="submit">Save</button></form></details><details class="item-delete"><summary>Delete</summary><form method="post" action="/app/lists/{{.ListID}}/items/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="{{.ReturnQuery}}"><p class="read-only">Deleting removes this item for good.</p><button type="submit">Delete</button></form></details></div></td>{{end}}</tr>{{else}}<tr><td class="empty" colspan="99">No items yet.</td></tr>{{end}}</tbody></table></div>{{else if .CalendarActive}}<nav class="calendar-nav" aria-label="Month"><a href="{{.PrevMonthURL}}">← Previous</a><span class="calendar-month">{{.MonthLabel}}</span><a href="{{.NextMonthURL}}">Next →</a></nav>{{if .DateChoices}}<nav class="list-groups" aria-label="Date column"><span class="group-label">By date</span>{{range .DateChoices}}<a href="{{.URL}}"{{if .Selected}} class="current" aria-current="true"{{end}}>{{.Name}}</a>{{end}}</nav>{{end}}{{if .BoardTruncated}}<p class="notice" role="status">This list has more than 1,000 items; the calendar shows the first 1,000.</p>{{end}}<div class="table-wrap"><table class="calendar" aria-label="{{.MonthLabel}} by {{.DateColumnName}}"><thead><tr><th scope="col">Sun</th><th scope="col">Mon</th><th scope="col">Tue</th><th scope="col">Wed</th><th scope="col">Thu</th><th scope="col">Fri</th><th scope="col">Sat</th></tr></thead><tbody>{{range .CalendarWeeks}}<tr>{{range .}}<td class="cal-day{{if not .InMonth}} cal-out{{end}}{{if .Today}} cal-today{{end}}"><span class="cal-num">{{.Day}}</span>{{range .Items}}<a class="cal-item{{if .Archived}} cal-done{{end}}" href="/app/lists/{{.ListID}}/items/{{.ID}}">{{.Title}}</a>{{end}}</td>{{end}}</tr>{{end}}</tbody></table></div>{{else}}<ul class="items">{{range .Items}}{{template "listRow" .}}{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}{{end}}
 ` + sharingSection + `</main>{{end}}`
@@ -4715,7 +4728,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/canvases/{canvasID}/comments/{commentID}/delete", h.deleteCanvasComment)
 	mux.HandleFunc("GET /app/lists", h.lists)
 	mux.HandleFunc("POST /app/lists/create", h.createList)
+	mux.HandleFunc("POST /app/lists/templates/delete", h.deleteWorkspaceListTemplate)
 	mux.HandleFunc("GET /app/lists/{listID}", h.list)
+	mux.HandleFunc("POST /app/lists/{listID}/save-template", h.saveListAsTemplate)
 	mux.HandleFunc("POST /app/lists/{listID}/columns", h.addListColumn)
 	mux.HandleFunc("POST /app/lists/{listID}/columns/remove", h.removeListColumn)
 	mux.HandleFunc("POST /app/lists/{listID}/share", h.shareList)
@@ -9730,7 +9745,17 @@ func (h Handler) lists(w http.ResponseWriter, r *http.Request) {
 	if page.HasMore {
 		more = "/app/lists?cursor=" + url.QueryEscape(string(page.NextCursor))
 	}
-	h.writeHTML(w, documentsTemplate, documentsData{Kind: "list", Title: "Lists", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeListsWrite), Lists: cards, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+	templates := make([]listTemplateView, 0)
+	if values, templateErr := h.Messages.WorkspaceListTemplates(r.Context(), principal.WorkspaceID, principal.UserID); templateErr == nil {
+		for _, value := range values {
+			kind := "List"
+			if value.TodoMode {
+				kind = "To-do list"
+			}
+			templates = append(templates, listTemplateView{ID: string(value.ID), Name: value.Name, Kind: kind})
+		}
+	}
+	h.writeHTML(w, documentsTemplate, documentsData{Kind: "list", Title: "Lists", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeListsWrite), Lists: cards, Templates: templates, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
 }
 
 func (h Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -10001,12 +10026,62 @@ func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	value, err := h.Messages.CreateList(r.Context(), principal.WorkspaceID, principal.UserID, fields["title"], "[]", "", "", false, fields["todo_mode"] == "true")
+	// A create that names a template starts from it — its columns and starter
+	// rows — rather than a blank list.
+	var value domain.List
+	if templateID := strings.TrimSpace(fields["template"]); templateID != "" {
+		value, err = h.Messages.CreateListFromTemplate(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListTemplateID(templateID), fields["title"])
+	} else {
+		value, err = h.Messages.CreateList(r.Context(), principal.WorkspaceID, principal.UserID, fields["title"], "[]", "", "", false, fields["todo_mode"] == "true")
+	}
 	if err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "The list was not created", "Enter a name and try again.")
 		return
 	}
 	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(value.ID)))
+}
+
+// saveListAsTemplate captures a list — its columns, to-do mode, and optionally
+// its rows — as a reusable workspace template.
+func (h Handler) saveListAsTemplate(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
+		return
+	}
+	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	name := strings.TrimSpace(fields["name"])
+	if name == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The template was not saved", "Give the template a name and try again.")
+		return
+	}
+	if _, err := h.Messages.SaveListAsTemplate(r.Context(), principal.WorkspaceID, principal.UserID, id, name, "", fields["include_records"] == "true"); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The template was not saved", "You need access to this list to save it as a template.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id))+"?notice="+url.QueryEscape("Saved as a template"))
+}
+
+// deleteWorkspaceListTemplate removes a saved list template.
+func (h Handler) deleteWorkspaceListTemplate(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Lists and try again.")
+	if !ok {
+		return
+	}
+	if err := h.Messages.DeleteListTemplate(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListTemplateID(strings.TrimSpace(fields["template"]))); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The template was not removed", "Only its creator or a workspace administrator can remove a template.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists?notice="+url.QueryEscape("Template removed"))
 }
 
 // addListColumn declares a column from the list page. Options are comma

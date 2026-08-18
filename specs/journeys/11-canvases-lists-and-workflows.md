@@ -283,7 +283,17 @@ it, and the comment crosses the chat seam with a parity case comparing it across
 both compositions. Item attachments are implemented — a list editor uploads a
 file onto an item and every reader of the list can download it — as are list
 record workflow triggers and returning an item action taken from a board lane or
-table row to the view it was taken from. List templates remain the gap.
+table row to the view it was taken from. List templates are implemented as a
+first-party workspace primitive: any member with access to a list saves it as a
+named workspace template capturing its columns and to-do mode, optionally with
+its current rows as starter items; the Lists page offers every template as a
+starting point in the create form and as a managed entry; creating a list from a
+template seeds a new owned list with those columns and rows; and a template is
+removed by its creator or a workspace administrator, without touching any list
+made from it. The four operations cross the chat seam with a parity case
+comparing them across both compositions. Slack's own catalog of first-party
+templates and its AI-assisted list creation remain out of scope: those are
+Slack-hosted content, not a storage or transport gap here.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered

@@ -90,6 +90,7 @@ var (
 	ErrInvalidView                 = errors.New("view payload is invalid")
 	ErrAppHomeNotEnabled           = errors.New("app home tab is not enabled")
 	ErrInvalidList                 = errors.New("list payload is invalid")
+	ErrInvalidListTemplate         = errors.New("list template payload is invalid")
 	ErrInvalidEntity               = errors.New("entity payload is invalid")
 	ErrInvalidWorkflowStep         = errors.New("workflow step payload is invalid")
 	ErrWorkflowPermissionDenied    = errors.New("workflow trigger is not available to this actor")

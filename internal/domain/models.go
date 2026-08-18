@@ -3332,6 +3332,28 @@ type List struct {
 	UpdatedAt         time.Time
 }
 
+// ListTemplate is a reusable list definition — a name, a column schema, whether
+// it is a to-do list, and optional starter rows — that a member instantiates
+// into a new list. It is the workspace's, shared by everyone in it, so a team
+// that keeps recreating the same shape saves it once. Slack ships templates and
+// lets members save their own; this carries the member-saved kind, which is the
+// one with durable per-workspace state.
+type ListTemplate struct {
+	ID                ListTemplateID
+	WorkspaceID       WorkspaceID
+	Creator           UserID
+	Name              string
+	DescriptionBlocks string
+	Schema            string
+	TodoMode          bool
+	// SeedItems is a JSON array of starter rows a list receives when created from
+	// this template, each row an item's fields in the same shape List items use.
+	// It is empty for a structure-only template.
+	SeedItems string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type ListItem struct {
 	ID           ListItemID
 	ListID       ListID

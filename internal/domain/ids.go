@@ -19,6 +19,7 @@ type FileID string
 type CanvasID string
 type ListID string
 type ListItemID string
+type ListTemplateID string
 type ListDownloadID string
 type ListItemCommentID string
 type ListItemFileID string
@@ -107,6 +108,10 @@ func NewFileID() (FileID, error)       { value, err := PublicID("file_"); return
 func NewCanvasID() (CanvasID, error)   { value, err := PublicID("F"); return CanvasID(value), err }
 func NewUserID() (UserID, error)       { value, err := PublicID("U"); return UserID(value), err }
 func NewListID() (ListID, error)       { value, err := PublicID("F"); return ListID(value), err }
+func NewListTemplateID() (ListTemplateID, error) {
+	value, err := PublicID("Ft")
+	return ListTemplateID(value), err
+}
 
 // NewExternalUploadID mints an identifier in the file identifier space.
 // files.getUploadURLExternal hands this value to the client as file_id, and the

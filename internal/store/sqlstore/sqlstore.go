@@ -561,7 +561,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 174
+const schemaVersion = 175
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3333,6 +3333,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 175 {
+		// Reusable list templates: a saved list definition (schema, to-do mode,
+		// and optional starter rows) a member instantiates into a new list. Created
+		// in the ladder so the reference to workspaces resolves on PostgreSQL.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS list_templates (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			creator_id TEXT NOT NULL, name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]',
+			schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0,
+			seed_items TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate list templates: %w", err)
 		}
 	}
 	if version < 174 {
@@ -20496,6 +20509,70 @@ func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id do
 		return domain.List{}, err
 	}
 	return value, nil
+}
+
+func (s *Store) CreateListTemplate(ctx context.Context, value domain.ListTemplate) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO list_templates(id, workspace_id, creator_id, name, description_blocks, schema_json, todo_mode, seed_items, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkspaceID, value.Creator, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.SeedItems, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt))
+	if err != nil {
+		return classify(err)
+	}
+	return nil
+}
+
+func (s *Store) ListListTemplates(ctx context.Context, workspace domain.WorkspaceID) ([]domain.ListTemplate, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, creator_id, name, description_blocks, schema_json, todo_mode, seed_items, created_at, updated_at FROM list_templates WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	templates := make([]domain.ListTemplate, 0)
+	for rows.Next() {
+		value, err := scanListTemplate(rows)
+		if err != nil {
+			return nil, err
+		}
+		templates = append(templates, value)
+	}
+	return templates, rows.Err()
+}
+
+func (s *Store) GetListTemplate(ctx context.Context, workspace domain.WorkspaceID, id domain.ListTemplateID) (domain.ListTemplate, error) {
+	value, err := scanListTemplate(s.db.QueryRowContext(ctx, `SELECT id, workspace_id, creator_id, name, description_blocks, schema_json, todo_mode, seed_items, created_at, updated_at FROM list_templates WHERE id = ? AND workspace_id = ?`, id, workspace))
+	if err != nil {
+		return domain.ListTemplate{}, translateNotFound(err)
+	}
+	return value, nil
+}
+
+func scanListTemplate(scanner rowScanner) (domain.ListTemplate, error) {
+	var value domain.ListTemplate
+	var todoMode int
+	var createdAt, updatedAt string
+	if err := scanner.Scan(&value.ID, &value.WorkspaceID, &value.Creator, &value.Name, &value.DescriptionBlocks, &value.Schema, &todoMode, &value.SeedItems, &createdAt, &updatedAt); err != nil {
+		return domain.ListTemplate{}, err
+	}
+	value.TodoMode = todoMode != 0
+	var err error
+	if value.CreatedAt, err = domain.ParseStoredTime(createdAt); err != nil {
+		return domain.ListTemplate{}, err
+	}
+	if value.UpdatedAt, err = domain.ParseStoredTime(updatedAt); err != nil {
+		return domain.ListTemplate{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) DeleteListTemplate(ctx context.Context, workspace domain.WorkspaceID, id domain.ListTemplateID) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM list_templates WHERE id = ? AND workspace_id = ?`, id, workspace)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 // visibleListPredicate is the one rule for whether a member may see a list, and

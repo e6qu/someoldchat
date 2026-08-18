@@ -1782,6 +1782,48 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// List templates end to end: a list is saved as a template (with its
+			// rows as starter rows), the workspace lists it, a member instantiates a
+			// new list from it that carries the seeded row, a non-creator non-admin
+			// cannot delete it, and the creator can. Both compositions must agree.
+			name: "a list template is saved, listed, instantiated, and deleted identically",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				list, err := chat.CreateList(ctx, "T1", "U1", "Launch", "", `[{"key":"title","name":"Title","type":"text","is_primary_column":true}]`, "", false, false)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"ship it"}]`); err != nil {
+					return nil, err
+				}
+				template, err := chat.SaveListAsTemplate(ctx, "T1", "U1", list.ID, "Launch template", "", true)
+				if err != nil {
+					return nil, err
+				}
+				templates, err := chat.WorkspaceListTemplates(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				made, err := chat.CreateListFromTemplate(ctx, "T1", "U2", template.ID, "My launch")
+				if err != nil {
+					return nil, err
+				}
+				items, err := chat.ListItems(ctx, "T1", "U2", made.ID, domain.PageRequest{Limit: 10}, false)
+				if err != nil {
+					return nil, err
+				}
+				// A non-creator, non-admin cannot delete the template; the creator can.
+				deleteByOther := chat.DeleteListTemplate(ctx, "T1", "U2", template.ID)
+				if err := chat.DeleteListTemplate(ctx, "T1", "U1", template.ID); err != nil {
+					return nil, err
+				}
+				after, err := chat.WorkspaceListTemplates(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				return []any{template.Name, len(templates), made.Name, made.OwnerID == "U2", len(items.Items), deleteByOther != nil, len(after)}, nil
+			},
+		},
+		{
 			// files.upload's sharing: a hosted file is shared into several channels
 			// with an initial comment. The refusals must match — a missing file and
 			// a threaded share into more than one channel are both refused whole,

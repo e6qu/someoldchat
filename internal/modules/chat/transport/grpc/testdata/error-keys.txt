@@ -62,6 +62,7 @@ service.invalid_integration_logs
 service.invalid_invite_request
 service.invalid_later_reminder
 service.invalid_list
+service.invalid_list_template
 service.invalid_message
 service.invalid_message_stream
 service.invalid_migration

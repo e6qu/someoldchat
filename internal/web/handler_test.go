@@ -231,6 +231,78 @@ func TestCanvasAndListJourneysUseDurableDocuments(t *testing.T) {
 	requireContains(t, "list directory", lists.Body.String(), "Launch", "To-do list")
 }
 
+// TestListTemplateJourneyCapturesReusesAndRemovesFromTheBrowser drives the
+// whole template surface through the client a member actually uses: a list is
+// captured as a workspace template carrying its rows, the template appears on
+// the Lists page as a starting point and a managed entry, a new list is created
+// from it with the seeded row present, and the template is removed again.
+func TestListTemplateJourneyCapturesReusesAndRemovesFromTheBrowser(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+
+	listCreated := postForm(t, mux, "/app/lists/create", url.Values{
+		"_csrf": {csrf}, "title": {"Launch"}, "todo_mode": {"true"},
+	}.Encode(), false)
+	if listCreated.Code != http.StatusSeeOther {
+		t.Fatalf("create list = %d: %s", listCreated.Code, listCreated.Body)
+	}
+	listURL := listCreated.Header().Get("Location")
+	if itemCreated := postForm(t, mux, listURL+"/items/create", url.Values{
+		"_csrf": {csrf}, "title": {"Verify persistence"},
+	}.Encode(), false); itemCreated.Code != http.StatusSeeOther {
+		t.Fatalf("create list item = %d: %s", itemCreated.Code, itemCreated.Body)
+	}
+
+	// The list page offers the save-as-template control; using it with rows
+	// included captures a workspace template.
+	listPage := get(t, mux, listURL)
+	requireContains(t, "save-template control", listPage.Body.String(), "Save as a template", "/save-template")
+	listID := strings.TrimPrefix(listURL, "/app/lists/")
+	saved := postForm(t, mux, "/app/lists/"+listID+"/save-template", url.Values{
+		"_csrf": {csrf}, "name": {"Launch template"}, "include_records": {"true"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save template = %d: %s", saved.Code, saved.Body)
+	}
+
+	// The Lists page shows the template both as a starting point in the create
+	// form and as a managed entry that can be removed.
+	lists := get(t, mux, "/app/lists")
+	requireContains(t, "template on lists page", lists.Body.String(), "Launch template", `name="template"`, "Start from")
+
+	// Creating a list from the template carries its seeded row.
+	made := postForm(t, mux, "/app/lists/create", url.Values{
+		"_csrf": {csrf}, "title": {"My launch"}, "template": {templateID(t, s)},
+	}.Encode(), false)
+	if made.Code != http.StatusSeeOther {
+		t.Fatalf("create from template = %d: %s", made.Code, made.Body)
+	}
+	madePage := get(t, mux, made.Header().Get("Location"))
+	requireContains(t, "list from template", madePage.Body.String(), "My launch", "Verify persistence")
+
+	// The template can be removed from the Lists page.
+	removed := postForm(t, mux, "/app/lists/templates/delete", url.Values{
+		"_csrf": {csrf}, "template": {templateID(t, s)},
+	}.Encode(), false)
+	if removed.Code != http.StatusSeeOther {
+		t.Fatalf("delete template = %d: %s", removed.Code, removed.Body)
+	}
+	if remaining, err := (service.Messages{Store: s}).WorkspaceListTemplates(context.Background(), "T1", "U1"); err != nil || len(remaining) != 0 {
+		t.Fatalf("templates after delete = %+v err=%v", remaining, err)
+	}
+}
+
+// templateID returns the id of the single template the browser journey saved,
+// so the test can name it in a form without scraping it out of the HTML.
+func templateID(t *testing.T, s *memory.Store) string {
+	t.Helper()
+	templates, err := (service.Messages{Store: s}).WorkspaceListTemplates(context.Background(), "T1", "U1")
+	if err != nil || len(templates) == 0 {
+		t.Fatalf("no saved template: %+v err=%v", templates, err)
+	}
+	return string(templates[0].ID)
+}
+
 // TestCanvasSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt covers the surface
 // that was missing entirely: the grant mechanism has existed since canvases
 // did, but nothing in this client showed a grant or made one, so a canvas could
