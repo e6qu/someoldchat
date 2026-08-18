@@ -329,6 +329,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureCanvasID)
 	case reflect.TypeOf(domain.ListID("")):
 		return reflect.ValueOf(fixtureListID)
+	case reflect.TypeOf(domain.ListItemID("")):
+		return reflect.ValueOf(fixtureListItemID)
+	case reflect.TypeOf([]domain.ListItemID(nil)):
+		// A non-empty selection, so a bulk delete reaches its own front door
+		// instead of being refused for an empty payload.
+		return reflect.ValueOf([]domain.ListItemID{fixtureListItemID})
 	case reflect.TypeOf(domain.CallID("")):
 		return reflect.ValueOf(fixtureCallID)
 	case reflect.TypeOf(domain.ReminderID("")):
@@ -369,8 +375,77 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureMessageTimestamp)
 	case reflect.TypeOf(domain.PageRequest{}):
 		return reflect.ValueOf(domain.PageRequest{Limit: 10})
+	case reflect.TypeOf(domain.ListColumnType("")):
+		// A real column type, so AddListColumn passes schema validation and the
+		// holder's write grant carries it to success.
+		return reflect.ValueOf(domain.ListColumnText)
+	case reflect.TypeOf(domain.LaterReminderRequest{}):
+		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
+		// holder's own seeded reminder after authorizeWorkspace — reaches success
+		// while a caller below membership is refused for standing.
+		return reflect.ValueOf(domain.LaterReminderRequest{
+			Target: domain.LaterReminderPersonal, Text: "updated fixture reminder",
+			Recurrence: domain.ReminderOnce, DueAt: time.Now().Add(24 * time.Hour).UTC(),
+		})
+	case reflect.TypeOf(""):
+		// A plain string argument is meaningful only per operation, so it is
+		// filled by name like the typed-target cases above and left empty for
+		// every operation not named here. Supplying a blanket non-empty string
+		// would change how unrelated operations answer their own validation.
+		return fixtureStringArgument(method)
+	case reflect.TypeOf(false):
+		// A bool is meaningful only per operation too. SetConversationArchived
+		// with false is a no-op on a conversation that is not archived — a state
+		// error that is not about standing — so it is handed true, which archives
+		// the seeded conversation and lets the holder reach success.
+		if method == "SetConversationArchived" {
+			return reflect.ValueOf(true)
+		}
+		return reflect.Zero(argument)
 	}
 	return reflect.Zero(argument)
+}
+
+// fixtureStringArgument supplies the one string an operation needs to reach its
+// own front door as the holder. It names only the operations the matrix drives
+// past argument validation; everything else keeps the empty string, which is
+// honest about the probe not knowing that argument's meaning.
+func fixtureStringArgument(method string) reflect.Value {
+	switch method {
+	case "AddReaction":
+		// A name the holder has not used, so adding it succeeds rather than
+		// colliding with the holder's own seeded reaction.
+		return reflect.ValueOf("wave")
+	case "RemoveReaction":
+		return reflect.ValueOf(fixtureHolderReaction)
+	case "UpdateListItem":
+		// An empty cell array is a valid no-op update: it keeps the row's fields
+		// and passes schema validation, so the holder reaches success.
+		return reflect.ValueOf("[]")
+	case "CommentOnListItem", "CommentOnCanvas":
+		return reflect.ValueOf("a fixture comment")
+	case "EditCanvas":
+		// A single append the holder's write grant admits, so the edit succeeds
+		// rather than dying on an empty change set.
+		return reflect.ValueOf(`[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"x"}}]`)
+	case "LookupCanvasSections":
+		// An empty criteria object matches every section, so the read succeeds.
+		return reflect.ValueOf("{}")
+	case "UserByEmail":
+		// The seeded member's own address, so the lookup finds a user.
+		return reflect.ValueOf("U-member@example.test")
+	case "RenameConversation":
+		return reflect.ValueOf("renamed-fixture")
+	case "UpdateCall":
+		// Both the external id and the join URL are required and are the only
+		// strings this operation takes, so one non-empty value reaches success.
+		return reflect.ValueOf("https://example.test/updated-call")
+	case "AddListColumn":
+		// A column name; paired with the real column type above, the holder's
+		// write grant carries the add to success.
+		return reflect.ValueOf("Status")
+	}
+	return reflect.ValueOf("")
 }
 
 func newFixture(t *testing.T) service.Messages {
@@ -452,7 +527,12 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}
 	seed("canvas", repository.CreateCanvas(ctx, domain.Canvas{
 		ID: fixtureCanvasID, WorkspaceID: "T1", OwnerID: "U-member", Title: "fixture canvas",
-		Version: 1, CreatedAt: at, UpdatedAt: at,
+		// A valid, empty document rather than the empty string: an operation that
+		// decodes the document (EditCanvas, LookupCanvasSections) reaches its own
+		// authorization instead of dying on unparseable content, so the holder's
+		// write grant carries it to success where a stranger is refused for access.
+		DocumentContent: `{"sections":[]}`,
+		Version:         1, CreatedAt: at, UpdatedAt: at,
 	}, event("E-canvas", "canvas.created")))
 	seed("list", repository.CreateList(ctx, domain.List{
 		ID: fixtureListID, WorkspaceID: "T1", OwnerID: "U-member", Name: "fixture list",
@@ -470,6 +550,15 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("list access", repository.SetListAccess(ctx, domain.ListAccess{
 		ListID: fixtureListID, EntityType: domain.GrantUser, EntityID: "U-owner", Access: domain.AccessWrite,
 	}, event("E-list-access", "list.access_set")))
+	// A row in that list, so the operations that read, update, assign, comment on,
+	// attach a file to, or delete an item have one the holder — granted write on
+	// the list above — can reach, while a caller below membership is refused at
+	// requireListAccess. Created by the member, so "mine" and "anybody's" stay
+	// different questions the way the list's own ownership does.
+	seed("list item", repository.CreateListItem(ctx, domain.ListItem{
+		ID: fixtureListItemID, ListID: fixtureListID, WorkspaceID: "T1", Fields: "[]",
+		CreatedBy: "U-member", UpdatedBy: "U-member", Version: 1, CreatedAt: at, UpdatedAt: at,
+	}, event("E-list-item", "list.item.created")))
 	seed("call", repository.CreateCall(ctx, domain.Call{
 		ID: fixtureCallID, WorkspaceID: "T1", ConversationID: "C1", ExternalUniqueID: "fixture-call",
 		JoinURL: "https://example.test/call", Title: "fixture call", CreatedBy: "U-member",
@@ -606,6 +695,19 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		Message:      domain.Message{ID: fixtureMessageID, WorkspaceID: "T1", Conversation: "C1"},
 		Conversation: "C1", UserID: "U-member", CreatedAt: at,
 	}, event("E-star", "star.added")))
+	// The same message carries a reaction owned by the HOLDER the differential
+	// asks (U-owner) too. Reactions are keyed by (message, user, name), so
+	// RemoveReaction on the holder's name answers a caller who has that reaction
+	// — the holder, who succeeds — differently from a caller below conversation
+	// membership, who is refused at authorizeConversation, while AddReaction with
+	// a name the holder has not used still succeeds. A pin and a star are keyed by
+	// (message, user) with no name, so the single seeded message cannot carry a
+	// holder-owned pin for RemovePin to find without making AddPin answer "already
+	// exists" for the same holder — the probe hands both the one timestamp — so
+	// RemovePin and RemoveStar stay a documented residue rather than being driven.
+	seed("holder reaction", repository.AddReaction(ctx, domain.Reaction{
+		Message: fixtureMessageID, Name: fixtureHolderReaction, UserID: "U-owner", CreatedAt: at,
+	}, event("E-holder-reaction", "reaction.added")))
 	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: fixtureSavedItemID, WorkspaceID: "T1", UserID: "U-member", MessageID: fixtureMessageID,
 		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
@@ -625,6 +727,11 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 
 // fixtureMessageTimestamp names the one seeded message.
 const fixtureMessageTimestamp domain.MessageTimestamp = "1700000000.000100"
+
+// fixtureHolderReaction is the emoji the holder has reacted with, so
+// RemoveReaction has one of the holder's own to remove. AddReaction is handed a
+// different name the holder has not used, so it too reaches success.
+const fixtureHolderReaction = "clap"
 
 // The objects the fixture holds so that an operation naming one reaches its own
 // authorization instead of dying at "not found".
@@ -658,6 +765,7 @@ const (
 	fixtureWorkflowRunID    domain.WorkflowRunID     = "F-run"
 	fixtureSavedItemID      domain.SavedItemID       = "F-saved"
 	fixtureMessageID        domain.MessageID         = "M1"
+	fixtureListItemID       domain.ListItemID        = "F-list-item"
 )
 
 func requireSeed(t *testing.T, err error) {
