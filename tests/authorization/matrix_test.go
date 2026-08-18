@@ -329,6 +329,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureCanvasID)
 	case reflect.TypeOf(domain.ListID("")):
 		return reflect.ValueOf(fixtureListID)
+	case reflect.TypeOf(domain.ListItemID("")):
+		return reflect.ValueOf(fixtureListItemID)
+	case reflect.TypeOf([]domain.ListItemID(nil)):
+		// A non-empty selection, so a bulk delete reaches its own front door
+		// instead of being refused for an empty payload.
+		return reflect.ValueOf([]domain.ListItemID{fixtureListItemID})
 	case reflect.TypeOf(domain.CallID("")):
 		return reflect.ValueOf(fixtureCallID)
 	case reflect.TypeOf(domain.ReminderID("")):
@@ -359,7 +365,32 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 	case reflect.TypeOf(domain.WorkflowRunID("")):
 		return reflect.ValueOf(fixtureWorkflowRunID)
 	case reflect.TypeOf(domain.SavedItemID("")):
+		// RemoveSavedItem acts on the caller's own saved item, so the holder is
+		// handed its own; other operations that name one keep the member's.
+		if method == "RemoveSavedItem" {
+			return reflect.ValueOf(fixtureHolderSavedItemID)
+		}
 		return reflect.ValueOf(fixtureSavedItemID)
+	case reflect.TypeOf(domain.ScheduledStatusID("")):
+		return reflect.ValueOf(fixtureScheduledStatusID)
+	case reflect.TypeOf(domain.ActivitySavedViewID("")):
+		return reflect.ValueOf(fixtureActivityViewID)
+	case reflect.TypeOf(domain.SidebarSectionID("")):
+		return reflect.ValueOf(fixtureSidebarSectionID)
+	case reflect.TypeOf([]domain.ConversationID(nil)):
+		// A non-empty channel selection for the user-group operations that add or
+		// remove channels; named by method so the sharing operations that also
+		// take a channel slice keep the empty one they are inconclusive with.
+		switch method {
+		case "AddUserGroupChannels", "RemoveUserGroupChannels":
+			return reflect.ValueOf([]domain.ConversationID{"C1"})
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf([]domain.WorkspaceID(nil)):
+		if method == "AdminAddUserGroupTeams" {
+			return reflect.ValueOf([]domain.WorkspaceID{"T2"})
+		}
+		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.MessageID("")):
 		return reflect.ValueOf(fixtureMessageID)
 	case reflect.TypeOf(domain.MessageTimestamp("")):
@@ -369,8 +400,133 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureMessageTimestamp)
 	case reflect.TypeOf(domain.PageRequest{}):
 		return reflect.ValueOf(domain.PageRequest{Limit: 10})
+	case reflect.TypeOf(domain.ListColumnType("")):
+		// A real column type, so AddListColumn passes schema validation and the
+		// holder's write grant carries it to success.
+		return reflect.ValueOf(domain.ListColumnText)
+	case reflect.TypeOf(domain.LaterReminderRequest{}):
+		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
+		// holder's own seeded reminder after authorizeWorkspace — reaches success
+		// while a caller below membership is refused for standing.
+		return reflect.ValueOf(domain.LaterReminderRequest{
+			Target: domain.LaterReminderPersonal, Text: "updated fixture reminder",
+			Recurrence: domain.ReminderOnce, DueAt: time.Now().Add(24 * time.Hour).UTC(),
+		})
+	case reflect.TypeOf(domain.WorkspaceRole("")):
+		// A real role, so SetUserRole reaches success promoting the seeded member
+		// rather than dying on an empty role. Named by method so the provisioning
+		// operations that also take a role — which authenticate a credential, not
+		// a member — keep the empty role they are inconclusive with.
+		if method == "SetUserRole" {
+			return reflect.ValueOf(domain.WorkspaceRoleAdmin)
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(domain.NotificationLevel("")):
+		// Named by method so SetSidebarSectionNotificationLevel, which needs a
+		// sidebar section this fixture does not seed, is not handed a valid level
+		// that would make it reach "not found" indistinguishably.
+		if method == "SetConversationNotificationPreferences" {
+			return reflect.ValueOf(domain.NotificationAll)
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(time.Time{}):
+		// Scheduling needs an instant in the future; other operations that take a
+		// time are content with the zero value, so only the schedulers are named.
+		switch method {
+		case "ScheduleMessage", "ScheduleMessageWithBlocks", "ScheduleMessageWithBlocksAndAttachments":
+			return reflect.ValueOf(time.Now().Add(24 * time.Hour).UTC())
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(int(0)):
+		// A valid retention duration; other int arguments keep the zero value.
+		if method == "SetConversationRetention" {
+			return reflect.ValueOf(30)
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(uint64(0)):
+		// The fixture workflow's version, so DeleteWorkflow's optimistic-version
+		// check matches and the manager reaches the delete rather than a conflict.
+		if method == "DeleteWorkflow" {
+			return reflect.ValueOf(uint64(1))
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(domain.AutomationPermission{}):
+		// A valid permission, so SetTriggerPermission — whose trigger and app the
+		// fixture already match — reaches success rather than an invalid-payload
+		// refusal. Named by method so the function-permission operation, which is
+		// still refused at its missing function, keeps the empty value.
+		if method == "SetTriggerPermission" {
+			return reflect.ValueOf(domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(""):
+		// A plain string argument is meaningful only per operation, so it is
+		// filled by name like the typed-target cases above and left empty for
+		// every operation not named here. Supplying a blanket non-empty string
+		// would change how unrelated operations answer their own validation.
+		return fixtureStringArgument(method)
+	case reflect.TypeOf(false):
+		// A bool is meaningful only per operation too. SetConversationArchived
+		// with false is a no-op on a conversation that is not archived — a state
+		// error that is not about standing — so it is handed true, which archives
+		// the seeded conversation and lets the holder reach success.
+		if method == "SetConversationArchived" {
+			return reflect.ValueOf(true)
+		}
+		return reflect.Zero(argument)
 	}
 	return reflect.Zero(argument)
+}
+
+// fixtureStringArgument supplies the one string an operation needs to reach its
+// own front door as the holder. It names only the operations the matrix drives
+// past argument validation; everything else keeps the empty string, which is
+// honest about the probe not knowing that argument's meaning.
+func fixtureStringArgument(method string) reflect.Value {
+	switch method {
+	case "AddReaction":
+		// A name the holder has not used, so adding it succeeds rather than
+		// colliding with the holder's own seeded reaction.
+		return reflect.ValueOf("wave")
+	case "RemoveReaction":
+		return reflect.ValueOf(fixtureHolderReaction)
+	case "UpdateListItem":
+		// An empty cell array is a valid no-op update: it keeps the row's fields
+		// and passes schema validation, so the holder reaches success.
+		return reflect.ValueOf("[]")
+	case "CommentOnListItem", "CommentOnCanvas":
+		return reflect.ValueOf("a fixture comment")
+	case "EditCanvas":
+		// A single append the holder's write grant admits, so the edit succeeds
+		// rather than dying on an empty change set.
+		return reflect.ValueOf(`[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"x"}}]`)
+	case "LookupCanvasSections":
+		// An empty criteria object matches every section, so the read succeeds.
+		return reflect.ValueOf("{}")
+	case "UserByEmail":
+		// The seeded member's own address, so the lookup finds a user.
+		return reflect.ValueOf("U-member@example.test")
+	case "RenameConversation":
+		return reflect.ValueOf("renamed-fixture")
+	case "UpdateCall":
+		// Both the external id and the join URL are required and are the only
+		// strings this operation takes, so one non-empty value reaches success.
+		return reflect.ValueOf("https://example.test/updated-call")
+	case "AddListColumn":
+		// A column name; paired with the real column type above, the holder's
+		// write grant carries the add to success.
+		return reflect.ValueOf("Status")
+	case "PostEphemeral", "ScheduleMessage", "SaveDraft":
+		// Message text, the only free string these take, so a member posting to
+		// the seeded conversation reaches success.
+		return reflect.ValueOf("a fixture message")
+	case "PostEphemeralWithBlocks", "ScheduleMessageWithBlocks":
+		// These take text and a blocks payload; a valid single-block layout reads
+		// as valid for both, so the holder reaches success while the string stays
+		// meaningful rather than a bare word standing in for JSON.
+		return reflect.ValueOf(`[{"type":"section","text":{"type":"mrkdwn","text":"x"}}]`)
+	}
+	return reflect.ValueOf("")
 }
 
 func newFixture(t *testing.T) service.Messages {
@@ -452,7 +608,12 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}
 	seed("canvas", repository.CreateCanvas(ctx, domain.Canvas{
 		ID: fixtureCanvasID, WorkspaceID: "T1", OwnerID: "U-member", Title: "fixture canvas",
-		Version: 1, CreatedAt: at, UpdatedAt: at,
+		// A valid, empty document rather than the empty string: an operation that
+		// decodes the document (EditCanvas, LookupCanvasSections) reaches its own
+		// authorization instead of dying on unparseable content, so the holder's
+		// write grant carries it to success where a stranger is refused for access.
+		DocumentContent: `{"sections":[]}`,
+		Version:         1, CreatedAt: at, UpdatedAt: at,
 	}, event("E-canvas", "canvas.created")))
 	seed("list", repository.CreateList(ctx, domain.List{
 		ID: fixtureListID, WorkspaceID: "T1", OwnerID: "U-member", Name: "fixture list",
@@ -470,6 +631,15 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("list access", repository.SetListAccess(ctx, domain.ListAccess{
 		ListID: fixtureListID, EntityType: domain.GrantUser, EntityID: "U-owner", Access: domain.AccessWrite,
 	}, event("E-list-access", "list.access_set")))
+	// A row in that list, so the operations that read, update, assign, comment on,
+	// attach a file to, or delete an item have one the holder — granted write on
+	// the list above — can reach, while a caller below membership is refused at
+	// requireListAccess. Created by the member, so "mine" and "anybody's" stay
+	// different questions the way the list's own ownership does.
+	seed("list item", repository.CreateListItem(ctx, domain.ListItem{
+		ID: fixtureListItemID, ListID: fixtureListID, WorkspaceID: "T1", Fields: "[]",
+		CreatedBy: "U-member", UpdatedBy: "U-member", Version: 1, CreatedAt: at, UpdatedAt: at,
+	}, event("E-list-item", "list.item.created")))
 	seed("call", repository.CreateCall(ctx, domain.Call{
 		ID: fixtureCallID, WorkspaceID: "T1", ConversationID: "C1", ExternalUniqueID: "fixture-call",
 		JoinURL: "https://example.test/call", Title: "fixture call", CreatedBy: "U-member",
@@ -606,11 +776,45 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		Message:      domain.Message{ID: fixtureMessageID, WorkspaceID: "T1", Conversation: "C1"},
 		Conversation: "C1", UserID: "U-member", CreatedAt: at,
 	}, event("E-star", "star.added")))
+	// The same message carries a reaction owned by the HOLDER the differential
+	// asks (U-owner) too. Reactions are keyed by (message, user, name), so
+	// RemoveReaction on the holder's name answers a caller who has that reaction
+	// — the holder, who succeeds — differently from a caller below conversation
+	// membership, who is refused at authorizeConversation, while AddReaction with
+	// a name the holder has not used still succeeds. A pin and a star are keyed by
+	// (message, user) with no name, so the single seeded message cannot carry a
+	// holder-owned pin for RemovePin to find without making AddPin answer "already
+	// exists" for the same holder — the probe hands both the one timestamp — so
+	// RemovePin and RemoveStar stay a documented residue rather than being driven.
+	seed("holder reaction", repository.AddReaction(ctx, domain.Reaction{
+		Message: fixtureMessageID, Name: fixtureHolderReaction, UserID: "U-owner", CreatedAt: at,
+	}, event("E-holder-reaction", "reaction.added")))
 	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: fixtureSavedItemID, WorkspaceID: "T1", UserID: "U-member", MessageID: fixtureMessageID,
 		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
 	}, event("E-saved", "saved_item.created")); err != nil {
 		t.Fatalf("seed saved item: %v", err)
+	}
+	// The HOLDER's own saved item on the same message, its own scheduled status,
+	// and its own draft, so the operations that read or remove "mine" — which
+	// authorize the workspace or conversation and then act on the caller's object
+	// — reach success as the holder while a caller below membership is refused for
+	// standing. Each belongs to U-owner, the caller the differential asks.
+	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
+		ID: fixtureHolderSavedItemID, WorkspaceID: "T1", UserID: "U-owner", MessageID: fixtureMessageID,
+		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
+	}, event("E-holder-saved", "saved_item.created")); err != nil {
+		t.Fatalf("seed holder saved item: %v", err)
+	}
+	seed("scheduled status", repository.CreateScheduledStatus(ctx, domain.ScheduledStatus{
+		ID: fixtureScheduledStatusID, WorkspaceID: "T1", UserID: "U-owner", StatusText: "away",
+		StartsAt: at.Add(time.Hour), EndsAt: at.Add(2 * time.Hour), CreatedAt: at, UpdatedAt: at,
+	}))
+	if _, err := repository.UpsertDraft(ctx, domain.Draft{
+		WorkspaceID: "T1", UserID: "U-owner", ConversationID: "C1", ThreadTimestamp: fixtureMessageTimestamp,
+		Text: "seeded draft", UpdatedAt: at,
+	}, event("E-holder-draft", "draft.updated")); err != nil {
+		t.Fatalf("seed holder draft: %v", err)
 	}
 	seed("usergroup", repository.CreateUserGroup(ctx, domain.UserGroup{
 		WorkspaceID: "T1", ID: fixtureUserGroupID, Name: "fixture group", Handle: "fixture-group",
@@ -621,10 +825,31 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// so an operation that adds, removes or lists them has one to act on.
 	seed("conversation access group", repository.SetConversationAccessGroups(ctx, "T1", "C1",
 		[]domain.UserGroupID{fixtureUserGroupID}, event("E-access-group", "conversation.access_groups_set")))
+	// A saved Activity view and a sidebar section owned by the HOLDER, so the
+	// operations that delete or collapse the caller's own object reach success as
+	// the holder while a caller below membership is refused for standing.
+	seed("activity saved view", repository.CreateActivitySavedView(ctx, domain.ActivitySavedView{
+		ID: fixtureActivityViewID, WorkspaceID: "T1", UserID: "U-owner", Name: "fixture view",
+		Kinds: []domain.ActivityKind{domain.ActivityMention}, CreatedAt: at,
+	}))
+	seed("sidebar section", repository.CreateSidebarSection(ctx, domain.SidebarSection{
+		ID: fixtureSidebarSectionID, WorkspaceID: "T1", UserID: "U-owner", Name: "fixture section",
+		Position: 1, NotificationLevel: domain.NotificationInherit, CreatedAt: at,
+	}))
+	// The seeded conversation's own canvas, so ConversationCanvas has one to
+	// return to a member of the channel.
+	if _, err := (service.Messages{Store: repository}).CreateConversationCanvas(ctx, "T1", "U-owner", "C1", "channel canvas", `{"type":"markdown","markdown":"x"}`); err != nil {
+		t.Fatalf("seed conversation canvas: %v", err)
+	}
 }
 
 // fixtureMessageTimestamp names the one seeded message.
 const fixtureMessageTimestamp domain.MessageTimestamp = "1700000000.000100"
+
+// fixtureHolderReaction is the emoji the holder has reacted with, so
+// RemoveReaction has one of the holder's own to remove. AddReaction is handed a
+// different name the holder has not used, so it too reaches success.
+const fixtureHolderReaction = "clap"
 
 // The objects the fixture holds so that an operation naming one reaches its own
 // authorization instead of dying at "not found".
@@ -652,12 +877,17 @@ const (
 	fixtureAppID           domain.AppID           = "F-app"
 	fixtureHuddleID        domain.CallID          = "F-huddle"
 
-	fixtureSharedInviteID   domain.SharedInviteID    = "F-invite"
-	fixtureApprovedInviteID domain.SharedInviteID    = "F-approved-invite"
-	fixtureWorkflowTriggerD domain.WorkflowTriggerID = "F-trigger"
-	fixtureWorkflowRunID    domain.WorkflowRunID     = "F-run"
-	fixtureSavedItemID      domain.SavedItemID       = "F-saved"
-	fixtureMessageID        domain.MessageID         = "M1"
+	fixtureSharedInviteID    domain.SharedInviteID      = "F-invite"
+	fixtureApprovedInviteID  domain.SharedInviteID      = "F-approved-invite"
+	fixtureWorkflowTriggerD  domain.WorkflowTriggerID   = "F-trigger"
+	fixtureWorkflowRunID     domain.WorkflowRunID       = "F-run"
+	fixtureSavedItemID       domain.SavedItemID         = "F-saved"
+	fixtureHolderSavedItemID domain.SavedItemID         = "F-holder-saved"
+	fixtureMessageID         domain.MessageID           = "M1"
+	fixtureListItemID        domain.ListItemID          = "F-list-item"
+	fixtureScheduledStatusID domain.ScheduledStatusID   = "F-scheduled-status"
+	fixtureActivityViewID    domain.ActivitySavedViewID = "F-activity-view"
+	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
 )
 
 func requireSeed(t *testing.T, err error) {

@@ -210,7 +210,18 @@ Absent, and named on the page rather than rendered as an inert control:
   asks a caller who holds the authority as well, and the operations whose
   refusal still cannot tell the two apart are named in
   `refusalDoesNotDistinguishTheHolder` under a ceiling that only shrinks. What
-  shrinks it is a fixture rich enough for each operation to find its object.
+  shrinks it is a fixture rich enough for each operation to find its object: an
+  exhaustive audit took that ceiling from 103 to 66 and the surviving-guard
+  ceiling from 82 to 77, closing every operation the fixture can reach as the
+  holder — the list-item, message-reaction, posting, scheduling, draft, role,
+  retention, notification, own-scheduled-status, own-saved-item, own-Activity-view,
+  own-sidebar-section, own-draft, user-group-channel, channel-canvas, workflow
+  delete and trigger-permission operations. What remains is named residue: operations owner-only on a
+  member-owned object, a developer-app operation the member-owned fixture app
+  shadows, a second-organization or enterprise-grid action, a per-message pin or
+  star whose add and remove share the probe's one timestamp, and the
+  complex-state workflow and block-kit-payload operations whose front door needs
+  a multi-step object graph the probe does not yet build.
 - Current official SDKs exercise applicable `admin.*`, `team.*`, `users.*`,
   `apps.*`, and Slack Connect `conversations.*` methods.
 - The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey creates and
