@@ -387,6 +387,37 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 			Target: domain.LaterReminderPersonal, Text: "updated fixture reminder",
 			Recurrence: domain.ReminderOnce, DueAt: time.Now().Add(24 * time.Hour).UTC(),
 		})
+	case reflect.TypeOf(domain.WorkspaceRole("")):
+		// A real role, so SetUserRole reaches success promoting the seeded member
+		// rather than dying on an empty role. Named by method so the provisioning
+		// operations that also take a role — which authenticate a credential, not
+		// a member — keep the empty role they are inconclusive with.
+		if method == "SetUserRole" {
+			return reflect.ValueOf(domain.WorkspaceRoleAdmin)
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(domain.NotificationLevel("")):
+		// Named by method so SetSidebarSectionNotificationLevel, which needs a
+		// sidebar section this fixture does not seed, is not handed a valid level
+		// that would make it reach "not found" indistinguishably.
+		if method == "SetConversationNotificationPreferences" {
+			return reflect.ValueOf(domain.NotificationAll)
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(time.Time{}):
+		// Scheduling needs an instant in the future; other operations that take a
+		// time are content with the zero value, so only the schedulers are named.
+		switch method {
+		case "ScheduleMessage", "ScheduleMessageWithBlocks", "ScheduleMessageWithBlocksAndAttachments":
+			return reflect.ValueOf(time.Now().Add(24 * time.Hour).UTC())
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(int(0)):
+		// A valid retention duration; other int arguments keep the zero value.
+		if method == "SetConversationRetention" {
+			return reflect.ValueOf(30)
+		}
+		return reflect.Zero(argument)
 	case reflect.TypeOf(""):
 		// A plain string argument is meaningful only per operation, so it is
 		// filled by name like the typed-target cases above and left empty for
@@ -444,6 +475,15 @@ func fixtureStringArgument(method string) reflect.Value {
 		// A column name; paired with the real column type above, the holder's
 		// write grant carries the add to success.
 		return reflect.ValueOf("Status")
+	case "PostEphemeral", "ScheduleMessage", "SaveDraft":
+		// Message text, the only free string these take, so a member posting to
+		// the seeded conversation reaches success.
+		return reflect.ValueOf("a fixture message")
+	case "PostEphemeralWithBlocks", "ScheduleMessageWithBlocks":
+		// These take text and a blocks payload; a valid single-block layout reads
+		// as valid for both, so the holder reaches success while the string stays
+		// meaningful rather than a bare word standing in for JSON.
+		return reflect.ValueOf(`[{"type":"section","text":{"type":"mrkdwn","text":"x"}}]`)
 	}
 	return reflect.ValueOf("")
 }

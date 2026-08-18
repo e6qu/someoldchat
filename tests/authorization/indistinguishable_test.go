@@ -87,8 +87,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"RevokeDeveloperAppToken":                 {},
 		"ListEphemeralMessages":                   {},
 		"OpenAppHome":                             {},
-		"PostEphemeral":                           {},
-		"PostEphemeralWithBlocks":                 {},
 		"PostEphemeralWithBlocksAndAttachments":   {},
 		"RemoveListColumn":                        {},
 		"RemovePin":                               {},
@@ -98,20 +96,14 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"RestoreCanvasRevision":                   {},
 		"RunWorkflow":                             {},
 		"SavedItemForMessage":                     {},
-		"SaveDraft":                               {},
 		"SaveDraftWithAttachments":                {},
-		"ScheduleMessage":                         {},
 		"ScheduleMessageAs":                       {},
-		"ScheduleMessageWithBlocks":               {},
 		"ScheduleMessageWithBlocksAndAttachments": {},
 		"SetAppIcon":                              {},
 		"SetCanvasAccess":                         {},
-		"SetConversationNotificationPreferences":  {},
-		"SetConversationRetention":                {},
 		"SetFunctionPermission":                   {},
 		"SetListAccess":                           {},
 		"SetTriggerPermission":                    {},
-		"SetUserRole":                             {},
 		"SetWorkflowTrigger":                      {},
 		"SubmitView":                              {},
 		"SubmitWorkflowForm":                      {},
@@ -163,4 +155,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // the missing section is reached before any standing check. The other sidebar
 // operations distinguish — a create/read/rename/reorder/assign reaches a
 // validation or ownership branch that a holder and a stranger do not share.
-const indistinguishableRefusalCeiling = 86
+const indistinguishableRefusalCeiling = 78
