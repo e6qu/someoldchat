@@ -663,7 +663,11 @@ type canvasData struct {
 	// so a canvas an app created through canvases.create — which has taken
 	// structured sections since it was built — could be read but never edited,
 	// and its structure was invisible.
-	Sections       []canvasSectionView
+	Sections []canvasSectionView
+	// NewBlockKinds is the kind chooser for the "add a block" control, with no
+	// entry preselected. It is the same fixed vocabulary every block's own
+	// chooser draws from.
+	NewBlockKinds  []canvasKindOption
 	UpdatedAt      string
 	CSRFToken      string
 	CanWrite       bool
@@ -729,8 +733,53 @@ type canvasSectionView struct {
 	ID       string
 	Type     string
 	Text     string
-	Editable bool
 	Position int
+	// First and Last gate the reorder controls: the top block offers no "move
+	// up" and the bottom none "move down", rather than drawing a control that
+	// would be a no-op.
+	First bool
+	Last  bool
+	// Kinds is this block's kind chooser with the current kind selected. A block
+	// carrying a kind this client does not name (an app wrote it through
+	// canvases.create) keeps that kind through a hidden field instead, so editing
+	// its text does not quietly reclassify it; KnownKind says which case holds.
+	Kinds     []canvasKindOption
+	KnownKind bool
+}
+
+// canvasKindOption is one entry in a block's kind chooser.
+type canvasKindOption struct {
+	Value    string
+	Label    string
+	Selected bool
+}
+
+// canvasBlockKinds is the fixed vocabulary the block editor offers: a paragraph
+// and the three heading levels Slack's canvas uses. The stored kind for a
+// paragraph is "markdown"; the empty kind an older single-section canvas may
+// carry is treated as a paragraph.
+var canvasBlockKinds = []canvasKindOption{
+	{Value: "markdown", Label: "Paragraph"},
+	{Value: "h1", Label: "Heading 1"},
+	{Value: "h2", Label: "Heading 2"},
+	{Value: "h3", Label: "Heading 3"},
+}
+
+// canvasKindOptions returns the kind chooser for a block of the given stored
+// kind, with the matching entry selected, and reports whether the kind is one
+// this client names.
+func canvasKindOptions(kind string) ([]canvasKindOption, bool) {
+	if kind == "" || kind == "paragraph" {
+		kind = "markdown"
+	}
+	options := make([]canvasKindOption, len(canvasBlockKinds))
+	known := false
+	for i, option := range canvasBlockKinds {
+		option.Selected = option.Value == kind
+		known = known || option.Selected
+		options[i] = option
+	}
+	return options, known
 }
 
 type listCellView struct {
@@ -3167,19 +3216,21 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 .canvas-section{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.canvas-section:first-of-type{border-top:0;padding-top:0}
 ` + sharingStyle + `
 .editor{display:grid;gap:11px;margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}.editor label{display:grid;gap:6px;font-weight:700}.editor input,.editor textarea{padding:10px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor textarea{min-height:300px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
+.editor.block{min-height:0}.editor.block textarea{min-height:120px}.editor.block select{padding:8px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor.block .actions button:not(:first-child){background:transparent;border:1px solid var(--line);color:var(--text)}.rename{margin:8px 0 4px}.add-block{margin-top:22px;padding-top:14px;border-top:1px dashed var(--line)}.delete-block{margin-top:8px}.delete-block button{border:1px solid var(--danger);border-radius:7px;padding:7px 11px;background:transparent;color:var(--danger);font-weight:800}details.rename summary,details.add-block summary,details.delete-block summary{cursor:pointer;font-weight:700;color:var(--muted)}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><h2>{{.Title}}</h2><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}
+{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><h2>{{.Title}}</h2><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<details class="rename"><summary>Rename canvas</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/sections"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="op" value="title"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><div class="actions"><button type="submit">Rename</button></div></form></details>{{end}}
 {{range .Sections}}<section class="canvas-section" aria-label="Canvas part {{.Position}}{{if .Type}}, {{.Type}}{{end}}">
   <div class="canvas-body">{{.Text}}</div>
-  {{if and $.CanWrite .Editable}}<form class="editor" method="post" action="/app/canvases/{{$.ID}}/update">
+  {{if $.CanWrite}}<form class="editor block" method="post" action="/app/canvases/{{$.ID}}/sections">
     <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}">
-    <label>Title<input name="title" maxlength="255" value="{{$.Title}}" required></label>
-    <label>Section {{.Position}} content<textarea name="body" maxlength="100000">{{.Text}}</textarea></label>
-    <div class="actions"><button type="submit">Save section {{.Position}}</button></div>
-  </form>{{else if $.CanWrite}}<p class="notice" role="note">This section is {{.Type}} content. It is shown as stored; editing it here would flatten it, so this client does not offer that.</p>{{end}}
+    {{if .KnownKind}}<label>Kind<select name="type">{{range .Kinds}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label>{{else}}<input type="hidden" name="type" value="{{.Type}}"><p class="read-only">This block is {{.Type}} content; its kind is kept as you edit its text.</p>{{end}}
+    <label>Block {{.Position}} content<textarea name="body" maxlength="100000">{{.Text}}</textarea></label>
+    <div class="actions"><button type="submit" name="op" value="save">Save block {{.Position}}</button>{{if not .First}}<button type="submit" name="op" value="move_up">Move up</button>{{end}}{{if not .Last}}<button type="submit" name="op" value="move_down">Move down</button>{{end}}</div>
+  </form>
+  <details class="delete-block"><summary>Delete block {{.Position}}</summary><form method="post" action="/app/canvases/{{$.ID}}/sections"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="op" value="delete"><input type="hidden" name="section_id" value="{{.ID}}"><p class="read-only">Deleting a block removes its text for good; a comment left on it is kept and marked as being about a removed section.</p><button type="submit">Delete block {{.Position}}</button></form></details>{{end}}
 </section>{{end}}
-{{if and .CanWrite (not .Sections)}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value=""><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000"></textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}<section class="canvas-comments" aria-labelledby="canvas-comments-heading"><h3 id="canvas-comments-heading">Comments</h3>
+{{if .CanWrite}}<details class="add-block"{{if not .Sections}} open{{end}}><summary>Add a block</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/sections"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="op" value="add"><label>Kind<select name="type">{{range .NewBlockKinds}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select></label><label>Content<textarea name="body" maxlength="100000"></textarea></label><div class="actions"><button type="submit">Add block</button></div></form></details>{{end}}<section class="canvas-comments" aria-labelledby="canvas-comments-heading"><h3 id="canvas-comments-heading">Comments</h3>
 {{if .Comments}}<ul class="comments">{{range .Comments}}<li class="comment"><span class="comment-head"><span class="comment-author">{{.AuthorName}}</span>{{if .SectionName}}<span class="comment-anchor">on {{.SectionName}}</span>{{end}}<time class="comment-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span><p class="comment-text">{{.Text}}</p>{{if .DeleteURL}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Delete comment</button></form>{{end}}</li>{{end}}</ul>{{else}}<p class="empty">No comments yet.</p>{{end}}
 <form class="new-comment" method="post" action="/app/canvases/{{.ID}}/comments"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
 <label for="comment-section">About</label><select id="comment-section" name="section_id"><option value="">The whole canvas</option>{{range .Sections}}<option value="{{.ID}}">Section {{.Position}}</option>{{end}}</select>
@@ -4717,7 +4768,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/canvases", h.canvases)
 	mux.HandleFunc("POST /app/canvases/create", h.createCanvas)
 	mux.HandleFunc("GET /app/canvases/{canvasID}", h.canvas)
-	mux.HandleFunc("POST /app/canvases/{canvasID}/update", h.updateCanvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/sections", h.editCanvasSection)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
 	mux.HandleFunc("GET /app/channel-canvas", h.channelCanvas)
@@ -9041,28 +9092,31 @@ func canvasSections(value domain.Canvas) ([]canvasSectionView, bool) {
 	}
 	views := make([]canvasSectionView, 0, len(document.Sections))
 	for index, section := range document.Sections {
+		kinds, known := canvasKindOptions(string(section.Type))
 		views = append(views, canvasSectionView{
+			// Every block is editable in place now: the model stores only a kind
+			// and text, so editing any block is lossless — there is no longer a
+			// class of block the editor renders read-only.
 			ID: section.ID, Type: string(section.Type), Text: section.Text,
-			Editable: section.Type.Editable(),
-			Position: index + 1,
+			Position:  index + 1,
+			First:     index == 0,
+			Last:      index == len(document.Sections)-1,
+			Kinds:     kinds,
+			KnownKind: known,
 		})
 	}
 	return views, true
 }
 
-func canvasEditor(value domain.Canvas) (body, sectionID string, editable bool) {
+// canvasBody joins a canvas's blocks into one preview string for the directory
+// card. It is only ever a preview: the editor renders each block on its own, so
+// this no longer needs to say which block is editable or single.
+func canvasBody(value domain.Canvas) string {
 	var document struct {
 		Sections []domain.CanvasSection `json:"sections"`
 	}
 	if json.Unmarshal([]byte(value.DocumentContent), &document) != nil {
-		return "", "", false
-	}
-	if len(document.Sections) == 0 {
-		return "", "", true
-	}
-	if len(document.Sections) == 1 && document.Sections[0].Type == domain.CanvasSectionMarkdown {
-		section := document.Sections[0]
-		return section.Text, section.ID, true
+		return ""
 	}
 	parts := make([]string, 0, len(document.Sections))
 	for _, section := range document.Sections {
@@ -9070,12 +9124,7 @@ func canvasEditor(value domain.Canvas) (body, sectionID string, editable bool) {
 			parts = append(parts, text)
 		}
 	}
-	return strings.Join(parts, "\n\n"), "", false
-}
-
-func canvasBody(value domain.Canvas) string {
-	body, _, _ := canvasEditor(value)
-	return body
+	return strings.Join(parts, "\n\n")
 }
 
 func (h Handler) canvases(w http.ResponseWriter, r *http.Request) {
@@ -9184,7 +9233,7 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	grants, shareTargets := h.canvasSharing(r.Context(), principal, value, owner)
-	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), SharePath: "/app/canvases/" + url.PathEscape(string(value.ID)), ShareNoun: "canvas", ID: string(value.ID), Title: value.Title, Sections: sections, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), SharePath: "/app/canvases/" + url.PathEscape(string(value.ID)), ShareNoun: "canvas", ID: string(value.ID), Title: value.Title, Sections: sections, NewBlockKinds: canvasBlockKinds, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
 }
 
 // documentSharing builds the sharing list and, for the owner, the people and
@@ -9561,7 +9610,13 @@ func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(value.ID)))
 }
 
-func (h Handler) updateCanvas(w http.ResponseWriter, r *http.Request) {
+// editCanvasSection is the block editor's single write path: it edits one
+// block's kind and text, adds a block, inserts one after another, reorders a
+// block up or down, deletes one, or renames the canvas — each expressed as a
+// canvases.edit change over the current document. A block whose structure moved
+// under the editor is a conflict, not a silent overwrite, so every operation
+// that names a block re-reads the document and refuses if that block is gone.
+func (h Handler) editCanvasSection(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {
 		h.writeAuthError(w, r, err)
@@ -9582,40 +9637,100 @@ func (h Handler) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its document could not be read. Reload it before editing.")
 		return
 	}
-	// The section being edited must still be there, still be the same section,
-	// and still be one this client can edit. A canvas whose structure changed
-	// under the editor is a conflict, not a silent overwrite of whatever now
-	// occupies that position.
-	sectionID := strings.TrimSpace(fields["section_id"])
-	operation := "replace"
-	if sectionID == "" {
-		if len(sections) != 0 {
-			h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its document structure changed. Reload it before editing.")
-			return
-		}
-		operation = "insert_at_end"
-	} else {
-		known := false
-		for _, section := range sections {
-			if section.ID == sectionID && section.Editable {
-				known = true
-				break
+	// find locates a named block and its stored kind, so an operation can both
+	// confirm the block is still present and preserve an app-authored kind this
+	// client does not name.
+	find := func(sectionID string) (int, string, bool) {
+		for index, section := range sections {
+			if section.ID == sectionID {
+				return index, section.Type, true
 			}
 		}
-		if !known {
-			h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "That section is no longer part of this canvas, or is not one this client can edit. Reload it before editing.")
+		return 0, "", false
+	}
+	sectionID := strings.TrimSpace(fields["section_id"])
+	body := fields["body"]
+	conflict := func() {
+		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its structure changed under you. Reload it before editing.")
+	}
+
+	var changes []map[string]any
+	switch fields["op"] {
+	case "title":
+		title := strings.TrimSpace(fields["title"])
+		if title == "" {
+			h.writeMutationError(w, r, http.StatusBadRequest, "The canvas was not renamed", "Give the canvas a title and try again.")
 			return
 		}
+		changes = []map[string]any{{"operation": "replace", "title_content": map[string]string{"title": title}}}
+	case "save":
+		_, existingKind, present := find(sectionID)
+		if !present {
+			conflict()
+			return
+		}
+		changes = []map[string]any{{"operation": "replace", "section_id": sectionID, "document_content": canvasBlockContent(fields["type"], existingKind, body)}}
+	case "add":
+		changes = []map[string]any{{"operation": "insert_at_end", "document_content": canvasBlockContent(fields["type"], "", body)}}
+	case "insert_after":
+		if _, _, present := find(sectionID); !present {
+			conflict()
+			return
+		}
+		changes = []map[string]any{{"operation": "insert_after", "section_id": sectionID, "document_content": canvasBlockContent(fields["type"], "", body)}}
+	case "delete":
+		if _, _, present := find(sectionID); !present {
+			conflict()
+			return
+		}
+		changes = []map[string]any{{"operation": "delete", "section_id": sectionID}}
+	case "move_up", "move_down":
+		index, _, present := find(sectionID)
+		if !present {
+			conflict()
+			return
+		}
+		up := fields["op"] == "move_up"
+		if (up && index == 0) || (!up && index == len(sections)-1) {
+			// Already at the edge; nothing to do rather than an error.
+			h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id)))
+			return
+		}
+		// The neighbour to hop over is the block just above (moving up) or just
+		// below (moving down); each is in range only because the edge case above
+		// already returned.
+		operation, target := "move_before", sections[index-1].ID
+		if !up {
+			operation, target = "move_after", sections[index+1].ID
+		}
+		changes = []map[string]any{{"operation": operation, "section_id": sectionID, "target_section_id": target}}
+	default:
+		h.writeMutationError(w, r, http.StatusBadRequest, "The canvas was not saved", "Reload the canvas and try again.")
+		return
 	}
-	changes, _ := json.Marshal([]map[string]any{
-		{"operation": "replace", "title_content": map[string]string{"title": strings.TrimSpace(fields["title"])}},
-		{"operation": operation, "section_id": sectionID, "document_content": map[string]string{"type": "markdown", "markdown": fields["body"]}},
-	})
-	if err := h.Messages.EditCanvas(r.Context(), principal.WorkspaceID, principal.UserID, id, string(changes)); err != nil {
+
+	encoded, _ := json.Marshal(changes)
+	if err := h.Messages.EditCanvas(r.Context(), principal.WorkspaceID, principal.UserID, id, string(encoded)); err != nil {
 		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "It changed elsewhere or you no longer have edit access. Reload it and try again.")
 		return
 	}
 	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id))+"?notice=Canvas+saved")
+}
+
+// canvasBlockContent builds the document_content for a block. A kind this client
+// names is used as given; an unnamed kind is preserved only when it matches the
+// block already there (an app-authored kind kept through an edit of its text),
+// and otherwise the block becomes a paragraph rather than inventing a kind.
+func canvasBlockContent(requested, existingKind, body string) map[string]string {
+	kind := strings.TrimSpace(requested)
+	switch kind {
+	case "markdown", "h1", "h2", "h3":
+	default:
+		if kind == "" || kind != existingKind {
+			kind = "markdown"
+		}
+	}
+	return map[string]string{"type": kind, "markdown": body}
 }
 
 func (h Handler) deleteCanvas(w http.ResponseWriter, r *http.Request) {

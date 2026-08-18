@@ -2015,12 +2015,25 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await page.getByLabel('Content').fill('Initial durable content');
   await page.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByRole('heading', { name: canvasName })).toBeVisible();
-  await page.getByLabel('Title').fill(`${canvasName} revised`);
-  // Each section carries its own editor, so the control names the section it
-  // saves. A canvas created through the UI has exactly one.
-  await page.getByLabel('Section 1 content').fill('One atomic revision');
-  await page.getByRole('button', { name: 'Save section 1' }).click();
+  // The title has its own rename control, opened from its summary like the
+  // create control above it; renaming commits a revision.
+  await page.getByText('Rename canvas').click();
+  const renameForm = page.locator('form').filter({ has: page.getByRole('button', { name: 'Rename' }) });
+  await renameForm.getByLabel('Title').fill(`${canvasName} revised`);
+  await renameForm.getByRole('button', { name: 'Rename' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
+  // Each block carries its own editor, so the control names the block it saves.
+  // A canvas created through the UI has exactly one block to start.
+  await page.getByLabel('Block 1 content').fill('One atomic revision');
+  await page.getByRole('button', { name: 'Save block 1' }).click();
+  await expect(page.getByText('Canvas saved')).toBeVisible();
+  // Add a heading block through the block editor and confirm it renders.
+  await page.getByText('Add a block').click();
+  const addBlock = page.locator('form').filter({ has: page.getByRole('button', { name: 'Add block' }) });
+  await addBlock.getByRole('combobox', { name: 'Kind' }).selectOption('h2');
+  await addBlock.getByLabel('Content').fill('Milestones');
+  await addBlock.getByRole('button', { name: 'Add block' }).click();
+  await expect(page.getByText('Milestones')).toBeVisible();
   await page.getByRole('link', { name: 'Canvases' }).click();
   await expect(page.getByRole('heading', { name: `${canvasName} revised` })).toBeVisible();
 

@@ -73,6 +73,68 @@ func TestCanvasLifecycleAndSectionLookup(t *testing.T) {
 	}
 }
 
+// TestCanvasSectionMovePreservesIdentityAndOrder covers the reorder operation
+// the block editor composes: a section moves before or after another, its own
+// id survives the move (so comment anchors stay attached), and a move naming a
+// missing or identical section is refused rather than silently dropped.
+func TestCanvasSectionMovePreservesIdentityAndOrder(t *testing.T) {
+	ctx := context.Background()
+	backing := memory.New()
+	backing.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Workspace"})
+	backing.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	messages := Messages{Store: backing}
+
+	canvas, err := messages.CreateCanvas(ctx, "T1", "U1", "Ordered", `{"type":"markdown","markdown":"first"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"second", "third"} {
+		if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"`+text+`"}}]`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	order := func() []domain.CanvasSection {
+		sections, err := messages.LookupCanvasSections(ctx, "T1", "U1", canvas.ID, `{}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sections
+	}
+	sections := order()
+	if len(sections) != 3 || sections[0].Text != "first" || sections[2].Text != "third" {
+		t.Fatalf("initial order=%+v", sections)
+	}
+	first, third := sections[0].ID, sections[2].ID
+
+	// Move the first section to the end (after the third). Its id must survive.
+	move := `[{"operation":"move_after","section_id":"` + first + `","target_section_id":"` + third + `"}]`
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, move); err != nil {
+		t.Fatalf("move_after: %v", err)
+	}
+	moved := order()
+	if len(moved) != 3 || moved[0].Text != "second" || moved[2].Text != "first" || moved[2].ID != first {
+		t.Fatalf("after move_after=%+v (first id %s)", moved, first)
+	}
+
+	// Move it back to the very front (before what is now the first section).
+	back := `[{"operation":"move_before","section_id":"` + first + `","target_section_id":"` + moved[0].ID + `"}]`
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, back); err != nil {
+		t.Fatalf("move_before: %v", err)
+	}
+	if restored := order(); restored[0].ID != first || restored[0].Text != "first" {
+		t.Fatalf("after move_before=%+v", restored)
+	}
+
+	// A move that names a missing target is a not-found, and a section cannot be
+	// moved relative to itself.
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"move_after","section_id":"`+first+`","target_section_id":"nope"}]`); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing target = %v, want ErrNotFound", err)
+	}
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"move_before","section_id":"`+first+`","target_section_id":"`+first+`"}]`); !errors.Is(err, ErrInvalidCanvas) {
+		t.Fatalf("self move = %v, want ErrInvalidCanvas", err)
+	}
+}
+
 func TestConversationCanvasIsSingularAndInheritsChannelAccess(t *testing.T) {
 	ctx := context.Background()
 	backing := memory.New()

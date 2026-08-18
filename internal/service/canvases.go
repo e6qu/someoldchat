@@ -21,6 +21,7 @@ type canvasDocument struct {
 type canvasChange struct {
 	Operation       string          `json:"operation"`
 	SectionID       string          `json:"section_id"`
+	TargetSectionID string          `json:"target_section_id"`
 	DocumentContent json.RawMessage `json:"document_content"`
 	TitleContent    json.RawMessage `json:"title_content"`
 }
@@ -561,6 +562,42 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 		for index, section := range document.Sections {
 			if section.ID == change.SectionID {
 				document.Sections = append(document.Sections[:index], document.Sections[index+1:]...)
+				return nil
+			}
+		}
+		return store.ErrNotFound
+	}
+	// move reorders an existing section without minting a new one, so its
+	// identity — and the comment anchors that point at it — survive the move. It
+	// is composed only by first-party clients (the block editor's up/down
+	// controls); Slack's own canvases.edit has no move, and none is exposed at
+	// the Slack API boundary.
+	if change.Operation == "move_before" || change.Operation == "move_after" {
+		if change.SectionID == "" || change.TargetSectionID == "" || change.SectionID == change.TargetSectionID {
+			return ErrInvalidCanvas
+		}
+		moved, ok := domain.CanvasSection{}, false
+		remaining := document.Sections[:0:0]
+		for _, section := range document.Sections {
+			if section.ID == change.SectionID {
+				moved, ok = section, true
+				continue
+			}
+			remaining = append(remaining, section)
+		}
+		if !ok {
+			return store.ErrNotFound
+		}
+		for index, section := range remaining {
+			if section.ID == change.TargetSectionID {
+				position := index
+				if change.Operation == "move_after" {
+					position++
+				}
+				remaining = append(remaining, domain.CanvasSection{})
+				copy(remaining[position+1:], remaining[position:])
+				remaining[position] = moved
+				document.Sections = remaining
 				return nil
 			}
 		}

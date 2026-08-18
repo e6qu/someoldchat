@@ -250,15 +250,24 @@ for later steps and conditions to read.
 ## Current SameOldChat boundary
 
 CANVAS-01 and the basic persistence portion of CANVAS-02 now have a real
-workspace surface and access-filtered memory/SQL/gRPC reads. Owner edits of a
-single Markdown section commit title and body as one compare-and-swap revision.
-Structured canvases render read-only rather than being silently flattened.
-Comments, revision history, and sharing review are now built: the sharing
-surface names everyone who may open a canvas, and only its owner is offered the
-controls that change that. A conversation now reaches its own canvas from the
-conversation itself, and creating one is a deliberate act rather than a side
-effect of following the link. Collaborative cursors, autosave/offline recovery,
-and full rich block editing remain gaps.
+workspace surface and access-filtered memory/SQL/gRPC reads. The web client is a
+block editor over the whole document: every block renders as its own block with
+its own editor, and a member with write access edits any block's text and kind
+(paragraph or heading), adds a block, reorders one up or down, deletes one, and
+renames the canvas — each committed as a canvases.edit change that bumps the
+compare-and-swap revision. A block whose structure moved under the editor is a
+conflict, not a silent overwrite. Reordering preserves a block's identity, so a
+comment anchored to it stays attached; a block carrying a kind this client does
+not name (an app authored it through canvases.create) is still editable and
+keeps that kind through an edit of its text rather than being flattened to a
+paragraph. Structured, multi-section canvases are therefore fully editable in
+app — the read-only fallback remains only for a document whose JSON cannot be
+parsed at all. Comments, revision history, and sharing review are built: the
+sharing surface names everyone who may open a canvas, and only its owner is
+offered the controls that change that. A conversation reaches its own canvas
+from the conversation itself, and creating one is a deliberate act rather than a
+side effect of following the link. Collaborative cursors and autosave/offline
+recovery remain gaps.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,
