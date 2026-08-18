@@ -137,6 +137,32 @@ entries:
     license: BSD-2-Clause
     purpose: WebSocket transport
     runtime: true
+  - id: go/github.com/pion/webrtc/v4
+    kind: go-module
+    canonical: github.com/pion/webrtc/v4
+    source: https://github.com/pion/webrtc
+    version: v4.0.16
+    revision: 705b728d289a92bc484c8c843a29b3fc51e4123d
+    published_at: 2025-04-25T18:21:36Z
+    evidence: https://proxy.golang.org/github.com/pion/webrtc/v4/@v/v4.0.16.info
+    checksum: h1:5f8QMVIbNvJr2mPRGi2QamkPa/LVUB6NWolOCwphKHA=
+    provenance: vcs-tag
+    license: MIT
+    purpose: In-process WebRTC selective forwarding unit for huddle media
+    runtime: true
+  - id: go/github.com/pion/interceptor
+    kind: go-module
+    canonical: github.com/pion/interceptor
+    source: https://github.com/pion/interceptor
+    version: v0.1.37
+    revision: 0eab1887cec79081e21457c0f9f89be2537c5df5
+    published_at: 2024-10-07T02:36:07Z
+    evidence: https://proxy.golang.org/github.com/pion/interceptor/@v/v0.1.37.info
+    checksum: h1:aRA8Zpab/wE7/c0O3fh1PqY0AJI3fCSEM5lRWJVorwI=
+    provenance: vcs-tag
+    license: MIT
+    purpose: WebRTC RTCP/NACK/report interceptors for the huddle SFU
+    runtime: true
   - id: go/github.com/jackc/pgx/v5
     kind: go-module
     canonical: github.com/jackc/pgx/v5
