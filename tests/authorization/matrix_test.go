@@ -365,7 +365,14 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 	case reflect.TypeOf(domain.WorkflowRunID("")):
 		return reflect.ValueOf(fixtureWorkflowRunID)
 	case reflect.TypeOf(domain.SavedItemID("")):
+		// RemoveSavedItem acts on the caller's own saved item, so the holder is
+		// handed its own; other operations that name one keep the member's.
+		if method == "RemoveSavedItem" {
+			return reflect.ValueOf(fixtureHolderSavedItemID)
+		}
 		return reflect.ValueOf(fixtureSavedItemID)
+	case reflect.TypeOf(domain.ScheduledStatusID("")):
+		return reflect.ValueOf(fixtureScheduledStatusID)
 	case reflect.TypeOf(domain.MessageID("")):
 		return reflect.ValueOf(fixtureMessageID)
 	case reflect.TypeOf(domain.MessageTimestamp("")):
@@ -754,6 +761,27 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}, event("E-saved", "saved_item.created")); err != nil {
 		t.Fatalf("seed saved item: %v", err)
 	}
+	// The HOLDER's own saved item on the same message, its own scheduled status,
+	// and its own draft, so the operations that read or remove "mine" — which
+	// authorize the workspace or conversation and then act on the caller's object
+	// — reach success as the holder while a caller below membership is refused for
+	// standing. Each belongs to U-owner, the caller the differential asks.
+	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
+		ID: fixtureHolderSavedItemID, WorkspaceID: "T1", UserID: "U-owner", MessageID: fixtureMessageID,
+		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
+	}, event("E-holder-saved", "saved_item.created")); err != nil {
+		t.Fatalf("seed holder saved item: %v", err)
+	}
+	seed("scheduled status", repository.CreateScheduledStatus(ctx, domain.ScheduledStatus{
+		ID: fixtureScheduledStatusID, WorkspaceID: "T1", UserID: "U-owner", StatusText: "away",
+		StartsAt: at.Add(time.Hour), EndsAt: at.Add(2 * time.Hour), CreatedAt: at, UpdatedAt: at,
+	}))
+	if _, err := repository.UpsertDraft(ctx, domain.Draft{
+		WorkspaceID: "T1", UserID: "U-owner", ConversationID: "C1", ThreadTimestamp: fixtureMessageTimestamp,
+		Text: "seeded draft", UpdatedAt: at,
+	}, event("E-holder-draft", "draft.updated")); err != nil {
+		t.Fatalf("seed holder draft: %v", err)
+	}
 	seed("usergroup", repository.CreateUserGroup(ctx, domain.UserGroup{
 		WorkspaceID: "T1", ID: fixtureUserGroupID, Name: "fixture group", Handle: "fixture-group",
 		Creator: "U-member", UpdatedBy: "U-member", CreatedAt: at, UpdatedAt: at, Enabled: true,
@@ -799,13 +827,15 @@ const (
 	fixtureAppID           domain.AppID           = "F-app"
 	fixtureHuddleID        domain.CallID          = "F-huddle"
 
-	fixtureSharedInviteID   domain.SharedInviteID    = "F-invite"
-	fixtureApprovedInviteID domain.SharedInviteID    = "F-approved-invite"
-	fixtureWorkflowTriggerD domain.WorkflowTriggerID = "F-trigger"
-	fixtureWorkflowRunID    domain.WorkflowRunID     = "F-run"
-	fixtureSavedItemID      domain.SavedItemID       = "F-saved"
-	fixtureMessageID        domain.MessageID         = "M1"
-	fixtureListItemID       domain.ListItemID        = "F-list-item"
+	fixtureSharedInviteID    domain.SharedInviteID    = "F-invite"
+	fixtureApprovedInviteID  domain.SharedInviteID    = "F-approved-invite"
+	fixtureWorkflowTriggerD  domain.WorkflowTriggerID = "F-trigger"
+	fixtureWorkflowRunID     domain.WorkflowRunID     = "F-run"
+	fixtureSavedItemID       domain.SavedItemID       = "F-saved"
+	fixtureHolderSavedItemID domain.SavedItemID       = "F-holder-saved"
+	fixtureMessageID         domain.MessageID         = "M1"
+	fixtureListItemID        domain.ListItemID        = "F-list-item"
+	fixtureScheduledStatusID domain.ScheduledStatusID = "F-scheduled-status"
 )
 
 func requireSeed(t *testing.T, err error) {
