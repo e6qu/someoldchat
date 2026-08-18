@@ -210,6 +210,21 @@ func (r *Room) Leave(id string) {
 	}
 }
 
+// has reports whether a participant is already in the room.
+func (r *Room) has(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.peers[id]
+	return ok
+}
+
+// empty reports whether the room has no participants left.
+func (r *Room) empty() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.peers) == 0
+}
+
 // Close tears the whole room down.
 func (r *Room) Close() {
 	r.mu.Lock()

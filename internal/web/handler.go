@@ -24,6 +24,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
@@ -39,6 +40,11 @@ type Handler struct {
 	Login           *LoginHandler
 	PublicURL       string
 	ReleaseRevision string
+	// SFU forwards huddle media. It is nil on a server that cannot host media
+	// (a distributed composition where this process is not the media host), in
+	// which case the huddle media routes answer that it is unavailable rather
+	// than pretending to connect.
+	SFU *huddlesfu.Manager
 }
 
 var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
@@ -4724,6 +4730,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/huddle/end", h.huddleMutation("ended", h.endHuddle, "Huddle ended"))
 	mux.HandleFunc("POST /app/huddle/invite", h.huddleInvite)
 	mux.HandleFunc("POST /app/huddle/signal", h.huddleSignal)
+	mux.HandleFunc("POST /app/huddle/sfu", h.huddleSFUOffer)
+	mux.HandleFunc("POST /app/huddle/sfu/signal", h.huddleSFUSignal)
 	mux.HandleFunc("POST /app/huddle/react", h.huddleReact)
 	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
 	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)

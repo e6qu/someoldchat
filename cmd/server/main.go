@@ -23,6 +23,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/generated"
+	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/observability"
@@ -195,6 +196,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	var authenticator auth.Authenticator
 	var webAuthenticator auth.Authenticator
 	var sessionRevoker auth.SessionRevoker
+	// The huddle SFU forwards media inside this process. It needs the event log
+	// to push its offers and candidates to browsers, so it is only wired where
+	// this process owns the store (local composition); elsewhere huddle media is
+	// reported unavailable rather than silently broken.
+	var sfuManager *huddlesfu.Manager
 	var socketModeStore socketmode.ConnectionStore
 	var socketModeAuth auth.Authenticator
 	switch settings.chatMode {
@@ -215,6 +221,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		}()
 		chatService = runtime.Service
 		socketModeStore = runtime.Store
+		sfuManager = huddlesfu.NewManager(web.HuddleSignalEmitter{Store: runtime.Store})
 		if settings.appToken != "" {
 			appTokenStore, ok := runtime.TokenStore.(interface {
 				SeedAppToken(context.Context, string, domain.AppTokenRecord) error
@@ -350,6 +357,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure web", "error", err)
 		return exitConfiguration
 	}
+	webHandler.SFU = sfuManager
 	if strings.TrimSpace(settings.authPublicURL) != "" {
 		if publicErr := webHandler.SetPublicURL(settings.authPublicURL); publicErr != nil {
 			logger.Error("configure web public URL", "error", publicErr)
