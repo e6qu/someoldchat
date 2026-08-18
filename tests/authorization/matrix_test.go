@@ -443,6 +443,22 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 			return reflect.ValueOf(30)
 		}
 		return reflect.Zero(argument)
+	case reflect.TypeOf(uint64(0)):
+		// The fixture workflow's version, so DeleteWorkflow's optimistic-version
+		// check matches and the manager reaches the delete rather than a conflict.
+		if method == "DeleteWorkflow" {
+			return reflect.ValueOf(uint64(1))
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf(domain.AutomationPermission{}):
+		// A valid permission, so SetTriggerPermission — whose trigger and app the
+		// fixture already match — reaches success rather than an invalid-payload
+		// refusal. Named by method so the function-permission operation, which is
+		// still refused at its missing function, keeps the empty value.
+		if method == "SetTriggerPermission" {
+			return reflect.ValueOf(domain.AutomationPermission{PermissionType: domain.PermissionEveryone})
+		}
+		return reflect.Zero(argument)
 	case reflect.TypeOf(""):
 		// A plain string argument is meaningful only per operation, so it is
 		// filled by name like the typed-target cases above and left empty for

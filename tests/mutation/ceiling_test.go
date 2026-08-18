@@ -42,6 +42,10 @@ package mutation
 // Activity view and sidebar section, and the seeded conversation's own canvas —
 // and handing the probe the one valid string, id, slice, level, role, duration
 // or instant each operation needs — moved refusalDoesNotDistinguishTheHolder
-// from 103 to 68 and this number with it, four operations at a time, as each
-// batch of the audit landed.
-const survivingGuardCeiling = 78
+// from 103 to 66 and this number with it, a batch at a time, as each batch of
+// the audit landed.
+//
+// 78 to 77: the workflow batch handed the probe the owner's workflow version and
+// a valid trigger permission, so DeleteWorkflow's manager guard is now
+// load-bearing where it used to run on to an optimistic-version conflict.
+const survivingGuardCeiling = 77

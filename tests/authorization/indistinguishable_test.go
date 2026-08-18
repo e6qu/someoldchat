@@ -22,16 +22,18 @@
 //
 // The ceiling only shrinks.
 //
-// The exhaustive audit took this list from 103 to 68. It closed every operation
+// The exhaustive audit took this list from 103 to 66. It closed every operation
 // the fixture can reach as the holder: the list-item operations once the list
 // gained a row; the message reactions once the holder had one of its own; the
 // posting, scheduling, draft, role, retention and notification operations once
 // the probe supplied the one string, level, role, duration or future instant
 // each needed; the operations on the caller's own scheduled status, saved item,
 // Activity view, sidebar section and draft once those were seeded owned by the
-// holder; and the user-group channel and channel-canvas operations once given a
-// channel to act on. Each is backed by the probe reaching its success where a
-// caller below membership is refused for standing, so a deleted guard is caught.
+// holder; the user-group channel and channel-canvas operations once given a
+// channel to act on; and the workflow delete and trigger-permission operations
+// once handed the owner's workflow version and a valid permission. Each is
+// backed by the probe reaching its success where a caller below membership is
+// refused for standing, so a deleted guard is caught.
 //
 // What remains is three kinds of residue, named rather than counted as covered:
 //   - Structural: an operation owner-only on an object the fixture gives the
@@ -42,9 +44,10 @@
 //     per-(message,user) pin or star whose add and remove share the one probe
 //     timestamp (RemovePin, RemoveStar). Closing these would distort the fixture
 //     other operations depend on.
-//   - Complex-state buildable: the workflow state machine (RunWorkflow,
-//     DeleteWorkflow, WebhookTriggerURL with its sealed secret, the interactive
-//     run and function operations) and the incoming-webhook, app-request and
+//   - Complex-state buildable: the rest of the workflow state machine
+//     (RunWorkflow, WebhookTriggerURL with its sealed secret, UpdateWorkflow and
+//     SetWorkflowTrigger with their full definitions, the interactive run and
+//     function operations) and the incoming-webhook, app-request and
 //     app-resolution admin operations. Each needs a multi-step object graph in a
 //     particular state; they are a further batch of the same audit, not a
 //     different problem.
@@ -96,7 +99,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"DeleteListItemComment":                   {},
 		"DetachFileFromListItem":                  {},
 		"DeleteListAccess":                        {},
-		"DeleteWorkflow":                          {},
 		"DiscardWorkflowStagedChanges":            {},
 		"DispatchAppShortcut":                     {},
 		"DispatchSlashCommand":                    {},
@@ -123,7 +125,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"SetCanvasAccess":                         {},
 		"SetFunctionPermission":                   {},
 		"SetListAccess":                           {},
-		"SetTriggerPermission":                    {},
 		"SetWorkflowTrigger":                      {},
 		"SubmitView":                              {},
 		"SubmitWorkflowForm":                      {},
@@ -161,4 +162,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // developer-app operation refuses the holder and a stranger alike with not-found.
 // Re-owning the fixture app would distort the cases that depend on a member-owned
 // app.
-const indistinguishableRefusalCeiling = 68
+const indistinguishableRefusalCeiling = 66
