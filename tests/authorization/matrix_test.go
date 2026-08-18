@@ -373,6 +373,24 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureSavedItemID)
 	case reflect.TypeOf(domain.ScheduledStatusID("")):
 		return reflect.ValueOf(fixtureScheduledStatusID)
+	case reflect.TypeOf(domain.ActivitySavedViewID("")):
+		return reflect.ValueOf(fixtureActivityViewID)
+	case reflect.TypeOf(domain.SidebarSectionID("")):
+		return reflect.ValueOf(fixtureSidebarSectionID)
+	case reflect.TypeOf([]domain.ConversationID(nil)):
+		// A non-empty channel selection for the user-group operations that add or
+		// remove channels; named by method so the sharing operations that also
+		// take a channel slice keep the empty one they are inconclusive with.
+		switch method {
+		case "AddUserGroupChannels", "RemoveUserGroupChannels":
+			return reflect.ValueOf([]domain.ConversationID{"C1"})
+		}
+		return reflect.Zero(argument)
+	case reflect.TypeOf([]domain.WorkspaceID(nil)):
+		if method == "AdminAddUserGroupTeams" {
+			return reflect.ValueOf([]domain.WorkspaceID{"T2"})
+		}
+		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.MessageID("")):
 		return reflect.ValueOf(fixtureMessageID)
 	case reflect.TypeOf(domain.MessageTimestamp("")):
@@ -791,6 +809,22 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// so an operation that adds, removes or lists them has one to act on.
 	seed("conversation access group", repository.SetConversationAccessGroups(ctx, "T1", "C1",
 		[]domain.UserGroupID{fixtureUserGroupID}, event("E-access-group", "conversation.access_groups_set")))
+	// A saved Activity view and a sidebar section owned by the HOLDER, so the
+	// operations that delete or collapse the caller's own object reach success as
+	// the holder while a caller below membership is refused for standing.
+	seed("activity saved view", repository.CreateActivitySavedView(ctx, domain.ActivitySavedView{
+		ID: fixtureActivityViewID, WorkspaceID: "T1", UserID: "U-owner", Name: "fixture view",
+		Kinds: []domain.ActivityKind{domain.ActivityMention}, CreatedAt: at,
+	}))
+	seed("sidebar section", repository.CreateSidebarSection(ctx, domain.SidebarSection{
+		ID: fixtureSidebarSectionID, WorkspaceID: "T1", UserID: "U-owner", Name: "fixture section",
+		Position: 1, NotificationLevel: domain.NotificationInherit, CreatedAt: at,
+	}))
+	// The seeded conversation's own canvas, so ConversationCanvas has one to
+	// return to a member of the channel.
+	if _, err := (service.Messages{Store: repository}).CreateConversationCanvas(ctx, "T1", "U-owner", "C1", "channel canvas", `{"type":"markdown","markdown":"x"}`); err != nil {
+		t.Fatalf("seed conversation canvas: %v", err)
+	}
 }
 
 // fixtureMessageTimestamp names the one seeded message.
@@ -827,15 +861,17 @@ const (
 	fixtureAppID           domain.AppID           = "F-app"
 	fixtureHuddleID        domain.CallID          = "F-huddle"
 
-	fixtureSharedInviteID    domain.SharedInviteID    = "F-invite"
-	fixtureApprovedInviteID  domain.SharedInviteID    = "F-approved-invite"
-	fixtureWorkflowTriggerD  domain.WorkflowTriggerID = "F-trigger"
-	fixtureWorkflowRunID     domain.WorkflowRunID     = "F-run"
-	fixtureSavedItemID       domain.SavedItemID       = "F-saved"
-	fixtureHolderSavedItemID domain.SavedItemID       = "F-holder-saved"
-	fixtureMessageID         domain.MessageID         = "M1"
-	fixtureListItemID        domain.ListItemID        = "F-list-item"
-	fixtureScheduledStatusID domain.ScheduledStatusID = "F-scheduled-status"
+	fixtureSharedInviteID    domain.SharedInviteID      = "F-invite"
+	fixtureApprovedInviteID  domain.SharedInviteID      = "F-approved-invite"
+	fixtureWorkflowTriggerD  domain.WorkflowTriggerID   = "F-trigger"
+	fixtureWorkflowRunID     domain.WorkflowRunID       = "F-run"
+	fixtureSavedItemID       domain.SavedItemID         = "F-saved"
+	fixtureHolderSavedItemID domain.SavedItemID         = "F-holder-saved"
+	fixtureMessageID         domain.MessageID           = "M1"
+	fixtureListItemID        domain.ListItemID          = "F-list-item"
+	fixtureScheduledStatusID domain.ScheduledStatusID   = "F-scheduled-status"
+	fixtureActivityViewID    domain.ActivitySavedViewID = "F-activity-view"
+	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
 )
 
 func requireSeed(t *testing.T, err error) {

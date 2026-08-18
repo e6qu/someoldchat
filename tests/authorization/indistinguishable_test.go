@@ -39,7 +39,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"SaveListAsTemplate":                      {},
 		"CreateListFromTemplate":                  {},
 		"DeleteListTemplate":                      {},
-		"AddUserGroupChannels":                    {},
 		"AdminAddConversationAccessGroup":         {},
 		"AdminAddUserGroupTeams":                  {},
 		"AdminClearAppResolution":                 {},
@@ -58,16 +57,12 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"CloseView":                               {},
 		"CompleteFunction":                        {},
 		"CompleteWorkflowButton":                  {},
-		"ConversationCanvas":                      {},
 		"ConvertGroupDirectToPrivate":             {},
 		"CurrentModalView":                        {},
 		"DeclineSharedInvite":                     {},
 		"DeleteCanvas":                            {},
 		"DeleteCanvasAccess":                      {},
 		"DeleteCanvasComment":                     {},
-		"DeleteActivitySavedView":                 {},
-		"DeleteSidebarSection":                    {},
-		"SetSidebarSectionCollapsed":              {},
 		"DeleteListItemComment":                   {},
 		"DetachFileFromListItem":                  {},
 		"DeleteListAccess":                        {},
@@ -89,7 +84,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"RemoveListColumn":                        {},
 		"RemovePin":                               {},
 		"RemoveStar":                              {},
-		"RemoveUserGroupChannels":                 {},
 		"RestoreCanvasRevision":                   {},
 		"RunWorkflow":                             {},
 		"SaveDraftWithAttachments":                {},
@@ -151,4 +145,4 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // the missing section is reached before any standing check. The other sidebar
 // operations distinguish — a create/read/rename/reorder/assign reaches a
 // validation or ownership branch that a holder and a stranger do not share.
-const indistinguishableRefusalCeiling = 74
+const indistinguishableRefusalCeiling = 68
