@@ -111,6 +111,50 @@ message CreateListRequest {
   bool todo_mode = 8;
 }
 
+message ListTemplate {
+  string id = 1;
+  string workspace_id = 2;
+  string creator_id = 3;
+  string name = 4;
+  string description_blocks = 5;
+  string schema = 6;
+  bool todo_mode = 7;
+  string seed_items = 8;
+  string created_at = 9;
+  string updated_at = 10;
+}
+
+message SaveListAsTemplateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string name = 4;
+  string description_blocks = 5;
+  bool include_records = 6;
+}
+
+message WorkspaceListTemplatesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message ListTemplatesResponse {
+  repeated ListTemplate templates = 1;
+}
+
+message CreateListFromTemplateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string template_id = 3;
+  string name = 4;
+}
+
+message DeleteListTemplateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string template_id = 3;
+}
+
 message UpdateListRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -294,6 +338,10 @@ message DetachFileFromListItemRequest {
 
 service ListsService {
   rpc CreateList(CreateListRequest) returns (ListResponse);
+  rpc SaveListAsTemplate(SaveListAsTemplateRequest) returns (ListTemplate);
+  rpc WorkspaceListTemplates(WorkspaceListTemplatesRequest) returns (ListTemplatesResponse);
+  rpc CreateListFromTemplate(CreateListFromTemplateRequest) returns (ListResponse);
+  rpc DeleteListTemplate(DeleteListTemplateRequest) returns (ListOKResponse);
   rpc GetList(ListItemRequest) returns (ListResponse);
   rpc GetListAccess(ListItemRequest) returns (ListAccessResponse);
   rpc ListGrants(ListItemRequest) returns (ListGrantsResponse);

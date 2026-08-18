@@ -165,16 +165,21 @@ func TestCanvasAndListJourneysUseDurableDocuments(t *testing.T) {
 	if canvasPage.Code != http.StatusOK {
 		t.Fatalf("open canvas = %d: %s", canvasPage.Code, canvasPage.Body)
 	}
-	// Each section carries its own editor, so the control names the section it
-	// saves rather than the whole canvas.
-	requireContains(t, "canvas", canvasPage.Body.String(), "Release plan", "Ship the durable UI", "Save section 1")
+	// Each block carries its own editor, so the control names the block it saves
+	// rather than the whole canvas; the title has its own rename control.
+	requireContains(t, "canvas", canvasPage.Body.String(), "Release plan", "Ship the durable UI", "Save block 1", "Rename canvas")
 	sectionMatch := regexp.MustCompile(`name="section_id" value="([^"]+)"`).FindStringSubmatch(canvasPage.Body.String())
 	if len(sectionMatch) != 2 {
-		t.Fatalf("canvas editor section is missing: %s", canvasPage.Body)
+		t.Fatalf("canvas editor block is missing: %s", canvasPage.Body)
 	}
 
-	canvasSaved := postForm(t, mux, canvasURL+"/update", url.Values{
-		"_csrf": {csrf}, "section_id": {sectionMatch[1]}, "title": {"Release plan v2"}, "body": {"Shipped atomically"},
+	if renamed := postForm(t, mux, canvasURL+"/sections", url.Values{
+		"_csrf": {csrf}, "op": {"title"}, "title": {"Release plan v2"},
+	}.Encode(), false); renamed.Code != http.StatusSeeOther {
+		t.Fatalf("rename canvas = %d: %s", renamed.Code, renamed.Body)
+	}
+	canvasSaved := postForm(t, mux, canvasURL+"/sections", url.Values{
+		"_csrf": {csrf}, "op": {"save"}, "section_id": {sectionMatch[1]}, "type": {"markdown"}, "body": {"Shipped atomically"},
 	}.Encode(), false)
 	if canvasSaved.Code != http.StatusSeeOther {
 		t.Fatalf("save canvas = %d: %s", canvasSaved.Code, canvasSaved.Body)
@@ -229,6 +234,78 @@ func TestCanvasAndListJourneysUseDurableDocuments(t *testing.T) {
 	lists := get(t, mux, "/app/lists")
 	requireContains(t, "canvas directory", canvases.Body.String(), "Release plan v2", "Shipped atomically")
 	requireContains(t, "list directory", lists.Body.String(), "Launch", "To-do list")
+}
+
+// TestListTemplateJourneyCapturesReusesAndRemovesFromTheBrowser drives the
+// whole template surface through the client a member actually uses: a list is
+// captured as a workspace template carrying its rows, the template appears on
+// the Lists page as a starting point and a managed entry, a new list is created
+// from it with the seeded row present, and the template is removed again.
+func TestListTemplateJourneyCapturesReusesAndRemovesFromTheBrowser(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+
+	listCreated := postForm(t, mux, "/app/lists/create", url.Values{
+		"_csrf": {csrf}, "title": {"Launch"}, "todo_mode": {"true"},
+	}.Encode(), false)
+	if listCreated.Code != http.StatusSeeOther {
+		t.Fatalf("create list = %d: %s", listCreated.Code, listCreated.Body)
+	}
+	listURL := listCreated.Header().Get("Location")
+	if itemCreated := postForm(t, mux, listURL+"/items/create", url.Values{
+		"_csrf": {csrf}, "title": {"Verify persistence"},
+	}.Encode(), false); itemCreated.Code != http.StatusSeeOther {
+		t.Fatalf("create list item = %d: %s", itemCreated.Code, itemCreated.Body)
+	}
+
+	// The list page offers the save-as-template control; using it with rows
+	// included captures a workspace template.
+	listPage := get(t, mux, listURL)
+	requireContains(t, "save-template control", listPage.Body.String(), "Save as a template", "/save-template")
+	listID := strings.TrimPrefix(listURL, "/app/lists/")
+	saved := postForm(t, mux, "/app/lists/"+listID+"/save-template", url.Values{
+		"_csrf": {csrf}, "name": {"Launch template"}, "include_records": {"true"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save template = %d: %s", saved.Code, saved.Body)
+	}
+
+	// The Lists page shows the template both as a starting point in the create
+	// form and as a managed entry that can be removed.
+	lists := get(t, mux, "/app/lists")
+	requireContains(t, "template on lists page", lists.Body.String(), "Launch template", `name="template"`, "Start from")
+
+	// Creating a list from the template carries its seeded row.
+	made := postForm(t, mux, "/app/lists/create", url.Values{
+		"_csrf": {csrf}, "title": {"My launch"}, "template": {templateID(t, s)},
+	}.Encode(), false)
+	if made.Code != http.StatusSeeOther {
+		t.Fatalf("create from template = %d: %s", made.Code, made.Body)
+	}
+	madePage := get(t, mux, made.Header().Get("Location"))
+	requireContains(t, "list from template", madePage.Body.String(), "My launch", "Verify persistence")
+
+	// The template can be removed from the Lists page.
+	removed := postForm(t, mux, "/app/lists/templates/delete", url.Values{
+		"_csrf": {csrf}, "template": {templateID(t, s)},
+	}.Encode(), false)
+	if removed.Code != http.StatusSeeOther {
+		t.Fatalf("delete template = %d: %s", removed.Code, removed.Body)
+	}
+	if remaining, err := (service.Messages{Store: s}).WorkspaceListTemplates(context.Background(), "T1", "U1"); err != nil || len(remaining) != 0 {
+		t.Fatalf("templates after delete = %+v err=%v", remaining, err)
+	}
+}
+
+// templateID returns the id of the single template the browser journey saved,
+// so the test can name it in a form without scraping it out of the HTML.
+func templateID(t *testing.T, s *memory.Store) string {
+	t.Helper()
+	templates, err := (service.Messages{Store: s}).WorkspaceListTemplates(context.Background(), "T1", "U1")
+	if err != nil || len(templates) == 0 {
+		t.Fatalf("no saved template: %+v err=%v", templates, err)
+	}
+	return string(templates[0].ID)
 }
 
 // TestCanvasSharingShowsWhoCanOpenItAndOnlyTheOwnerChangesIt covers the surface
@@ -769,10 +846,15 @@ func TestChannelCanvasIsOfferedToMembersAndCreatedOnPurpose(t *testing.T) {
 	}
 }
 
-func TestCanvasEditorRefusesToFlattenStructuredContent(t *testing.T) {
+// TestCanvasBlockSaveRefusesAStaleBlockReference covers the block editor's
+// no-silent-overwrite guarantee: a save naming a block that is no longer part of
+// the canvas — the document changed under the editor — is a conflict, and the
+// stored canvas is left exactly as it was rather than a new block being written
+// in the missing one's place.
+func TestCanvasBlockSaveRefusesAStaleBlockReference(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}
-	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Structured plan", `{"type":"heading","text":"Keep this heading"}`, "")
+	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Structured plan", `{"type":"markdown","markdown":"Keep this body"}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -780,28 +862,26 @@ func TestCanvasEditorRefusesToFlattenStructuredContent(t *testing.T) {
 
 	page := get(t, mux, target)
 	if page.Code != http.StatusOK {
-		t.Fatalf("open structured canvas = %d: %s", page.Code, page.Body)
+		t.Fatalf("open canvas = %d: %s", page.Code, page.Body)
 	}
-	// The section is shown as stored and carries no editor: this client has no
-	// heading editor, and a plain textarea for one would flatten it on save.
-	// That is narrower than the whole canvas being read-only, which is what
-	// this used to assert — a canvas with a heading and a paragraph left the
-	// paragraph uneditable too.
-	requireContains(t, "structured canvas", page.Body.String(), "Keep this heading", "editing it here would flatten it")
-	requireMissing(t, "structured canvas", page.Body.String(), "Save section")
+	before, err := s.GetCanvas(context.Background(), "T1", value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	response := postForm(t, mux, target+"/update", url.Values{
-		"_csrf": {auth.CSRFToken("session")}, "title": {"Flattened"}, "body": {"Lost content"},
+	response := postForm(t, mux, target+"/sections", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "op": {"save"}, "section_id": {"temp:C:doesnotexist"},
+		"type": {"markdown"}, "body": {"Lost content"},
 	}.Encode(), false)
 	if response.Code != http.StatusConflict {
-		t.Fatalf("structured save = %d: %s", response.Code, response.Body)
+		t.Fatalf("stale-block save = %d: %s", response.Code, response.Body)
 	}
 	stored, err := s.GetCanvas(context.Background(), "T1", value.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Title != value.Title || stored.DocumentContent != value.DocumentContent || stored.Version != value.Version {
-		t.Fatalf("refused structured save changed canvas: got %#v want %#v", stored, value)
+	if stored.DocumentContent != before.DocumentContent || stored.Version != before.Version {
+		t.Fatalf("refused save changed canvas: got %#v want %#v", stored, before)
 	}
 }
 

@@ -139,6 +139,7 @@ var errorClasses = []errorClass{
 	{key: "service.oauth_app_mismatch", code: codes.PermissionDenied, sentinel: service.ErrOAuthAppMismatch},
 	{key: "service.invalid_integration_logs", code: codes.InvalidArgument, sentinel: service.ErrInvalidIntegrationLogs},
 	{key: "service.invalid_list", code: codes.InvalidArgument, sentinel: service.ErrInvalidList},
+	{key: "service.invalid_list_template", code: codes.InvalidArgument, sentinel: service.ErrInvalidListTemplate},
 	{key: "service.invalid_entity", code: codes.InvalidArgument, sentinel: service.ErrInvalidEntity},
 	{key: "service.invalid_bookmark", code: codes.InvalidArgument, sentinel: service.ErrInvalidBookmark},
 	{key: "service.invalid_canvas", code: codes.InvalidArgument, sentinel: service.ErrInvalidCanvas},

@@ -516,6 +516,10 @@ type Service interface {
 	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error
 	LookupCanvasSections(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) ([]domain.CanvasSection, error)
 	CreateList(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, domain.ListID, bool, bool) (domain.List, error)
+	SaveListAsTemplate(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string, string, bool) (domain.ListTemplate, error)
+	WorkspaceListTemplates(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.ListTemplate, error)
+	CreateListFromTemplate(context.Context, domain.WorkspaceID, domain.UserID, domain.ListTemplateID, string) (domain.List, error)
+	DeleteListTemplate(context.Context, domain.WorkspaceID, domain.UserID, domain.ListTemplateID) error
 	List(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) (domain.List, error)
 	ListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) (domain.ListAccess, error)
 	Lists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)

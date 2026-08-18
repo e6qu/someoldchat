@@ -143,6 +143,7 @@ type Store struct {
 	userProfileFieldValues        map[string]map[domain.ProfileFieldID]domain.UserProfileFieldValue
 	accessLogs                    []domain.AccessLog
 	lists                         map[domain.ListID]domain.List
+	listTemplates                 map[domain.ListTemplateID]domain.ListTemplate
 	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
 	listAccess                    map[string]domain.ListAccess
 	listDownloads                 map[domain.ListDownloadID]domain.ListDownload
@@ -248,6 +249,7 @@ func New() *Store {
 	// here compiles and panics on the first write to it.
 	return &Store{
 		lists:                         make(map[domain.ListID]domain.List),
+		listTemplates:                 make(map[domain.ListTemplateID]domain.ListTemplate),
 		listItems:                     make(map[domain.ListID]map[domain.ListItemID]domain.ListItem),
 		listAccess:                    make(map[string]domain.ListAccess),
 		listDownloads:                 make(map[domain.ListDownloadID]domain.ListDownload),
@@ -11459,6 +11461,58 @@ func (s *Store) GetList(_ context.Context, workspace domain.WorkspaceID, id doma
 		return domain.List{}, store.ErrNotFound
 	}
 	return value, nil
+}
+
+func (s *Store) CreateListTemplate(_ context.Context, value domain.ListTemplate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[value.WorkspaceID]; !exists {
+		return store.ErrNotFound
+	}
+	if _, exists := s.listTemplates[value.ID]; exists {
+		return store.ErrConflict
+	}
+	s.listTemplates[value.ID] = value
+	return nil
+}
+
+func (s *Store) ListListTemplates(_ context.Context, workspace domain.WorkspaceID) ([]domain.ListTemplate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	templates := make([]domain.ListTemplate, 0)
+	for _, value := range s.listTemplates {
+		if value.WorkspaceID == workspace {
+			templates = append(templates, value)
+		}
+	}
+	sort.Slice(templates, func(left, right int) bool {
+		if !templates[left].CreatedAt.Equal(templates[right].CreatedAt) {
+			return templates[left].CreatedAt.After(templates[right].CreatedAt)
+		}
+		return templates[left].ID > templates[right].ID
+	})
+	return templates, nil
+}
+
+func (s *Store) GetListTemplate(_ context.Context, workspace domain.WorkspaceID, id domain.ListTemplateID) (domain.ListTemplate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.listTemplates[id]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.ListTemplate{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) DeleteListTemplate(_ context.Context, workspace domain.WorkspaceID, id domain.ListTemplateID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.listTemplates[id]
+	if !exists || value.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.listTemplates, id)
+	return nil
 }
 
 func (s *Store) ListLists(_ context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {

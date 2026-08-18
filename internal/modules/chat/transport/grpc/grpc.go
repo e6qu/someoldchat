@@ -1149,6 +1149,67 @@ func (r Remote) CreateList(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return decodeProtoList(out.GetList())
 }
 
+func (r Remote) SaveListAsTemplate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, name, descriptionBlocks string, includeRecords bool) (domain.ListTemplate, error) {
+	out, err := r.lists.SaveListAsTemplate(ctx, &chatv1.SaveListAsTemplateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), Name: name, DescriptionBlocks: descriptionBlocks, IncludeRecords: includeRecords})
+	if err != nil {
+		return domain.ListTemplate{}, err
+	}
+	return decodeProtoListTemplate(out), nil
+}
+
+func (r Remote) WorkspaceListTemplates(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.ListTemplate, error) {
+	out, err := r.lists.WorkspaceListTemplates(ctx, &chatv1.WorkspaceListTemplatesRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	templates := make([]domain.ListTemplate, 0, len(out.GetTemplates()))
+	for _, template := range out.GetTemplates() {
+		templates = append(templates, decodeProtoListTemplate(template))
+	}
+	return templates, nil
+}
+
+func (r Remote) CreateListFromTemplate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, templateID domain.ListTemplateID, name string) (domain.List, error) {
+	out, err := r.lists.CreateListFromTemplate(ctx, &chatv1.CreateListFromTemplateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TemplateId: string(templateID), Name: name})
+	if err != nil {
+		return domain.List{}, err
+	}
+	return decodeProtoList(out.GetList())
+}
+
+func (r Remote) DeleteListTemplate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, templateID domain.ListTemplateID) error {
+	out, err := r.lists.DeleteListTemplate(ctx, &chatv1.DeleteListTemplateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TemplateId: string(templateID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "list template deletion")
+}
+
+func encodeProtoListTemplate(value domain.ListTemplate) *chatv1.ListTemplate {
+	return &chatv1.ListTemplate{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), CreatorId: string(value.Creator),
+		Name: value.Name, DescriptionBlocks: value.DescriptionBlocks, Schema: value.Schema,
+		TodoMode: value.TodoMode, SeedItems: value.SeedItems,
+		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func decodeProtoListTemplate(value *chatv1.ListTemplate) domain.ListTemplate {
+	if value == nil {
+		return domain.ListTemplate{}
+	}
+	template := domain.ListTemplate{
+		ID: domain.ListTemplateID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Creator: domain.UserID(value.GetCreatorId()),
+		Name: value.GetName(), DescriptionBlocks: value.GetDescriptionBlocks(), Schema: value.GetSchema(),
+		TodoMode: value.GetTodoMode(), SeedItems: value.GetSeedItems(),
+	}
+	template.CreatedAt, _ = time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	template.UpdatedAt, _ = time.Parse(time.RFC3339Nano, value.GetUpdatedAt())
+	template.CreatedAt = template.CreatedAt.UTC()
+	template.UpdatedAt = template.UpdatedAt.UTC()
+	return template
+}
+
 func (r Remote) List(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) (domain.List, error) {
 	out, err := r.lists.GetList(ctx, &chatv1.ListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id)})
 	if err != nil {
@@ -8632,6 +8693,41 @@ func (s *Server) CreateList(ctx context.Context, input *chatv1.CreateListRequest
 		return nil, mapError(err)
 	}
 	return &chatv1.ListResponse{Ok: true, List: encodeProtoList(value)}, nil
+}
+
+func (s *Server) SaveListAsTemplate(ctx context.Context, input *chatv1.SaveListAsTemplateRequest) (*chatv1.ListTemplate, error) {
+	value, err := s.implementation.SaveListAsTemplate(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetName(), input.GetDescriptionBlocks(), input.GetIncludeRecords())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoListTemplate(value), nil
+}
+
+func (s *Server) WorkspaceListTemplates(ctx context.Context, input *chatv1.WorkspaceListTemplatesRequest) (*chatv1.ListTemplatesResponse, error) {
+	values, err := s.implementation.WorkspaceListTemplates(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	templates := make([]*chatv1.ListTemplate, 0, len(values))
+	for _, value := range values {
+		templates = append(templates, encodeProtoListTemplate(value))
+	}
+	return &chatv1.ListTemplatesResponse{Templates: templates}, nil
+}
+
+func (s *Server) CreateListFromTemplate(ctx context.Context, input *chatv1.CreateListFromTemplateRequest) (*chatv1.ListResponse, error) {
+	value, err := s.implementation.CreateListFromTemplate(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListTemplateID(input.GetTemplateId()), input.GetName())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListResponse{Ok: true, List: encodeProtoList(value)}, nil
+}
+
+func (s *Server) DeleteListTemplate(ctx context.Context, input *chatv1.DeleteListTemplateRequest) (*chatv1.ListOKResponse, error) {
+	if err := s.implementation.DeleteListTemplate(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListTemplateID(input.GetTemplateId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListOKResponse{Ok: true}, nil
 }
 
 func (s *Server) GetList(ctx context.Context, input *chatv1.ListItemRequest) (*chatv1.ListResponse, error) {
