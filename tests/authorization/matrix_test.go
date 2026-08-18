@@ -324,6 +324,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.ConversationID("")):
+		// ConvertGroupDirectToPrivate needs a DM or group DM, not the seeded
+		// channel, so it alone is handed the group direct message; every other
+		// operation keeps the channel it can act on.
+		if method == "ConvertGroupDirectToPrivate" {
+			return reflect.ValueOf(fixtureGroupDMID)
+		}
 		return reflect.ValueOf(domain.ConversationID("C1"))
 	case reflect.TypeOf(domain.CanvasID("")):
 		return reflect.ValueOf(fixtureCanvasID)
@@ -373,6 +379,10 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureSavedItemID)
 	case reflect.TypeOf(domain.ScheduledStatusID("")):
 		return reflect.ValueOf(fixtureScheduledStatusID)
+	case reflect.TypeOf(domain.ListDownloadID("")):
+		return reflect.ValueOf(fixtureListDownloadID)
+	case reflect.TypeOf(domain.ProfileFieldID("")):
+		return reflect.ValueOf(fixtureProfileFieldID)
 	case reflect.TypeOf(domain.ActivitySavedViewID("")):
 		return reflect.ValueOf(fixtureActivityViewID)
 	case reflect.TypeOf(domain.SidebarSectionID("")):
@@ -450,6 +460,14 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 			return reflect.ValueOf(uint64(1))
 		}
 		return reflect.Zero(argument)
+	case reflect.TypeOf(int64(0)):
+		// The version the fixture canvas holds a revision at, so
+		// RestoreCanvasRevision finds one to restore rather than answering the
+		// holder and a stranger alike with not-found.
+		if method == "RestoreCanvasRevision" {
+			return reflect.ValueOf(int64(1))
+		}
+		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.AutomationPermission{}):
 		// A valid permission, so SetTriggerPermission — whose trigger and app the
 		// fixture already match — reaches success rather than an invalid-payload
@@ -516,6 +534,12 @@ func fixtureStringArgument(method string) reflect.Value {
 		// A column name; paired with the real column type above, the holder's
 		// write grant carries the add to success.
 		return reflect.ValueOf("Status")
+	case "RemoveListColumn":
+		// The key of the column the fixture list carries, so the remove finds one.
+		return reflect.ValueOf("priority")
+	case "ConvertGroupDirectToPrivate":
+		// The name for the new private channel the group DM becomes.
+		return reflect.ValueOf("converted-channel")
 	case "PostEphemeral", "ScheduleMessage", "SaveDraft":
 		// Message text, the only free string these take, so a member posting to
 		// the seeded conversation reaches success.
@@ -617,6 +641,9 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}, event("E-canvas", "canvas.created")))
 	seed("list", repository.CreateList(ctx, domain.List{
 		ID: fixtureListID, WorkspaceID: "T1", OwnerID: "U-member", Name: "fixture list",
+		// One column, so RemoveListColumn has one to remove; keyed "priority" so it
+		// does not collide with the "Status" column AddListColumn adds.
+		Schema:  `[{"id":"priority","key":"priority","name":"Priority","type":"text"}]`,
 		Version: 1, CreatedAt: at, UpdatedAt: at,
 	}, event("E-list", "list.created")))
 	// The holder the differential asks is the workspace owner, and a document
@@ -631,6 +658,19 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("list access", repository.SetListAccess(ctx, domain.ListAccess{
 		ListID: fixtureListID, EntityType: domain.GrantUser, EntityID: "U-owner", Access: domain.AccessWrite,
 	}, event("E-list-access", "list.access_set")))
+	// One edit to the canvas by the holder (now that it has a write grant), so a
+	// revision exists at version 1 for RestoreCanvasRevision to restore. Without
+	// a revision, restoring answers the holder and a stranger alike with the same
+	// not-found.
+	if err := (service.Messages{Store: repository}).EditCanvas(ctx, "T1", "U-owner", fixtureCanvasID,
+		`[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"revised"}}]`); err != nil {
+		t.Fatalf("seed canvas revision: %v", err)
+	}
+	// A finished list download, so GetListDownload has one to return to a member.
+	seed("list download", repository.CreateListDownload(ctx, domain.ListDownload{
+		ID: fixtureListDownloadID, ListID: fixtureListID, WorkspaceID: "T1", Status: "ready",
+		URL: "https://example.test/download.csv", CreatedAt: at,
+	}, event("E-list-download", "list.download_created")))
 	// A row in that list, so the operations that read, update, assign, comment on,
 	// attach a file to, or delete an item have one the holder — granted write on
 	// the list above — can reach, while a caller below membership is refused at
@@ -841,6 +881,21 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	if _, err := (service.Messages{Store: repository}).CreateConversationCanvas(ctx, "T1", "U-owner", "C1", "channel canvas", `{"type":"markdown","markdown":"x"}`); err != nil {
 		t.Fatalf("seed conversation canvas: %v", err)
 	}
+	// A group direct message the holder belongs to, so ConvertGroupDirectToPrivate
+	// — which needs a DM or group DM, not the seeded channel — reaches success as
+	// the holder while a caller below membership is refused for standing.
+	seed("group dm", repository.SeedConversation(domain.Conversation{
+		ID: fixtureGroupDMID, WorkspaceID: "T1", Kind: domain.ConversationTypeMPIM, Name: "fixture-mpim",
+	}))
+	seed("group dm member owner", repository.SeedConversationMember(fixtureGroupDMID, "U-owner"))
+	seed("group dm member", repository.SeedConversationMember(fixtureGroupDMID, "U-member"))
+	// A workspace profile field, so DeleteWorkspaceProfileField — admin-gated —
+	// has one for the holder (who holds admin) to delete, while a member is
+	// refused for standing at requireWorkspaceAdmin.
+	seed("profile field", repository.SetWorkspaceProfileField(ctx, domain.ProfileFieldDefinition{
+		WorkspaceID: "T1", ID: fixtureProfileFieldID, Ordering: 1, Label: "Team",
+		Type: domain.ProfileFieldText, CreatedAt: at,
+	}))
 }
 
 // fixtureMessageTimestamp names the one seeded message.
@@ -888,6 +943,9 @@ const (
 	fixtureScheduledStatusID domain.ScheduledStatusID   = "F-scheduled-status"
 	fixtureActivityViewID    domain.ActivitySavedViewID = "F-activity-view"
 	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
+	fixtureListDownloadID    domain.ListDownloadID      = "F-list-download"
+	fixtureGroupDMID         domain.ConversationID      = "Cmpim"
+	fixtureProfileFieldID    domain.ProfileFieldID      = "F-profile-field"
 )
 
 func requireSeed(t *testing.T, err error) {
