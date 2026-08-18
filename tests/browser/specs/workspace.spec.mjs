@@ -2033,7 +2033,9 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await addBlock.getByRole('combobox', { name: 'Kind' }).selectOption('h2');
   await addBlock.getByLabel('Content').fill('Milestones');
   await addBlock.getByRole('button', { name: 'Add block' }).click();
-  await expect(page.getByText('Milestones')).toBeVisible();
+  // The new block's text renders in the read-only block body and is mirrored in
+  // its editor textarea, so scope the assertion to the rendered body.
+  await expect(page.locator('.canvas-body').filter({ hasText: 'Milestones' })).toBeVisible();
   await page.getByRole('link', { name: 'Canvases' }).click();
   await expect(page.getByRole('heading', { name: `${canvasName} revised` })).toBeVisible();
 
@@ -3417,23 +3419,24 @@ test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can
   // A canvas nobody has edited has no history to show.
   await expect(page.getByRole('heading', { name: 'History', exact: true })).toHaveCount(0);
 
-  // A canvas created with content has one section, so the editor is the
-  // per-section one rather than the whole-document form.
-  const second = `${first} revised`;
-  await page.getByLabel('Title').fill(second);
-  await page.getByLabel('Section 1 content').fill('the replacement body');
-  await page.getByRole('button', { name: 'Save section 1' }).click();
-  await expect(page.getByRole('heading', { name: second })).toBeVisible();
+  // A canvas created with content has one block, edited in place through its own
+  // block editor. Its text is shown in the block body and mirrored in the editor
+  // textarea, so it appears twice.
+  await page.getByLabel('Block 1 content').fill('the replacement body');
+  await page.getByRole('button', { name: 'Save block 1' }).click();
+  await expect(page.getByText('the replacement body')).toHaveCount(2);
 
   // The history shows what it said before, not what it says now.
   await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
   const revision = page.locator('.revision').first();
-  await expect(revision).toContainText(first);
   await expect(revision).toContainText('the original body');
   await expectNoSeriousAccessibilityViolations(page);
 
   await revision.getByRole('button', { name: 'Restore this revision' }).click();
-  await expect(page.getByRole('heading', { name: first })).toBeVisible();
+  // Restoring brings the original body back into the rendered block (it also
+  // appears in that block's editor and now in a revision excerpt, so scope to
+  // the body).
+  await expect(page.locator('.canvas-body').filter({ hasText: 'the original body' })).toBeVisible();
   // The replaced content is now itself a revision, so the restore is undoable.
   await expect(page.locator('.revision').first()).toContainText('the replacement body');
 });
@@ -3460,10 +3463,9 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await expect(comment).toContainText('on Section 1');
   await expectNoSeriousAccessibilityViolations(page);
 
-  // Rewriting the paragraph the comment was about leaves the comment, now
-  // anchored to a section that is gone.
-  await page.getByLabel('Section 1 content').fill('a rewrite');
-  await page.getByRole('button', { name: 'Save section 1' }).click();
+  // Rewriting the paragraph the comment was about leaves the comment in place.
+  await page.getByLabel('Block 1 content').fill('a rewrite');
+  await page.getByRole('button', { name: 'Save block 1' }).click();
   await expect(page.locator('.comment').first()).toContainText('this paragraph is wrong');
 
   // A comment belongs to whoever wrote it, and this session wrote this one.
