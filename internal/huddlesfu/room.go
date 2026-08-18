@@ -20,6 +20,7 @@
 package huddlesfu
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -107,8 +108,15 @@ func (r *Room) Join(id string, sink Sink, config webrtc.Configuration) error {
 	current := &peer{id: id, pc: pc, sink: sink}
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate != nil {
-			sink(Signal{Kind: "candidate", Candidate: candidate.ToJSON().Candidate})
+		if candidate == nil {
+			return
+		}
+		// The full candidate init — candidate string, sdpMid and
+		// sdpMLineIndex — is carried as JSON so the browser can add it directly;
+		// a bare candidate string with no media line is rejected by some browsers.
+		data, err := json.Marshal(candidate.ToJSON())
+		if err == nil {
+			sink(Signal{Kind: "candidate", Candidate: string(data)})
 		}
 	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
@@ -185,7 +193,12 @@ func (r *Room) Signal(id string, signal Signal) error {
 		if signal.Candidate == "" {
 			return nil
 		}
-		return current.pc.AddICECandidate(webrtc.ICECandidateInit{Candidate: signal.Candidate})
+		var init webrtc.ICECandidateInit
+		if err := json.Unmarshal([]byte(signal.Candidate), &init); err != nil {
+			// Tolerate a bare candidate string as well as the JSON init.
+			init = webrtc.ICECandidateInit{Candidate: signal.Candidate}
+		}
+		return current.pc.AddICECandidate(init)
 	default:
 		return fmt.Errorf("unexpected signal kind %q from a participant", signal.Kind)
 	}

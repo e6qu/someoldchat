@@ -1,6 +1,7 @@
 package huddlesfu
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -32,8 +33,12 @@ func newBrowser(t *testing.T, room *Room, id string) *browser {
 	}
 	b := &browser{t: t, id: id, room: room, pc: pc}
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate != nil {
-			_ = room.Signal(id, Signal{Kind: "candidate", Candidate: candidate.ToJSON().Candidate})
+		if candidate == nil {
+			return
+		}
+		data, err := json.Marshal(candidate.ToJSON())
+		if err == nil {
+			_ = room.Signal(id, Signal{Kind: "candidate", Candidate: string(data)})
 		}
 	})
 	// The sink is how the SFU talks back to this browser: a renegotiation offer,

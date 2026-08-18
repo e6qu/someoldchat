@@ -19,16 +19,18 @@ func forwardOwner(key string) string {
 	return key
 }
 
-// forwardStreamID carries the owning participant in the outgoing stream id so a
-// subscriber's browser can attribute each forwarded track to the participant it
-// came from and lay their tiles out accordingly.
-func forwardStreamID(owner, streamID string) string {
-	return owner + forwardDelimiter + streamID
+// forwardStreamID is the outgoing media-stream id for a participant's forwarded
+// tracks: their id and nothing else. It must be a valid SDP msid token, so it
+// carries no delimiter. Using the owner alone also groups all of a participant's
+// tracks into one media stream on the subscriber, which is what the browser
+// attaches to their tile.
+func forwardStreamID(owner, _ string) string {
+	return owner
 }
 
 // ForwardedOwner recovers the participant a forwarded stream id belongs to. The
 // browser reads it from the incoming stream id to place the track on the right
 // tile.
 func ForwardedOwner(streamID string) string {
-	return forwardOwner(streamID)
+	return streamID
 }

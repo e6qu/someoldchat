@@ -2627,7 +2627,7 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
     </form>
   </details>{{end}}
 </div>
-{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-peers="{{range $index, $peer := .PeerIDs}}{{if $index}},{{end}}{{$peer}}{{end}}" data-huddle-signal="{{.SignalURL}}" data-huddle-react="{{.ReactURL}}" data-huddle-csrf="{{.CSRFToken}}">
+{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-sfu="{{.SFUURL}}" data-huddle-sfu-signal="{{.SFUSignalURL}}" data-huddle-names="{{.Names}}" data-huddle-ice="{{.ICEServers}}" data-huddle-react="{{.ReactURL}}" data-huddle-csrf="{{.CSRFToken}}">
   <div class="huddle-controls">
     <button type="button" data-huddle-control="microphone" aria-pressed="false">Mute microphone</button>
     <button type="button" data-huddle-control="camera" aria-pressed="false">Turn on camera</button>
