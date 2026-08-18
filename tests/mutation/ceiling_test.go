@@ -42,7 +42,7 @@ package mutation
 // Activity view and sidebar section, and the seeded conversation's own canvas —
 // and handing the probe the one valid string, id, slice, level, role, duration
 // or instant each operation needs — moved refusalDoesNotDistinguishTheHolder
-// from 103 to 62 and this number with it, a batch at a time, as each batch of
+// from 103 to 61 and this number with it, a batch at a time, as each batch of
 // the audit landed.
 //
 // 78 to 77: the workflow batch handed the probe the owner's workflow version and

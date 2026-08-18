@@ -381,6 +381,8 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureScheduledStatusID)
 	case reflect.TypeOf(domain.ListDownloadID("")):
 		return reflect.ValueOf(fixtureListDownloadID)
+	case reflect.TypeOf(domain.ProfileFieldID("")):
+		return reflect.ValueOf(fixtureProfileFieldID)
 	case reflect.TypeOf(domain.ActivitySavedViewID("")):
 		return reflect.ValueOf(fixtureActivityViewID)
 	case reflect.TypeOf(domain.SidebarSectionID("")):
@@ -887,6 +889,13 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}))
 	seed("group dm member owner", repository.SeedConversationMember(fixtureGroupDMID, "U-owner"))
 	seed("group dm member", repository.SeedConversationMember(fixtureGroupDMID, "U-member"))
+	// A workspace profile field, so DeleteWorkspaceProfileField — admin-gated —
+	// has one for the holder (who holds admin) to delete, while a member is
+	// refused for standing at requireWorkspaceAdmin.
+	seed("profile field", repository.SetWorkspaceProfileField(ctx, domain.ProfileFieldDefinition{
+		WorkspaceID: "T1", ID: fixtureProfileFieldID, Ordering: 1, Label: "Team",
+		Type: domain.ProfileFieldText, CreatedAt: at,
+	}))
 }
 
 // fixtureMessageTimestamp names the one seeded message.
@@ -936,6 +945,7 @@ const (
 	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
 	fixtureListDownloadID    domain.ListDownloadID      = "F-list-download"
 	fixtureGroupDMID         domain.ConversationID      = "Cmpim"
+	fixtureProfileFieldID    domain.ProfileFieldID      = "F-profile-field"
 )
 
 func requireSeed(t *testing.T, err error) {
