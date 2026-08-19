@@ -88,14 +88,16 @@ against.
 the member's microphone and connects their browser — with a single
 WebRTC connection — to the server itself, which runs the SFU inside the same
 binary as one more listener rather than a second service. The browser publishes
-its microphone and one video lane (its camera, or its screen while sharing)
-once; the SFU forwards each participant's media to everyone else. That is one
-upload per participant however large the huddle, not the mesh's one upload per
-other participant, and the media flows through a server the browser can always
-reach instead of a direct peer path that fails behind NAT. The SFU's forwarded
-media is grouped one stream per participant, whose id is that participant, so
-each track lands on the right tile; tiles are labelled with the participant's
-display name.
+its microphone, its camera and its screen — each on its own lane — once; the SFU
+forwards each participant's media to everyone else. That is one upload per
+participant however large the huddle, not the mesh's one upload per other
+participant, and the media flows through a server the browser can always reach
+instead of a direct peer path that fails behind NAT. The SFU's forwarded media
+is grouped by participant: their microphone and camera share one stream, whose
+id is that participant, so they land on that participant's tile, while a screen
+share is a second stream the SFU marks with the id the browser declared for it,
+so it opens its own presenter tile beside the camera rather than replacing it.
+Tiles are labelled with the participant's display name.
 
 Negotiation has two halves. The browser publishes with a single offer POSTed to
 the SFU, which answers. Thereafter the SFU drives renegotiation: when the set of
@@ -111,26 +113,30 @@ operator opens.
 Presence is live. Each participant broadcasts its microphone, camera and
 screen-share state, so every tile carries a muted or camera-off badge, the
 loudest speaker's tile is ringed (a Web Audio level meter over each stream), and
-a participant sharing their screen is promoted to a presenter view that fills the
-grid while the rest sit in a filmstrip. Screen sharing is relayed like any other
-video, offered where the browser provides `getDisplayMedia`. Reactions are
+a participant sharing their screen opens a dedicated presenter tile — the
+screen's own forwarded stream — that fills the grid while their camera keeps
+playing in the filmstrip alongside everyone else. Screen sharing is relayed like
+any other video, offered where the browser provides `getDisplayMedia`; a sharer
+sends their camera and their screen at once, on two lanes, rather than trading
+one for the other. Reactions are
 implemented — a participant sends one of the huddle's quick emoji and every
 participant sees it float and fade — and the huddle canvas is the channel's own
 canvas, offered from the huddle bar. Captions remain unimplemented because they
 need speech-to-text this deployment hosts nowhere.
 
-Bounded gaps, recorded rather than hidden: a participant publishes one video
-lane, so a member sharing their screen replaces their camera feed for the
-duration rather than sending both at once. The forwarding path itself is covered
-by an in-process loopback test — two real pion peer connections stand in for
-browsers over the actual offer/answer/candidate exchange, one publishes and the
-other receives the track forwarded through the SFU with real RTP flowing. Two
-browsers forwarding to each other end to end is still not covered by the browser
-suite: the harness authenticates one session, so it drives one browser into a
-huddle and not two. What the browser suite covers is everything one browser
-decides — the microphone opening, the connection to the SFU establishing, the
-track muting, the camera starting, and its own presence broadcast returning to
-badge its tile.
+The forwarding path is covered by in-process loopback tests — two real pion peer
+connections stand in for browsers over the actual offer/answer/candidate
+exchange. One proves a published track is forwarded to the other with real RTP
+flowing; a second proves a participant's camera and screen are forwarded at once
+as two distinct streams, each carrying RTP, so a subscriber can show a screen
+share beside the sharer's camera rather than in place of it. Bounded gaps,
+recorded rather than hidden: two browsers forwarding to each other end to end is
+still not covered by the browser suite, because the harness authenticates one
+session, so it drives one browser into a huddle and not two. What the browser
+suite covers is everything one browser decides — the microphone opening, the
+connection to the SFU establishing, the track muting, the camera starting,
+sharing the screen as a second presenter tile while the camera keeps playing,
+and its own presence broadcast returning to badge its tile.
 
 ## Evidence
 

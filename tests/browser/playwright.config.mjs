@@ -27,8 +27,14 @@ export default defineConfig({
         browserName: 'chromium',
         launchOptions: {
           // Synthetic devices, so a huddle can connect without a microphone
-          // and without a permission prompt no test could answer.
-          args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+          // and without a permission prompt no test could answer. The
+          // desktop-capture auto-select answers getDisplayMedia the same way, so
+          // screen sharing can be exercised without a picker no test could click.
+          args: [
+            '--use-fake-device-for-media-stream',
+            '--use-fake-ui-for-media-stream',
+            '--auto-select-desktop-capture-source=Entire screen',
+          ],
           ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
             ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
             : {}),
