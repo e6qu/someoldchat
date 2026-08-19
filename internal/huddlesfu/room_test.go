@@ -12,13 +12,9 @@ import (
 
 // forwardDeadline bounds how long a test waits for the ICE/DTLS handshake and
 // the first forwarded RTP to complete. Locally each test finishes in a second or
-// two; the margin exists only so scheduling contention does not read as a
-// forwarding failure. Its value depends on the build: under the race detector
-// (race_test.go) it is far larger, because `go test -race ./...` runs dozens of
-// package binaries at once with the detector's own 5-20x overhead on top, and a
-// real WebRTC handshake's timing-sensitive goroutines can be starved for tens of
-// seconds on a shared CI runner. Without the detector (norace_test.go) a tight
-// bound keeps a genuine stall a fast failure rather than a slow one.
+// two; the margin absorbs ordinary scheduling contention, including the race
+// detector's overhead under `go test -race ./...`.
+const forwardDeadline = 30 * time.Second
 
 // browser stands in for a participant's browser: a real pion peer connection
 // wired to the SFU over the same offer/answer/candidate signals the web client
@@ -43,6 +39,14 @@ func newBrowser(t *testing.T, room *Room, id string) *browser {
 	if err != nil {
 		t.Fatalf("new browser pc: %v", err)
 	}
+	// Close the browser's own connection when the test ends. Only the room's side
+	// of each peer was ever torn down (room.Close), so every test leaked two live
+	// PeerConnections — each holding a UDP socket and a running ICE agent. Under
+	// `go test ./...` those accumulate across the package's tests and, on a
+	// resource-constrained CI runner, starve the very handshakes these tests time,
+	// which showed up as a forwarding test blowing past its deadline while passing
+	// on an unloaded developer machine.
+	t.Cleanup(func() { _ = pc.Close() })
 	b := &browser{t: t, id: id, room: room, pc: pc}
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
