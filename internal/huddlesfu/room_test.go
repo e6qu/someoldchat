@@ -10,6 +10,15 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 )
 
+// forwardDeadline bounds how long a test waits for the ICE/DTLS handshake and
+// the first forwarded RTP to complete. It is deliberately generous: these tests
+// run under the race detector as part of `go test ./...`, where dozens of
+// package binaries contend for a CI runner's few cores, and a real WebRTC
+// handshake starves badly under that load. Locally each test finishes in a
+// second or two; the margin exists only so scheduling contention on CI does not
+// read as a forwarding failure.
+const forwardDeadline = 60 * time.Second
+
 // browser stands in for a participant's browser: a real pion peer connection
 // wired to the SFU over the same offer/answer/candidate signals the web client
 // exchanges, so the test exercises the actual media path — ICE, DTLS-SRTP and
@@ -179,7 +188,7 @@ func TestRoomForwardsAPublishedTrackToAnotherParticipant(t *testing.T) {
 	var remote *webrtc.TrackRemote
 	select {
 	case remote = <-received:
-	case <-time.After(20 * time.Second):
+	case <-time.After(forwardDeadline):
 		t.Fatal("the receiver never got the publisher's forwarded track")
 	}
 
@@ -192,7 +201,7 @@ func TestRoomForwardsAPublishedTrackToAnotherParticipant(t *testing.T) {
 	// And real RTP flows: at least one packet crosses the forwarded path.
 	done := make(chan error, 1)
 	go func() {
-		_ = remote.SetReadDeadline(time.Now().Add(20 * time.Second))
+		_ = remote.SetReadDeadline(time.Now().Add(forwardDeadline))
 		_, _, readErr := remote.ReadRTP()
 		done <- readErr
 	}()
@@ -201,7 +210,7 @@ func TestRoomForwardsAPublishedTrackToAnotherParticipant(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("reading a forwarded RTP packet: %v", readErr)
 		}
-	case <-time.After(25 * time.Second):
+	case <-time.After(forwardDeadline):
 		t.Fatal("no forwarded RTP packet arrived")
 	}
 }
@@ -250,7 +259,7 @@ func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
 		screen := ForwardedIsScreen(remote.StreamID())
 		arrivals <- arrival{owner: ForwardedOwner(remote.StreamID()), screen: screen}
 		go func() {
-			_ = remote.SetReadDeadline(time.Now().Add(20 * time.Second))
+			_ = remote.SetReadDeadline(time.Now().Add(forwardDeadline))
 			if _, _, readErr := remote.ReadRTP(); readErr == nil {
 				rtp <- screen
 			}
@@ -279,7 +288,7 @@ func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
 	// Both lanes reach the receiver, attributed to the publisher, one camera and
 	// one screen.
 	sawCamera, sawScreen := false, false
-	deadline := time.After(25 * time.Second)
+	deadline := time.After(forwardDeadline)
 	for !sawCamera || !sawScreen {
 		select {
 		case got := <-arrivals:
@@ -303,11 +312,11 @@ func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
 		for !screen {
 			select {
 			case screen = <-rtp:
-			case <-time.After(25 * time.Second):
+			case <-time.After(forwardDeadline):
 				t.Fatal("no RTP packet arrived on the forwarded screen lane")
 			}
 		}
-	case <-time.After(25 * time.Second):
+	case <-time.After(forwardDeadline):
 		t.Fatal("no forwarded RTP packet arrived")
 	}
 }
