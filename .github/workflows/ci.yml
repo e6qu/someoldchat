@@ -317,6 +317,11 @@ jobs:
       # fetch. The test run is a separate target so a retry does not re-run it.
       - name: Install browser qualification dependencies
         run: |
+          # Make apt itself drop a stalled mirror connection after 60s and retry,
+          # so a hung download fails fast instead of hanging until the outer
+          # timeout. The retry loop below is the backup for a mirror that is down
+          # rather than merely slow.
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "60";\nAcquire::https::Timeout "60";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-retries >/dev/null
           for attempt in 1 2 3; do
             if timeout 600 make browser-qualification-deps; then
               break
@@ -326,12 +331,14 @@ jobs:
               exit 1
             fi
             echo "attempt $attempt to install browser dependencies stalled or failed; retrying" >&2
-            # A timeout kills apt mid-download, leaving dpkg half-configured and
-            # the next attempt failing with apt exit code 100. Recover the state
-            # and clear partial downloads before retrying.
+            # timeout kills the make/npx parent, but the sudo'd apt-get it spawned
+            # survives and keeps holding the apt lock, so the next attempt fails
+            # with "Could not get lock". Kill the survivor, clear the stale locks,
+            # then repair any half-configured dpkg state before retrying.
+            sudo pkill -9 -x apt-get >/dev/null 2>&1 || true
+            sudo pkill -9 -x dpkg >/dev/null 2>&1 || true
+            sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock >/dev/null 2>&1 || true
             sudo dpkg --configure -a >/dev/null 2>&1 || true
-            sudo apt-get -f install -y >/dev/null 2>&1 || true
-            sudo apt-get clean || true
             sleep 15
           done
 
@@ -385,6 +392,7 @@ jobs:
       # step before.
       - name: Install the browser contract dependencies
         run: |
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "60";\nAcquire::https::Timeout "60";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-retries >/dev/null
           for attempt in 1 2 3; do
             if timeout 600 bash -c 'npm ci --prefix tests/browser && npx --prefix tests/browser playwright install --with-deps chromium'; then
               break
@@ -394,10 +402,12 @@ jobs:
               exit 1
             fi
             echo "attempt $attempt to install browser contract dependencies stalled or failed; retrying" >&2
-            # Recover apt state a killed attempt left half-configured (exit 100).
+            # Kill the sudo'd apt-get the timeout left holding the lock, clear the
+            # stale locks, and repair dpkg before retrying (see the browser job).
+            sudo pkill -9 -x apt-get >/dev/null 2>&1 || true
+            sudo pkill -9 -x dpkg >/dev/null 2>&1 || true
+            sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock >/dev/null 2>&1 || true
             sudo dpkg --configure -a >/dev/null 2>&1 || true
-            sudo apt-get -f install -y >/dev/null 2>&1 || true
-            sudo apt-get clean || true
             sleep 15
           done
 
