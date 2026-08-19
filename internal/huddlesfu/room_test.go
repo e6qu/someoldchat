@@ -11,13 +11,14 @@ import (
 )
 
 // forwardDeadline bounds how long a test waits for the ICE/DTLS handshake and
-// the first forwarded RTP to complete. It is deliberately generous: these tests
-// run under the race detector as part of `go test ./...`, where dozens of
-// package binaries contend for a CI runner's few cores, and a real WebRTC
-// handshake starves badly under that load. Locally each test finishes in a
-// second or two; the margin exists only so scheduling contention on CI does not
-// read as a forwarding failure.
-const forwardDeadline = 60 * time.Second
+// the first forwarded RTP to complete. Locally each test finishes in a second or
+// two; the margin exists only so scheduling contention does not read as a
+// forwarding failure. Its value depends on the build: under the race detector
+// (race_test.go) it is far larger, because `go test -race ./...` runs dozens of
+// package binaries at once with the detector's own 5-20x overhead on top, and a
+// real WebRTC handshake's timing-sensitive goroutines can be starved for tens of
+// seconds on a shared CI runner. Without the detector (norace_test.go) a tight
+// bound keeps a genuine stall a fast failure rather than a slow one.
 
 // browser stands in for a participant's browser: a real pion peer connection
 // wired to the SFU over the same offer/answer/candidate signals the web client
