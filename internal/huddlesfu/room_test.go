@@ -12,9 +12,12 @@ import (
 
 // forwardDeadline bounds how long a test waits for the ICE/DTLS handshake and
 // the first forwarded RTP to complete. Locally each test finishes in a second or
-// two; the margin absorbs ordinary scheduling contention, including the race
-// detector's overhead under `go test -race ./...`.
-const forwardDeadline = 30 * time.Second
+// two. The margin absorbs ordinary scheduling contention on a shared CI runner —
+// generously, because the failure it guards against is only ever a genuine stall,
+// and the package's own 30m timeout still bounds that. It sits well above the
+// worst honest handshake seen once the leaked peer connections (see newBrowser)
+// were closed.
+const forwardDeadline = 120 * time.Second
 
 // browser stands in for a participant's browser: a real pion peer connection
 // wired to the SFU over the same offer/answer/candidate signals the web client
