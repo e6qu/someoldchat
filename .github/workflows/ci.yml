@@ -310,8 +310,27 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The install pulls browser system libraries from an apt mirror that has
+      # stalled and been cancelled on browser-touching pull requests. A per-
+      # attempt timeout turns a stall into a fast failure, and three attempts ride
+      # out a transient mirror problem — the same shape as the dqlite job's index
+      # fetch. The test run is a separate target so a retry does not re-run it.
       - name: Install browser qualification dependencies
-        run: make browser-qualification
+        run: |
+          for attempt in 1 2 3; do
+            if timeout 600 make browser-qualification-deps; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "browser dependency installation failed after 3 attempts" >&2
+              exit 1
+            fi
+            echo "attempt $attempt to install browser dependencies stalled or failed; retrying" >&2
+            sleep 15
+          done
+
+      - name: Run browser qualification
+        run: make browser-qualification-run
 
       # Playwright already records a trace, a DOM snapshot and the network
       # exchange for a failed test — the config asks for it — and this job threw
@@ -355,10 +374,22 @@ jobs:
         with:
           node-version: 24.7.0
 
+      # Same stall, same fix as the browser-qualification job: a per-attempt
+      # timeout and three tries ride out an apt mirror that has cancelled this
+      # step before.
       - name: Install the browser contract dependencies
         run: |
-          npm ci --prefix tests/browser
-          npx --prefix tests/browser playwright install --with-deps chromium
+          for attempt in 1 2 3; do
+            if timeout 600 bash -c 'npm ci --prefix tests/browser && npx --prefix tests/browser playwright install --with-deps chromium'; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "browser contract dependency installation failed after 3 attempts" >&2
+              exit 1
+            fi
+            echo "attempt $attempt to install browser contract dependencies stalled or failed; retrying" >&2
+            sleep 15
+          done
 
       - name: Run the real Shauth, Ory Hydra, PostgreSQL, and browser matrix
         env:

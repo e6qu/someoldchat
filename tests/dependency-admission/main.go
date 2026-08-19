@@ -679,7 +679,7 @@ var integrationJobGates = map[string][]string{
 	"race":                 {"test-race"},
 	"scale-zero-artifacts": {"activator-check"},
 	"sdk":                  {"sdk-qualification"},
-	"browser":              {"browser-qualification"},
+	"browser":              {"browser-qualification-deps", "browser-qualification-run"},
 	"shauth-sso":           {"shauth-sso-qualification"},
 	"dqlite":               {"build-dqlite", "vet-dqlite", "vuln-check-dqlite", "test-dqlite"},
 	"postgres":             {"test-postgres"},
