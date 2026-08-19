@@ -137,6 +137,32 @@ entries:
     license: BSD-2-Clause
     purpose: WebSocket transport
     runtime: true
+  - id: go/github.com/pion/webrtc/v4
+    kind: go-module
+    canonical: github.com/pion/webrtc/v4
+    source: https://github.com/pion/webrtc
+    version: v4.2.18
+    revision: a08347acf9d5353163d4db2ed597ab23ba358ce3
+    published_at: 2026-07-27T09:13:32Z
+    evidence: https://proxy.golang.org/github.com/pion/webrtc/v4/@v/v4.2.18.info
+    checksum: h1:smA/3g6Gy4RohM0VIZ5KKY/12TQbxv3XFgpUMyb2EUI=
+    provenance: vcs-tag
+    license: MIT
+    purpose: In-process WebRTC selective forwarding unit for huddle media
+    runtime: true
+  - id: go/github.com/pion/interceptor
+    kind: go-module
+    canonical: github.com/pion/interceptor
+    source: https://github.com/pion/interceptor
+    version: v0.1.47
+    revision: 341ec2dc11b25b0fc705cc453336678e811992f8
+    published_at: 2026-07-24T20:04:27Z
+    evidence: https://proxy.golang.org/github.com/pion/interceptor/@v/v0.1.47.info
+    checksum: h1:yw8t5pJ2f8t78NgU+8EmxhaqYLXS7uFCC/tAGOaSDBo=
+    provenance: vcs-tag
+    license: MIT
+    purpose: WebRTC RTCP/NACK/report interceptors for the huddle SFU
+    runtime: true
   - id: go/github.com/jackc/pgx/v5
     kind: go-module
     canonical: github.com/jackc/pgx/v5
@@ -154,11 +180,11 @@ entries:
     kind: go-module
     canonical: golang.org/x/net
     source: https://go.googlesource.com/net
-    version: v0.53.0
-    revision: a8d1fc14d9e33e1f6842ab78a0127d42cd8fff44
-    published_at: 2026-04-09T19:17:33Z
-    evidence: https://proxy.golang.org/golang.org/x/net/@v/v0.53.0.info
-    checksum: h1:d+qAbo5L0orcWAr0a9JweQpjXF19LMXJE8Ey7hwOdUA=
+    version: v0.56.0
+    revision: 9e7fdbfadb32b0cc7524100014c5cf9b6adc7729
+    published_at: 2026-06-09T16:58:42Z
+    evidence: https://proxy.golang.org/golang.org/x/net/@v/v0.56.0.info
+    checksum: h1:Rw8j/hFzGvJUZwNBXnAtf5sVDVt+65SK2C7IxCxZt5o=
     provenance: vcs-tag
     license: BSD-3-Clause
     purpose: HTTP and identity protocol support

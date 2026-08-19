@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -39,14 +40,19 @@ type huddleView struct {
 	JoinURL      string
 	LeaveURL     string
 	EndURL       string
-	// CallID, SelfID and PeerIDs are what the media script needs to open a
-	// connection to each other participant. They are identifiers the reader can
-	// already see in this conversation, and the script cannot do anything with
-	// them the member could not do by hand.
-	CallID    string
-	SelfID    string
-	PeerIDs   []string
-	SignalURL string
+	// CallID and SelfID identify the reader's connection to the SFU. SFUURL takes
+	// the browser's publish offer and returns the SFU's answer; SFUSignalURL
+	// carries the browser's answers and candidates back. Names maps each
+	// participant to a display name for their tile, and ICEServers is the
+	// JSON-encoded ICE-server list the browser uses to reach the SFU (empty for
+	// same-network/host candidates). All are identifiers or configuration the
+	// reader could already see.
+	CallID       string
+	SelfID       string
+	SFUURL       string
+	SFUSignalURL string
+	Names        string
+	ICEServers   string
 	// ReactURL and Reactions drive ephemeral huddle reactions: the member sends
 	// one of the offered emoji and every participant sees it float and fade. They
 	// exist only while the reader is joined.
@@ -127,16 +133,21 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 	view.CanEnd = call.CreatedBy == principal.UserID
 	view.CallID = string(call.ID)
 	view.SelfID = string(principal.UserID)
-	view.SignalURL = "/app/huddle/signal"
+	view.SFUURL = "/app/huddle/sfu"
+	view.SFUSignalURL = "/app/huddle/sfu/signal"
+	view.ICEServers = "[]"
+	nameMap := make(map[string]string, len(call.Participants))
 	for _, participant := range call.Participants {
 		if participant == principal.UserID {
 			view.Joined = true
-			continue
 		}
-		view.PeerIDs = append(view.PeerIDs, string(participant))
-	}
-	for _, participant := range call.Participants {
+		nameMap[string(participant)] = names.name(participant)
 		view.Participants = append(view.Participants, names.name(participant))
+	}
+	if encoded, err := json.Marshal(nameMap); err == nil {
+		view.Names = string(encoded)
+	} else {
+		view.Names = "{}"
 	}
 	if view.Joined {
 		view.ReactURL = "/app/huddle/react"

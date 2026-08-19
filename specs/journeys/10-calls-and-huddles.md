@@ -84,31 +84,46 @@ authority throughout, checked independently of posting permission — `calls.add
 checks neither, because an app-registered call has no conversation to check
 against.
 
-**Media is peer to peer, and there is no media server.** Joining opens the
-member's microphone and connects their browser directly to each other
-participant with WebRTC. The server relays the handshake — one peer's SDP
-description or ICE candidate to one other peer — and carries no media itself. A
-signal is addressed to its recipient and delivered only to them, because a
-candidate names how to reach that person's machine.
+**Media is relayed by an in-process selective forwarding unit.** Joining opens
+the member's microphone and connects their browser — with a single
+WebRTC connection — to the server itself, which runs the SFU inside the same
+binary as one more listener rather than a second service. The browser publishes
+its microphone and one video lane (its camera, or its screen while sharing)
+once; the SFU forwards each participant's media to everyone else. That is one
+upload per participant however large the huddle, not the mesh's one upload per
+other participant, and the media flows through a server the browser can always
+reach instead of a direct peer path that fails behind NAT. The SFU's forwarded
+media is grouped one stream per participant, whose id is that participant, so
+each track lands on the right tile; tiles are labelled with the participant's
+display name.
 
-Slack uses a selective forwarding unit. A mesh does not scale the same way: each
-browser uploads one copy of its media per other participant, so a six-person
-huddle asks each of them for five uploads. That is the ceiling this deployment
-has, and it is why the huddle is honest about being small rather than claiming
-Slack's capacity.
+Negotiation has two halves. The browser publishes with a single offer POSTed to
+the SFU, which answers. Thereafter the SFU drives renegotiation: when the set of
+tracks a browser should receive changes, the SFU sends it an offer as a
+recipient-scoped signal stamped from the SFU, and the browser answers over the
+signal endpoint. The SFU answers with host candidates, which reach it on the
+same network or host; a deployment behind NAT advertises a reachable address and
+the browser is handed ICE servers to use.
 
-Screen sharing is offered where the browser provides `getDisplayMedia`.
-Reactions are implemented — a participant sends one of the huddle's quick emoji
-and every participant sees it float and fade — and the huddle canvas is the
-channel's own canvas, offered from the huddle bar. Captions remain unimplemented
-because they need speech-to-text this deployment hosts nowhere.
+Screen sharing is relayed like any other video, offered where the browser
+provides `getDisplayMedia`. Reactions are implemented — a participant sends one
+of the huddle's quick emoji and every participant sees it float and fade — and
+the huddle canvas is the channel's own canvas, offered from the huddle bar.
+Captions remain unimplemented because they need speech-to-text this deployment
+hosts nowhere.
 
-The peer-to-peer handshake completing between two browsers is not covered by the
-browser suite: the harness authenticates one session, so it can drive one
-browser into a huddle and not two. What it does cover is everything that one
-browser decides — the microphone really opening, the track really muting, the
-camera really starting — and the signalling refusals are covered across both
-compositions by the seam parity suite instead.
+Bounded gaps, recorded rather than hidden: a participant publishes one video
+lane, so camera and screen share it rather than showing at once, and there is no
+dedicated presenter view, active-speaker indicator, or remote mute/camera
+indicator yet. The forwarding path itself is covered by an in-process loopback
+test — two real pion peer connections stand in for browsers over the actual
+offer/answer/candidate exchange, one publishes and the other receives the track
+forwarded through the SFU with real RTP flowing. Two browsers forwarding to each
+other end to end is still not covered by the browser suite: the harness
+authenticates one session, so it drives one browser into a huddle and not two.
+What the browser suite covers is everything one browser decides — the microphone
+opening, the connection to the SFU establishing, the track muting, the camera
+starting.
 
 ## Evidence
 
