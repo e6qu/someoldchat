@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -67,23 +66,26 @@ type peer struct {
 	negotiating bool // a server offer is outstanding, so hold the next one
 }
 
-// NewRoom builds an empty room with the default codecs and the standard
-// RTCP/NACK/report interceptors a browser expects.
+// NewRoom builds an empty room with its own default WebRTC API — host
+// candidates, the default codecs and the standard interceptors. The manager
+// builds rooms over a shared, deployment-configured API instead; this
+// constructor is for callers and tests that want a standalone room.
 func NewRoom() (*Room, error) {
-	mediaEngine := &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-		return nil, fmt.Errorf("register codecs: %w", err)
+	api, _, err := buildAPI(Config{})
+	if err != nil {
+		return nil, err
 	}
-	registry := &interceptor.Registry{}
-	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, registry); err != nil {
-		return nil, fmt.Errorf("register interceptors: %w", err)
-	}
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(registry))
+	return newRoomWithAPI(api), nil
+}
+
+// newRoomWithAPI builds a room over an already-assembled API, so every room in a
+// manager shares one media engine, interceptor set and UDP mux.
+func newRoomWithAPI(api *webrtc.API) *Room {
 	return &Room{
 		api:      api,
 		peers:    make(map[string]*peer),
 		forwards: make(map[string]*webrtc.TrackLocalStaticRTP),
-	}, nil
+	}
 }
 
 // Join registers a participant and its signalling sink but does not offer yet:

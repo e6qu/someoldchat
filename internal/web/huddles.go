@@ -51,6 +51,7 @@ type huddleView struct {
 	SelfID       string
 	SFUURL       string
 	SFUSignalURL string
+	PresenceURL  string
 	Names        string
 	ICEServers   string
 	// ReactURL and Reactions drive ephemeral huddle reactions: the member sends
@@ -135,7 +136,11 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 	view.SelfID = string(principal.UserID)
 	view.SFUURL = "/app/huddle/sfu"
 	view.SFUSignalURL = "/app/huddle/sfu/signal"
+	view.PresenceURL = "/app/huddle/presence"
 	view.ICEServers = "[]"
+	if strings.TrimSpace(h.HuddleICEServers) != "" {
+		view.ICEServers = h.HuddleICEServers
+	}
 	nameMap := make(map[string]string, len(call.Participants))
 	for _, participant := range call.Participants {
 		if participant == principal.UserID {

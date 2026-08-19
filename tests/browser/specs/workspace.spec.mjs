@@ -3887,12 +3887,20 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   });
   expect(trackEnabled, 'the button said muted while the track was still live').toBe(false);
 
+  // Presence: the member's own tile carries the muted state, and muting
+  // broadcasts a presence update — the same event that gives every participant a
+  // muted or camera-off badge, an active-speaker ring, and a presenter view.
+  await expect(ownTile).toHaveAttribute('data-huddle-muted', 'true');
+  const presenceBroadcast = page.waitForResponse((response) => response.url().endsWith('/app/huddle/presence') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Unmute microphone' }).click();
+  expect((await presenceBroadcast).status()).toBe(204);
   await expect(session).toHaveAttribute('data-huddle-microphone', 'on');
+  await expect(ownTile).toHaveAttribute('data-huddle-muted', 'false');
 
   // The camera is a second real device, added to the same session.
   await page.getByRole('button', { name: 'Turn on camera' }).click();
   await expect(session).toHaveAttribute('data-huddle-camera', 'on', { timeout: 15000 });
+  await expect(ownTile).toHaveAttribute('data-huddle-camera', 'true');
   const videoTracks = await page.evaluate(() => {
     const media = document.querySelector('[data-huddle-tile] video');
     const stream = media && media.srcObject;
