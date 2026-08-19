@@ -2,6 +2,7 @@ package huddlesfu
 
 import (
 	"context"
+	"io"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
@@ -21,16 +22,39 @@ type Emitter interface {
 type Manager struct {
 	emitter Emitter
 	config  webrtc.Configuration
+	api     *webrtc.API
+	closer  io.Closer
 
 	mu    sync.Mutex
 	rooms map[string]*Room
 }
 
-// NewManager builds a manager. The SFU answers with host candidates by default,
-// which reach it on the same network or host; a deployment behind NAT advertises
-// a reachable address separately.
-func NewManager(emitter Emitter) *Manager {
-	return &Manager{emitter: emitter, config: webrtc.Configuration{}, rooms: make(map[string]*Room)}
+// NewManager builds a manager whose rooms share one WebRTC API assembled from
+// the deployment config — the advertised public address and shared UDP port, if
+// any. It returns an error only if that config cannot be honoured (a UDP port
+// that will not bind). The returned Close releases the shared UDP socket.
+func NewManager(emitter Emitter, config Config) (*Manager, error) {
+	api, closer, err := buildAPI(config)
+	if err != nil {
+		return nil, err
+	}
+	return &Manager{emitter: emitter, config: webrtc.Configuration{}, api: api, closer: closer, rooms: make(map[string]*Room)}, nil
+}
+
+// Close disposes every room and releases the shared media socket.
+func (m *Manager) Close() error {
+	m.mu.Lock()
+	rooms := m.rooms
+	m.rooms = map[string]*Room{}
+	closer := m.closer
+	m.mu.Unlock()
+	for _, room := range rooms {
+		room.Close()
+	}
+	if closer != nil {
+		return closer.Close()
+	}
+	return nil
 }
 
 // Offer takes a participant's initial publish offer for a huddle, joining the
@@ -77,12 +101,7 @@ func (m *Manager) room(workspaceID, callID, participant string) (*Room, error) {
 	m.mu.Lock()
 	room, ok := m.rooms[callID]
 	if !ok {
-		created, err := NewRoom()
-		if err != nil {
-			m.mu.Unlock()
-			return nil, err
-		}
-		room = created
+		room = newRoomWithAPI(m.api)
 		m.rooms[callID] = room
 	}
 	m.mu.Unlock()

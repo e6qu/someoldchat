@@ -24,6 +24,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
@@ -45,6 +46,16 @@ type Handler struct {
 	// which case the huddle media routes answer that it is unavailable rather
 	// than pretending to connect.
 	SFU *huddlesfu.Manager
+	// HuddleStore appends the broadcast presence events that carry each
+	// participant's live mic/camera/screen state. Nil where the SFU is, and for
+	// the same reason.
+	HuddleStore interface {
+		AppendEvent(context.Context, events.Event) error
+	}
+	// HuddleICEServers is the JSON array of ICE servers (STUN/TURN) the browser
+	// is handed to reach the SFU across NAT. Empty ("" or "[]") uses host
+	// candidates, which suffice on the same network.
+	HuddleICEServers string
 }
 
 var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
@@ -1682,6 +1693,16 @@ const workspaceRefinements = `<style>
 .huddle-reaction-bubble{position:absolute;bottom:8px;font-size:26px;line-height:1;animation:huddle-float 2.6s ease-out forwards}
 @keyframes huddle-float{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1;transform:translateY(-12px) scale(1)}100%{opacity:0;transform:translateY(-120px) scale(1)}}
 @media (prefers-reduced-motion:reduce){.huddle-reaction-bubble{animation:huddle-fade 2.6s linear forwards}@keyframes huddle-fade{0%{opacity:1}100%{opacity:0}}}
+.huddle-tiles{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.huddle-tiles [data-huddle-tile]{position:relative;margin:0;border:2px solid transparent;border-radius:10px;overflow:hidden;background:#111;aspect-ratio:16/9}
+.huddle-tiles [data-huddle-tile] video{width:100%;height:100%;object-fit:cover;display:block;background:#111}
+.huddle-tile-label{position:absolute;left:6px;bottom:6px;padding:1px 8px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:700;max-width:calc(100% - 44px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.huddle-tile-badge{position:absolute;right:6px;top:6px;display:flex;gap:4px;font-size:15px;line-height:1}
+[data-huddle-tile][data-huddle-muted="true"] .huddle-tile-badge::before{content:"\1F507"}
+[data-huddle-tile][data-huddle-camera="false"][data-huddle-presenting="false"] .huddle-tile-badge::after{content:"\1F4F7";opacity:.55}
+.huddle-tiles [data-huddle-tile][data-huddle-speaking="true"]{border-color:var(--ok,#2bac76)}
+.huddle-tiles[data-huddle-presenter]{grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}
+.huddle-tiles[data-huddle-presenter] [data-huddle-tile][data-huddle-presenting="true"]{grid-column:1/-1;aspect-ratio:16/8}
 .channel-actions button:hover{background:var(--hover)}
 .channel-actions a{color:var(--muted);text-decoration:none;font-weight:600;font-size:13px}
 .channel-actions a:hover{color:var(--text);text-decoration:underline}
@@ -2627,7 +2648,7 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
     </form>
   </details>{{end}}
 </div>
-{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-sfu="{{.SFUURL}}" data-huddle-sfu-signal="{{.SFUSignalURL}}" data-huddle-names="{{.Names}}" data-huddle-ice="{{.ICEServers}}" data-huddle-react="{{.ReactURL}}" data-huddle-csrf="{{.CSRFToken}}">
+{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-sfu="{{.SFUURL}}" data-huddle-sfu-signal="{{.SFUSignalURL}}" data-huddle-presence="{{.PresenceURL}}" data-huddle-names="{{.Names}}" data-huddle-ice="{{.ICEServers}}" data-huddle-react="{{.ReactURL}}" data-huddle-csrf="{{.CSRFToken}}">
   <div class="huddle-controls">
     <button type="button" data-huddle-control="microphone" aria-pressed="false">Mute microphone</button>
     <button type="button" data-huddle-control="camera" aria-pressed="false">Turn on camera</button>
@@ -4732,6 +4753,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/huddle/signal", h.huddleSignal)
 	mux.HandleFunc("POST /app/huddle/sfu", h.huddleSFUOffer)
 	mux.HandleFunc("POST /app/huddle/sfu/signal", h.huddleSFUSignal)
+	mux.HandleFunc("POST /app/huddle/presence", h.huddlePresence)
 	mux.HandleFunc("POST /app/huddle/react", h.huddleReact)
 	mux.HandleFunc("POST /app/remote-files/share", h.shareRemoteFile)
 	mux.HandleFunc("POST /app/remote-files/remove", h.removeRemoteFile)

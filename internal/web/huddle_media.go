@@ -41,6 +41,7 @@ var names={};
 try{names=JSON.parse(session.getAttribute('data-huddle-names')||'{}')}catch(error){names={}}
 var iceServers=[];
 try{iceServers=JSON.parse(session.getAttribute('data-huddle-ice')||'[]')}catch(error){iceServers=[]}
+var presenceURL=session.getAttribute('data-huddle-presence');
 var pc=null;
 var local=null;
 var cameraTrack=null;
@@ -48,6 +49,56 @@ var screenStream=null;
 var videoSender=null;
 var pending=[];
 var haveRemote=false;
+var selfMuted=false;
+var selfCamera=false;
+var selfPresenting=false;
+var audioContext=null;
+var meters={};
+var broadcastPresence=function(){
+if(!presenceURL)return;
+post(presenceURL,{muted:selfMuted?'true':'false',camera:selfCamera?'true':'false',presenting:selfPresenting?'true':'false'}).catch(function(){});
+};
+var applyPresence=function(id,muted,camera,presenting){
+var tile=tileFor(id);
+tile.setAttribute('data-huddle-muted',muted?'true':'false');
+tile.setAttribute('data-huddle-camera',camera?'true':'false');
+tile.setAttribute('data-huddle-presenting',presenting?'true':'false');
+var presenter=tiles.querySelector('[data-huddle-tile][data-huddle-presenting="true"]');
+if(presenter){tiles.setAttribute('data-huddle-presenter',presenter.getAttribute('data-huddle-tile'))}
+else{tiles.removeAttribute('data-huddle-presenter')}
+};
+var ensureAudioContext=function(){
+if(!audioContext&&(window.AudioContext||window.webkitAudioContext)){audioContext=new (window.AudioContext||window.webkitAudioContext)()}
+return audioContext;
+};
+var meterFor=function(id,stream){
+var ctx=ensureAudioContext();
+if(!ctx||!stream||meters[id]||stream.getAudioTracks().length===0)return;
+try{
+var source=ctx.createMediaStreamSource(stream);
+var analyser=ctx.createAnalyser();
+analyser.fftSize=512;
+source.connect(analyser);
+meters[id]={analyser:analyser,data:new Uint8Array(analyser.frequencyBinCount)};
+}catch(error){}
+};
+var speakingLoop=function(){
+var loudest=null;
+var loudestLevel=0.05;
+Object.keys(meters).forEach(function(id){
+if(id===selfID&&selfMuted)return;
+var meter=meters[id];
+meter.analyser.getByteFrequencyData(meter.data);
+var sum=0;
+for(var i=0;i<meter.data.length;i++){sum+=meter.data[i]*meter.data[i]}
+var level=Math.sqrt(sum/meter.data.length)/255;
+if(level>loudestLevel){loudestLevel=level;loudest=id}
+});
+Array.prototype.forEach.call(tiles.querySelectorAll('[data-huddle-tile]'),function(tile){
+tile.setAttribute('data-huddle-speaking',tile.getAttribute('data-huddle-tile')===loudest?'true':'false');
+});
+if(window.requestAnimationFrame){window.requestAnimationFrame(speakingLoop)}else{window.setTimeout(speakingLoop,120)}
+};
 var nameOf=function(id){return id===selfID?'You':(names[id]||id)};
 var tileFor=function(id){
 var found=tiles.querySelector('[data-huddle-tile="'+id+'"]');
@@ -64,6 +115,11 @@ var label=document.createElement('span');
 label.className='huddle-tile-label';
 label.textContent=nameOf(id);
 item.appendChild(label);
+var badge=document.createElement('span');
+badge.className='huddle-tile-badge';
+badge.setAttribute('data-huddle-badge','');
+badge.setAttribute('aria-hidden','true');
+item.appendChild(badge);
 tiles.appendChild(item);
 return item;
 };
@@ -121,7 +177,8 @@ var owner=stream.id;
 if(owner===selfID)return;
 var media=tileFor(owner).querySelector('video');
 if(media.srcObject!==stream)media.srcObject=stream;
-stream.addEventListener('removetrack',function(){if(stream.getTracks().length===0)dropTile(owner)});
+meterFor(owner,stream);
+stream.addEventListener('removetrack',function(){if(stream.getTracks().length===0){delete meters[owner];dropTile(owner)}});
 report();
 };
 pc.onconnectionstatechange=function(){
@@ -167,6 +224,14 @@ try{decoded=JSON.parse(detail.data)}catch(error){return}
 if(!decoded||decoded.call_id!==callID||!decoded.reaction)return;
 floatReaction(glyphMap[decoded.reaction]||(':'+decoded.reaction+':'));
 });
+document.addEventListener('sameoldchat:event',function(event){
+var detail=event.detail;
+if(!detail||detail.type!=='huddle.presence')return;
+var decoded=null;
+try{decoded=JSON.parse(detail.data)}catch(error){return}
+if(!decoded||decoded.call_id!==callID||!decoded.user_id)return;
+applyPresence(decoded.user_id,decoded.muted==='true',decoded.camera==='true',decoded.presenting==='true');
+});
 var control=function(name){return session.querySelector('[data-huddle-control="'+name+'"]')};
 var microphone=control('microphone');
 if(microphone)microphone.addEventListener('click',function(){
@@ -174,9 +239,12 @@ if(!local)return;
 var track=local.getAudioTracks()[0];
 if(!track)return;
 track.enabled=!track.enabled;
+selfMuted=!track.enabled;
 microphone.setAttribute('aria-pressed',track.enabled?'false':'true');
 microphone.textContent=track.enabled?'Mute microphone':'Unmute microphone';
 session.setAttribute('data-huddle-microphone',track.enabled?'on':'off');
+applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
+broadcastPresence();
 });
 var showSelf=function(track){
 tileFor(selfID).querySelector('video').srcObject=track?new MediaStream([track]):local;
@@ -188,18 +256,24 @@ if(cameraTrack){
 cameraTrack.stop();cameraTrack=null;
 videoSender.replaceTrack(null);
 showSelf(null);
+selfCamera=false;
 camera.setAttribute('aria-pressed','false');
 camera.textContent='Turn on camera';
 session.setAttribute('data-huddle-camera','off');
+applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
+broadcastPresence();
 return;
 }
 navigator.mediaDevices.getUserMedia({video:true}).then(function(stream){
 cameraTrack=stream.getVideoTracks()[0];
 if(!cameraTrack)return;
 if(!screenStream){videoSender.replaceTrack(cameraTrack);showSelf(cameraTrack)}
+selfCamera=true;
 camera.setAttribute('aria-pressed','true');
 camera.textContent='Turn off camera';
 session.setAttribute('data-huddle-camera','on');
+applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
+broadcastPresence();
 }).catch(function(){announce('Your camera could not be opened. The huddle continues without it.')});
 });
 var screen=control('screen');
@@ -210,9 +284,12 @@ screenStream.getTracks().forEach(function(track){track.stop()});
 screenStream=null;
 videoSender.replaceTrack(cameraTrack||null);
 showSelf(cameraTrack);
+selfPresenting=false;
 screen.setAttribute('aria-pressed','false');
 screen.textContent='Share screen';
 session.setAttribute('data-huddle-screen','off');
+applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
+broadcastPresence();
 return;
 }
 if(!navigator.mediaDevices.getDisplayMedia){announce('This browser cannot share a screen.');return}
@@ -223,15 +300,22 @@ if(!track)return;
 track.addEventListener('ended',function(){if(screenStream)screen.click()});
 videoSender.replaceTrack(track);
 showSelf(track);
+selfPresenting=true;
 screen.setAttribute('aria-pressed','true');
 screen.textContent='Stop sharing';
 session.setAttribute('data-huddle-screen','on');
+applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
+broadcastPresence();
 }).catch(function(){announce('The screen was not shared.')});
 });
 navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
 local=stream;
 session.setAttribute('data-huddle-microphone','on');
 tileFor(selfID).querySelector('video').srcObject=local;
+applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
+broadcastPresence();
+meterFor(selfID,local);
+speakingLoop();
 connect();
 report();
 }).catch(function(){
@@ -242,6 +326,7 @@ window.addEventListener('pagehide',function(){
 if(pc){try{pc.close()}catch(error){}}
 if(local)local.getTracks().forEach(function(track){track.stop()});
 if(screenStream)screenStream.getTracks().forEach(function(track){track.stop()});
+if(audioContext){try{audioContext.close()}catch(error){}}
 });
 };
 start(document.querySelector('[data-huddle-call]'));

@@ -97,6 +97,13 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	blobS3Bucket := flags.String("blob-s3-bucket", os.Getenv("SAMEOLDCHAT_BLOB_S3_BUCKET"), "Amazon Simple Storage Service bucket for file storage")
 	blobS3Prefix := flags.String("blob-s3-prefix", os.Getenv("SAMEOLDCHAT_BLOB_S3_PREFIX"), "Amazon Simple Storage Service key prefix for file storage")
 	blobMaxBytes := flags.Int64("blob-max-bytes", 100<<20, "maximum individual blob size")
+	// Huddle media reachability. Empty public IP and zero port keep host
+	// candidates and ephemeral ports, which suffice on the same network; a
+	// deployment behind NAT sets the advertised address and a single UDP port to
+	// expose, and hands the browser the ICE servers (STUN/TURN) to reach it.
+	huddlePublicIP := flags.String("huddle-public-ip", os.Getenv("SAMEOLDCHAT_HUDDLE_PUBLIC_IP"), "public IP the huddle SFU advertises (NAT 1-to-1 mapping of host candidates); empty leaves host candidates unmapped")
+	huddleUDPPort := flags.Int("huddle-udp-port", envInt("SAMEOLDCHAT_HUDDLE_UDP_PORT"), "single UDP port for all huddle media; 0 uses ephemeral ports")
+	huddleICEServers := flags.String("huddle-ice-servers", os.Getenv("SAMEOLDCHAT_HUDDLE_ICE_SERVERS"), "JSON array of ICE servers (STUN/TURN) browsers use to reach the huddle SFU; empty uses none")
 	chatAddress := flags.String("chat-address", "", "distributed chat gRPC address; required for -chat-mode=grpc")
 	chatCA := flags.String("chat-ca", "", "CA certificate for distributed chat gRPC")
 	chatServerName := flags.String("chat-server-name", "", "TLS server name for distributed chat gRPC")
@@ -199,8 +206,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// The huddle SFU forwards media inside this process. It needs the event log
 	// to push its offers and candidates to browsers, so it is only wired where
 	// this process owns the store (local composition); elsewhere huddle media is
-	// reported unavailable rather than silently broken.
+	// reported unavailable rather than silently broken. huddleStore carries the
+	// broadcast presence events alongside it.
 	var sfuManager *huddlesfu.Manager
+	var huddleStore store.Store
 	var socketModeStore socketmode.ConnectionStore
 	var socketModeAuth auth.Authenticator
 	switch settings.chatMode {
@@ -221,7 +230,17 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		}()
 		chatService = runtime.Service
 		socketModeStore = runtime.Store
-		sfuManager = huddlesfu.NewManager(web.HuddleSignalEmitter{Store: runtime.Store})
+		manager, sfuErr := huddlesfu.NewManager(web.HuddleSignalEmitter{Store: runtime.Store}, huddlesfu.Config{PublicIP: *huddlePublicIP, UDPPort: *huddleUDPPort})
+		if sfuErr != nil {
+			return startupFailure(applicationContext, logger, "configure huddle SFU", sfuErr)
+		}
+		sfuManager = manager
+		defer func() {
+			if err := sfuManager.Close(); err != nil {
+				logger.Error("close huddle SFU", "error", err)
+			}
+		}()
+		huddleStore = runtime.Store
 		if settings.appToken != "" {
 			appTokenStore, ok := runtime.TokenStore.(interface {
 				SeedAppToken(context.Context, string, domain.AppTokenRecord) error
@@ -358,6 +377,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		return exitConfiguration
 	}
 	webHandler.SFU = sfuManager
+	if huddleStore != nil {
+		webHandler.HuddleStore = huddleStore
+	}
+	webHandler.HuddleICEServers = *huddleICEServers
 	if strings.TrimSpace(settings.authPublicURL) != "" {
 		if publicErr := webHandler.SetPublicURL(settings.authPublicURL); publicErr != nil {
 			logger.Error("configure web public URL", "error", publicErr)
@@ -508,6 +531,17 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 // deploy that stops a task mid-startup then looks like a crash, which a
 // deployment circuit breaker rolls the release back on. Being asked to stop is
 // exit 0.
+// envInt reads a non-negative integer from an environment variable, defaulting
+// to zero when unset or unparseable, so an operator can configure the huddle
+// media port purely from the environment the way terraform/ecs-runtime does.
+func envInt(name string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
+}
+
 func startupFailure(ctx context.Context, logger *slog.Logger, stage string, err error) int {
 	if ctx.Err() != nil {
 		logger.Info("startup interrupted before completion", "stage", stage)

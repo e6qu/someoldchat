@@ -102,28 +102,35 @@ the SFU, which answers. Thereafter the SFU drives renegotiation: when the set of
 tracks a browser should receive changes, the SFU sends it an offer as a
 recipient-scoped signal stamped from the SFU, and the browser answers over the
 signal endpoint. The SFU answers with host candidates, which reach it on the
-same network or host; a deployment behind NAT advertises a reachable address and
-the browser is handed ICE servers to use.
+same network or host; a deployment behind NAT sets a public address the SFU
+advertises as a one-to-one mapping and a single UDP port to expose
+(`-huddle-public-ip`, `-huddle-udp-port`), and hands the browser the ICE servers
+to use (`-huddle-ice-servers`), so one known port and one address are all an
+operator opens.
 
-Screen sharing is relayed like any other video, offered where the browser
-provides `getDisplayMedia`. Reactions are implemented — a participant sends one
-of the huddle's quick emoji and every participant sees it float and fade — and
-the huddle canvas is the channel's own canvas, offered from the huddle bar.
-Captions remain unimplemented because they need speech-to-text this deployment
-hosts nowhere.
+Presence is live. Each participant broadcasts its microphone, camera and
+screen-share state, so every tile carries a muted or camera-off badge, the
+loudest speaker's tile is ringed (a Web Audio level meter over each stream), and
+a participant sharing their screen is promoted to a presenter view that fills the
+grid while the rest sit in a filmstrip. Screen sharing is relayed like any other
+video, offered where the browser provides `getDisplayMedia`. Reactions are
+implemented — a participant sends one of the huddle's quick emoji and every
+participant sees it float and fade — and the huddle canvas is the channel's own
+canvas, offered from the huddle bar. Captions remain unimplemented because they
+need speech-to-text this deployment hosts nowhere.
 
 Bounded gaps, recorded rather than hidden: a participant publishes one video
-lane, so camera and screen share it rather than showing at once, and there is no
-dedicated presenter view, active-speaker indicator, or remote mute/camera
-indicator yet. The forwarding path itself is covered by an in-process loopback
-test — two real pion peer connections stand in for browsers over the actual
-offer/answer/candidate exchange, one publishes and the other receives the track
-forwarded through the SFU with real RTP flowing. Two browsers forwarding to each
-other end to end is still not covered by the browser suite: the harness
-authenticates one session, so it drives one browser into a huddle and not two.
-What the browser suite covers is everything one browser decides — the microphone
-opening, the connection to the SFU establishing, the track muting, the camera
-starting.
+lane, so a member sharing their screen replaces their camera feed for the
+duration rather than sending both at once. The forwarding path itself is covered
+by an in-process loopback test — two real pion peer connections stand in for
+browsers over the actual offer/answer/candidate exchange, one publishes and the
+other receives the track forwarded through the SFU with real RTP flowing. Two
+browsers forwarding to each other end to end is still not covered by the browser
+suite: the harness authenticates one session, so it drives one browser into a
+huddle and not two. What the browser suite covers is everything one browser
+decides — the microphone opening, the connection to the SFU establishing, the
+track muting, the camera starting, and its own presence broadcast returning to
+badge its tile.
 
 ## Evidence
 

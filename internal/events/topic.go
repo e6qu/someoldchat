@@ -352,6 +352,11 @@ var topicRules = []topicRule{
 	// for all the participants — so it is not recipient-scoped; the client shows
 	// it only for the huddle it is watching, by call id.
 	{topic: "huddle.reaction", note: "not pinned: Slack documents no huddle reaction event"},
+	// Presence is a participant's live microphone, camera and screen-share state,
+	// shown to everyone in the huddle so tiles can carry a muted or camera-off
+	// badge and the sharer's tile can be promoted to a presenter view. Like a
+	// reaction it is for all participants and names no addressee.
+	{topic: "huddle.presence", note: "not pinned: Slack documents no huddle presence event"},
 	{topic: "canvas.created", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.commented", note: "first-party: canvases postdate the snapshot and Slack publishes no canvas comment event"},

@@ -122,6 +122,62 @@ func (h Handler) huddleSFUSignal(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// huddlePresence broadcasts one participant's live microphone, camera and
+// screen-share state to everyone in the huddle, so their tiles can show a muted
+// or camera-off badge and promote a sharer to a presenter view. It is the same
+// standing as a reaction: the sender must be a live participant.
+func (h Handler) huddlePresence(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if h.HuddleStore == nil {
+		http.Error(w, "Huddle media is not available on this server.", http.StatusServiceUnavailable)
+		return
+	}
+	fields, err := decodeFormFields(w, r)
+	if err != nil {
+		return
+	}
+	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))
+	if callID == "" {
+		http.Error(w, "A call id is required.", http.StatusBadRequest)
+		return
+	}
+	call, err := h.Messages.GetCall(r.Context(), principal.WorkspaceID, principal.UserID, callID)
+	if err != nil || !call.EndedAt.IsZero() || !slices.Contains(call.Participants, principal.UserID) {
+		http.Error(w, "You are not in this huddle.", http.StatusForbidden)
+		return
+	}
+	id, err := domain.NewEventID()
+	if err != nil {
+		http.Error(w, "The presence update could not be sent.", http.StatusInternalServerError)
+		return
+	}
+	event, err := events.New(id, principal.WorkspaceID, principal.UserID, events.NewPayload("huddle.presence",
+		events.String("call_id", string(callID)),
+		events.String("channel_id", string(call.ConversationID)),
+		events.String("user_id", string(principal.UserID)),
+		events.String("muted", huddleBool(fields["muted"])),
+		events.String("camera", huddleBool(fields["camera"])),
+		events.String("presenting", huddleBool(fields["presenting"])),
+	), time.Now().UTC())
+	if err == nil {
+		_ = h.HuddleStore.AppendEvent(r.Context(), event)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// huddleBool normalises a form flag to "true" or "false" for the presence
+// payload, so the browser reads a stable value.
+func huddleBool(value string) string {
+	if strings.TrimSpace(value) == "true" {
+		return "true"
+	}
+	return "false"
+}
+
 // callAdmitsParticipant reports whether the principal is a live participant of
 // the call, so a stranger cannot publish into or subscribe to a huddle they are
 // not in.
