@@ -326,6 +326,12 @@ jobs:
               exit 1
             fi
             echo "attempt $attempt to install browser dependencies stalled or failed; retrying" >&2
+            # A timeout kills apt mid-download, leaving dpkg half-configured and
+            # the next attempt failing with apt exit code 100. Recover the state
+            # and clear partial downloads before retrying.
+            sudo dpkg --configure -a >/dev/null 2>&1 || true
+            sudo apt-get -f install -y >/dev/null 2>&1 || true
+            sudo apt-get clean || true
             sleep 15
           done
 
@@ -388,6 +394,10 @@ jobs:
               exit 1
             fi
             echo "attempt $attempt to install browser contract dependencies stalled or failed; retrying" >&2
+            # Recover apt state a killed attempt left half-configured (exit 100).
+            sudo dpkg --configure -a >/dev/null 2>&1 || true
+            sudo apt-get -f install -y >/dev/null 2>&1 || true
+            sudo apt-get clean || true
             sleep 15
           done
 
