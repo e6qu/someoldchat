@@ -310,8 +310,40 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The install pulls browser system libraries from an apt mirror that has
+      # stalled and been cancelled on browser-touching pull requests. A per-
+      # attempt timeout turns a stall into a fast failure, and three attempts ride
+      # out a transient mirror problem — the same shape as the dqlite job's index
+      # fetch. The test run is a separate target so a retry does not re-run it.
       - name: Install browser qualification dependencies
-        run: make browser-qualification
+        run: |
+          # Make apt itself drop a stalled mirror connection after 60s and retry,
+          # so a hung download fails fast instead of hanging until the outer
+          # timeout. The retry loop below is the backup for a mirror that is down
+          # rather than merely slow.
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "60";\nAcquire::https::Timeout "60";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-retries >/dev/null
+          for attempt in 1 2 3; do
+            if timeout 600 make browser-qualification-deps; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "browser dependency installation failed after 3 attempts" >&2
+              exit 1
+            fi
+            echo "attempt $attempt to install browser dependencies stalled or failed; retrying" >&2
+            # timeout kills the make/npx parent, but the sudo'd apt-get it spawned
+            # survives and keeps holding the apt lock, so the next attempt fails
+            # with "Could not get lock". Kill the survivor, clear the stale locks,
+            # then repair any half-configured dpkg state before retrying.
+            sudo pkill -9 -x apt-get >/dev/null 2>&1 || true
+            sudo pkill -9 -x dpkg >/dev/null 2>&1 || true
+            sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock >/dev/null 2>&1 || true
+            sudo dpkg --configure -a >/dev/null 2>&1 || true
+            sleep 15
+          done
+
+      - name: Run browser qualification
+        run: make browser-qualification-run
 
       # Playwright already records a trace, a DOM snapshot and the network
       # exchange for a failed test — the config asks for it — and this job threw
@@ -355,10 +387,29 @@ jobs:
         with:
           node-version: 24.7.0
 
+      # Same stall, same fix as the browser-qualification job: a per-attempt
+      # timeout and three tries ride out an apt mirror that has cancelled this
+      # step before.
       - name: Install the browser contract dependencies
         run: |
-          npm ci --prefix tests/browser
-          npx --prefix tests/browser playwright install --with-deps chromium
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "60";\nAcquire::https::Timeout "60";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-retries >/dev/null
+          for attempt in 1 2 3; do
+            if timeout 600 bash -c 'npm ci --prefix tests/browser && npx --prefix tests/browser playwright install --with-deps chromium'; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "browser contract dependency installation failed after 3 attempts" >&2
+              exit 1
+            fi
+            echo "attempt $attempt to install browser contract dependencies stalled or failed; retrying" >&2
+            # Kill the sudo'd apt-get the timeout left holding the lock, clear the
+            # stale locks, and repair dpkg before retrying (see the browser job).
+            sudo pkill -9 -x apt-get >/dev/null 2>&1 || true
+            sudo pkill -9 -x dpkg >/dev/null 2>&1 || true
+            sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock >/dev/null 2>&1 || true
+            sudo dpkg --configure -a >/dev/null 2>&1 || true
+            sleep 15
+          done
 
       - name: Run the real Shauth, Ory Hydra, PostgreSQL, and browser matrix
         env:
