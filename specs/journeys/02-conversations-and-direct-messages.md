@@ -61,6 +61,13 @@ The formal current argument contract limits one request to 100 user IDs.
   archived channels, and insufficient roles follow Slack's distinct rules.
 - Permanent deletion is an administrative journey with Slack's confirmation,
   retention, and audit consequences; archive MUST NOT masquerade as delete.
+  Deleting a channel removes everything it owns in one transaction — its
+  messages and their reactions, pins, stars and saved copies, and equally its
+  bookmarks, incoming webhooks, per-member notification preferences, retention
+  override, linked records, ephemeral messages and every other row keyed to it —
+  so no orphan survives and no enforced foreign key can refuse the delete.
+  Records that only name the channel without belonging to it, such as a member's
+  reminder made from one of its messages, are kept, exactly as Slack keeps them.
 
 ## DM-01 — Find and open a one-to-one DM
 

@@ -3785,11 +3785,116 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 				delete(s.stars, userID)
 			}
 		}
+		for key, messageID := range s.idempotency {
+			if messageID == message.ID {
+				delete(s.idempotency, key)
+			}
+		}
 	}
 	delete(s.messages, conversation)
 	delete(s.memberships, conversation)
 	delete(s.conversationPrefs, conversation)
 	delete(s.conversationAccess, conversation)
+	// Everything else the conversation owns, mirroring the sqlstore cascade so
+	// the two profiles agree on what deleting a channel removes. A record that
+	// only names the conversation without owning it — a member's later reminder
+	// made from one of its messages, a workflow run's audit trail — is kept in
+	// both stores, exactly as the SQL side keeps it.
+	delete(s.conversationRetention, conversation)
+	delete(s.retentionSweptAt, conversation)
+	delete(s.externalInvitePermissions, conversation)
+	for id, item := range s.savedItems {
+		if item.Conversation == conversation {
+			delete(s.savedItems, id)
+		}
+	}
+	for id, item := range s.activityItems {
+		if item.Conversation == conversation {
+			delete(s.activityItems, id)
+		}
+	}
+	for id, bookmark := range s.bookmarks {
+		if bookmark.Conversation == conversation {
+			delete(s.bookmarks, id)
+		}
+	}
+	for id, webhook := range s.incomingWebhooks {
+		if webhook.ConversationID == conversation {
+			delete(s.incomingWebhooks, id)
+		}
+	}
+	for id, invite := range s.sharedInvites {
+		if invite.ConversationID == conversation {
+			delete(s.sharedInvites, id)
+		}
+	}
+	for key, thread := range s.assistantThreads {
+		if thread.Conversation == conversation {
+			delete(s.assistantThreads, key)
+		}
+	}
+	for key, signal := range s.typing {
+		if signal.Conversation == conversation {
+			delete(s.typing, key)
+		}
+	}
+	for id, call := range s.calls {
+		if call.ConversationID == conversation {
+			delete(s.calls, id)
+		}
+	}
+	for key, object := range s.conversationObjects {
+		if object.ConversationID == conversation {
+			delete(s.conversationObjects, key)
+		}
+	}
+	for key, draft := range s.drafts {
+		if draft.ConversationID == conversation {
+			delete(s.drafts, key)
+		}
+	}
+	for key, pref := range s.conversationNotificationPrefs {
+		if pref.Conversation == conversation {
+			delete(s.conversationNotificationPrefs, key)
+		}
+	}
+	// A socket-mode interaction quotes the response URL it must reply to, and
+	// that URL names the conversation, so both go when the conversation does.
+	for envelope, interaction := range s.socketInteractions {
+		if interaction.Response.ConversationID == conversation {
+			delete(s.socketInteractions, envelope)
+		}
+	}
+	for token, responseURL := range s.appResponseURLs {
+		if responseURL.ConversationID == conversation {
+			delete(s.appResponseURLs, token)
+		}
+	}
+	// thread_follows is keyed workspace\x00user\x00conversation\x00root, so the
+	// conversation is the third segment.
+	for key := range s.threadFollows {
+		parts := strings.Split(key, "\x00")
+		if len(parts) >= 3 && parts[2] == string(conversation) {
+			delete(s.threadFollows, key)
+		}
+	}
+	remainingEphemeral := s.ephemeralMessages[:0]
+	for _, ephemeral := range s.ephemeralMessages {
+		if ephemeral.Conversation != conversation {
+			remainingEphemeral = append(remainingEphemeral, ephemeral)
+		}
+	}
+	s.ephemeralMessages = remainingEphemeral
+	for id, section := range s.sidebarSections {
+		kept := section.Conversations[:0]
+		for _, member := range section.Conversations {
+			if member != conversation {
+				kept = append(kept, member)
+			}
+		}
+		section.Conversations = kept
+		s.sidebarSections[id] = section
+	}
 	for key := range s.closedDirects {
 		if strings.HasSuffix(key, "\x00"+string(conversation)) {
 			delete(s.closedDirects, key)
