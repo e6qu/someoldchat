@@ -59,12 +59,15 @@ func (m *Manager) Close() error {
 
 // Offer takes a participant's initial publish offer for a huddle, joining the
 // room if this is their first message, and returns the SFU's answer.
-func (m *Manager) Offer(workspaceID, callID, participant, offerSDP string) (string, error) {
+// screenStreamID is the msid the browser assigned its screen lane, so the SFU
+// can forward a screen share on its own stream; it is empty when the browser
+// declares no screen lane.
+func (m *Manager) Offer(workspaceID, callID, participant, offerSDP, screenStreamID string) (string, error) {
 	room, err := m.room(workspaceID, callID, participant)
 	if err != nil {
 		return "", err
 	}
-	return room.Answer(participant, offerSDP)
+	return room.Answer(participant, offerSDP, screenStreamID)
 }
 
 // Signal feeds a participant's answer or trickled candidate to their room.

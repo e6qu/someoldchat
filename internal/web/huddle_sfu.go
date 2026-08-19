@@ -86,7 +86,7 @@ func (h Handler) huddleSFUOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "You are not in this huddle.", http.StatusForbidden)
 		return
 	}
-	answer, err := h.SFU.Offer(string(principal.WorkspaceID), string(callID), string(principal.UserID), offer)
+	answer, err := h.SFU.Offer(string(principal.WorkspaceID), string(callID), string(principal.UserID), offer, strings.TrimSpace(fields["screen_stream"]))
 	if err != nil {
 		http.Error(w, "The huddle media connection could not be established.", http.StatusConflict)
 		return

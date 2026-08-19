@@ -61,9 +61,11 @@ type peer struct {
 	pc   *webrtc.PeerConnection
 	sink Sink
 
-	mu          sync.Mutex
-	ready       bool // the initial publish offer has been answered
-	negotiating bool // a server offer is outstanding, so hold the next one
+	mu             sync.Mutex
+	ready          bool   // the initial publish offer has been answered
+	negotiating    bool   // a server offer is outstanding, so hold the next one
+	dirty          bool   // tracks were added since the last offer was sent
+	screenStreamID string // the browser-declared msid of this peer's screen lane, if any
 }
 
 // NewRoom builds an empty room with its own default WebRTC API — host
@@ -142,16 +144,22 @@ func (r *Room) Join(id string, sink Sink, config webrtc.Configuration) error {
 }
 
 // Answer accepts a participant's initial publish offer — the browser sending its
-// own microphone, camera and screen transceivers — and returns the SFU's answer.
-// After it, only the SFU offers, so a later subscription change cannot collide
+// microphone, camera and a dedicated screen transceiver — and returns the SFU's
+// answer. screenStreamID is the msid the browser assigned that screen lane, so
+// the SFU can tell a screen track apart from a camera track when either starts
+// flowing; it is empty for a browser that publishes no screen lane. After the
+// answer, only the SFU offers, so a later subscription change cannot collide
 // with the browser.
-func (r *Room) Answer(id, offerSDP string) (string, error) {
+func (r *Room) Answer(id, offerSDP, screenStreamID string) (string, error) {
 	r.mu.Lock()
 	current, ok := r.peers[id]
 	r.mu.Unlock()
 	if !ok {
 		return "", fmt.Errorf("participant %q is not in the room", id)
 	}
+	current.mu.Lock()
+	current.screenStreamID = screenStreamID
+	current.mu.Unlock()
 	if err := current.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offerSDP}); err != nil {
 		return "", fmt.Errorf("set remote offer: %w", err)
 	}
@@ -261,7 +269,20 @@ func (r *Room) Close() {
 // copies its packets until the remote track ends.
 func (r *Room) publish(owner string, remote *webrtc.TrackRemote) {
 	key := forwardKey(owner, remote.ID())
-	local, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, remote.ID(), forwardStreamID(owner, remote.StreamID()))
+	// A screen track is the one whose msid the browser declared as its screen
+	// lane; everything else is the participant's camera or microphone. The two
+	// are forwarded under distinct stream ids so a subscriber can play a screen
+	// share alongside the sharer's camera instead of in place of it.
+	r.mu.Lock()
+	current := r.peers[owner]
+	r.mu.Unlock()
+	screen := false
+	if current != nil {
+		current.mu.Lock()
+		screen = current.screenStreamID != "" && remote.StreamID() == current.screenStreamID
+		current.mu.Unlock()
+	}
+	local, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, remote.ID(), forwardStreamID(owner, screen))
 	if err != nil {
 		return
 	}
@@ -297,9 +318,10 @@ func (r *Room) publish(owner string, remote *webrtc.TrackRemote) {
 }
 
 // synchronize reconciles every ready peer's outbound senders with the current
-// set of forwarded tracks and offers a fresh description to any peer whose
-// senders changed. A peer already in sync, not yet ready, or with an offer still
-// outstanding is left alone, so offers never collide.
+// set of forwarded tracks and offers a fresh description to any peer that needs
+// one. A peer that gains a track is marked dirty; offer decides whether to send
+// now or after an outstanding offer is answered, so offers never collide and a
+// track added mid-negotiation is not lost.
 func (r *Room) synchronize() {
 	r.mu.Lock()
 	if r.closed {
@@ -308,7 +330,7 @@ func (r *Room) synchronize() {
 	}
 	type work struct {
 		current *peer
-		offer   bool
+		added   bool
 	}
 	items := make([]work, 0, len(r.peers))
 	for _, current := range r.peers {
@@ -318,7 +340,7 @@ func (r *Room) synchronize() {
 				existing[track.ID()] = struct{}{}
 			}
 		}
-		changed := false
+		added := false
 		for key, local := range r.forwards {
 			if forwardOwner(key) == current.id {
 				continue
@@ -327,30 +349,37 @@ func (r *Room) synchronize() {
 				continue
 			}
 			if _, err := current.pc.AddTrack(local); err == nil {
-				changed = true
+				added = true
 			}
 		}
-		items = append(items, work{current: current, offer: changed})
+		items = append(items, work{current: current, added: added})
 	}
 	r.mu.Unlock()
 
 	for _, item := range items {
-		if !item.offer {
-			continue
+		if item.added {
+			item.current.mu.Lock()
+			item.current.dirty = true
+			item.current.mu.Unlock()
 		}
 		r.offer(item.current)
 	}
 }
 
-// offer sends one server-initiated offer to a peer, unless it is not ready yet
-// or already has an offer in flight (in which case the pending change is picked
-// up when that offer is answered).
+// offer sends one server-initiated offer to a peer when it has unoffered track
+// changes, is ready, and has no offer already in flight. The dirty flag persists
+// across a negotiation, so a track that AddTrack put in the senders list while an
+// earlier offer was outstanding — and so was absent from that offer's SDP — is
+// still described by the next offer rather than stranded. It is cleared only when
+// an offer is actually sent, and restored if that send fails so a later
+// synchronize retries.
 func (r *Room) offer(current *peer) {
 	current.mu.Lock()
-	if !current.ready || current.negotiating {
+	if !current.ready || current.negotiating || !current.dirty {
 		current.mu.Unlock()
 		return
 	}
+	current.dirty = false
 	current.negotiating = true
 	current.mu.Unlock()
 
@@ -361,6 +390,7 @@ func (r *Room) offer(current *peer) {
 	if err != nil {
 		current.mu.Lock()
 		current.negotiating = false
+		current.dirty = true
 		current.mu.Unlock()
 		return
 	}

@@ -3857,6 +3857,14 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   // explaining its absence.
   await expect(page.locator('.huddle-bar')).toContainText('your browser connects to each person who joins');
 
+  // The publish offer is the browser→SFU contract for simultaneous camera and
+  // screen: it declares a dedicated screen media-stream id, which the SFU matches
+  // to forward a screen share on its own stream rather than in place of the
+  // camera. Capturing it proves the browser holds up its half — the Go loopback
+  // proves the SFU holds up the other.
+  const offerPosted = page.waitForRequest(
+    (request) => request.url().endsWith('/app/huddle/sfu') && request.method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Start a huddle' }).click();
   const session = page.locator('.huddle-media-session');
   await expect(session).toBeVisible();
@@ -3864,6 +3872,13 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   // The microphone is really opened: the attribute follows getUserMedia
   // resolving, not the button being pressed.
   await expect(session).toHaveAttribute('data-huddle-microphone', 'on', { timeout: 15000 });
+
+  const offerBody = new URLSearchParams((await offerPosted).postData() || '');
+  const screenStreamId = offerBody.get('screen_stream');
+  expect(screenStreamId, 'the publish offer declared no screen lane').toBeTruthy();
+  // The declared id is a real media stream in the offered SDP — a second video
+  // lane the SFU can tell apart from the camera — not a bare label.
+  expect(offerBody.get('sdp')).toContain(screenStreamId);
 
   // The member's own tile carries a live stream rather than an empty element.
   const ownTile = page.locator('[data-huddle-tile]').first();
@@ -3907,6 +3922,33 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
     return stream ? stream.getVideoTracks().length : 0;
   });
   expect(videoTracks, 'the camera reported on with no video track').toBeGreaterThan(0);
+
+  // Sharing a screen is a second video lane, not a replacement for the camera:
+  // HUDDLE-02 lists audio, video and screen share as concurrent, so the sharer
+  // keeps their camera tile while their screen opens its own presenter tile.
+  // Only Chromium here answers getDisplayMedia from a fake desktop source;
+  // Firefox's fake pipeline offers no screen to pick.
+  if (browserName === 'chromium') {
+    const screenTile = page.locator('[data-huddle-tile][data-huddle-screen]');
+    await page.getByRole('button', { name: 'Share screen' }).click();
+    await expect(session).toHaveAttribute('data-huddle-screen', 'on', { timeout: 15000 });
+    // The screen is its own tile with a live stream, and the camera tile is
+    // still present and still on — the two lanes coexist.
+    await expect(screenTile).toBeVisible();
+    await expect
+      .poll(async () => screenTile.locator('video').evaluate((media) => Boolean(media.srcObject)))
+      .toBe(true);
+    await expect(ownTile).toHaveAttribute('data-huddle-camera', 'true');
+    // The screen is promoted to the presenter surface that fills the grid.
+    await expect(page.locator('[data-huddle-tiles]')).toHaveAttribute('data-huddle-presenter', /screen:/);
+    // Stopping the share removes only the screen tile; the camera survives.
+    await page.getByRole('button', { name: 'Stop sharing' }).click();
+    await expect(session).toHaveAttribute('data-huddle-screen', 'off');
+    await expect(screenTile).toHaveCount(0);
+    await expect(page.locator('[data-huddle-tiles]')).not.toHaveAttribute('data-huddle-presenter');
+    await expect(ownTile).toHaveAttribute('data-huddle-camera', 'true');
+  }
+
   await page.getByRole('button', { name: 'Turn off camera' }).click();
   await expect(session).toHaveAttribute('data-huddle-camera', 'off');
 

@@ -3,20 +3,25 @@ package web
 // huddleMediaScript connects one browser to a huddle through the in-process
 // selective forwarding unit.
 //
-// Each browser holds ONE connection, to this server. It publishes its microphone
-// and one video lane (its camera, or its screen while sharing) once; the SFU
+// Each browser holds ONE connection, to this server. It publishes its
+// microphone, its camera and its screen — each on its own lane — once; the SFU
 // forwards each participant's media to everyone else. That is one upload per
 // participant however many people are in the huddle — not the mesh's one upload
 // per other participant — and the media flows through a server the browser can
-// always reach rather than a direct peer path that fails behind NAT.
+// always reach rather than a direct peer path that fails behind NAT. The screen
+// lane carries a dedicated media stream whose id the browser declares to the SFU
+// in its publish offer, so the SFU can forward a screen share on its own stream
+// and a subscriber can play it beside the sharer's camera instead of in place.
 //
 // Negotiation has two halves. The browser publishes with a single initial offer
 // POSTed to the SFU, which answers. Thereafter the SFU drives renegotiation:
 // when the set of tracks the browser should receive changes, the SFU sends an
 // offer as a recipient-scoped huddle.signal event stamped from the SFU, and the
-// browser answers over the signal endpoint. Forwarded media arrives grouped into
-// one stream per participant, whose id is that participant, so each track lands
-// on the right tile.
+// browser answers over the signal endpoint. Forwarded media arrives grouped by
+// participant: a stream whose id is the participant carries their camera and
+// microphone onto their tile, and a stream whose id is that participant plus a
+// screen suffix opens a separate presenter tile, so a screen share plays beside
+// the sharer's camera.
 //
 // The script carries no comments: html/template elides them inside a script
 // element, so the served bytes would stop matching the Content-Security-Policy
@@ -47,6 +52,8 @@ var local=null;
 var cameraTrack=null;
 var screenStream=null;
 var videoSender=null;
+var screenSender=null;
+var screenStreamOut=null;
 var pending=[];
 var haveRemote=false;
 var selfMuted=false;
@@ -62,8 +69,9 @@ var applyPresence=function(id,muted,camera,presenting){
 var tile=tileFor(id);
 tile.setAttribute('data-huddle-muted',muted?'true':'false');
 tile.setAttribute('data-huddle-camera',camera?'true':'false');
-tile.setAttribute('data-huddle-presenting',presenting?'true':'false');
-var presenter=tiles.querySelector('[data-huddle-tile][data-huddle-presenting="true"]');
+};
+var refreshPresenter=function(){
+var presenter=tiles.querySelector('[data-huddle-tile][data-huddle-screen]');
 if(presenter){tiles.setAttribute('data-huddle-presenter',presenter.getAttribute('data-huddle-tile'))}
 else{tiles.removeAttribute('data-huddle-presenter')}
 };
@@ -94,7 +102,7 @@ for(var i=0;i<meter.data.length;i++){sum+=meter.data[i]*meter.data[i]}
 var level=Math.sqrt(sum/meter.data.length)/255;
 if(level>loudestLevel){loudestLevel=level;loudest=id}
 });
-Array.prototype.forEach.call(tiles.querySelectorAll('[data-huddle-tile]'),function(tile){
+Array.prototype.forEach.call(tiles.querySelectorAll('[data-huddle-tile]:not([data-huddle-screen])'),function(tile){
 tile.setAttribute('data-huddle-speaking',tile.getAttribute('data-huddle-tile')===loudest?'true':'false');
 });
 if(window.requestAnimationFrame){window.requestAnimationFrame(speakingLoop)}else{window.setTimeout(speakingLoop,120)}
@@ -123,13 +131,46 @@ item.appendChild(badge);
 tiles.appendChild(item);
 return item;
 };
+var screenKey=function(id){return 'screen:'+id};
+var screenTileFor=function(id){
+var key=screenKey(id);
+var found=tiles.querySelector('[data-huddle-tile="'+key+'"]');
+if(found)return found;
+var item=document.createElement('li');
+item.setAttribute('data-huddle-tile',key);
+item.setAttribute('data-huddle-screen','');
+item.setAttribute('data-huddle-presenting','true');
+var media=document.createElement('video');
+media.autoplay=true;
+media.playsInline=true;
+if(id===selfID)media.muted=true;
+item.appendChild(media);
+var label=document.createElement('span');
+label.className='huddle-tile-label';
+label.textContent=id===selfID?'Your screen':nameOf(id)+'’s screen';
+item.appendChild(label);
+tiles.appendChild(item);
+return item;
+};
+var attachScreen=function(id,stream){
+var tile=screenTileFor(id);
+var media=tile.querySelector('video');
+if(media.srcObject!==stream)media.srcObject=stream;
+refreshPresenter();
+};
+var detachScreen=function(id){
+var tile=tiles.querySelector('[data-huddle-tile="'+screenKey(id)+'"]');
+if(tile)tile.remove();
+refreshPresenter();
+};
 var dropTile=function(id){
 var tile=tiles.querySelector('[data-huddle-tile="'+id+'"]');
 if(tile)tile.remove();
+detachScreen(id);
 report();
 };
 var remoteCount=function(){
-var total=tiles.querySelectorAll('[data-huddle-tile]').length;
+var total=tiles.querySelectorAll('[data-huddle-tile]:not([data-huddle-screen])').length;
 if(tiles.querySelector('[data-huddle-tile="'+selfID+'"]'))total=total-1;
 return total;
 };
@@ -173,8 +214,15 @@ pc.onicecandidate=function(event){if(event.candidate)toServer('candidate',{candi
 pc.ontrack=function(event){
 var stream=event.streams&&event.streams[0];
 if(!stream)return;
-var owner=stream.id;
+var screen=stream.id.slice(-7)==='.screen';
+var owner=screen?stream.id.slice(0,-7):stream.id;
 if(owner===selfID)return;
+if(screen){
+attachScreen(owner,stream);
+stream.addEventListener('removetrack',function(){if(stream.getTracks().length===0)detachScreen(owner)});
+report();
+return;
+}
 var media=tileFor(owner).querySelector('video');
 if(media.srcObject!==stream)media.srcObject=stream;
 meterFor(owner,stream);
@@ -187,8 +235,10 @@ report();
 };
 pc.addTrack(local.getAudioTracks()[0],local);
 videoSender=pc.addTransceiver('video',{direction:'sendrecv'}).sender;
+screenStreamOut=new MediaStream();
+screenSender=pc.addTransceiver('video',{direction:'sendonly',streams:[screenStreamOut]}).sender;
 pc.createOffer().then(function(offer){return pc.setLocalDescription(offer)}).then(function(){
-return post(offerURL,{sdp:pc.localDescription.sdp});
+return post(offerURL,{sdp:pc.localDescription.sdp,screen_stream:screenStreamOut.id});
 }).then(function(response){if(!response.ok)throw new Error('offer');return response.json()}).then(function(answer){
 return pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
 }).then(function(){flush();report()}).catch(function(){
@@ -267,7 +317,8 @@ return;
 navigator.mediaDevices.getUserMedia({video:true}).then(function(stream){
 cameraTrack=stream.getVideoTracks()[0];
 if(!cameraTrack)return;
-if(!screenStream){videoSender.replaceTrack(cameraTrack);showSelf(cameraTrack)}
+videoSender.replaceTrack(cameraTrack);
+showSelf(cameraTrack);
 selfCamera=true;
 camera.setAttribute('aria-pressed','true');
 camera.textContent='Turn off camera';
@@ -278,12 +329,12 @@ broadcastPresence();
 });
 var screen=control('screen');
 if(screen)screen.addEventListener('click',function(){
-if(!videoSender)return;
+if(!screenSender)return;
 if(screenStream){
 screenStream.getTracks().forEach(function(track){track.stop()});
 screenStream=null;
-videoSender.replaceTrack(cameraTrack||null);
-showSelf(cameraTrack);
+screenSender.replaceTrack(null);
+detachScreen(selfID);
 selfPresenting=false;
 screen.setAttribute('aria-pressed','false');
 screen.textContent='Share screen';
@@ -298,8 +349,8 @@ screenStream=stream;
 var track=stream.getVideoTracks()[0];
 if(!track)return;
 track.addEventListener('ended',function(){if(screenStream)screen.click()});
-videoSender.replaceTrack(track);
-showSelf(track);
+screenSender.replaceTrack(track);
+attachScreen(selfID,stream);
 selfPresenting=true;
 screen.setAttribute('aria-pressed','true');
 screen.textContent='Stop sharing';

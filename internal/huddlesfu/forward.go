@@ -19,18 +19,36 @@ func forwardOwner(key string) string {
 	return key
 }
 
+// screenStreamSuffix marks a forwarded media stream as a participant's screen
+// share rather than their camera. A participant id is a prefixed hex string
+// (domain.PublicID) with no dot, so the suffix cannot collide with an owner and
+// the two lanes stay distinguishable. It is a valid SDP msid token, so it
+// survives renegotiation unchanged. The browser mirrors this exact convention
+// to route a screen stream to its presenter surface.
+const screenStreamSuffix = ".screen"
+
 // forwardStreamID is the outgoing media-stream id for a participant's forwarded
-// tracks: their id and nothing else. It must be a valid SDP msid token, so it
-// carries no delimiter. Using the owner alone also groups all of a participant's
-// tracks into one media stream on the subscriber, which is what the browser
-// attaches to their tile.
-func forwardStreamID(owner, _ string) string {
+// track. Their camera and microphone share the owner's id alone, so the browser
+// groups them onto one tile; their screen carries the owner plus the screen
+// suffix, so it lands on a distinct presenter surface while the camera keeps
+// playing. It must be a valid SDP msid token, so it carries no delimiter.
+func forwardStreamID(owner string, screen bool) string {
+	if screen {
+		return owner + screenStreamSuffix
+	}
 	return owner
 }
 
-// ForwardedOwner recovers the participant a forwarded stream id belongs to. The
-// browser reads it from the incoming stream id to place the track on the right
-// tile.
+// ForwardedOwner recovers the participant a forwarded stream id belongs to,
+// whether it is a camera or a screen stream. The browser reads it from the
+// incoming stream id to place the track on the right tile.
 func ForwardedOwner(streamID string) string {
-	return streamID
+	return strings.TrimSuffix(streamID, screenStreamSuffix)
+}
+
+// ForwardedIsScreen reports whether a forwarded stream id names a participant's
+// screen share rather than their camera, so a subscriber can promote it to a
+// presenter view instead of replacing the owner's camera tile.
+func ForwardedIsScreen(streamID string) bool {
+	return strings.HasSuffix(streamID, screenStreamSuffix)
 }

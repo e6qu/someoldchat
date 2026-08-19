@@ -1699,8 +1699,9 @@ const workspaceRefinements = `<style>
 .huddle-tile-label{position:absolute;left:6px;bottom:6px;padding:1px 8px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:700;max-width:calc(100% - 44px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .huddle-tile-badge{position:absolute;right:6px;top:6px;display:flex;gap:4px;font-size:15px;line-height:1}
 [data-huddle-tile][data-huddle-muted="true"] .huddle-tile-badge::before{content:"\1F507"}
-[data-huddle-tile][data-huddle-camera="false"][data-huddle-presenting="false"] .huddle-tile-badge::after{content:"\1F4F7";opacity:.55}
+[data-huddle-tile][data-huddle-camera="false"] .huddle-tile-badge::after{content:"\1F4F7";opacity:.55}
 .huddle-tiles [data-huddle-tile][data-huddle-speaking="true"]{border-color:var(--ok,#2bac76)}
+.huddle-tiles [data-huddle-tile][data-huddle-screen] video{object-fit:contain;background:#000}
 .huddle-tiles[data-huddle-presenter]{grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}
 .huddle-tiles[data-huddle-presenter] [data-huddle-tile][data-huddle-presenting="true"]{grid-column:1/-1;aspect-ratio:16/8}
 .channel-actions button:hover{background:var(--hover)}
