@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -752,6 +755,82 @@ func TestSnippetRendersInlineInTheTimeline(t *testing.T) {
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "snippet renders inline", body,
 		`class="message-snippet"`, `data-filetype="python"`, "print(&#39;hello, snippet&#39;)")
+}
+
+// TestImageThumbnailIsServedDownscaledAndCached covers the timeline's image
+// preview: an uploaded image renders with a lightweight, downscaled thumbnail as
+// its src and the full bytes behind the link, and the thumbnail endpoint returns
+// a smaller image the browser can cache hard because the source never changes.
+func TestImageThumbnailIsServedDownscaledAndCached(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "photographer"})
+	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("Cdev", "U1")
+	if err := s.SeedSession(ctx, "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	objects, err := blob.NewFilesystem(t.TempDir(), 100<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := service.Messages{Store: s, Blob: objects, AppCredentialKey: []byte(strings.Repeat("k", 32))}
+
+	source := image.NewRGBA(image.Rect(0, 0, 800, 600))
+	for y := 0; y < 600; y++ {
+		for x := 0; x < 800; x++ {
+			source.SetRGBA(x, y, color.RGBA{R: uint8(x % 256), G: uint8(y % 256), B: 90, A: 255})
+		}
+	}
+	var raw bytes.Buffer
+	if err := png.Encode(&raw, source); err != nil {
+		t.Fatal(err)
+	}
+	file, err := messages.UploadFile(ctx, "T1", "U1", "photo.png", "photo", "image/png", "", int64(raw.Len()), bytes.NewReader(raw.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", file.ID, []domain.ConversationID{"Cdev"}, "a photo", ""); err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewBrowser(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(messages, authenticator, s, "Cdev", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	// The timeline shows the image through its thumbnail, with the full bytes
+	// behind the link.
+	page := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "image renders via a thumbnail", page,
+		`src="/app/files/`+string(file.ID)+`/thumbnail"`, `href="/app/files/`+string(file.ID)+`"`)
+
+	thumb := get(t, mux, "/app/files/"+string(file.ID)+"/thumbnail")
+	if thumb.Code != http.StatusOK {
+		t.Fatalf("thumbnail status=%d body=%q", thumb.Code, thumb.Body.String())
+	}
+	if got := thumb.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("thumbnail content-type=%q, want image/png", got)
+	}
+	if cache := thumb.Header().Get("Cache-Control"); !strings.Contains(cache, "immutable") {
+		t.Fatalf("thumbnail cache-control=%q, want immutable", cache)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(thumb.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decode thumbnail: %v", err)
+	}
+	if config.Width != 400 || config.Height != 300 {
+		t.Fatalf("thumbnail is %dx%d, want 400x300 (downscaled 4:3)", config.Width, config.Height)
+	}
+	if thumb.Body.Len() >= raw.Len() {
+		t.Fatalf("thumbnail (%d bytes) is not smaller than the source (%d bytes)", thumb.Body.Len(), raw.Len())
+	}
 }
 
 // TestMemberEditsCustomProfileFieldFromTheDirectory covers the member side of
