@@ -1012,6 +1012,15 @@ func (s *Store) DeleteCanvas(_ context.Context, workspace domain.WorkspaceID, id
 			delete(s.canvasAccess, key)
 		}
 	}
+	// A canvas owns its comments and its revision history; the SQL profile deletes
+	// both when the canvas is deleted, so the in-memory profile must too, or the
+	// two disagree on whether a deleted canvas still has comments to read back.
+	for key, comment := range s.canvasComments {
+		if comment.CanvasID == id {
+			delete(s.canvasComments, key)
+		}
+	}
+	delete(s.canvasRevisions, id)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
