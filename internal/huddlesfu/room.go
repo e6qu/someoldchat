@@ -190,15 +190,19 @@ func (r *Room) Signal(id string, signal Signal) error {
 	}
 	switch signal.Kind {
 	case "answer":
-		if err := current.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: signal.SDP}); err != nil {
-			return err
-		}
+		err := current.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: signal.SDP})
+		// Clear the outstanding-offer flag whether or not the answer applied.
+		// Leaving it set on an error would wedge the peer for good: offer() would
+		// never send another description, so a track added while this offer was in
+		// flight — marked dirty and waiting for the next offer — would never be
+		// renegotiated onto the peer, and the subscriber would simply never receive
+		// that stream. Clearing it and re-synchronising lets the peer recover: any
+		// still-dirty change is re-offered from whatever state the connection is in.
 		current.mu.Lock()
 		current.negotiating = false
 		current.mu.Unlock()
-		// A subscription may have arrived while this offer was in flight.
 		r.synchronize()
-		return nil
+		return err
 	case "candidate":
 		if signal.Candidate == "" {
 			return nil
@@ -318,10 +322,14 @@ func (r *Room) publish(owner string, remote *webrtc.TrackRemote) {
 }
 
 // synchronize reconciles every ready peer's outbound senders with the current
-// set of forwarded tracks and offers a fresh description to any peer that needs
-// one. A peer that gains a track is marked dirty; offer decides whether to send
-// now or after an outstanding offer is answered, so offers never collide and a
-// track added mid-negotiation is not lost.
+// set of forwarded tracks in both directions: it adds a forward the peer should
+// be receiving and is not, and removes a sender whose forward is gone because the
+// publisher left or its track ended. A peer whose senders changed is marked dirty
+// and offered a fresh description; offer decides whether to send now or after an
+// outstanding offer is answered, so offers never collide and a change made
+// mid-negotiation is not lost. Removal is what stops a participant who leaves from
+// lingering as a frozen tile on everyone else — before it, synchronize only ever
+// added, so a departed publisher's tracks stayed bound to every other peer.
 func (r *Room) synchronize() {
 	r.mu.Lock()
 	if r.closed {
@@ -330,34 +338,46 @@ func (r *Room) synchronize() {
 	}
 	type work struct {
 		current *peer
-		added   bool
+		changed bool
 	}
 	items := make([]work, 0, len(r.peers))
 	for _, current := range r.peers {
-		existing := map[string]struct{}{}
-		for _, sender := range current.pc.GetSenders() {
-			if track := sender.Track(); track != nil {
-				existing[track.ID()] = struct{}{}
-			}
-		}
-		added := false
+		desired := map[string]*webrtc.TrackLocalStaticRTP{}
 		for key, local := range r.forwards {
 			if forwardOwner(key) == current.id {
 				continue
 			}
-			if _, have := existing[local.ID()]; have {
+			desired[local.ID()] = local
+		}
+		existing := map[string]*webrtc.RTPSender{}
+		for _, sender := range current.pc.GetSenders() {
+			if track := sender.Track(); track != nil {
+				existing[track.ID()] = sender
+			}
+		}
+		changed := false
+		for id, sender := range existing {
+			if _, want := desired[id]; want {
+				continue
+			}
+			if err := current.pc.RemoveTrack(sender); err == nil {
+				changed = true
+			}
+		}
+		for id, local := range desired {
+			if _, have := existing[id]; have {
 				continue
 			}
 			if _, err := current.pc.AddTrack(local); err == nil {
-				added = true
+				changed = true
 			}
 		}
-		items = append(items, work{current: current, added: added})
+		items = append(items, work{current: current, changed: changed})
 	}
 	r.mu.Unlock()
 
 	for _, item := range items {
-		if item.added {
+		if item.changed {
 			item.current.mu.Lock()
 			item.current.dirty = true
 			item.current.mu.Unlock()
@@ -383,9 +403,21 @@ func (r *Room) offer(current *peer) {
 	current.negotiating = true
 	current.mu.Unlock()
 
-	offer, err := current.pc.CreateOffer(nil)
-	if err == nil {
-		err = current.pc.SetLocalDescription(offer)
+	// Build the offer, retrying a transient failure a couple of times before
+	// giving up. A failed CreateOffer/SetLocalDescription is otherwise a dead end:
+	// the flag is put back, but nothing re-drives negotiation until the next
+	// publish or answer, so a peer could sit with a track it should be receiving
+	// and never be offered it.
+	var offer webrtc.SessionDescription
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		offer, err = current.pc.CreateOffer(nil)
+		if err == nil {
+			err = current.pc.SetLocalDescription(offer)
+		}
+		if err == nil {
+			break
+		}
 	}
 	if err != nil {
 		current.mu.Lock()
