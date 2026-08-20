@@ -85,14 +85,24 @@ var (
 	// to check which address they signed in with.
 	ErrInvitationExpired = errors.New("invitation has expired")
 	// ErrHuddleNotOwned refuses to end a huddle on everyone else's behalf.
-	ErrHuddleNotOwned              = errors.New("huddle is not owned by this actor")
-	ErrInvalidAppApproval          = errors.New("app approval is invalid")
-	ErrInvalidView                 = errors.New("view payload is invalid")
-	ErrAppHomeNotEnabled           = errors.New("app home tab is not enabled")
-	ErrInvalidList                 = errors.New("list payload is invalid")
-	ErrInvalidListTemplate         = errors.New("list template payload is invalid")
-	ErrInvalidEntity               = errors.New("entity payload is invalid")
-	ErrInvalidWorkflowStep         = errors.New("workflow step payload is invalid")
+	ErrHuddleNotOwned      = errors.New("huddle is not owned by this actor")
+	ErrInvalidAppApproval  = errors.New("app approval is invalid")
+	ErrInvalidView         = errors.New("view payload is invalid")
+	ErrAppHomeNotEnabled   = errors.New("app home tab is not enabled")
+	ErrInvalidList         = errors.New("list payload is invalid")
+	ErrInvalidListTemplate = errors.New("list template payload is invalid")
+	ErrInvalidEntity       = errors.New("entity payload is invalid")
+	ErrInvalidWorkflowStep = errors.New("workflow step payload is invalid")
+	// ErrFunctionUseRestricted refuses a builder who uses a function an
+	// administrator has restricted to specific people or to the app's
+	// collaborators. It rides the same restricted_action code the posting policy
+	// uses, because it is the same kind of refusal: the actor may act in general
+	// but not with this particular resource.
+	ErrFunctionUseRestricted = errors.New("this function is restricted from you")
+	// ErrTriggerTypeRestricted refuses a builder who creates a trigger of a type
+	// an administrator has restricted. Same restricted_action shape as a function
+	// restriction: the actor may build in general, but not with this trigger type.
+	ErrTriggerTypeRestricted       = errors.New("this trigger type is restricted from you")
 	ErrWorkflowPermissionDenied    = errors.New("workflow trigger is not available to this actor")
 	ErrFunctionAccessDenied        = errors.New("actor does not have access to this function execution")
 	ErrFunctionNotRunning          = errors.New("function execution is not running")
@@ -3903,7 +3913,42 @@ func (m Messages) AssistantSearchContext(ctx context.Context, workspaceID domain
 	if strings.TrimSpace(query) == "" {
 		return domain.MessagePage{}, ErrInvalidWorkspace
 	}
-	return m.SearchMessages(ctx, workspaceID, actorID, domain.MessageSearchRequest{Query: query, Page: request})
+	page, err := m.SearchMessages(ctx, workspaceID, actorID, domain.MessageSearchRequest{Query: query, Page: request})
+	if err != nil || len(page.Messages) == 0 {
+		return page, err
+	}
+	// An assistant may not quote a channel the workspace has kept out of Slack AI,
+	// even to a member who can read it themselves — the member's own eyes are not
+	// the AI. Drop those messages from the context the assistant is handed.
+	seen := make(map[domain.ConversationID]struct{}, len(page.Messages))
+	ids := make([]domain.ConversationID, 0, len(page.Messages))
+	for _, message := range page.Messages {
+		if _, ok := seen[message.Conversation]; ok {
+			continue
+		}
+		seen[message.Conversation] = struct{}{}
+		ids = append(ids, message.Conversation)
+	}
+	excludedIDs, err := m.Store.ConversationsExcludedFromAI(ctx, workspaceID, ids)
+	if err != nil {
+		return domain.MessagePage{}, err
+	}
+	if len(excludedIDs) == 0 {
+		return page, nil
+	}
+	excluded := make(map[domain.ConversationID]struct{}, len(excludedIDs))
+	for _, id := range excludedIDs {
+		excluded[id] = struct{}{}
+	}
+	kept := page.Messages[:0]
+	for _, message := range page.Messages {
+		if _, out := excluded[message.Conversation]; out {
+			continue
+		}
+		kept = append(kept, message)
+	}
+	page.Messages = kept
+	return page, nil
 }
 
 // AdminRequestExport records a request for a report the workspace will build
@@ -6262,6 +6307,18 @@ func (m Messages) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID
 func (m Messages) ThreadSummaries(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return nil, err
+	}
+	// A channel an administrator has kept out of Slack AI shows no AI summaries,
+	// which is the whole point of the exclusion: it is set and reported, so it must
+	// also govern the one AI surface a summary reaches. An empty result reads, to
+	// the caller, as a channel with nothing summarised — which is exactly the state
+	// the exclusion puts it in.
+	excluded, err := m.Store.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{conversationID})
+	if err != nil {
+		return nil, err
+	}
+	if len(excluded) > 0 {
+		return map[domain.MessageTimestamp]domain.ThreadSummary{}, nil
 	}
 	return m.Store.ThreadSummaries(ctx, conversationID, roots)
 }

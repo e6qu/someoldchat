@@ -234,6 +234,8 @@ var errorClasses = []errorClass{
 	// post; it is a precondition on the channel, not an absence or a lack of
 	// membership, which is why it sits beside not_in_conversation.
 	{key: "service.conversation_posting_restricted", code: codes.FailedPrecondition, sentinel: service.ErrConversationPostingRestricted},
+	{key: "service.function_use_restricted", code: codes.FailedPrecondition, sentinel: service.ErrFunctionUseRestricted},
+	{key: "service.trigger_type_restricted", code: codes.FailedPrecondition, sentinel: service.ErrTriggerTypeRestricted},
 	{key: "service.cannot_invite_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotInviteSelf},
 	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppInteractionUnavailable},
 	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: service.ErrAppHomeNotEnabled},

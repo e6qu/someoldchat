@@ -68,6 +68,9 @@ func deletingAConversationRemovesEverythingItOwns(t *testing.T, open opener) {
 	}, f.event("saved", "saved_item.created", string(message.ID))); err != nil {
 		t.Fatalf("seed saved item: %v", err)
 	}
+	if err := f.repository.SetConversationsExcludedFromAI(ctx, f.workspaceID, []domain.ConversationID{f.channelID}, true, f.event("ai-exclude", "channel.ai_exclusion_set", string(f.channelID))); err != nil {
+		t.Fatalf("seed AI exclusion: %v", err)
+	}
 
 	// The delete must now succeed rather than fail on a foreign key.
 	if err := f.repository.DeleteConversation(ctx, f.workspaceID, f.channelID, f.event("delete", "conversation.deleted", string(f.channelID))); err != nil {

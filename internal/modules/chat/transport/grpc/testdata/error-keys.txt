@@ -36,6 +36,7 @@ service.external_auth_connection
 service.external_invite_not_permitted
 service.function_access_denied
 service.function_not_running
+service.function_use_restricted
 service.huddle_not_owned
 service.invalid_access_log
 service.invalid_activity_saved_view
@@ -111,6 +112,7 @@ service.shared_invite_settled
 service.slack_connect_full
 service.slash_command_in_thread
 service.slash_command_not_found
+service.trigger_type_restricted
 service.user_is_restricted
 service.user_is_ultra_restricted
 service.webhook_trigger_secret
