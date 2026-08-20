@@ -2,6 +2,9 @@ package huddlesfu
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,14 +13,45 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 )
 
+// debugState snapshots what the room and every peer look like right now. A
+// forwarding test that times out prints it so an intermittent CI stall reports
+// which half wedged — a peer stuck negotiating or dirty is the SFU's own state
+// machine, a peer whose ICE never left "checking" is the handshake or the runner
+// — rather than only "a lane did not arrive".
+func (r *Room) debugState() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	owners := make([]string, 0, len(r.forwards))
+	for key := range r.forwards {
+		owners = append(owners, forwardOwner(key))
+	}
+	sort.Strings(owners)
+	var b strings.Builder
+	fmt.Fprintf(&b, "room closed=%v forwards=%d owners=%v peers=%d\n", r.closed, len(r.forwards), owners, len(r.peers))
+	for id, current := range r.peers {
+		current.mu.Lock()
+		ready, negotiating, dirty, screenID := current.ready, current.negotiating, current.dirty, current.screenStreamID
+		current.mu.Unlock()
+		senders := 0
+		for _, sender := range current.pc.GetSenders() {
+			if sender.Track() != nil {
+				senders++
+			}
+		}
+		fmt.Fprintf(&b, "  peer %q ready=%v negotiating=%v dirty=%v conn=%s ice=%s sig=%s senders=%d screenID=%q\n",
+			id, ready, negotiating, dirty, current.pc.ConnectionState(), current.pc.ICEConnectionState(), current.pc.SignalingState(), senders, screenID)
+	}
+	return b.String()
+}
+
 // forwardDeadline bounds how long a test waits for the ICE/DTLS handshake and
-// the first forwarded RTP to complete. It is deliberately generous: these tests
-// run under the race detector as part of `go test ./...`, where dozens of
-// package binaries contend for a CI runner's few cores, and a real WebRTC
-// handshake starves badly under that load. Locally each test finishes in a
-// second or two; the margin exists only so scheduling contention on CI does not
-// read as a forwarding failure.
-const forwardDeadline = 60 * time.Second
+// the first forwarded RTP to complete. Locally each test finishes in a second or
+// two. The margin absorbs ordinary scheduling contention on a shared CI runner —
+// generously, because the failure it guards against is only ever a genuine stall,
+// and the package's own 30m timeout still bounds that. It sits well above the
+// worst honest handshake seen once the leaked peer connections (see newBrowser)
+// were closed.
+const forwardDeadline = 120 * time.Second
 
 // browser stands in for a participant's browser: a real pion peer connection
 // wired to the SFU over the same offer/answer/candidate signals the web client
@@ -42,6 +76,14 @@ func newBrowser(t *testing.T, room *Room, id string) *browser {
 	if err != nil {
 		t.Fatalf("new browser pc: %v", err)
 	}
+	// Close the browser's own connection when the test ends. Only the room's side
+	// of each peer was ever torn down (room.Close), so every test leaked two live
+	// PeerConnections — each holding a UDP socket and a running ICE agent. Under
+	// `go test ./...` those accumulate across the package's tests and, on a
+	// resource-constrained CI runner, starve the very handshakes these tests time,
+	// which showed up as a forwarding test blowing past its deadline while passing
+	// on an unloaded developer machine.
+	t.Cleanup(func() { _ = pc.Close() })
 	b := &browser{t: t, id: id, room: room, pc: pc}
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
@@ -301,7 +343,7 @@ func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
 				sawCamera = true
 			}
 		case <-deadline:
-			t.Fatalf("did not receive both lanes: camera=%v screen=%v", sawCamera, sawScreen)
+			t.Fatalf("did not receive both lanes: camera=%v screen=%v\n%s", sawCamera, sawScreen, room.debugState())
 		}
 	}
 
@@ -313,10 +355,81 @@ func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
 			select {
 			case screen = <-rtp:
 			case <-time.After(forwardDeadline):
-				t.Fatal("no RTP packet arrived on the forwarded screen lane")
+				t.Fatalf("no RTP packet arrived on the forwarded screen lane\n%s", room.debugState())
 			}
 		}
 	case <-time.After(forwardDeadline):
-		t.Fatal("no forwarded RTP packet arrived")
+		t.Fatalf("no forwarded RTP packet arrived\n%s", room.debugState())
+	}
+}
+
+// activeSenders counts how many of a peer's outbound senders still carry a live
+// track, so a test can watch the SFU stop forwarding a departed participant.
+func (r *Room) activeSenders(id string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, ok := r.peers[id]
+	if !ok {
+		return -1
+	}
+	count := 0
+	for _, sender := range current.pc.GetSenders() {
+		if sender.Track() != nil {
+			count++
+		}
+	}
+	return count
+}
+
+// TestRoomStopsForwardingAParticipantWhoLeaves proves the SFU removes a departed
+// participant's tracks from everyone still in the room. synchronize used only to
+// add forwards, so a publisher who left stayed bound to every other peer as a
+// frozen tile that never cleared; reconciling removals as well as additions is
+// what lets a leaver's media actually stop.
+func TestRoomStopsForwardingAParticipantWhoLeaves(t *testing.T) {
+	room, err := NewRoom()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer room.Close()
+
+	receiver := newBrowser(t, room, "receiver")
+	received := make(chan struct{}, 1)
+	receiver.pc.OnTrack(func(_ *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+	})
+	receiver.connect()
+
+	publisher := newBrowser(t, room, "publisher")
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "video", "leaver-camera")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher.publish(track)
+	pump(t, track)
+
+	select {
+	case <-received:
+	case <-time.After(forwardDeadline):
+		t.Fatalf("the receiver never got the forwarded track\n%s", room.debugState())
+	}
+	if senders := room.activeSenders("receiver"); senders != 1 {
+		t.Fatalf("receiver has %d active senders before the publisher leaves, want 1", senders)
+	}
+
+	// The publisher leaves; the SFU must drop its track from the receiver.
+	room.Leave("publisher")
+
+	deadline := time.After(forwardDeadline)
+	for room.activeSenders("receiver") != 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("the receiver still forwards the departed publisher: %d senders\n%s", room.activeSenders("receiver"), room.debugState())
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 }

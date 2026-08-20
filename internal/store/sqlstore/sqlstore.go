@@ -7507,6 +7507,15 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 	if direct != 0 || groupDirect != 0 {
 		return store.ErrInvalidConversationType
 	}
+	// Every row a conversation owns is removed here. A row keyed to the
+	// conversation by an enforced foreign key is not optional: leaving it makes
+	// the final DELETE fail outright, which is how a channel with a bookmark, an
+	// incoming webhook, a per-member notification preference, a canvas link, a
+	// retention override or an ephemeral message could not be deleted at all.
+	// Records that merely name the conversation without owning it — a member's
+	// later reminder made from one of its messages, a workflow run's audit
+	// trail — carry no foreign key and are deliberately kept, exactly as Slack
+	// keeps them when a channel goes away.
 	statements := []string{
 		`DELETE FROM remote_file_shares WHERE conversation_id = ?`,
 		`DELETE FROM file_shares WHERE conversation_id = ?`,
@@ -7515,8 +7524,31 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM conversation_access_groups WHERE conversation_id = ?`,
 		`DELETE FROM workspace_default_channels WHERE conversation_id = ?`,
 		`DELETE FROM conversation_prefs WHERE conversation_id = ?`,
+		`DELETE FROM conversation_notification_preferences WHERE conversation_id = ?`,
+		`DELETE FROM conversation_retention WHERE conversation_id = ?`,
+		`DELETE FROM conversation_ai_exclusions WHERE conversation_id = ?`,
+		`DELETE FROM conversation_typing WHERE conversation_id = ?`,
+		`DELETE FROM conversation_objects WHERE conversation_id = ?`,
+		`DELETE FROM conversation_team_invite_permissions WHERE conversation_id = ?`,
+		`DELETE FROM sidebar_section_members WHERE conversation_id = ?`,
+		`DELETE FROM bookmarks WHERE conversation_id = ?`,
+		`DELETE FROM incoming_webhooks WHERE conversation_id = ?`,
+		`DELETE FROM assistant_threads WHERE conversation_id = ?`,
+		`DELETE FROM shared_invites WHERE conversation_id = ?`,
+		`DELETE FROM ephemeral_messages WHERE conversation_id = ?`,
 		`DELETE FROM read_cursors WHERE conversation_id = ?`,
+		// draft_attachments carries an ON DELETE CASCADE to drafts, so removing
+		// the drafts below takes its attachment rows with it.
 		`DELETE FROM drafts WHERE conversation_id = ?`,
+		// A response URL is the parent of any socket-mode interaction that quoted
+		// it, so the interaction goes first or its foreign key blocks the URL.
+		`DELETE FROM socket_mode_interactions WHERE response_token_hash IN (SELECT token_hash FROM app_response_urls WHERE conversation_id = ?)`,
+		`DELETE FROM app_response_urls WHERE conversation_id = ?`,
+		// A call's participants reference the call, so they precede it; only calls
+		// belonging to this conversation are removed, never an app-registered call
+		// that names no conversation.
+		`DELETE FROM call_participants WHERE call_id IN (SELECT id FROM calls WHERE conversation_id = ?)`,
+		`DELETE FROM calls WHERE conversation_id = ?`,
 		`DELETE FROM closed_direct_conversations WHERE conversation_id = ?`,
 		`DELETE FROM scheduled_messages WHERE channel_id = ?`,
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,

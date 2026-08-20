@@ -103,6 +103,7 @@ func runQualification(t *testing.T, open opener) {
 		{"connected channel pages are filtered and bounded", connectedChannelPagesAreFilteredAndBounded},
 		{"message timestamps are unique per conversation", messageTimestampsAreUniquePerConversation},
 		{"the creator of a conversation is a member of it", conversationCreatorIsAMember},
+		{"deleting a conversation removes everything it owns", deletingAConversationRemovesEverythingItOwns},
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 		{"revoking an app token announces tokens_revoked once", revokingAnAppTokenAnnouncesTokensRevokedOnce},
 		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
