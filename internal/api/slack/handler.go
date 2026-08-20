@@ -11040,6 +11040,14 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, service.ErrConversationPostingRestricted) {
 		return "restricted_action"
 	}
+	// A function an administrator restricted is refused the same way: the builder
+	// may act in general but not with this resource, which is restricted_action.
+	if errors.Is(err, service.ErrFunctionUseRestricted) {
+		return "restricted_action"
+	}
+	if errors.Is(err, service.ErrTriggerTypeRestricted) {
+		return "restricted_action"
+	}
 	if errors.Is(err, service.ErrCannotInviteSelf) {
 		return "cant_invite_self"
 	}

@@ -521,7 +521,7 @@ func (m Messages) CreateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
-	if err := m.validateWorkflowFunctions(ctx, value.AppID, stepValues); err != nil {
+	if err := m.validateWorkflowFunctions(ctx, workspaceID, value.AppID, actor, stepValues); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	id, err := domain.NewWorkflowID()
@@ -582,7 +582,7 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	if publish && len(stepValues) == 0 {
 		return domain.WorkflowDefinition{}, ErrInvalidWorkflowStep
 	}
-	if err := m.validateWorkflowFunctions(ctx, current.AppID, stepValues); err != nil {
+	if err := m.validateWorkflowFunctions(ctx, workspaceID, current.AppID, actor, stepValues); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
 	value.ID = current.ID
@@ -1490,6 +1490,17 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 	if !value.Type.Valid() {
 		return domain.WorkflowTrigger{}, ErrInvalidTriggerConfig
 	}
+	// A trigger type an administrator restricted may only be built by someone the
+	// restriction admits. Until this check the permission set by
+	// admin.workflows.triggers.types.permissions.set was stored and reported but
+	// never read.
+	allowed, err := m.canBuildTriggerType(ctx, workspaceID, workflow.AppID, value.Type, actor)
+	if err != nil {
+		return domain.WorkflowTrigger{}, err
+	}
+	if !allowed {
+		return domain.WorkflowTrigger{}, ErrTriggerTypeRestricted
+	}
 	if value.ID == "" {
 		value.ID, err = domain.NewWorkflowTriggerID()
 		if err != nil {
@@ -1658,7 +1669,7 @@ func (m Messages) workflowFunctionSnapshot(ctx context.Context, appID domain.App
 	}, nil
 }
 
-func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.AppID, steps []workflowFunctionDefinition) error {
+func (m Messages) validateWorkflowFunctions(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, actor domain.UserID, steps []workflowFunctionDefinition) error {
 	for _, step := range steps {
 		if step.Type != workflowStepTypeFunction {
 			continue
@@ -1677,8 +1688,61 @@ func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.Ap
 		if err != nil || function.Runtime != "remote" {
 			return ErrInvalidWorkflowStep
 		}
+		// A function an administrator restricted may only be built into a workflow
+		// by someone the restriction admits. Until this check the permission set by
+		// admin.functions.permissions.set was stored and reported but never read,
+		// so a restriction changed nothing.
+		allowed, err := m.canUseFunction(ctx, workspaceID, stepAppID, function.ID, actor)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrFunctionUseRestricted
+		}
 	}
 	return nil
+}
+
+// canUseFunction reports whether actor may build a workflow with one function,
+// and canBuildTriggerType whether actor may create a trigger of one type,
+// honouring the permission an administrator set. An unset permission is Slack's
+// default of everyone, matching what the admin reporters return when none is
+// stored.
+func (m Messages) canUseFunction(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, functionID string, actor domain.UserID) (bool, error) {
+	return m.automationPermits(ctx, workspaceID, "function", functionID, appID, actor)
+}
+
+func (m Messages) canBuildTriggerType(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, kind domain.WorkflowTriggerType, actor domain.UserID) (bool, error) {
+	return m.automationPermits(ctx, workspaceID, "trigger_type", string(kind), appID, actor)
+}
+
+// automationPermits resolves whether actor is admitted by the automation
+// permission stored for one resource. An unset permission is everyone;
+// named_entities admits the listed members; app_collaborators admits the app's
+// owner, the closest this deployment's single-owner app model has to Slack's
+// collaborator set; no_one and system admit nobody acting by hand.
+func (m Messages) automationPermits(ctx context.Context, workspaceID domain.WorkspaceID, resourceType, resourceID string, appID domain.AppID, actor domain.UserID) (bool, error) {
+	permission, err := m.Store.GetAutomationPermission(ctx, workspaceID, resourceType, resourceID)
+	if errors.Is(err, store.ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch permission.PermissionType {
+	case domain.PermissionEveryone:
+		return true, nil
+	case domain.PermissionNamedEntities:
+		return slices.Contains(permission.UserIDs, actor), nil
+	case domain.PermissionAppCollaborators:
+		app, _, err := m.Store.GetApp(ctx, appID)
+		if err != nil {
+			return false, err
+		}
+		return app.OwnerID == actor, nil
+	default: // no_one, system
+		return false, nil
+	}
 }
 
 // newWorkflowDelayExecution parks a run on the clock. The step is waiting like

@@ -85,14 +85,24 @@ var (
 	// to check which address they signed in with.
 	ErrInvitationExpired = errors.New("invitation has expired")
 	// ErrHuddleNotOwned refuses to end a huddle on everyone else's behalf.
-	ErrHuddleNotOwned              = errors.New("huddle is not owned by this actor")
-	ErrInvalidAppApproval          = errors.New("app approval is invalid")
-	ErrInvalidView                 = errors.New("view payload is invalid")
-	ErrAppHomeNotEnabled           = errors.New("app home tab is not enabled")
-	ErrInvalidList                 = errors.New("list payload is invalid")
-	ErrInvalidListTemplate         = errors.New("list template payload is invalid")
-	ErrInvalidEntity               = errors.New("entity payload is invalid")
-	ErrInvalidWorkflowStep         = errors.New("workflow step payload is invalid")
+	ErrHuddleNotOwned      = errors.New("huddle is not owned by this actor")
+	ErrInvalidAppApproval  = errors.New("app approval is invalid")
+	ErrInvalidView         = errors.New("view payload is invalid")
+	ErrAppHomeNotEnabled   = errors.New("app home tab is not enabled")
+	ErrInvalidList         = errors.New("list payload is invalid")
+	ErrInvalidListTemplate = errors.New("list template payload is invalid")
+	ErrInvalidEntity       = errors.New("entity payload is invalid")
+	ErrInvalidWorkflowStep = errors.New("workflow step payload is invalid")
+	// ErrFunctionUseRestricted refuses a builder who uses a function an
+	// administrator has restricted to specific people or to the app's
+	// collaborators. It rides the same restricted_action code the posting policy
+	// uses, because it is the same kind of refusal: the actor may act in general
+	// but not with this particular resource.
+	ErrFunctionUseRestricted = errors.New("this function is restricted from you")
+	// ErrTriggerTypeRestricted refuses a builder who creates a trigger of a type
+	// an administrator has restricted. Same restricted_action shape as a function
+	// restriction: the actor may build in general, but not with this trigger type.
+	ErrTriggerTypeRestricted       = errors.New("this trigger type is restricted from you")
 	ErrWorkflowPermissionDenied    = errors.New("workflow trigger is not available to this actor")
 	ErrFunctionAccessDenied        = errors.New("actor does not have access to this function execution")
 	ErrFunctionNotRunning          = errors.New("function execution is not running")

@@ -1703,6 +1703,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAdminAutomationPermissions
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/service:TestFunctionPermissionGatesBuildingAWorkflow
   - method: admin.roles.addAssignments
     status: behavior-compatible
     provenance: slack-reference
@@ -1824,6 +1825,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAdminAutomationPermissions
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/service:TestTriggerTypePermissionGatesTriggerCreation
   - method: admin.workflows.unpublish
     status: behavior-compatible
     provenance: slack-reference
