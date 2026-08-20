@@ -8921,25 +8921,49 @@ func mergedEmojiOptions(query, category string, recent []string, custom []domain
 	}
 	includeCustom := category == "" || category == "Custom"
 	includeStandard := category != "Custom"
-	for _, value := range custom {
-		if !includeCustom {
-			break
+	if includeCustom {
+		// Rank the custom matches the way slackemoji.Search ranks the standard ones,
+		// so a member typing a custom emoji's exact name sees it before one that
+		// merely contains the query, and the shorter name leads among equals. An
+		// empty query leaves them in their stored order for browsing.
+		type customMatch struct {
+			name, imageURL string
+			rank           int
 		}
-		if len(result) == limit {
-			break
+		matches := make([]customMatch, 0, len(custom))
+		for _, value := range custom {
+			name := strings.ToLower(strings.TrimSpace(value.Name))
+			if name == "" {
+				continue
+			}
+			imageURL := images[name]
+			if imageURL == "" {
+				continue
+			}
+			rank := customEmojiRank(name, query)
+			if rank < 0 {
+				continue
+			}
+			matches = append(matches, customMatch{name: name, imageURL: imageURL, rank: rank})
 		}
-		name := strings.ToLower(strings.TrimSpace(value.Name))
-		if name == "" || (query != "" && !strings.Contains(name, query)) {
-			continue
-		}
-		imageURL := images[name]
-		if imageURL == "" {
-			continue
-		}
-		appendOption(emojiOptionView{
-			Name: name, Display: ":" + name + ":", ImageURL: imageURL,
-			Category: "Custom", Custom: true,
+		sort.SliceStable(matches, func(left, right int) bool {
+			if matches[left].rank != matches[right].rank {
+				return matches[left].rank < matches[right].rank
+			}
+			if len(matches[left].name) != len(matches[right].name) {
+				return len(matches[left].name) < len(matches[right].name)
+			}
+			return matches[left].name < matches[right].name
 		})
+		for _, match := range matches {
+			if len(result) == limit {
+				break
+			}
+			appendOption(emojiOptionView{
+				Name: match.name, Display: ":" + match.name + ":", ImageURL: match.imageURL,
+				Category: "Custom", Custom: true,
+			})
+		}
 	}
 	if len(result) == limit {
 		return result
@@ -8961,6 +8985,23 @@ func mergedEmojiOptions(query, category string, recent []string, custom []domain
 		}
 	}
 	return result
+}
+
+// customEmojiRank scores a custom emoji name against a query the same way
+// slackemoji ranks a standard one: an empty query or an exact name is best, then
+// a name that begins with the query, then one that merely contains it. It returns
+// -1 when the name does not match, so a non-matching custom emoji is dropped.
+func customEmojiRank(name, query string) int {
+	if query == "" || name == query {
+		return 0
+	}
+	if strings.HasPrefix(name, query) {
+		return 1
+	}
+	if strings.Contains(name, query) {
+		return 2
+	}
+	return -1
 }
 
 func customEmojiImages(values []domain.CustomEmoji) map[string]string {
