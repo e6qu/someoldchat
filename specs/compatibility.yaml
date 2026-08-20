@@ -1545,7 +1545,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
+      - A barrier stops a direct message, a group direct message, a call, sharing a channel, and appearing in each other's people search between the groups it separates. Adding a barriered member to a channel that holds the other group is refused, on the admin path as well as an ordinary invite, and the two groups do not find each other in people search.
   - method: admin.barriers.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -1555,7 +1555,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
+      - A barrier stops a direct message, a group direct message, a call, sharing a channel, and appearing in each other's people search between the groups it separates. Adding a barriered member to a channel that holds the other group is refused, on the admin path as well as an ordinary invite, and the two groups do not find each other in people search.
   - method: admin.barriers.list
     status: behavior-compatible
     provenance: slack-reference
@@ -1565,7 +1565,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
+      - A barrier stops a direct message, a group direct message, a call, sharing a channel, and appearing in each other's people search between the groups it separates. Adding a barriered member to a channel that holds the other group is refused, on the admin path as well as an ordinary invite, and the two groups do not find each other in people search.
   - method: admin.barriers.update
     status: behavior-compatible
     provenance: slack-reference
@@ -1575,7 +1575,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:informationBarriersKeepTheirGroupsAndSubjects
     deviations:
-      - A barrier stops a direct message, a group direct message and a call between the groups it separates; it does not filter channel membership or search.
+      - A barrier stops a direct message, a group direct message, a call, sharing a channel, and appearing in each other's people search between the groups it separates. Adding a barriered member to a channel that holds the other group is refused, on the admin path as well as an ordinary invite, and the two groups do not find each other in people search.
   - method: admin.conversations.bulkArchive
     status: behavior-compatible
     provenance: slack-reference
