@@ -9,9 +9,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
+
+// testAPI builds the WebRTC API the test's peers use — the SFU's default codecs
+// and interceptors, but with ICE given far longer than pion's defaults to finish
+// its connectivity checks. Under `go test -race ./...` on a shared runner, those
+// checks (STUN over loopback) can be starved past the default failed timeout, at
+// which point pion declares the connection failed; the SFU reaps a failed peer,
+// so the publisher would simply vanish and nothing was forwarded — which the
+// timeout diagnostics showed as a room left with only the receiver in it. The
+// generous window lets a starved handshake complete instead of being killed. It
+// is test-only: a real deployment wants the default timeouts so a genuinely dead
+// connection is cleaned up promptly.
+func testAPI(t *testing.T) *webrtc.API {
+	t.Helper()
+	mediaEngine := &webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		t.Fatalf("register codecs: %v", err)
+	}
+	registry := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, registry); err != nil {
+		t.Fatalf("register interceptors: %v", err)
+	}
+	settingEngine := webrtc.SettingEngine{}
+	settingEngine.SetICETimeouts(30*time.Second, 60*time.Second, 2*time.Second)
+	return webrtc.NewAPI(
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(registry),
+		webrtc.WithSettingEngine(settingEngine),
+	)
+}
 
 // debugState snapshots what the room and every peer look like right now. A
 // forwarding test that times out prints it so an intermittent CI stall reports
@@ -70,9 +100,9 @@ type browser struct {
 	pending    []webrtc.ICECandidateInit
 }
 
-func newBrowser(t *testing.T, room *Room, id string) *browser {
+func newBrowser(t *testing.T, api *webrtc.API, room *Room, id string) *browser {
 	t.Helper()
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		t.Fatalf("new browser pc: %v", err)
 	}
@@ -186,14 +216,12 @@ func (b *browser) connect() {
 // browser — which opened exactly one connection, to the SFU — receives that
 // track forwarded through this process, attributed to the publisher.
 func TestRoomForwardsAPublishedTrackToAnotherParticipant(t *testing.T) {
-	room, err := NewRoom()
-	if err != nil {
-		t.Fatal(err)
-	}
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
 	defer room.Close()
 
 	// The receiver joins first and reports the track it is handed.
-	receiver := newBrowser(t, room, "receiver")
+	receiver := newBrowser(t, api, room, "receiver")
 	received := make(chan *webrtc.TrackRemote, 1)
 	receiver.pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		select {
@@ -204,7 +232,7 @@ func TestRoomForwardsAPublishedTrackToAnotherParticipant(t *testing.T) {
 	receiver.connect()
 
 	// The publisher joins and sends VP8 video.
-	publisher := newBrowser(t, room, "publisher")
+	publisher := newBrowser(t, api, room, "publisher")
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "video", "publisher-camera")
 	if err != nil {
@@ -284,13 +312,11 @@ func pump(t *testing.T, track *webrtc.TrackLocalStaticSample) {
 // and declares which is its screen; the other receives both, correctly
 // attributed, with real RTP flowing on each.
 func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
-	room, err := NewRoom()
-	if err != nil {
-		t.Fatal(err)
-	}
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
 	defer room.Close()
 
-	receiver := newBrowser(t, room, "receiver")
+	receiver := newBrowser(t, api, room, "receiver")
 	type arrival struct {
 		owner  string
 		screen bool
@@ -311,7 +337,7 @@ func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
 
 	// The publisher sends its camera and its screen as two separate streams and
 	// tells the SFU which media stream is the screen.
-	publisher := newBrowser(t, room, "publisher")
+	publisher := newBrowser(t, api, room, "publisher")
 	cameraTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "camera", "publisher-camera")
 	if err != nil {
@@ -387,13 +413,11 @@ func (r *Room) activeSenders(id string) int {
 // frozen tile that never cleared; reconciling removals as well as additions is
 // what lets a leaver's media actually stop.
 func TestRoomStopsForwardingAParticipantWhoLeaves(t *testing.T) {
-	room, err := NewRoom()
-	if err != nil {
-		t.Fatal(err)
-	}
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
 	defer room.Close()
 
-	receiver := newBrowser(t, room, "receiver")
+	receiver := newBrowser(t, api, room, "receiver")
 	received := make(chan struct{}, 1)
 	receiver.pc.OnTrack(func(_ *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		select {
@@ -403,7 +427,7 @@ func TestRoomStopsForwardingAParticipantWhoLeaves(t *testing.T) {
 	})
 	receiver.connect()
 
-	publisher := newBrowser(t, room, "publisher")
+	publisher := newBrowser(t, api, room, "publisher")
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "video", "leaver-camera")
 	if err != nil {
@@ -455,17 +479,15 @@ func waitForSenders(t *testing.T, room *Room, id string, want int) {
 // forwarded track is kept across the pause so resuming re-attaches it without a
 // fresh publish.
 func TestRoomPausesAndResumesAScreenShare(t *testing.T) {
-	room, err := NewRoom()
-	if err != nil {
-		t.Fatal(err)
-	}
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
 	defer room.Close()
 
-	receiver := newBrowser(t, room, "receiver")
+	receiver := newBrowser(t, api, room, "receiver")
 	receiver.pc.OnTrack(func(_ *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {})
 	receiver.connect()
 
-	publisher := newBrowser(t, room, "publisher")
+	publisher := newBrowser(t, api, room, "publisher")
 	cameraTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "camera", "publisher-camera")
 	if err != nil {
