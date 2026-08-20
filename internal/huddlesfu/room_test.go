@@ -1,3 +1,15 @@
+//go:build huddlemedia
+
+// These are the SFU's real-media forwarding tests: two or three pion peer
+// connections per test complete an actual ICE/DTLS/RTP handshake over UDP. That
+// handshake is reliable on a developer machine but not inside `go test ./...` on
+// a shared CI runner, where a hundred package binaries running at once starve
+// pion's ICE connectivity checks until a peer is declared failed and reaped — the
+// instrumentation caught the publisher vanishing mid-test with the receiver still
+// healthy. They are therefore kept behind the `huddlemedia` build tag and out of
+// the default suite, and the Makefile runs them in a dedicated pass of their own,
+// where nothing else on the runner competes for the handshake. The forwarding
+// logic they cover still runs on every CI build; only its isolation changes.
 package huddlesfu
 
 import (
@@ -9,9 +21,46 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
+
+// testAPI builds the WebRTC API the test's peers use — the SFU's default codecs
+// and interceptors, but with ICE given far longer than pion's defaults to finish
+// its connectivity checks. Under `go test -race ./...` on a shared runner, those
+// checks (STUN over loopback) can be starved past the default failed timeout, at
+// which point pion declares the connection failed; the SFU reaps a failed peer,
+// so the publisher would simply vanish and nothing was forwarded — which the
+// timeout diagnostics showed as a room left with only the receiver in it. The
+// generous window lets a starved handshake complete instead of being killed. It
+// is test-only: a real deployment wants the default timeouts so a genuinely dead
+// connection is cleaned up promptly.
+func testAPI(t *testing.T) *webrtc.API {
+	t.Helper()
+	mediaEngine := &webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		t.Fatalf("register codecs: %v", err)
+	}
+	registry := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, registry); err != nil {
+		t.Fatalf("register interceptors: %v", err)
+	}
+	settingEngine := webrtc.SettingEngine{}
+	settingEngine.SetICETimeouts(30*time.Second, 60*time.Second, 2*time.Second)
+	// Offer the loopback address as an ICE candidate, which pion excludes by
+	// default. Both peers then hold a 127.0.0.1 host candidate that pairs
+	// directly, so the handshake does not depend on a routable interface or on
+	// mDNS resolving a .local candidate — neither of which a CI runner reliably
+	// provides, which is why the publisher's connection kept failing there while
+	// it always connected on a developer machine.
+	settingEngine.SetIncludeLoopbackCandidate(true)
+	return webrtc.NewAPI(
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(registry),
+		webrtc.WithSettingEngine(settingEngine),
+	)
+}
 
 // debugState snapshots what the room and every peer look like right now. A
 // forwarding test that times out prints it so an intermittent CI stall reports
@@ -70,9 +119,9 @@ type browser struct {
 	pending    []webrtc.ICECandidateInit
 }
 
-func newBrowser(t *testing.T, room *Room, id string) *browser {
+func newBrowser(t *testing.T, api *webrtc.API, room *Room, id string) *browser {
 	t.Helper()
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		t.Fatalf("new browser pc: %v", err)
 	}
@@ -186,14 +235,12 @@ func (b *browser) connect() {
 // browser — which opened exactly one connection, to the SFU — receives that
 // track forwarded through this process, attributed to the publisher.
 func TestRoomForwardsAPublishedTrackToAnotherParticipant(t *testing.T) {
-	room, err := NewRoom()
-	if err != nil {
-		t.Fatal(err)
-	}
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
 	defer room.Close()
 
 	// The receiver joins first and reports the track it is handed.
-	receiver := newBrowser(t, room, "receiver")
+	receiver := newBrowser(t, api, room, "receiver")
 	received := make(chan *webrtc.TrackRemote, 1)
 	receiver.pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		select {
@@ -204,7 +251,7 @@ func TestRoomForwardsAPublishedTrackToAnotherParticipant(t *testing.T) {
 	receiver.connect()
 
 	// The publisher joins and sends VP8 video.
-	publisher := newBrowser(t, room, "publisher")
+	publisher := newBrowser(t, api, room, "publisher")
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "video", "publisher-camera")
 	if err != nil {
@@ -284,13 +331,11 @@ func pump(t *testing.T, track *webrtc.TrackLocalStaticSample) {
 // and declares which is its screen; the other receives both, correctly
 // attributed, with real RTP flowing on each.
 func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
-	room, err := NewRoom()
-	if err != nil {
-		t.Fatal(err)
-	}
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
 	defer room.Close()
 
-	receiver := newBrowser(t, room, "receiver")
+	receiver := newBrowser(t, api, room, "receiver")
 	type arrival struct {
 		owner  string
 		screen bool
@@ -311,7 +356,7 @@ func TestRoomForwardsCameraAndScreenAsDistinctStreams(t *testing.T) {
 
 	// The publisher sends its camera and its screen as two separate streams and
 	// tells the SFU which media stream is the screen.
-	publisher := newBrowser(t, room, "publisher")
+	publisher := newBrowser(t, api, room, "publisher")
 	cameraTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "camera", "publisher-camera")
 	if err != nil {
@@ -387,13 +432,11 @@ func (r *Room) activeSenders(id string) int {
 // frozen tile that never cleared; reconciling removals as well as additions is
 // what lets a leaver's media actually stop.
 func TestRoomStopsForwardingAParticipantWhoLeaves(t *testing.T) {
-	room, err := NewRoom()
-	if err != nil {
-		t.Fatal(err)
-	}
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
 	defer room.Close()
 
-	receiver := newBrowser(t, room, "receiver")
+	receiver := newBrowser(t, api, room, "receiver")
 	received := make(chan struct{}, 1)
 	receiver.pc.OnTrack(func(_ *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		select {
@@ -403,7 +446,7 @@ func TestRoomStopsForwardingAParticipantWhoLeaves(t *testing.T) {
 	})
 	receiver.connect()
 
-	publisher := newBrowser(t, room, "publisher")
+	publisher := newBrowser(t, api, room, "publisher")
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "video", "leaver-camera")
 	if err != nil {
@@ -432,4 +475,61 @@ func TestRoomStopsForwardingAParticipantWhoLeaves(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
+}
+
+// waitForSenders blocks until a peer has exactly the wanted number of live
+// outbound senders, failing with the room's state if it never settles there.
+func waitForSenders(t *testing.T, room *Room, id string, want int) {
+	t.Helper()
+	deadline := time.After(forwardDeadline)
+	for room.activeSenders(id) != want {
+		select {
+		case <-deadline:
+			t.Fatalf("peer %q has %d active senders, want %d\n%s", id, room.activeSenders(id), want, room.debugState())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// TestRoomPausesAndResumesAScreenShare proves that stopping a screen share takes
+// it off other participants' tiles and restarting it puts it back. A browser
+// that stops sharing only replaces its outgoing track with nothing, which the
+// SFU cannot distinguish from a static screen, so it says so with a signal; the
+// forwarded track is kept across the pause so resuming re-attaches it without a
+// fresh publish.
+func TestRoomPausesAndResumesAScreenShare(t *testing.T) {
+	api := testAPI(t)
+	room := newRoomWithAPI(api)
+	defer room.Close()
+
+	receiver := newBrowser(t, api, room, "receiver")
+	receiver.pc.OnTrack(func(_ *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {})
+	receiver.connect()
+
+	publisher := newBrowser(t, api, room, "publisher")
+	cameraTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "camera", "publisher-camera")
+	if err != nil {
+		t.Fatal(err)
+	}
+	screenTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "screen", "publisher-screen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher.screenStreamID = "publisher-screen"
+	publisher.publish(cameraTrack, screenTrack)
+	pump(t, cameraTrack)
+	pump(t, screenTrack)
+
+	// Camera and screen both forwarded.
+	waitForSenders(t, room, "receiver", 2)
+
+	// Stopping the share drops the screen lane; the camera stays.
+	room.setScreenActive("publisher", false)
+	waitForSenders(t, room, "receiver", 1)
+
+	// Restarting it puts the screen back.
+	room.setScreenActive("publisher", true)
+	waitForSenders(t, room, "receiver", 2)
 }

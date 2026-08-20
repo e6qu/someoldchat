@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-mutation test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification browser-qualification-deps browser-qualification-run shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite check-dqlite test test-huddle-media test-race test-load test-load-race test-transport-load test-mutation test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification browser-qualification-deps browser-qualification-run shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -75,6 +75,19 @@ test-postgres:
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...
+	$(MAKE) test-huddle-media
+
+# The SFU forwarding tests establish real pion ICE/DTLS/RTP handshakes, which a
+# shared CI runner cannot complete while a hundred other package binaries run
+# alongside them under `./...` — the checks starve and a peer is reaped. They are
+# behind the `huddlemedia` build tag and run here in a pass of their own, after
+# the main suite, so the runner is theirs alone. They are deliberately not run
+# under the race detector: its 5-20x slowdown starves the same handshake even
+# with the runner to itself (the instrumentation showed the publisher reaped with
+# no data race reported), and the detector adds little to a real-UDP integration
+# test whose own logic the unraced suite already covers. `check` runs this.
+test-huddle-media:
+	GOCACHE=$(GOCACHE) go test -tags huddlemedia -count=1 -p 1 ./internal/huddlesfu
 
 # -timeout is raised above Go's 10m default because the race detector makes the
 # largest packages several times slower: internal/store/sqlstore alone runs its

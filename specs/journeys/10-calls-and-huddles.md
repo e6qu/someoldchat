@@ -118,7 +118,10 @@ screen's own forwarded stream — that fills the grid while their camera keeps
 playing in the filmstrip alongside everyone else. Screen sharing is relayed like
 any other video, offered where the browser provides `getDisplayMedia`; a sharer
 sends their camera and their screen at once, on two lanes, rather than trading
-one for the other. Reactions are
+one for the other. Stopping a share tells the SFU explicitly, so it comes off
+every other participant's tiles at once rather than freezing on the last frame
+until the sharer leaves — a browser that stops only sends nothing, which the SFU
+cannot tell from a momentarily static screen. Reactions are
 implemented — a participant sends one of the huddle's quick emoji and every
 participant sees it float and fade — and the huddle canvas is the channel's own
 canvas, offered from the huddle bar. Captions remain unimplemented because they

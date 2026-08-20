@@ -334,6 +334,7 @@ if(screenStream){
 screenStream.getTracks().forEach(function(track){track.stop()});
 screenStream=null;
 screenSender.replaceTrack(null);
+toServer('screen_off');
 detachScreen(selfID);
 selfPresenting=false;
 screen.setAttribute('aria-pressed','false');
@@ -350,6 +351,7 @@ var track=stream.getVideoTracks()[0];
 if(!track)return;
 track.addEventListener('ended',function(){if(screenStream)screen.click()});
 screenSender.replaceTrack(track);
+toServer('screen_on');
 attachScreen(selfID,stream);
 selfPresenting=true;
 screen.setAttribute('aria-pressed','true');
