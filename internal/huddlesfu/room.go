@@ -62,10 +62,12 @@ type peer struct {
 	sink Sink
 
 	mu             sync.Mutex
-	ready          bool   // the initial publish offer has been answered
-	negotiating    bool   // a server offer is outstanding, so hold the next one
-	dirty          bool   // tracks were added since the last offer was sent
-	screenStreamID string // the browser-declared msid of this peer's screen lane, if any
+	ready          bool                        // the initial publish offer has been answered
+	negotiating    bool                        // a server offer is outstanding, so hold the next one
+	dirty          bool                        // tracks were added since the last offer was sent
+	screenStreamID string                      // the browser-declared msid of this peer's screen lane, if any
+	screenKey      string                      // the forward key of this peer's screen track, once it has published one
+	screenLocal    *webrtc.TrackLocalStaticRTP // the forwarded screen track, retained so a paused share can resume
 }
 
 // NewRoom builds an empty room with its own default WebRTC API — host
@@ -213,9 +215,45 @@ func (r *Room) Signal(id string, signal Signal) error {
 			init = webrtc.ICECandidateInit{Candidate: signal.Candidate}
 		}
 		return current.pc.AddICECandidate(init)
+	case "screen_off":
+		r.setScreenActive(id, false)
+		return nil
+	case "screen_on":
+		r.setScreenActive(id, true)
+		return nil
 	default:
 		return fmt.Errorf("unexpected signal kind %q from a participant", signal.Kind)
 	}
+}
+
+// setScreenActive takes a participant's screen share off everyone else's tiles
+// (active false) or puts it back (active true). Stopping a share only replaces
+// the browser's outgoing track with nothing, which the SFU cannot tell from a
+// momentarily static screen, so the browser says so explicitly; without this a
+// stopped share lingered as a frozen tile on every other participant until the
+// sharer left. The forwarded track is retained across a pause (see publish), so
+// resuming re-attaches the same live track rather than renegotiating a new one.
+func (r *Room) setScreenActive(id string, active bool) {
+	r.mu.Lock()
+	current, ok := r.peers[id]
+	if !ok || r.closed {
+		r.mu.Unlock()
+		return
+	}
+	current.mu.Lock()
+	key, local := current.screenKey, current.screenLocal
+	current.mu.Unlock()
+	if key == "" || local == nil {
+		r.mu.Unlock()
+		return
+	}
+	if active {
+		r.forwards[key] = local
+	} else if stored, ok := r.forwards[key]; ok && stored == local {
+		delete(r.forwards, key)
+	}
+	r.mu.Unlock()
+	r.synchronize()
 }
 
 // Leave removes a participant and stops forwarding its tracks to the rest.
@@ -289,6 +327,15 @@ func (r *Room) publish(owner string, remote *webrtc.TrackRemote) {
 	local, err := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, remote.ID(), forwardStreamID(owner, screen))
 	if err != nil {
 		return
+	}
+	// Remember the screen forward so a later pause can take it off everyone's
+	// tiles and a resume can put it back without waiting for the browser to
+	// republish — the read loop below keeps running across both.
+	if screen && current != nil {
+		current.mu.Lock()
+		current.screenKey = key
+		current.screenLocal = local
+		current.mu.Unlock()
 	}
 	r.mu.Lock()
 	if r.closed {

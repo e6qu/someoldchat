@@ -112,7 +112,11 @@ func (h Handler) huddleSFUSignal(w http.ResponseWriter, r *http.Request) {
 	}
 	callID := strings.TrimSpace(fields["call_id"])
 	kind := strings.TrimSpace(fields["kind"])
-	if callID == "" || (kind != "answer" && kind != "candidate") {
+	// answer and candidate carry the WebRTC handshake; screen_on and screen_off
+	// tell the SFU to put a screen share back on everyone's tiles or take it off,
+	// which the browser must say explicitly because stopping a share only sends
+	// nothing rather than a signal the SFU could read from the media.
+	if callID == "" || !slices.Contains([]string{"answer", "candidate", "screen_on", "screen_off"}, kind) {
 		http.Error(w, "A call id and a valid signal are required.", http.StatusBadRequest)
 		return
 	}

@@ -433,3 +433,62 @@ func TestRoomStopsForwardingAParticipantWhoLeaves(t *testing.T) {
 		}
 	}
 }
+
+// waitForSenders blocks until a peer has exactly the wanted number of live
+// outbound senders, failing with the room's state if it never settles there.
+func waitForSenders(t *testing.T, room *Room, id string, want int) {
+	t.Helper()
+	deadline := time.After(forwardDeadline)
+	for room.activeSenders(id) != want {
+		select {
+		case <-deadline:
+			t.Fatalf("peer %q has %d active senders, want %d\n%s", id, room.activeSenders(id), want, room.debugState())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+// TestRoomPausesAndResumesAScreenShare proves that stopping a screen share takes
+// it off other participants' tiles and restarting it puts it back. A browser
+// that stops sharing only replaces its outgoing track with nothing, which the
+// SFU cannot distinguish from a static screen, so it says so with a signal; the
+// forwarded track is kept across the pause so resuming re-attaches it without a
+// fresh publish.
+func TestRoomPausesAndResumesAScreenShare(t *testing.T) {
+	room, err := NewRoom()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer room.Close()
+
+	receiver := newBrowser(t, room, "receiver")
+	receiver.pc.OnTrack(func(_ *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {})
+	receiver.connect()
+
+	publisher := newBrowser(t, room, "publisher")
+	cameraTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "camera", "publisher-camera")
+	if err != nil {
+		t.Fatal(err)
+	}
+	screenTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "screen", "publisher-screen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher.screenStreamID = "publisher-screen"
+	publisher.publish(cameraTrack, screenTrack)
+	pump(t, cameraTrack)
+	pump(t, screenTrack)
+
+	// Camera and screen both forwarded.
+	waitForSenders(t, room, "receiver", 2)
+
+	// Stopping the share drops the screen lane; the camera stays.
+	room.setScreenActive("publisher", false)
+	waitForSenders(t, room, "receiver", 1)
+
+	// Restarting it puts the screen back.
+	room.setScreenActive("publisher", true)
+	waitForSenders(t, room, "receiver", 2)
+}
