@@ -3812,6 +3812,7 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	delete(s.conversationRetention, conversation)
 	delete(s.retentionSweptAt, conversation)
 	delete(s.externalInvitePermissions, conversation)
+	delete(s.aiExcludedConversations, conversation)
 	for id, item := range s.savedItems {
 		if item.Conversation == conversation {
 			delete(s.savedItems, id)

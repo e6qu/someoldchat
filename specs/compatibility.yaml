@@ -1604,6 +1604,8 @@ operations:
       - go-test:internal/api/slack:TestAdminConversationAdministration
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
+      - go-test:internal/service:TestThreadSummariesRespectAIExclusion
+      - go-test:internal/service:TestAssistantSearchContextRespectsAIExclusion
   - method: admin.conversations.convertToPublic
     status: behavior-compatible
     provenance: slack-reference

@@ -3903,7 +3903,42 @@ func (m Messages) AssistantSearchContext(ctx context.Context, workspaceID domain
 	if strings.TrimSpace(query) == "" {
 		return domain.MessagePage{}, ErrInvalidWorkspace
 	}
-	return m.SearchMessages(ctx, workspaceID, actorID, domain.MessageSearchRequest{Query: query, Page: request})
+	page, err := m.SearchMessages(ctx, workspaceID, actorID, domain.MessageSearchRequest{Query: query, Page: request})
+	if err != nil || len(page.Messages) == 0 {
+		return page, err
+	}
+	// An assistant may not quote a channel the workspace has kept out of Slack AI,
+	// even to a member who can read it themselves — the member's own eyes are not
+	// the AI. Drop those messages from the context the assistant is handed.
+	seen := make(map[domain.ConversationID]struct{}, len(page.Messages))
+	ids := make([]domain.ConversationID, 0, len(page.Messages))
+	for _, message := range page.Messages {
+		if _, ok := seen[message.Conversation]; ok {
+			continue
+		}
+		seen[message.Conversation] = struct{}{}
+		ids = append(ids, message.Conversation)
+	}
+	excludedIDs, err := m.Store.ConversationsExcludedFromAI(ctx, workspaceID, ids)
+	if err != nil {
+		return domain.MessagePage{}, err
+	}
+	if len(excludedIDs) == 0 {
+		return page, nil
+	}
+	excluded := make(map[domain.ConversationID]struct{}, len(excludedIDs))
+	for _, id := range excludedIDs {
+		excluded[id] = struct{}{}
+	}
+	kept := page.Messages[:0]
+	for _, message := range page.Messages {
+		if _, out := excluded[message.Conversation]; out {
+			continue
+		}
+		kept = append(kept, message)
+	}
+	page.Messages = kept
+	return page, nil
 }
 
 // AdminRequestExport records a request for a report the workspace will build
@@ -6262,6 +6297,18 @@ func (m Messages) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID
 func (m Messages) ThreadSummaries(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return nil, err
+	}
+	// A channel an administrator has kept out of Slack AI shows no AI summaries,
+	// which is the whole point of the exclusion: it is set and reported, so it must
+	// also govern the one AI surface a summary reaches. An empty result reads, to
+	// the caller, as a channel with nothing summarised — which is exactly the state
+	// the exclusion puts it in.
+	excluded, err := m.Store.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{conversationID})
+	if err != nil {
+		return nil, err
+	}
+	if len(excluded) > 0 {
+		return map[domain.MessageTimestamp]domain.ThreadSummary{}, nil
 	}
 	return m.Store.ThreadSummaries(ctx, conversationID, roots)
 }
