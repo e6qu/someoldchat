@@ -1,3 +1,15 @@
+//go:build huddlemedia
+
+// These are the SFU's real-media forwarding tests: two or three pion peer
+// connections per test complete an actual ICE/DTLS/RTP handshake over UDP. That
+// handshake is reliable on a developer machine but not inside `go test ./...` on
+// a shared CI runner, where a hundred package binaries running at once starve
+// pion's ICE connectivity checks until a peer is declared failed and reaped — the
+// instrumentation caught the publisher vanishing mid-test with the receiver still
+// healthy. They are therefore kept behind the `huddlemedia` build tag and out of
+// the default suite, and the Makefile runs them in a dedicated pass of their own,
+// where nothing else on the runner competes for the handshake. The forwarding
+// logic they cover still runs on every CI build; only its isolation changes.
 package huddlesfu
 
 import (
