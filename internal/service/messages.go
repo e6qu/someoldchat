@@ -200,6 +200,7 @@ const (
 	conversationInviteUserNotFound     conversationInviteFailureReason = "user_not_found"
 	conversationInviteSelf             conversationInviteFailureReason = "cant_invite_self"
 	conversationInviteAlreadyInChannel conversationInviteFailureReason = "already_in_channel"
+	conversationInviteBarriered        conversationInviteFailureReason = "restricted_by_barrier"
 )
 
 type conversationInviteFailure struct {
@@ -3689,7 +3690,30 @@ func (m Messages) SearchPeople(ctx context.Context, workspaceID domain.Workspace
 	if strings.TrimSpace(query) == "" {
 		return domain.UserPage{}, ErrInvalidSearch
 	}
-	return m.Store.SearchUsers(ctx, workspaceID, query, request)
+	page, err := m.Store.SearchUsers(ctx, workspaceID, query, request)
+	if err != nil {
+		return domain.UserPage{}, err
+	}
+	// A member on the far side of an information barrier is not found here: the
+	// two groups a barrier separates do not see each other in search any more than
+	// they can message each other. The page may come back shorter than its limit
+	// as a result, which is the honest answer — the cursor still walks the store.
+	barriered, err := m.barrieredMembers(ctx, workspaceID, userID)
+	if err != nil {
+		return domain.UserPage{}, err
+	}
+	if len(barriered) == 0 {
+		return page, nil
+	}
+	filtered := page.Users[:0]
+	for _, user := range page.Users {
+		if _, out := barriered[user.ID]; out {
+			continue
+		}
+		filtered = append(filtered, user)
+	}
+	page.Users = filtered
+	return page, nil
 }
 
 // SearchChannels answers the Channels search tab. It is the member conversation
@@ -4891,6 +4915,89 @@ func (m Messages) Conversations(ctx context.Context, workspaceID domain.Workspac
 // handful of barriers, the groups are small, and a stale cache here would let
 // through exactly the contact the barrier exists to stop.
 func (m Messages) barrierSeparates(ctx context.Context, workspaceID domain.WorkspaceID, members []domain.UserID, subject domain.BarrierSubject) (bool, error) {
+	return m.barrierSeparatesMatching(ctx, workspaceID, members, func(subjects []domain.BarrierSubject) bool {
+		return slices.Contains(subjects, subject)
+	})
+}
+
+// anyBarrierSeparates reports whether any barrier at all, whatever its restricted
+// subjects, separates two of the named members. Sharing a channel and appearing
+// in each other's search are contact between the groups just as a direct message
+// is, but Slack expresses no per-subject toggle for them — a barrier between the
+// groups keeps them apart everywhere — so they are gated on the barrier's mere
+// existence rather than on the im/mpim/call subject set an administrator picked.
+func (m Messages) anyBarrierSeparates(ctx context.Context, workspaceID domain.WorkspaceID, members []domain.UserID) (bool, error) {
+	return m.barrierSeparatesMatching(ctx, workspaceID, members, func([]domain.BarrierSubject) bool { return true })
+}
+
+// barrieredMembers is every member an information barrier keeps away from actor,
+// in either direction: a barrier separates its primary group from each group it
+// is barriered from, and the wall stands both ways, so a member of one cannot
+// share a channel with or see a member of the other. It reads the workspace's
+// barriers directly for the same reason barrierSeparates does — a stale answer
+// would let through exactly the contact the barrier exists to stop. It returns an
+// empty set when no barrier touches actor, which is the common case.
+func (m Messages) barrieredMembers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID) (map[domain.UserID]struct{}, error) {
+	page, err := m.Store.ListBarriers(ctx, workspaceID, domain.PageRequest{Limit: barrierReadCeiling})
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[domain.UserID]struct{})
+	inGroup := func(groupID domain.UserGroupID) (bool, error) {
+		group, err := m.Store.GetUserGroup(ctx, workspaceID, groupID)
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return slices.Contains(group.Users, actor), nil
+	}
+	addGroup := func(groupID domain.UserGroupID) error {
+		group, err := m.Store.GetUserGroup(ctx, workspaceID, groupID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		for _, member := range group.Users {
+			if member != actor {
+				result[member] = struct{}{}
+			}
+		}
+		return nil
+	}
+	for _, barrier := range page.Barriers {
+		primary, err := inGroup(barrier.PrimaryGroupID)
+		if err != nil {
+			return nil, err
+		}
+		if primary {
+			for _, group := range barrier.BarrieredFromIDs {
+				if err := addGroup(group); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		for _, group := range barrier.BarrieredFromIDs {
+			member, err := inGroup(group)
+			if err != nil {
+				return nil, err
+			}
+			if member {
+				if err := addGroup(barrier.PrimaryGroupID); err != nil {
+					return nil, err
+				}
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (m Messages) barrierSeparatesMatching(ctx context.Context, workspaceID domain.WorkspaceID, members []domain.UserID, matches func([]domain.BarrierSubject) bool) (bool, error) {
 	if len(members) < 2 {
 		return false, nil
 	}
@@ -4903,7 +5010,7 @@ func (m Messages) barrierSeparates(ctx context.Context, workspaceID domain.Works
 		present[member] = struct{}{}
 	}
 	for _, barrier := range page.Barriers {
-		if !slices.Contains(barrier.Subjects, subject) {
+		if !matches(barrier.Subjects) {
 			continue
 		}
 		primary, err := m.groupHolds(ctx, workspaceID, barrier.PrimaryGroupID, present)
@@ -5387,6 +5494,8 @@ func (m Messages) InviteConversationMembers(ctx context.Context, workspaceID dom
 		return domain.Conversation{}, ErrCannotInviteSelf
 	case conversationInviteAlreadyInChannel:
 		return domain.Conversation{}, store.ErrAlreadyExists
+	case conversationInviteBarriered:
+		return domain.Conversation{}, ErrBarrieredFromMember
 	default:
 		return domain.Conversation{}, store.ErrNotFound
 	}
@@ -5407,6 +5516,19 @@ func (m Messages) inviteConversationMembersWithOptions(ctx context.Context, work
 	}
 	if conversation.IsDirectOrGroup() || conversation.Archived {
 		return conversationInviteResult{}, ErrInvalidConversation
+	}
+
+	// A barrier keeps its separated groups out of the same channel, so an invitee
+	// barriered from anyone already here — or from another invitee admitted in the
+	// same request — is refused. The current members are read once; the set grows
+	// as invitees are admitted so two barriered people cannot slip in together.
+	memberPage, err := m.Store.ListConversationMembers(ctx, conversationID, domain.PageRequest{Limit: barrierReadCeiling})
+	if err != nil {
+		return conversationInviteResult{}, err
+	}
+	channelMembers := make(map[domain.UserID]struct{}, len(memberPage.Users)+len(users))
+	for _, member := range memberPage.Users {
+		channelMembers[member.ID] = struct{}{}
 	}
 
 	result := conversationInviteResult{Conversation: conversation}
@@ -5439,6 +5561,22 @@ func (m Messages) inviteConversationMembersWithOptions(ctx context.Context, work
 			result.Failures = append(result.Failures, conversationInviteFailure{UserID: targetID, Reason: conversationInviteAlreadyInChannel})
 			continue
 		}
+		barriered, barrierErr := m.barrieredMembers(ctx, workspaceID, targetID)
+		if barrierErr != nil {
+			return conversationInviteResult{}, barrierErr
+		}
+		separated := false
+		for id := range barriered {
+			if _, here := channelMembers[id]; here {
+				separated = true
+				break
+			}
+		}
+		if separated {
+			result.Failures = append(result.Failures, conversationInviteFailure{UserID: targetID, Reason: conversationInviteBarriered})
+			continue
+		}
+		channelMembers[targetID] = struct{}{}
 		valid = append(valid, targetID)
 	}
 	if len(valid) == 0 || (!force && len(result.Failures) != 0) {
@@ -6170,6 +6308,30 @@ func (m Messages) adminInviteConversationMembers(ctx context.Context, workspaceI
 	}
 	if len(normalized) == 0 {
 		return domain.Conversation{}, ErrInvalidConversation
+	}
+	// An administrator does not get to defeat a barrier: adding a member barriered
+	// from anyone already in the channel, or from another member added in the same
+	// request, would put the separated groups in one room, which is the contact
+	// the barrier exists to stop.
+	memberPage, err := m.Store.ListConversationMembers(ctx, conversationID, domain.PageRequest{Limit: barrierReadCeiling})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	channelMembers := make(map[domain.UserID]struct{}, len(memberPage.Users)+len(normalized))
+	for _, member := range memberPage.Users {
+		channelMembers[member.ID] = struct{}{}
+	}
+	for _, targetID := range normalized {
+		barriered, err := m.barrieredMembers(ctx, workspaceID, targetID)
+		if err != nil {
+			return domain.Conversation{}, err
+		}
+		for id := range barriered {
+			if _, here := channelMembers[id]; here {
+				return domain.Conversation{}, ErrBarrieredFromMember
+			}
+		}
+		channelMembers[targetID] = struct{}{}
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.members_invited", events.String("channel_id", string(conversationID)), events.Strings("user_ids", userIDStrings(normalized))), time.Now().UTC())
 	if err != nil {
