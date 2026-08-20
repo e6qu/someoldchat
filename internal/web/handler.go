@@ -30,6 +30,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/store"
+	"github.com/sameoldchat/sameoldchat/internal/thumbnail"
 )
 
 type Handler struct {
@@ -292,7 +293,12 @@ type fileView struct {
 	MIMEType    string
 	Size        string
 	DownloadURL string
-	Deleted     bool
+	// ThumbnailURL serves a small, downscaled preview of an image inline, so the
+	// timeline shows a lightweight version and fetches the full bytes only when
+	// the image is opened. It is set for images; the endpoint falls back to the
+	// full bytes for anything it cannot downscale.
+	ThumbnailURL string
+	Deleted      bool
 	// IsImage decides whether this file is shown or linked. Description is the
 	// uploader's account of it, and AccessibleName is what the alt attribute
 	// carries — empty when nobody has described the image and it has no title,
@@ -1930,7 +1936,7 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
     {{if $message.DisplayText}}<p class="message-text">{{$message.DisplayText}}</p>{{end}}
     {{if $message.Files}}<div class="message-files" aria-label="Shared files">{{range $file := $message.Files}}
       <div class="message-file{{if $file.IsImage}} is-image{{end}}{{if $file.IsSnippet}} is-snippet{{end}}">
-        {{if $file.IsImage}}<a class="message-image-link" href="{{$file.DownloadURL}}"><img class="message-image" src="{{$file.DownloadURL}}" alt="{{$file.AccessibleName}}" loading="lazy"></a>
+        {{if $file.IsImage}}<a class="message-image-link" href="{{$file.DownloadURL}}"><img class="message-image" src="{{$file.ThumbnailURL}}" alt="{{$file.AccessibleName}}" loading="lazy"></a>
         {{else if $file.IsSnippet}}<span class="message-file-icon" aria-hidden="true">{{if $file.FileType}}{{$file.FileType}}{{else}}snippet{{end}}</span>
         {{else}}<span class="message-file-icon" aria-hidden="true">FILE</span>{{end}}
         <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span>{{if and $file.IsImage (not $file.AccessibleName)}}<span class="message-file-meta undescribed">No description yet</span>{{end}}</span>
@@ -4880,6 +4886,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/file/stage", h.stageDraftFiles)
 	mux.HandleFunc("POST /app/file", h.uploadFile)
 	mux.HandleFunc("GET /app/files/{fileID}", h.downloadFile)
+	mux.HandleFunc("GET /app/files/{fileID}/thumbnail", h.downloadFileThumbnail)
 	mux.HandleFunc("POST /app/interaction", h.appInteraction)
 	mux.HandleFunc("POST /app/shortcut", h.appShortcut)
 	mux.HandleFunc("POST /app/view/submit", h.viewSubmit)
@@ -6487,6 +6494,9 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 				AccessibleName: file.AccessibleName(),
 				IsSnippet:      file.IsSnippet() && !file.Deleted,
 				FileType:       file.FileType,
+			}
+			if fileItem.IsImage {
+				fileItem.ThumbnailURL = fileItem.DownloadURL + "/thumbnail"
 			}
 			if fileItem.IsSnippet {
 				// A snippet is shown in place as a code block, so its text is read
@@ -11634,6 +11644,68 @@ func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.Copy(w, source)
+}
+
+// thumbnailMaxDim bounds the long side of a served preview, and
+// thumbnailSourceLimit bounds how large a source the server will decode to build
+// one — a larger image is linked at full size rather than thumbnailed, so a
+// single request cannot pull an enormous file into memory to downscale it.
+const (
+	thumbnailMaxDim      = 400
+	thumbnailSourceLimit = 25 << 20
+)
+
+// downloadFileThumbnail serves a small, downscaled preview of an image so the
+// timeline loads a lightweight version and fetches the full bytes only when the
+// image is opened. A file's stored bytes never change, so the preview is
+// immutable and cached hard by the browser — generated at most once per viewer.
+// Anything it cannot or should not downscale (a non-image, an oversized source,
+// an undecodable one) falls back to serving or linking the original, so the
+// timeline never shows a broken image.
+func (h Handler) downloadFileThumbnail(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesRead)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fileID := domain.FileID(strings.TrimSpace(r.PathValue("fileID")))
+	file, source, err := h.Messages.OpenFile(r.Context(), principal.WorkspaceID, principal.UserID, fileID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			h.writePageError(w, http.StatusNotFound, "That file is not available", "It may have been deleted or is not shared with a conversation you can access.")
+			return
+		}
+		h.writePageError(w, http.StatusServiceUnavailable, "That file could not be opened", "The file store is temporarily unavailable.")
+		return
+	}
+	defer source.Close()
+
+	// A file too large to hold in memory, or a type this cannot downscale, is
+	// linked at full size instead. An <img> follows the redirect and displays it.
+	if !thumbnail.Supported(file.MIMEType) || file.Size > thumbnailSourceLimit {
+		http.Redirect(w, r, "/app/files/"+url.PathEscape(string(fileID)), http.StatusFound)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(source, thumbnailSourceLimit+1))
+	if err != nil || int64(len(data)) > thumbnailSourceLimit {
+		http.Redirect(w, r, "/app/files/"+url.PathEscape(string(fileID)), http.StatusFound)
+		return
+	}
+	preview, previewType, err := thumbnail.Generate(data, thumbnailMaxDim)
+	if err != nil {
+		// The bytes did not decode as the image their type claimed; serve them as
+		// they are rather than a broken preview, still inline for the <img>.
+		preview, previewType = data, file.MIMEType
+	}
+	w.Header().Set("Content-Type", previewType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(preview)))
+	// The stored bytes are immutable, so the derived preview is too: a viewer
+	// builds it once and the browser keeps it. It stays private because access to
+	// the file is authorised per member, not shared across a cache.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(preview)
 }
 
 func slashCommandInput(text string) (string, string, bool) {

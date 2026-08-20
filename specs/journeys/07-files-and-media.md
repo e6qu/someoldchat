@@ -42,8 +42,12 @@ in the ledger.
 ## FILE-03 — Render and inspect a file
 
 File messages expose safe metadata, preview/thumbnail where supported, uploader,
-description/alt text, share destination, and actions. Preview failure falls
-back to metadata/download rather than a broken or unsafe embed. Images,
+description/alt text, share destination, and actions. An image renders through a
+downscaled thumbnail generated on demand — a bounded decode that refuses a
+decompression bomb, a box downscale, a re-encode that keeps a PNG a PNG — and the
+full bytes are fetched only when it is opened; the thumbnail is served immutably
+because the stored bytes never change. Preview or thumbnail failure falls back to
+serving or linking the original rather than a broken or unsafe embed. Images,
 audio/video, text, PDF, archives, unknown binaries, remote files, deleted
 files, and app-owned files follow Slack's distinguishable states.
 
