@@ -36,6 +36,13 @@ func testAPI(t *testing.T) *webrtc.API {
 	}
 	settingEngine := webrtc.SettingEngine{}
 	settingEngine.SetICETimeouts(30*time.Second, 60*time.Second, 2*time.Second)
+	// Offer the loopback address as an ICE candidate, which pion excludes by
+	// default. Both peers then hold a 127.0.0.1 host candidate that pairs
+	// directly, so the handshake does not depend on a routable interface or on
+	// mDNS resolving a .local candidate — neither of which a CI runner reliably
+	// provides, which is why the publisher's connection kept failing there while
+	// it always connected on a developer machine.
+	settingEngine.SetIncludeLoopbackCandidate(true)
 	return webrtc.NewAPI(
 		webrtc.WithMediaEngine(mediaEngine),
 		webrtc.WithInterceptorRegistry(registry),
