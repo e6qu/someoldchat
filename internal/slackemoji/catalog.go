@@ -106,51 +106,74 @@ func Search(query string, limit int) []Emoji {
 		copy(result, all[:len(result)])
 		return result
 	}
-	buckets := [4][]Emoji{}
+	type ranked struct {
+		emoji Emoji
+		rank  int
+	}
+	matches := make([]ranked, 0, 64)
 	for _, emoji := range all {
 		if rank := searchRank(emoji, query); rank >= 0 {
-			buckets[rank] = append(buckets[rank], emoji)
+			matches = append(matches, ranked{emoji: emoji, rank: rank})
 		}
 	}
-	result := make([]Emoji, 0, min(limit, len(all)))
-	for _, bucket := range buckets {
-		for _, emoji := range bucket {
-			result = append(result, emoji)
-			if len(result) == limit {
-				return result
-			}
+	// Order by how directly each emoji answers the query — its exact name, then
+	// its exact alias, then a name that begins with it, and so on down the tiers
+	// searchRank assigns. Within a tier the shorter name wins, because the closer
+	// the whole name is to what was typed the more likely it is what was meant, and
+	// equal-length names break alphabetically for a stable, predictable list.
+	// SliceStable leaves the pinned catalog order as the final tiebreak, so the
+	// result never depends on iteration order.
+	sort.SliceStable(matches, func(left, right int) bool {
+		if matches[left].rank != matches[right].rank {
+			return matches[left].rank < matches[right].rank
 		}
+		leftName, rightName := matches[left].emoji.Name, matches[right].emoji.Name
+		if len(leftName) != len(rightName) {
+			return len(leftName) < len(rightName)
+		}
+		return leftName < rightName
+	})
+	count := min(limit, len(matches))
+	result := make([]Emoji, count)
+	for index := 0; index < count; index++ {
+		result[index] = matches[index].emoji
 	}
 	return result
 }
 
+// searchRank scores how directly an emoji answers a query, lowest first: an
+// exact name, then an exact alias, a name that begins with the query, an alias
+// that does, the query appearing anywhere in the name, then in an alias, and
+// finally in the description. A name match always outranks the same kind of alias
+// match, which is what keeps :smile: above an emoji that merely lists "smile"
+// among its aliases. It returns -1 when nothing matches.
 func searchRank(emoji Emoji, query string) int {
 	if emoji.Name == query {
 		return 0
 	}
 	for _, alias := range emoji.Aliases {
 		if alias == query {
-			return 0
-		}
-	}
-	if strings.HasPrefix(emoji.Name, query) {
-		return 1
-	}
-	for _, alias := range emoji.Aliases {
-		if strings.HasPrefix(alias, query) {
 			return 1
 		}
 	}
-	if strings.Contains(emoji.Name, query) {
+	if strings.HasPrefix(emoji.Name, query) {
 		return 2
 	}
 	for _, alias := range emoji.Aliases {
+		if strings.HasPrefix(alias, query) {
+			return 3
+		}
+	}
+	if strings.Contains(emoji.Name, query) {
+		return 4
+	}
+	for _, alias := range emoji.Aliases {
 		if strings.Contains(alias, query) {
-			return 2
+			return 5
 		}
 	}
 	if strings.Contains(strings.ToLower(emoji.Description), query) {
-		return 3
+		return 6
 	}
 	return -1
 }
