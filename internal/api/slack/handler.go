@@ -6779,7 +6779,7 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rawUsers := strings.Split(fields["users"], ",")
-	if len(rawUsers) > 100 {
+	if len(rawUsers) > 1000 {
 		writeError(w, "too_many_users")
 		return
 	}

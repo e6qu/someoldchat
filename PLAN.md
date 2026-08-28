@@ -528,9 +528,9 @@ durable trigger-failure surfacing beyond the run ledger remain.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 155 representative exact assertions
-explicitly citing 53 of the 102 journey IDs across every journey domain.
-`make journey-check` prints the other 49 as upstream-text evidence
+developer pages and currently checks 163 representative exact assertions
+explicitly citing 53 of the 108 journey IDs across every journey domain.
+`make journey-check` prints the other 55 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and
