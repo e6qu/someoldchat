@@ -19,6 +19,12 @@ end-to-end readiness. Readiness performs a bounded chat-store operation through
 the selected composition, so a separate HTTP replica is not admitted while its
 TLS gRPC chat dependency is unavailable.
 
+Set `SAMEOLDCHAT_MONITORING_TOKEN` to an independent bearer credential of at
+least 32 non-whitespace characters to publish `GET /monitoring/observation`.
+The authenticated `e6qu.monitoring/v2` document reports the same end-to-end
+readiness check plus fixed-cardinality operation, duration, and process
+evidence. An unset token leaves the endpoint fail-closed.
+
 ## Replica termination
 
 `SIGTERM` and `SIGINT` are explicit drain signals. HTTP replicas stop admitting

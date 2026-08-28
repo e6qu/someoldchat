@@ -241,6 +241,11 @@ The server exposes its first 12 hexadecimal characters—the same immutable tag
 used by the published image—through `SAMEOLDCHAT_RELEASE_REVISION` for Shauth
 validation. A manual build must supply the immutable commit explicitly:
 
+Deployments that register application monitoring with Shauth also provide a
+unique `SAMEOLDCHAT_MONITORING_TOKEN` secret. The same value belongs only in
+Shauth's application registration and this workload; it must not reuse an API,
+session, or OpenID Connect client credential.
+
 ```sh
 docker build --build-arg RELEASE_REVISION="$(git rev-parse HEAD)" .
 ```

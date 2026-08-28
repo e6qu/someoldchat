@@ -105,6 +105,22 @@ func TestResolveAcceptsTheSmallestLocalConfiguration(t *testing.T) {
 	}
 }
 
+func TestResolveValidatesMonitoringToken(t *testing.T) {
+	settings := localConfig()
+	settings.monitoringToken = "short"
+	if _, err := settings.resolve(); err == nil || !strings.Contains(err.Error(), "SAMEOLDCHAT_MONITORING_TOKEN") {
+		t.Fatalf("weak monitoring token error = %v", err)
+	}
+	settings.monitoringToken = "sameoldchat-monitoring-token-00000000000000000000"
+	resolved, err := settings.resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.monitoringTokenDigest == nil {
+		t.Fatal("valid monitoring token was not retained as a digest")
+	}
+}
+
 // terraform/ecs-runtime exported SAMEOLDCHAT_OIDC_ISSUER and
 // SAMEOLDCHAT_SESSION_TOKEN together, which this binary refuses, so the module
 // could not start the binary it configures. The rule is pinned here and
