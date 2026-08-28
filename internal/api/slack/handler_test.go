@@ -3201,17 +3201,23 @@ func TestInviteConversationForceInvitesValidSubset(t *testing.T) {
 	}
 }
 
-func TestInviteConversationValidatesForceAndCurrentHundredUserLimit(t *testing.T) {
+func TestInviteConversationValidatesForceAndCurrentThousandUserLimit(t *testing.T) {
 	handler := testHandler()
 	invalidForce := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U3&force=occasionally")
 	if invalidForce.Code != http.StatusOK || !strings.Contains(invalidForce.Body.String(), `"error":"invalid_arg_name"`) {
 		t.Fatalf("invalid force status=%d body=%s", invalidForce.Code, invalidForce.Body)
 	}
 
-	users := make([]string, 101)
+	users := make([]string, 1000)
 	for index := range users {
 		users[index] = "U" + strconv.Itoa(index+100)
 	}
+	atLimit := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users="+strings.Join(users, ","))
+	if atLimit.Code != http.StatusOK || strings.Contains(atLimit.Body.String(), `"error":"too_many_users"`) {
+		t.Fatalf("at-limit status=%d body=%s", atLimit.Code, atLimit.Body)
+	}
+
+	users = append(users, "U1100")
 	tooMany := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users="+strings.Join(users, ","))
 	if tooMany.Code != http.StatusOK || !strings.Contains(tooMany.Body.String(), `"error":"too_many_users"`) {
 		t.Fatalf("too many status=%d body=%s", tooMany.Code, tooMany.Body)

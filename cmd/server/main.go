@@ -126,6 +126,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// own administration.
 	sessionAdmin := flags.Bool("session-admin", os.Getenv("SAMEOLDCHAT_SESSION_ADMIN") == "1", "grant the static development browser session workspace-administrator scopes; requires -session-token and is rejected when an identity provider is configured")
 	metricsListen := flags.String("metrics-listen", os.Getenv("SAMEOLDCHAT_METRICS_LISTEN"), "operator-only listen address publishing /metrics; empty serves no metrics endpoint")
+	monitoringToken := flags.String("monitoring-token", os.Getenv("SAMEOLDCHAT_MONITORING_TOKEN"), "deployment bearer token publishing /monitoring/observation; empty disables authenticated access")
 	authWorkspace := flags.String("auth-workspace", os.Getenv("SAMEOLDCHAT_AUTH_WORKSPACE"), "workspace for external authorization (required when enabled)")
 	authLookupUser := flags.String("auth-lookup-user", os.Getenv("SAMEOLDCHAT_AUTH_LOOKUP_USER"), "existing user used to authorize external identity lookup (required when enabled)")
 	authPublicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public HTTPS URL used for authorization callbacks")
@@ -163,7 +164,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	}
 
 	settings := startupConfig{
-		addr: *addr, metricsListen: *metricsListen, authCookieDomain: *authCookieDomain, releaseRevisionFlag: *release,
+		addr: *addr, metricsListen: *metricsListen, monitoringToken: *monitoringToken, authCookieDomain: *authCookieDomain, releaseRevisionFlag: *release,
 		chatMode: *chatMode, storeName: *storeName, databaseDSN: *dsn,
 		dqliteDirectory: *dqliteDirectory, dqliteAddress: *dqliteAddress, dqliteCluster: *dqliteCluster, dqliteDatabase: *dqliteDatabase,
 		blobDirectory: *blobDirectory, blobS3Bucket: *blobS3Bucket, blobS3Prefix: *blobS3Prefix,
@@ -454,6 +455,9 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("GET /readyz", readinessHandler(chatService, logger, resolved.workspace, resolved.lookupUser))
+	mux.Handle("GET /monitoring/observation", observability.ObservationHandler(resolved.monitoringTokenDigest, metrics, func(ctx context.Context) error {
+		return readinessCheck(ctx, chatService, resolved.workspace, resolved.lookupUser)
+	}, logger))
 	mux.HandleFunc("GET /{$}", applicationRootHandler)
 
 	// ReadHeaderTimeout bounds the slow-header (Slowloris) window that previously
@@ -603,6 +607,7 @@ type startupConfig struct {
 	// refused by the real start, so the deployment gate that treats
 	// -check-config as the authority could not see a crash-looping task.
 	metricsListen       string
+	monitoringToken     string
 	authCookieDomain    string
 	releaseRevisionFlag string
 	chatMode            string
@@ -659,6 +664,7 @@ type resolvedConfig struct {
 	appCredentialKey      []byte
 	scopes                []string
 	externalAuthorization bool
+	monitoringTokenDigest *observability.TokenDigest
 }
 
 // configuredProviders names the real identity providers this process would
@@ -691,6 +697,11 @@ func (c startupConfig) releaseRevision(configured string) string {
 
 func (c startupConfig) resolve() (resolvedConfig, error) {
 	resolved := resolvedConfig{workspace: defaultWorkspace, lookupUser: defaultLookupUser}
+	monitoringTokenDigest, err := observability.MonitoringTokenDigest(c.monitoringToken)
+	if err != nil {
+		return resolvedConfig{}, err
+	}
+	resolved.monitoringTokenDigest = monitoringTokenDigest
 	if c.chatMode != "local" && c.chatMode != "grpc" {
 		return resolvedConfig{}, fmt.Errorf("invalid chat composition %q: -chat-mode must be local or grpc", c.chatMode)
 	}
@@ -1037,7 +1048,7 @@ func readinessHandler(chatService chatapi.Service, logger *slog.Logger, workspac
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestContext, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		if _, err := chatService.Conversations(requestContext, domain.WorkspaceID(workspace), domain.UserID(user), domain.ConversationListRequest{Limit: 1}); err != nil {
+		if err := readinessCheck(requestContext, chatService, workspace, user); err != nil {
 			logger.Warn("readiness probe failed", "error", err, "workspace", workspace, "user", user)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte("not ready\n"))
@@ -1046,4 +1057,9 @@ func readinessHandler(chatService chatapi.Service, logger *slog.Logger, workspac
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ready\n"))
 	}
+}
+
+func readinessCheck(ctx context.Context, chatService chatapi.Service, workspace, user string) error {
+	_, err := chatService.Conversations(ctx, domain.WorkspaceID(workspace), domain.UserID(user), domain.ConversationListRequest{Limit: 1})
+	return err
 }

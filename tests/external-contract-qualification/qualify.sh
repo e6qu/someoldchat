@@ -440,7 +440,7 @@ assert_contains "$work/conversations-invite.html" 'channels:manage channels:writ
 	'[CONV-03] conversations.invite bot scope alternatives match the current contract' "$conversation_invite_url"
 assert_contains "$work/conversations-invite.html" 'channels:write channels:write.invites groups:write groups:write.invites im:write mpim:write' \
 	'[CONV-03] conversations.invite user scope alternatives match the current contract' "$conversation_invite_url"
-assert_contains "$work/conversations-invite.html" 'Up to 100 users may be listed' \
+assert_contains "$work/conversations-invite.html" 'Up to 1000 users may be listed' \
 	'[CONV-03] conversations.invite enforces the formal current user limit' "$conversation_invite_url"
 assert_contains "$work/conversations-invite.html" 'continue inviting the valid ones while disregarding invalid IDs' \
 	'[CONV-03] conversations.invite force supports partial success' "$conversation_invite_url"
