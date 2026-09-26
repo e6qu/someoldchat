@@ -141,7 +141,12 @@ The RTM WebSocket endpoint follows Slack's published legacy RTM protocol:
 successful ping messages return a `pong`, preserve scalar fields, and copy a
 positive client `id` into `reply_to`; nested ping fields fail as invalid input.
 The endpoint also rejects messages larger than 16 kilobytes at the WebSocket
-boundary. See [Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the
+boundary. The server pings every RTM socket every ten seconds and closes one
+that answers neither that ping nor the next, and every write is bounded by a
+deadline, so a vanished or stalled client does not hold its stream. The URL
+`rtm.connect` returns follows the origin the client called it on: `wss://`
+when the request arrived over TLS or carries `X-Forwarded-Proto: https`.
+See [Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the
 upstream wire contract.
 
 ### Socket Mode
@@ -149,19 +154,57 @@ upstream wire contract.
 Socket Mode uses an app-level token with the `connections:write` scope. The
 `apps.connections.open` method creates a short-lived, single-use connection
 lease and returns a WebSocket URL. The WebSocket consumes that lease, sends a
-`hello` message, and acknowledges each valid received envelope by returning
-its `envelope_id`. A missing envelope identifier closes the connection with a
-protocol error. Approved app installations identify the workspaces whose
-durable outbox events can be delivered. The last acknowledged event sequence
-is stored per app, so a replacement process resumes after the last confirmed
-event instead of depending on process memory. The implementation allows up to
-ten active connections per app. Each active connection renews its durable
-lease and releases it when the WebSocket closes. Each connection uses a
-bounded one-event-at-a-time delivery loop; the client must acknowledge an
-event before the next event is sent.
+`hello` message carrying `num_connections`, `connection_info.app_id` and
+`debug_info`, and acknowledges each valid received envelope by returning its
+`envelope_id`. A missing envelope identifier closes the connection with a
+protocol error; an acknowledgement for an envelope the connection no longer
+holds (a late or duplicate one) is ignored. Approved app installations
+identify the workspaces whose durable outbox events can be delivered. The last
+acknowledged event sequence is stored per app, so a replacement process
+resumes after the last confirmed event instead of depending on process memory.
+The implementation allows up to ten active connections per app; an eleventh
+`apps.connections.open` is answered with HTTP 429, `Retry-After`, and
+`rate_limited`, which official clients retry. Each active connection renews
+its durable lease and releases it when the WebSocket closes.
 
-Response payloads are accepted only for known event envelopes and must be
-valid JSON. The HTTP process records each response durably by app identifier
+The connection URL follows the origin the client called
+`apps.connections.open` on, so no configuration is needed behind a
+TLS-terminating proxy that sets `X-Forwarded-Proto`. Two settings override it:
+
+- `-socket-host` / `SAMEOLDCHAT_SOCKET_HOST` names the public `host:port`
+  every connection URL uses, for deployments that serve `/socket-mode` on a
+  different host from the Web API.
+- `-socket-tls` / `SAMEOLDCHAT_SOCKET_TLS=1` selects `wss://`. With
+  `-socket-host` it chooses the scheme; without it, it forces `wss://` behind a
+  proxy that terminates TLS without sending `X-Forwarded-Proto`.
+
+`terraform/ecs-runtime` exports `SAMEOLDCHAT_SOCKET_TLS=1`, because its public
+URL is required to be HTTPS and its caller-owned ingress may not send
+`X-Forwarded-Proto`; the host still follows the request. The
+WebSocket upgrade accepts any `Origin` (the single-use ticket is the
+credential), and a request that cannot be upgraded does not spend the ticket.
+
+Delivery is claimed, not polled: after every acknowledgement the connection
+claims the next envelope at once. Interaction envelopes (slash commands,
+shortcuts, block actions, view submissions, options) are delivered
+concurrently, up to ten unacknowledged per connection. Events are delivered in
+order, one durable record at a time per app across all of its connections,
+because the store keeps one delivery position per app; this is a recorded
+deviation from Slack, which delivers events concurrently. An envelope that is
+not acknowledged within thirty seconds goes back to the queue without closing
+the connection and is re-sent with `retry_attempt` and `retry_reason`
+(`timeout`); a first delivery carries `retry_attempt: 0` and an empty
+`retry_reason`. Retries follow Slack's Events API schedule — immediately, after
+one minute, after five minutes — and after the third retry the envelope is
+dropped and logged at error level. A dropped event is recorded in the app's
+delivery-attempt history as delivered, because the store has no separate
+outcome for it.
+
+Response payloads are accepted only for envelopes the connection holds and
+must be a JSON object. An absent or `null` payload is a plain acknowledgement,
+and so is `{}` on an event envelope, which several official SDKs attach to
+every acknowledgement; on an interaction `{}` is still a response (an empty
+option list, or a modal closed). The HTTP process records each response durably by app identifier
 and envelope identifier before it advances the event cursor. Replaying the
 same response is idempotent; replaying the envelope with different payload
 bytes fails with a state conflict. The response record is the explicit handoff
@@ -173,7 +216,10 @@ The response record is an input journal, not an implicit retry or a hidden
 fallback. The reusable response processor claims records with an owner and a
 lease, invokes an explicitly supplied handler, acknowledges each successful
 record, and releases failed records at an explicit retry time. A crash before
-acknowledgement leaves the record reclaimable after the lease expires. The
+acknowledgement leaves the record reclaimable after the lease expires.
+Acknowledged response and interaction rows are kept for 24 hours, so a replayed
+acknowledgement stays idempotent, and are then pruned on the write path in both
+storage profiles. The
 processor claims one response at a time and renews its lease while the handler
 runs. It does not guess application-specific response semantics or run an
 unbounded retry loop. See this section and the compatibility ledger for the

@@ -121,11 +121,10 @@ func TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: store}, userAuth)
+	handler, err := NewHandler(service.Messages{Store: store}, userAuth, WithAppAuthenticator(appAuth), WithSocketMode(socketmode.Service{Store: store}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "example.test"}, appAuth)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	request := httptest.NewRequest(http.MethodPost, "/api/apps.connections.open", nil)
@@ -623,11 +622,10 @@ func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator)
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, WithAppAuthenticator(appAuthenticator))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ConfigureSocketMode(socketmode.Service{}, appAuthenticator)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 

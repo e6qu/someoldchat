@@ -66,7 +66,10 @@ The `environment` output carries `SAMEOLDCHAT_CHAT_MODE`, `SAMEOLDCHAT_STORE`,
 `SAMEOLDCHAT_AUTH_WORKSPACE`, `SAMEOLDCHAT_AUTH_LOOKUP_USER`,
 `SAMEOLDCHAT_AUTH_PUBLIC_URL`, `SAMEOLDCHAT_BLOB_S3_BUCKET`, and
 `SAMEOLDCHAT_BLOB_S3_PREFIX` in addition to the OpenID Connect and release
-values. All of these are required for the server to start, and the blob settings
+values. It also sets `SAMEOLDCHAT_SOCKET_TLS=1`: `auth_public_url` must be
+HTTPS, so Socket Mode connection URLs are `wss://` on whatever host the app
+called `apps.connections.open` on, even behind an ingress that sends no
+`X-Forwarded-Proto`. All of these are required for the server to start, and the blob settings
 are exported so the task's `-blob-s3-prefix` cannot diverge from the prefix
 `task_policy_json` actually grants.
 

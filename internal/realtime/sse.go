@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"golang.org/x/net/websocket"
 )
 
 type Handler struct {
@@ -43,6 +43,10 @@ type Handler struct {
 	Reauthorize time.Duration
 	// WriteTimeout bounds one write to one client. Zero selects writeTimeout.
 	WriteTimeout time.Duration
+	// RTMPingPeriod is how often an RTM socket is pinged; a client that
+	// answers neither that ping nor the next is disconnected. Zero selects
+	// rtmPingPeriod; only tests shorten it.
+	RTMPingPeriod time.Duration
 }
 
 func (h Handler) heartbeat() time.Duration {
@@ -162,29 +166,73 @@ func (h Handler) Register(mux *http.ServeMux) {
 }
 
 func (h Handler) RegisterRTM(mux *http.ServeMux) {
-	mux.Handle("/rtm", websocket.Server{
-		Handler: websocket.Handler(h.rtmWebSocket),
-		Handshake: func(*websocket.Config, *http.Request) error {
-			return nil
-		},
-	})
+	mux.HandleFunc("/rtm", h.rtmWebSocket)
+}
+
+// rtmUpgrader accepts every origin. The single-use session ticket is the
+// credential, and official RTM clients are not browsers: a same-origin check
+// only refuses them behind a proxy that rewrites Host.
+var rtmUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+// rtmPingPeriod is how often the server pings an RTM client. The socket had
+// no liveness check at all: a peer that vanished without a TCP FIN held its
+// goroutine and its poll loop until the operating system gave up on the
+// connection.
+const rtmPingPeriod = 10 * time.Second
+
+func (h Handler) rtmPing() time.Duration {
+	if h.RTMPingPeriod > 0 {
+		return h.RTMPingPeriod
+	}
+	return rtmPingPeriod
+}
+
+// rtmReadTimeout allows one missed ping before the peer is declared gone. A
+// pong or any frame from the client extends it.
+func (h Handler) rtmReadTimeout() time.Duration {
+	return 2 * h.rtmPing()
+}
+
+// rtmSocket serialises every data frame through one deadline-bounded writer,
+// so a client that stops reading cannot park the stream inside a write.
+type rtmSocket struct {
+	conn    *websocket.Conn
+	timeout time.Duration
+}
+
+func (s rtmSocket) Send(frame string) error {
+	if err := s.conn.SetWriteDeadline(time.Now().Add(s.timeout)); err != nil {
+		return err
+	}
+	return s.conn.WriteMessage(websocket.TextMessage, []byte(frame))
 }
 
 func (h Handler) events(w http.ResponseWriter, r *http.Request) {
 	h.stream(w, r, auth.ScopeChannelsHistory)
 }
 
-func (h Handler) rtmWebSocket(conn *websocket.Conn) {
-	request := conn.Request()
-	conn.MaxPayloadBytes = maxRTMMessageBytes
+func (h Handler) rtmWebSocket(w http.ResponseWriter, request *http.Request) {
+	upgraded, err := rtmUpgrader.Upgrade(w, request, nil)
+	if err != nil {
+		return
+	}
+	defer upgraded.Close()
+	upgraded.SetReadLimit(maxRTMMessageBytes)
+	if err := upgraded.SetReadDeadline(time.Now().Add(h.rtmReadTimeout())); err != nil {
+		return
+	}
+	upgraded.SetPongHandler(func(string) error {
+		return upgraded.SetReadDeadline(time.Now().Add(h.rtmReadTimeout()))
+	})
+	conn := rtmSocket{conn: upgraded, timeout: h.writeTimeout()}
 	if h.RTMConnections == nil {
-		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
+		_ = conn.Send(`{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
 		return
 	}
 	connectionID := strings.TrimSpace(request.URL.Query().Get("session_id"))
 	connection, err := h.RTMConnections.ConsumeRTMConnection(request.Context(), connectionID)
 	if err != nil || connection.WorkspaceID == "" {
-		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
+		_ = conn.Send(`{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
 		return
 	}
 	// The stream follows the connection's workspace, for the same reason the
@@ -192,7 +240,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	// workspace it was issued for, and a construction-time workspace bound
 	// every connection in the process to one of them.
 	workspace := connection.WorkspaceID
-	if err := websocket.Message.Send(conn, `{"type":"hello"}`); err != nil {
+	if err := conn.Send(`{"type":"hello"}`); err != nil {
 		return
 	}
 	// The ticket's cursor is where this stream starts. An explicit
@@ -204,7 +252,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	after := connection.Cursor
 	requested, err := lastEventID(request)
 	if err != nil {
-		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":3,"msg":"invalid_event_cursor"}}`)
+		_ = conn.Send(`{"type":"error","error":{"code":3,"msg":"invalid_event_cursor"}}`)
 		return
 	}
 	if requested > 0 {
@@ -212,15 +260,23 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	}
 	commands := make(chan string)
 	readerDone := make(chan error, 1)
+	// done wakes the reader when the stream ends for any reason, including
+	// one the request context does not see.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		for {
-			var message string
-			if receiveErr := websocket.Message.Receive(conn, &message); receiveErr != nil {
+			_, message, receiveErr := upgraded.ReadMessage()
+			if receiveErr != nil {
 				readerDone <- receiveErr
 				return
 			}
+			// Any frame from the client proves it is alive, not only a pong.
+			_ = upgraded.SetReadDeadline(time.Now().Add(h.rtmReadTimeout()))
 			select {
-			case commands <- message:
+			case commands <- string(message):
+			case <-done:
+				return
 			case <-request.Context().Done():
 				return
 			}
@@ -228,6 +284,8 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	}()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	pingTicker := time.NewTicker(h.rtmPing())
+	defer pingTicker.Stop()
 	announcer := newTypingAnnouncer()
 	// Zero rather than now, so a client that connects mid-sentence sees the
 	// signal on its first pass instead of waiting out a poll interval.
@@ -236,7 +294,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	// intentional end of the stream so an official client reconnects instead
 	// of treating the close as a failure. Best effort by design — the peer
 	// that is already gone cannot be told goodbye.
-	sayGoodbye := func() { _ = websocket.Message.Send(conn, `{"type":"goodbye"}`) }
+	sayGoodbye := func() { _ = conn.Send(`{"type":"goodbye"}`) }
 	for {
 		page, listErr := h.Source.ListUserEventsAfter(request.Context(), workspace, connection.UserID, after, 100)
 		if listErr != nil {
@@ -278,7 +336,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 					h.logger().Warn("RTM skipped a record it could not encode", "workspace", workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
 					continue
 				}
-				if websocket.Message.Send(conn, payload) != nil {
+				if conn.Send(payload) != nil {
 					return
 				}
 			}
@@ -300,7 +358,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 					if frameErr != nil {
 						continue
 					}
-					if websocket.Message.Send(conn, string(frame)) != nil {
+					if conn.Send(string(frame)) != nil {
 						return
 					}
 				}
@@ -317,17 +375,21 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			if err := handleRTMCommand(request.Context(), conn, connection, h.Messages, h.Typing, message); err != nil {
 				return
 			}
+		case <-pingTicker.C:
+			if err := upgraded.WriteControl(websocket.PingMessage, nil, time.Now().Add(h.writeTimeout())); err != nil {
+				return
+			}
 		case <-ticker.C:
 		}
 	}
 }
 
-func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection domain.RTMConnection, messages RTMMessageService, typing TypingSource, raw string) error {
+func handleRTMCommand(ctx context.Context, conn rtmSocket, connection domain.RTMConnection, messages RTMMessageService, typing TypingSource, raw string) error {
 	var command struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal([]byte(raw), &command); err != nil || strings.TrimSpace(command.Type) == "" {
-		return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+		return conn.Send(`{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
 	}
 	switch command.Type {
 	case "typing":
@@ -351,9 +413,9 @@ func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection doma
 	case "ping":
 		payload, err := encodeRTMPong(raw)
 		if err != nil {
-			return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+			return conn.Send(`{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
 		}
-		return websocket.Message.Send(conn, string(payload))
+		return conn.Send(string(payload))
 	case "message":
 		payload, err := encodeRTMMessage(ctx, connection, messages, raw)
 		if err != nil {
@@ -365,13 +427,13 @@ func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection doma
 				return sendRTMMessageError(conn, commandID, message)
 			}
 			if errors.Is(err, errRTMMessageFailed) {
-				return websocket.Message.Send(conn, `{"ok":false,"error":{"code":2,"msg":"message_failed"}}`)
+				return conn.Send(`{"ok":false,"error":{"code":2,"msg":"message_failed"}}`)
 			}
-			return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+			return conn.Send(`{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
 		}
-		return websocket.Message.Send(conn, string(payload))
+		return conn.Send(string(payload))
 	default:
-		return websocket.Message.Send(conn, `{"type":"error","error":{"code":5,"msg":"unsupported_message"}}`)
+		return conn.Send(`{"type":"error","error":{"code":5,"msg":"unsupported_message"}}`)
 	}
 }
 
@@ -420,7 +482,7 @@ func rtmCommandID(raw string) int64 {
 	return command.ID
 }
 
-func sendRTMMessageError(conn *websocket.Conn, id int64, message string) error {
+func sendRTMMessageError(conn rtmSocket, id int64, message string) error {
 	payload, err := json.Marshal(map[string]any{
 		"ok":       false,
 		"reply_to": id,
@@ -432,7 +494,7 @@ func sendRTMMessageError(conn *websocket.Conn, id int64, message string) error {
 	if err != nil {
 		return err
 	}
-	return websocket.Message.Send(conn, string(payload))
+	return conn.Send(string(payload))
 }
 
 func encodeRTMPong(message string) ([]byte, error) {
