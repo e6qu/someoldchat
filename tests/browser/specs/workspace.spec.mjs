@@ -2149,7 +2149,7 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('Trigger created')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Start incident triage' })).toBeVisible();
   await page.getByRole('button', { name: 'Run' }).click();
-  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
   const runURL = page.url();
   await expect(page.getByRole('heading', { name: 'Workflow run' })).toBeVisible();
   await expect(page.getByText('running', { exact: true })).toBeVisible();
@@ -2264,14 +2264,14 @@ test('[WORKFLOW-04] a step with a condition only runs when the condition holds',
   // Without the input the condition needs, the only step is skipped and the
   // run completes without executing anything.
   await page.getByRole('button', { name: 'Run' }).click();
-  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
   await expect(page.getByText('completed', { exact: true })).toBeVisible();
 
   // With the input set, the condition holds and the second step executes.
   await page.getByRole('link', { name: '← Workflow' }).click();
   await page.getByLabel('Inputs (JSON)').fill('{"go":"yes"}');
   await page.getByRole('button', { name: 'Run' }).click();
-  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
   await expect(page.getByText('running', { exact: true })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 });
@@ -2314,7 +2314,7 @@ test('[WORKFLOW-02] a built-in message step posts and completes the run with no 
   await page.getByRole('button', { name: 'Run' }).click();
 
   // The run is finished the moment it returns: nothing is coming to move it.
-  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
   await expect(page.getByText('completed', { exact: true })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 
@@ -2368,7 +2368,7 @@ test('[WORKFLOW-02] built-in steps add people and create a canvas, and chain int
   await page.getByLabel('Trigger name').fill('Onboard');
   await page.getByRole('button', { name: 'Create trigger' }).click();
   await page.getByRole('button', { name: 'Run' }).click();
-  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
   await expect(page.getByText('completed', { exact: true })).toBeVisible();
 
   // The canvas the step describes really exists, owned by the member who ran it.
@@ -2471,7 +2471,7 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   await page.getByRole('button', { name: 'Create trigger' }).click();
   await expect(page.getByText('Trigger created')).toBeVisible();
   await page.getByRole('button', { name: 'Run' }).click();
-  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
 
   // The form step parks the run; submit it and the run advances to the button.
   await expect(page.getByRole('heading', { name: 'Intake' })).toBeVisible();

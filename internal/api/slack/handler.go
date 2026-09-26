@@ -13584,10 +13584,10 @@ func (h Handler) conversationNamed(ctx context.Context, principal auth.Principal
 }
 
 // looksLikeUserID and looksLikeConversationID recognise identifier shapes: an
-// uppercase kind letter followed by letters and digits. Slack's own identifiers
-// are uppercase throughout and this deployment mints the tail in lowercase hex;
-// a channel name is lowercase from its first letter, so neither is confused
-// with a name.
+// uppercase kind letter followed by letters and digits. Slack's identifiers,
+// and those domain.SlackID mints, are uppercase throughout; identifiers minted
+// before SlackID carry a lowercase hex tail and stay valid. A channel name is
+// lowercase from its first letter, so neither is confused with a name.
 func looksLikeUserID(value string) bool {
 	return len(value) > 1 && (value[0] == 'U' || value[0] == 'W') && slackIdentifierTail(value[1:])
 }

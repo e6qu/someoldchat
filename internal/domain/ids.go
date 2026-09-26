@@ -152,23 +152,52 @@ func asciiDigits(value string) bool {
 }
 
 // PublicID is deliberately opaque. The prefix is part of the wire contract;
-// the random suffix is not used as an ordering key.
+// the random suffix is not used as an ordering key. It mints tokens, secrets
+// and this deployment's own opaque handles; an identifier Slack defines is
+// minted by SlackID instead.
 func PublicID(prefix string) (string, error) {
+	suffix, err := randomSuffix(prefix)
+	if err != nil {
+		return "", err
+	}
+	return prefix + suffix, nil
+}
+
+// SlackID mints an identifier in one of Slack's object namespaces: the kind
+// prefix Slack uses (U, C, D, T, A, B, F, S, Rm, Q, V, Ev, …) followed by
+// upper-case letters and digits only. Slack's identifiers never contain a
+// lower-case letter, and apps rely on that: they parse `<@U[A-Z0-9]+>` and
+// `<#C[A-Z0-9]+|…>` out of message text, and the pinned OpenAPI document
+// validates ids against patterns such as ^[UW][A-Z0-9]{8,}$. The tail is the
+// same 80 random bits PublicID uses, in upper-case hex.
+//
+// Identifiers minted before SlackID existed keep their lower-case hex tail
+// and remain valid: every identifier is opaque and compared byte-for-byte, and
+// the shape checks that recognise an identifier accept either case.
+func SlackID(prefix string) (string, error) {
+	suffix, err := randomSuffix(prefix)
+	if err != nil {
+		return "", err
+	}
+	return prefix + strings.ToUpper(suffix), nil
+}
+
+func randomSuffix(prefix string) (string, error) {
 	var b [10]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generate %s id: %w", prefix, err)
 	}
-	return prefix + hex.EncodeToString(b[:]), nil
+	return hex.EncodeToString(b[:]), nil
 }
 
 func NewMessageID() (MessageID, error) { value, err := PublicID("msg_"); return MessageID(value), err }
-func NewEventID() (EventID, error)     { value, err := PublicID("evt_"); return EventID(value), err }
-func NewFileID() (FileID, error)       { value, err := PublicID("file_"); return FileID(value), err }
-func NewCanvasID() (CanvasID, error)   { value, err := PublicID("F"); return CanvasID(value), err }
-func NewUserID() (UserID, error)       { value, err := PublicID("U"); return UserID(value), err }
-func NewListID() (ListID, error)       { value, err := PublicID("F"); return ListID(value), err }
+func NewEventID() (EventID, error)     { value, err := SlackID("Ev"); return EventID(value), err }
+func NewFileID() (FileID, error)       { value, err := SlackID("F"); return FileID(value), err }
+func NewCanvasID() (CanvasID, error)   { value, err := SlackID("F"); return CanvasID(value), err }
+func NewUserID() (UserID, error)       { value, err := SlackID("U"); return UserID(value), err }
+func NewListID() (ListID, error)       { value, err := SlackID("F"); return ListID(value), err }
 func NewListTemplateID() (ListTemplateID, error) {
-	value, err := PublicID("Ft")
+	value, err := SlackID("Ft")
 	return ListTemplateID(value), err
 }
 
@@ -181,7 +210,7 @@ func NewExternalUploadID() (ExternalUploadID, error) {
 	return ExternalUploadID(value), err
 }
 func NewListItemID() (ListItemID, error) {
-	value, err := PublicID("Rec")
+	value, err := SlackID("Rec")
 	return ListItemID(value), err
 }
 func NewListDownloadID() (ListDownloadID, error) {
@@ -189,11 +218,11 @@ func NewListDownloadID() (ListDownloadID, error) {
 	return ListDownloadID(value), err
 }
 func NewWorkflowID() (WorkflowID, error) {
-	value, err := PublicID("Wf")
+	value, err := SlackID("Wf")
 	return WorkflowID(value), err
 }
 func NewWorkflowTriggerID() (WorkflowTriggerID, error) {
-	value, err := PublicID("Ft")
+	value, err := SlackID("Ft")
 	return WorkflowTriggerID(value), err
 }
 func NewWorkflowRunID() (WorkflowRunID, error) {
@@ -201,19 +230,16 @@ func NewWorkflowRunID() (WorkflowRunID, error) {
 	// function_executed payloads and functions.* completion calls. Keep the
 	// durable run in that same public identifier space so transports never have
 	// to invent a second execution identity.
-	value, err := PublicID("Wx")
+	value, err := SlackID("Wx")
 	return WorkflowRunID(value), err
 }
 func NewFunctionExecutionID() (WorkflowStepID, error) {
-	value, err := PublicID("Fx")
+	value, err := SlackID("Fx")
 	return WorkflowStepID(value), err
 }
 func NewReminderID() (ReminderID, error) {
-	value, err := PublicID("Rm")
-	if err != nil {
-		return "", err
-	}
-	return ReminderID("Rm" + strings.ToUpper(value[2:])), nil
+	value, err := SlackID("Rm")
+	return ReminderID(value), err
 }
 
 func NewLaterReminderID() (LaterReminderID, error) {
@@ -222,14 +248,10 @@ func NewLaterReminderID() (LaterReminderID, error) {
 }
 
 // NewProfileFieldID mints a custom-profile-field identifier. Slack names these
-// Xf…; the prefix is what a client keys the value object by, so it is preserved
-// and upper-cased like the other public IDs.
+// Xf…; the prefix is what a client keys the value object by.
 func NewProfileFieldID() (ProfileFieldID, error) {
-	value, err := PublicID("Xf")
-	if err != nil {
-		return "", err
-	}
-	return ProfileFieldID("Xf" + strings.ToUpper(value[2:])), nil
+	value, err := SlackID("Xf")
+	return ProfileFieldID(value), err
 }
 
 // ActivityIDFor returns the stable identity of a notification-producing fact.
@@ -250,7 +272,7 @@ func NewSavedItemID() (SavedItemID, error) {
 }
 
 func NewConversationID() (ConversationID, error) {
-	value, err := PublicID("C")
+	value, err := SlackID("C")
 	return ConversationID(value), err
 }
 
@@ -258,21 +280,18 @@ func NewConversationID() (ConversationID, error) {
 // DirectConversationIDPrefix. Existing conversations keep the identifier they
 // were created with, which every stored reference already names.
 func NewDirectConversationID(kind ConversationType) (ConversationID, error) {
-	value, err := PublicID(DirectConversationIDPrefix(kind))
+	value, err := SlackID(DirectConversationIDPrefix(kind))
 	return ConversationID(value), err
 }
 
 func NewBookmarkID() (BookmarkID, error) {
-	value, err := PublicID("Bk")
+	value, err := SlackID("Bk")
 	return BookmarkID(value), err
 }
 
 func NewScheduledMessageID() (ScheduledMessageID, error) {
-	value, err := PublicID("Q")
-	if err != nil {
-		return "", err
-	}
-	return ScheduledMessageID("Q" + strings.ToUpper(value[1:])), nil
+	value, err := SlackID("Q")
+	return ScheduledMessageID(value), err
 }
 
 func NewScheduledStatusID() (ScheduledStatusID, error) {
@@ -281,55 +300,49 @@ func NewScheduledStatusID() (ScheduledStatusID, error) {
 }
 
 func NewUserGroupID() (UserGroupID, error) {
-	value, err := PublicID("S")
-	if err != nil {
-		return "", err
-	}
-	return UserGroupID("S" + strings.ToUpper(value[1:])), nil
+	value, err := SlackID("S")
+	return UserGroupID(value), err
 }
 
 // NewBarrierID mints an information barrier identifier. Slack prefixes one with
 // B, as it does a bot, and the two never share a table.
 func NewBarrierID() (BarrierID, error) {
-	value, err := PublicID("B")
-	if err != nil {
-		return "", err
-	}
-	return BarrierID("B" + strings.ToUpper(value[1:])), nil
+	value, err := SlackID("B")
+	return BarrierID(value), err
 }
 
-func NewCallID() (CallID, error) { value, err := PublicID("call_"); return CallID(value), err }
+func NewCallID() (CallID, error) { value, err := SlackID("R"); return CallID(value), err }
 func NewIncomingWebhookID() (IncomingWebhookID, error) {
 	value, err := PublicID("wh_")
 	return IncomingWebhookID(value), err
 }
 func NewWorkspaceID() (WorkspaceID, error) {
-	value, err := PublicID("T")
+	value, err := SlackID("T")
 	return WorkspaceID(value), err
 }
 
 func NewAppRequestID() (AppRequestID, error) {
-	value, err := PublicID("R")
+	value, err := SlackID("R")
 	return AppRequestID(value), err
 }
 
 func NewAppID() (AppID, error) {
-	value, err := PublicID("A")
+	value, err := SlackID("A")
 	return AppID(value), err
 }
 
 func NewViewID() (ViewID, error) {
-	value, err := PublicID("V")
+	value, err := SlackID("V")
 	return ViewID(value), err
 }
 
 func NewDialogID() (DialogID, error) {
-	value, err := PublicID("D")
+	value, err := SlackID("D")
 	return DialogID(value), err
 }
 
 func NewBotID() (BotID, error) {
-	value, err := PublicID("B")
+	value, err := SlackID("B")
 	return BotID(value), err
 }
 
