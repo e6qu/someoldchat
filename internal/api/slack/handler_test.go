@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -4020,14 +4021,55 @@ func TestAdminEmojiLifecycle(t *testing.T) {
 	list.Header.Set("Authorization", "Bearer token")
 	listed := httptest.NewRecorder()
 	handler.ServeHTTP(listed, list)
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"hello":"alias:shipit"`) {
-		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body)
+	// admin.emoji.list answers objects, not emoji.list's strings: the Java
+	// SDK's admin Emoji model failed to decode a bare URL.
+	var adminList struct {
+		OK    bool `json:"ok"`
+		Emoji map[string]struct {
+			URL         string `json:"url"`
+			DateCreated int64  `json:"date_created"`
+			UploadedBy  string `json:"uploaded_by"`
+		} `json:"emoji"`
+		ResponseMetadata struct {
+			NextCursor string `json:"next_cursor"`
+		} `json:"response_metadata"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &adminList); err != nil || listed.Code != http.StatusOK || !adminList.OK ||
+		adminList.Emoji["hello"].URL != "alias:shipit" || adminList.Emoji["shipit"].URL != "https://cdn.example/shipit.png" ||
+		adminList.Emoji["shipit"].DateCreated == 0 || adminList.Emoji["shipit"].UploadedBy == "" {
+		t.Fatalf("list status=%d body=%s err=%v", listed.Code, listed.Body, err)
+	}
+	// limit=1 pages by name and hands back a cursor for the rest.
+	first := call("admin.emoji.list", "limit=1")
+	adminList.Emoji = nil
+	if err := json.Unmarshal(first.Body.Bytes(), &adminList); err != nil || len(adminList.Emoji) != 1 || adminList.Emoji["hello"].URL == "" || adminList.ResponseMetadata.NextCursor == "" {
+		t.Fatalf("first page=%s err=%v", first.Body, err)
+	}
+	second := call("admin.emoji.list", "limit=1&cursor="+adminList.ResponseMetadata.NextCursor)
+	adminList.Emoji = nil
+	if err := json.Unmarshal(second.Body.Bytes(), &adminList); err != nil || len(adminList.Emoji) != 1 || adminList.Emoji["shipit"].URL == "" || adminList.ResponseMetadata.NextCursor != "" {
+		t.Fatalf("second page=%s err=%v", second.Body, err)
+	}
+	// emoji.list's cache_ts is Slack's seconds.micros and moves with the set.
+	cacheTS := func() string {
+		var body struct {
+			CacheTS string `json:"cache_ts"`
+		}
+		_ = json.Unmarshal(call("emoji.list", "").Body.Bytes(), &body)
+		return body.CacheTS
+	}
+	before := cacheTS()
+	if !regexp.MustCompile(`^[1-9][0-9]*\.[0-9]{6}$`).MatchString(before) {
+		t.Fatalf("cache_ts=%q", before)
 	}
 	if res := call("admin.emoji.rename", "name=hello&new_name=greeting"); res.Code != http.StatusOK {
 		t.Fatalf("rename status=%d body=%s", res.Code, res.Body)
 	}
 	if res := call("admin.emoji.remove", "name=shipit"); res.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", res.Code, res.Body)
+	}
+	if after := cacheTS(); after == before {
+		t.Fatalf("cache_ts did not move after a removal: %q", after)
 	}
 }
 

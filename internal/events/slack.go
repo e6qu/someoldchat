@@ -810,7 +810,11 @@ func emojiChanged(subtype string) builder {
 			if err != nil {
 				return nil, err
 			}
-			fields = append(fields, Strings("names", []string{values["name"]}))
+			names := []string{values["name"]}
+			if removed, ok := delivered.Strings("names"); ok && len(removed) > 0 {
+				names = removed
+			}
+			fields = append(fields, Strings("names", names))
 		case "rename":
 			values, err := stringFields(delivered, "old_name", "new_name")
 			if err != nil {

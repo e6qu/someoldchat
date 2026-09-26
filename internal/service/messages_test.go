@@ -1156,12 +1156,43 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "greeting"); err != nil {
 		t.Fatal(err)
 	}
+	// The rename carried the alias along with the name, and the uploader and
+	// upload time admin.emoji.list reports were recorded.
+	values, err = messages.Emojis(ctx, "T1", "U1")
+	if err != nil || len(values) != 2 || values[0].Name != "greeting" || values[0].AliasFor != "shipit" ||
+		values[1].CreatedBy != "U1" || values[1].CreatedAt.IsZero() {
+		t.Fatalf("renamed values=%+v err=%v", values, err)
+	}
+	// An alias may name a built-in emoji, as Slack's `:thumbsup_all:` does.
+	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "yes", "thumbsup"); err != nil {
+		t.Fatalf("AdminAddEmojiAlias(built-in) error=%v", err)
+	}
+	before, err := messages.EmojiRevision(ctx, "T1", "U1")
+	if err != nil || before.IsZero() {
+		t.Fatalf("revision=%v err=%v", before, err)
+	}
+	// Removing an emoji removes the aliases that point at it; the alias of the
+	// built-in emoji is untouched, and the revision moves.
+	time.Sleep(time.Millisecond)
 	if err := messages.AdminRemoveEmoji(ctx, "T1", "U1", "shipit"); err != nil {
 		t.Fatal(err)
 	}
 	values, err = messages.Emojis(ctx, "T1", "U1")
-	if err != nil || len(values) != 1 || values[0].Name != "greeting" {
+	if err != nil || len(values) != 1 || values[0].Name != "yes" || values[0].AliasFor != "thumbsup" {
 		t.Fatalf("final values=%+v err=%v", values, err)
+	}
+	after, err := messages.EmojiRevision(ctx, "T1", "U1")
+	if err != nil || !after.After(before) {
+		t.Fatalf("revision after removal=%v before=%v err=%v", after, before, err)
+	}
+	removed := false
+	for _, event := range s.Outbox() {
+		if event.Topic == "emoji.removed" && strings.Contains(event.Payload, `"greeting"`) {
+			removed = true
+		}
+	}
+	if !removed {
+		t.Fatalf("the emoji.removed event did not name the removed alias: %+v", s.Outbox())
 	}
 }
 

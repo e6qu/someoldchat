@@ -3032,9 +3032,17 @@ func (r Remote) Emojis(ctx context.Context, workspaceID domain.WorkspaceID, user
 	}
 	result := make([]domain.CustomEmoji, 0, len(out.GetEmojis()))
 	for _, value := range out.GetEmojis() {
-		result = append(result, domain.CustomEmoji{WorkspaceID: workspaceID, Name: value.GetName(), URL: value.GetUrl(), AliasFor: value.GetAliasFor()})
+		result = append(result, domain.CustomEmoji{WorkspaceID: workspaceID, Name: value.GetName(), URL: value.GetUrl(), AliasFor: value.GetAliasFor(), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), CreatedBy: domain.UserID(value.GetCreatedBy())})
 	}
 	return result, nil
+}
+
+func (r Remote) EmojiRevision(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (time.Time, error) {
+	out, err := r.directory.EmojiRevision(ctx, &chatv1.EmojiListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return optionalTimeFromUnixNano(out.GetChangedAtUnixNano()), nil
 }
 
 func (r Remote) AdminAddEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, url string) error {
@@ -6873,9 +6881,17 @@ func (s *Server) Emojis(ctx context.Context, input *chatv1.EmojiListRequest) (*c
 	}
 	result := make([]*chatv1.Emoji, 0, len(values))
 	for _, value := range values {
-		result = append(result, &chatv1.Emoji{Name: value.Name, Url: value.URL, AliasFor: value.AliasFor})
+		result = append(result, &chatv1.Emoji{Name: value.Name, Url: value.URL, AliasFor: value.AliasFor, CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), CreatedBy: string(value.CreatedBy)})
 	}
 	return &chatv1.EmojiListResponse{Emojis: result}, nil
+}
+
+func (s *Server) EmojiRevision(ctx context.Context, input *chatv1.EmojiListRequest) (*chatv1.EmojiRevisionResponse, error) {
+	value, err := s.implementation.EmojiRevision(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.EmojiRevisionResponse{ChangedAtUnixNano: optionalUnixNano(value)}, nil
 }
 func (s *Server) AddEmoji(ctx context.Context, input *chatv1.EmojiMutationRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.AdminAddEmoji(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetValue()); err != nil {

@@ -254,6 +254,7 @@ type Service interface {
 	AdminConversationTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) ([]domain.WorkspaceID, bool, domain.Cursor, error)
 	AdminSetConversationTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID, bool) error
 	Emojis(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.CustomEmoji, error)
+	EmojiRevision(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
 	AdminAddEmoji(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminAddEmojiAlias(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminRemoveEmoji(context.Context, domain.WorkspaceID, domain.UserID, string) error

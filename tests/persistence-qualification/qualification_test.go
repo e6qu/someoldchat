@@ -1363,23 +1363,44 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 
-	emoji := domain.CustomEmoji{WorkspaceID: workspaceID, Name: "wave_one", URL: "https://files.example/wave.png"}
+	if revision, err := repository.EmojiRevision(ctx, workspaceID); err != nil || !revision.IsZero() {
+		t.Fatalf("revision before any emoji=%v err=%v", revision, err)
+	}
+	uploaded := time.Unix(1_700_000_000, 0).UTC()
+	emoji := domain.CustomEmoji{WorkspaceID: workspaceID, Name: "wave_one", URL: "https://files.example/wave.png", CreatedAt: uploaded, CreatedBy: userID}
 	if err := repository.AddEmoji(ctx, emoji, event("emoji-add", "emoji.added", emoji.Name)); err != nil {
 		t.Fatal(err)
 	}
+	alias := domain.CustomEmoji{WorkspaceID: workspaceID, Name: "wave_alias", AliasFor: emoji.Name, CreatedAt: uploaded, CreatedBy: userID}
+	if err := repository.AddEmoji(ctx, alias, event("emoji-alias", "emoji.alias_added", alias.Name)); err != nil {
+		t.Fatal(err)
+	}
 	emojis, err := repository.ListEmojis(ctx, workspaceID)
-	if err != nil || len(emojis) != 1 || emojis[0].Name != emoji.Name {
+	if err != nil || len(emojis) != 2 || emojis[1].Name != emoji.Name || !emojis[1].CreatedAt.Equal(uploaded) || emojis[1].CreatedBy != userID {
 		t.Fatalf("emojis=%+v err=%v", emojis, err)
+	}
+	added, err := repository.EmojiRevision(ctx, workspaceID)
+	if err != nil || added.IsZero() {
+		t.Fatalf("revision after add=%v err=%v", added, err)
 	}
 	if err := repository.RenameEmoji(ctx, workspaceID, emoji.Name, "wave_updated", event("emoji-rename", "emoji.renamed", emoji.Name)); err != nil {
 		t.Fatal(err)
 	}
+	// A rename carries the aliases that pointed at the old name along.
+	emojis, err = repository.ListEmojis(ctx, workspaceID)
+	if err != nil || len(emojis) != 2 || emojis[0].AliasFor != "wave_updated" {
+		t.Fatalf("emojis after rename=%+v err=%v", emojis, err)
+	}
 	if err := repository.RemoveEmoji(ctx, workspaceID, "wave_updated", event("emoji-remove", "emoji.removed", "wave_updated")); err != nil {
 		t.Fatal(err)
 	}
+	// A removal takes the aliases with it, and the revision never goes back.
 	emojis, err = repository.ListEmojis(ctx, workspaceID)
 	if err != nil || len(emojis) != 0 {
 		t.Fatalf("emojis after remove=%+v err=%v", emojis, err)
+	}
+	if removed, err := repository.EmojiRevision(ctx, workspaceID); err != nil || removed.Before(added) {
+		t.Fatalf("revision after remove=%v (added %v) err=%v", removed, added, err)
 	}
 }
 

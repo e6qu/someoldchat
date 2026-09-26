@@ -777,6 +777,9 @@ type Store interface {
 	AppendRetentionEvents(context.Context, domain.WorkspaceID, []events.Event) error
 	AddEmoji(context.Context, domain.CustomEmoji, events.Event) error
 	ListEmojis(context.Context, domain.WorkspaceID) ([]domain.CustomEmoji, error)
+	// EmojiRevision is when the workspace's custom emoji set last changed, or
+	// the zero time when it never has.
+	EmojiRevision(context.Context, domain.WorkspaceID) (time.Time, error)
 	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error
 	RenameEmoji(context.Context, domain.WorkspaceID, string, string, events.Event) error
 	// AddConversationMember and its siblings accept the notice message the

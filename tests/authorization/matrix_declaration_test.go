@@ -308,6 +308,7 @@ func authorityMatrix() map[string]authority {
 		"EditBookmark":                            authorityAnyMember,
 		"EditCanvas":                              authorityAnyMember,
 		"Emojis":                                  authorityAnyMember,
+		"EmojiRevision":                           authorityAnyMember,
 		"EndCall":                                 authorityAnyMember,
 		"EndDND":                                  authorityAnyMember,
 		"EndSnooze":                               authorityAnyMember,

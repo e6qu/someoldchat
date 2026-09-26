@@ -180,6 +180,17 @@ public final class Qualification {
             require(methods.adminEmojiAddAlias(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiAddAliasRequest.builder()
                             .name("qualified-alias").aliasFor("qualified").build()).isOk(), "admin.emoji.addAlias failed");
+            // admin.emoji.list answers an object per emoji; the client's
+            // strict admin Emoji model cannot decode emoji.list's bare URLs.
+            com.slack.api.methods.response.admin.emoji.AdminEmojiListResponse addedEmoji = methods.adminEmojiList(
+                    com.slack.api.methods.request.admin.emoji.AdminEmojiListRequest.builder().limit(1000).build());
+            require(addedEmoji.isOk() && addedEmoji.getEmoji() != null
+                            && addedEmoji.getEmoji().get("qualified") != null
+                            && "https://example.com/qualified.png".equals(addedEmoji.getEmoji().get("qualified").getUrl())
+                            && addedEmoji.getEmoji().get("qualified").getDateCreated() != null
+                            && addedEmoji.getEmoji().get("qualified-alias") != null
+                            && "alias:qualified".equals(addedEmoji.getEmoji().get("qualified-alias").getUrl()),
+                    "admin.emoji.list after add failed: " + addedEmoji);
             require(methods.adminEmojiRename(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiRenameRequest.builder()
                             .name("qualified").newName("qualified-renamed").build()).isOk(), "admin.emoji.rename failed");

@@ -122,6 +122,7 @@ type Store struct {
 	userGroups                    map[domain.UserGroupID]domain.UserGroup
 	calls                         map[domain.CallID]domain.Call
 	emojis                        map[string]domain.CustomEmoji
+	emojiRevisions                map[domain.WorkspaceID]time.Time
 	canvases                      map[domain.CanvasID]domain.Canvas
 	canvasAccess                  map[string]domain.CanvasAccess
 	canvasRevisions               map[domain.CanvasID][]domain.CanvasRevision
@@ -350,6 +351,7 @@ func New() *Store {
 		userGroups:                    make(map[domain.UserGroupID]domain.UserGroup),
 		calls:                         make(map[domain.CallID]domain.Call),
 		emojis:                        make(map[string]domain.CustomEmoji),
+		emojiRevisions:                make(map[domain.WorkspaceID]time.Time),
 		bookmarks:                     make(map[domain.BookmarkID]domain.Bookmark),
 		canvases:                      make(map[domain.CanvasID]domain.Canvas),
 		canvasAccess:                  make(map[string]domain.CanvasAccess),
@@ -1109,9 +1111,31 @@ func (s *Store) AddEmoji(_ context.Context, value domain.CustomEmoji, event even
 	if _, exists := s.emojis[key]; exists {
 		return store.ErrAlreadyExists
 	}
+	if !value.CreatedAt.IsZero() {
+		value.CreatedAt = time.Unix(value.CreatedAt.Unix(), 0).UTC()
+	}
 	s.emojis[key] = value
+	s.touchEmojiRevisionLocked(value.WorkspaceID, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+// touchEmojiRevisionLocked mirrors the SQL store's custom_emoji_revisions:
+// microsecond precision, and never moving backwards.
+func (s *Store) touchEmojiRevisionLocked(workspace domain.WorkspaceID, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	at = time.UnixMicro(at.UnixMicro()).UTC()
+	if at.After(s.emojiRevisions[workspace]) {
+		s.emojiRevisions[workspace] = at
+	}
+}
+
+func (s *Store) EmojiRevision(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.emojiRevisions[workspace], nil
 }
 
 func (s *Store) ListEmojis(_ context.Context, workspace domain.WorkspaceID) ([]domain.CustomEmoji, error) {
@@ -1127,6 +1151,8 @@ func (s *Store) ListEmojis(_ context.Context, workspace domain.WorkspaceID) ([]d
 	return result, nil
 }
 
+// RemoveEmoji removes a custom emoji together with every alias that points at
+// it, as the SQL store does.
 func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1135,10 +1161,18 @@ func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, nam
 		return store.ErrNotFound
 	}
 	delete(s.emojis, key)
+	for aliasKey, value := range s.emojis {
+		if value.WorkspaceID == workspace && value.AliasFor == name {
+			delete(s.emojis, aliasKey)
+		}
+	}
+	s.touchEmojiRevisionLocked(workspace, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
 
+// RenameEmoji renames a custom emoji and retargets the aliases that pointed at
+// the old name, as the SQL store does.
 func (s *Store) RenameEmoji(_ context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1153,6 +1187,13 @@ func (s *Store) RenameEmoji(_ context.Context, workspace domain.WorkspaceID, old
 	value.Name = newName
 	s.emojis[newKey] = value
 	delete(s.emojis, oldKey)
+	for aliasKey, alias := range s.emojis {
+		if alias.WorkspaceID == workspace && alias.AliasFor == oldName {
+			alias.AliasFor = newName
+			s.emojis[aliasKey] = alias
+		}
+	}
+	s.touchEmojiRevisionLocked(workspace, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
 }

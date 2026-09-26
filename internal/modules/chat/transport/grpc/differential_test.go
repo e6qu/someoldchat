@@ -1571,9 +1571,13 @@ func parityCases() []parityCase {
 				}
 				names := make([]string, 0, len(listed))
 				for _, emoji := range listed {
-					names = append(names, emoji.Name+"="+emoji.AliasFor)
+					names = append(names, emoji.Name+"="+emoji.AliasFor+" by "+string(emoji.CreatedBy)+" dated "+strconv.FormatBool(!emoji.CreatedAt.IsZero()))
 				}
 				sort.Strings(names)
+				revision, err := chat.EmojiRevision(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
 				if err := chat.AdminRemoveEmoji(ctx, "T1", "UA", "partyparrot"); err != nil {
 					return nil, err
 				}
@@ -1582,8 +1586,13 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				movedRevision, err := chat.EmojiRevision(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
 				return []any{names, len(after), duplicate != nil, aliasOfNothing != nil,
-					renameMissing != nil, member != nil, removeMissing != nil}, nil
+					renameMissing != nil, member != nil, removeMissing != nil,
+					!revision.IsZero(), !movedRevision.Before(revision)}, nil
 			},
 		},
 		{

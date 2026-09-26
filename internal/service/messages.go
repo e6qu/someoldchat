@@ -5906,6 +5906,16 @@ func (m Messages) Emojis(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return m.Store.ListEmojis(ctx, workspaceID)
 }
 
+// EmojiRevision is when the workspace's custom emoji set last changed, which
+// emoji.list reports as cache_ts. It is the zero time for a workspace whose
+// custom set never changed.
+func (m Messages) EmojiRevision(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (time.Time, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return time.Time{}, err
+	}
+	return m.Store.EmojiRevision(ctx, workspaceID)
+}
+
 func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, imageURL string) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return err
@@ -5919,11 +5929,12 @@ func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.Workspac
 	if nameShadowsBuiltInEmoji(name) {
 		return ErrEmojiAlreadyExists
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name), events.String("value", imageURL)), time.Now().UTC())
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name), events.String("value", imageURL)), now)
 	if err != nil {
 		return err
 	}
-	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: imageURL}, event)
+	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: imageURL, CreatedAt: now, CreatedBy: userID}, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -5941,25 +5952,39 @@ func (m Messages) AdminAddEmojiAlias(ctx context.Context, workspaceID domain.Wor
 	if nameShadowsBuiltInEmoji(name) {
 		return ErrEmojiAlreadyExists
 	}
-	emojis, err := m.Store.ListEmojis(ctx, workspaceID)
-	if err != nil {
-		return err
-	}
+	// Slack lets an alias name either a custom emoji or a built-in one
+	// (`:thumbsup_all:` → `:+1:`). An alias of an alias is resolved to its
+	// target so a client never has to follow a chain.
 	found := false
-	for _, value := range emojis {
-		if value.Name == target {
-			found = true
-			break
+	if nameShadowsBuiltInEmoji(target) {
+		found = true
+	} else {
+		emojis, err := m.Store.ListEmojis(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		for _, value := range emojis {
+			if value.Name == target {
+				found = true
+				if value.AliasFor != "" {
+					target = value.AliasFor
+				}
+				break
+			}
 		}
 	}
 	if !found {
 		return store.ErrNotFound
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.alias_added", events.String("name", name), events.String("alias_for", target)), time.Now().UTC())
+	if target == name {
+		return ErrInvalidEmoji
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.alias_added", events.String("name", name), events.String("alias_for", target)), now)
 	if err != nil {
 		return err
 	}
-	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, AliasFor: target}, event)
+	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, AliasFor: target, CreatedAt: now, CreatedBy: userID}, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -5974,7 +5999,20 @@ func (m Messages) AdminRemoveEmoji(ctx context.Context, workspaceID domain.Works
 	if name == "" {
 		return ErrInvalidEmoji
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.removed", events.String("name", name)), time.Now().UTC())
+	// The store removes the aliases that point at the emoji with it, so the
+	// emoji_changed event names them too: a client that only drops `name`
+	// would keep rendering aliases of an image that is gone.
+	emojis, err := m.Store.ListEmojis(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	names := []string{name}
+	for _, value := range emojis {
+		if value.AliasFor == name {
+			names = append(names, value.Name)
+		}
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.removed", events.String("name", name), events.Strings("names", names)), time.Now().UTC())
 	if err != nil {
 		return err
 	}

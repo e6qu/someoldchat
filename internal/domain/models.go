@@ -213,6 +213,10 @@ type CustomEmoji struct {
 	Name        string
 	URL         string
 	AliasFor    string
+	// CreatedAt and CreatedBy are admin.emoji.list's date_created and
+	// uploaded_by. Rows written before they were recorded carry zero values.
+	CreatedAt time.Time
+	CreatedBy UserID
 }
 
 type Presence string

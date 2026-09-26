@@ -5770,12 +5770,13 @@ func conversationPrefsResponse(value domain.ConversationPrefs) map[string]any {
 	return map[string]any{"can_thread": map[string]any{"type": value.CanThread.Types, "user": value.CanThread.Users}, "who_can_post": map[string]any{"type": value.WhoCanPost.Types, "user": value.WhoCanPost.Users}}
 }
 
+// emojiList is emoji.list. Its cache_ts is the instant the workspace's custom
+// emoji set last changed, in Slack's "seconds.micros" form, so a client that
+// caches the list by cache_ts refetches after an add, alias, rename or removal.
+// It used to be the built-in catalog's revision hash, which neither had Slack's
+// shape nor moved when the custom set did.
 func (h Handler) emojiList(w http.ResponseWriter, r *http.Request) {
-	h.listEmoji(w, r, auth.ScopeEmojiRead)
-}
-
-func (h Handler) listEmoji(w http.ResponseWriter, r *http.Request, scope auth.Scope) {
-	principal, err := h.authenticate(r, scope)
+	principal, err := h.authenticate(r, auth.ScopeEmojiRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -5795,16 +5796,28 @@ func (h Handler) listEmoji(w http.ResponseWriter, r *http.Request, scope auth.Sc
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
+	revision, err := h.Messages.EmojiRevision(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
 	response := map[string]any{
 		"ok":       true,
 		"emoji":    emojiResponse(values),
-		"cache_ts": slackemoji.Revision,
+		"cache_ts": emojiCacheTimestamp(revision),
 	}
 	if includeCategories {
 		response["categories_version"] = slackemoji.CategoriesVersion
 		response["categories"] = slackemoji.Categories()
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func emojiCacheTimestamp(revision time.Time) string {
+	if revision.IsZero() {
+		return "0.000000"
+	}
+	return slackTimestamp(revision)
 }
 
 func emojiResponse(values []domain.CustomEmoji) map[string]string {
@@ -5819,12 +5832,69 @@ func emojiResponse(values []domain.CustomEmoji) map[string]string {
 	return result
 }
 
-// adminEmojiList is admin.emoji.list. It differs from emoji.list only in the
-// scope the pinned contract requires: `admin.teams:read` rather than
-// `emoji:read`. Requiring a write scope for a read locked read-only admin tokens
-// out of their own emoji inventory.
+// adminEmojiList is admin.emoji.list. It requires `admin.teams:read` rather
+// than `emoji:read`, and unlike emoji.list it is cursor-paginated and answers
+// each emoji as an object — {"url", "date_created", "uploaded_by"} — which is
+// what the official SDKs model (the Java client's admin Emoji type); the
+// emoji.list string map made strict clients fail to decode the response.
 func (h Handler) adminEmojiList(w http.ResponseWriter, r *http.Request) {
-	h.listEmoji(w, r, auth.ScopeAdminTeamsRead)
+	principal, err := h.authenticate(r, auth.ScopeAdminTeamsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// The pinned parameter documents 1–1000 inclusive.
+	limit, err := clampLimit(fields["limit"], 100, 1000)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	cursor, err := decodeCursor(fields["cursor"], "invalid_cursor")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	after, _ := domain.DecodeListCursor(cursor)
+	values, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	// The service lists by name, so the name is the keyset position.
+	start := sort.Search(len(values), func(index int) bool { return values[index].Name > after })
+	page := values[start:]
+	nextCursor := ""
+	if len(page) > limit {
+		page = page[:limit]
+		next, err := domain.NewListCursor(page[len(page)-1].Name)
+		if err != nil {
+			writeError(w, mapServiceError(err, "fatal_error"))
+			return
+		}
+		nextCursor = string(next)
+	}
+	emoji := make(map[string]any, len(page))
+	for _, value := range page {
+		imageURL := value.URL
+		if value.AliasFor != "" {
+			imageURL = "alias:" + value.AliasFor
+		}
+		var created int64
+		if !value.CreatedAt.IsZero() {
+			created = value.CreatedAt.Unix()
+		}
+		emoji[value.Name] = map[string]any{"url": imageURL, "date_created": created, "uploaded_by": string(value.CreatedBy)}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                true,
+		"emoji":             emoji,
+		"response_metadata": map[string]any{"next_cursor": nextCursor},
+	})
 }
 
 func (h Handler) adminEmojiAdd(w http.ResponseWriter, r *http.Request) {

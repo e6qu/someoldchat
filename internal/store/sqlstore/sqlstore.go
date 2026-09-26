@@ -506,7 +506,11 @@ CREATE TABLE IF NOT EXISTS call_participants (
 );
 CREATE TABLE IF NOT EXISTS custom_emoji (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', alias_for TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL DEFAULT '',
  PRIMARY KEY (workspace_id, name)
+);
+CREATE TABLE IF NOT EXISTS custom_emoji_revisions (
+ workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), changed_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS lists (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
@@ -561,7 +565,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 175
+const schemaVersion = 176
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3335,6 +3339,31 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 176 {
+		// admin.emoji.list reports who uploaded each custom emoji and when, and
+		// emoji.list's cache_ts has to move whenever the custom set changes so a
+		// client's cached copy is invalidated. Rows written before this step keep
+		// zero values: the uploader and upload time were never recorded.
+		columns, err := s.tableColumns(ctx, db, "custom_emoji")
+		if err != nil {
+			return err
+		}
+		if !columns["created_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE custom_emoji ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate custom emoji created_at: %w", err)
+			}
+		}
+		if !columns["created_by"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE custom_emoji ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate custom emoji created_by: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS custom_emoji_revisions (
+			workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), changed_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate custom emoji revisions: %w", err)
+		}
+	}
 	if version < 175 {
 		// Reusable list templates: a saved list definition (schema, to-do mode,
 		// and optional starter rows) a member instantiates into a new list. Created
@@ -4433,6 +4462,7 @@ var migratableTables = []string{
 	"calls",
 	"canvases",
 	"conversations",
+	"custom_emoji",
 	"draft_attachments",
 	"drafts",
 	"ephemeral_messages",
@@ -12333,8 +12363,11 @@ func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event ev
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji(workspace_id, name, url, alias_for) VALUES (?, ?, ?, ?)`, value.WorkspaceID, value.Name, value.URL, value.AliasFor); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji(workspace_id, name, url, alias_for, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)`, value.WorkspaceID, value.Name, value.URL, value.AliasFor, unixSeconds(value.CreatedAt), value.CreatedBy); err != nil {
 		return classify(err)
+	}
+	if err := touchEmojiRevision(ctx, tx, value.WorkspaceID, event.CreatedAt); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -12342,8 +12375,31 @@ func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event ev
 	return tx.Commit()
 }
 
+// touchEmojiRevision records that a workspace's custom emoji set changed, so
+// emoji.list's cache_ts moves with it. It never moves backwards: two changes in
+// the same second keep the later instant.
+func touchEmojiRevision(ctx context.Context, tx txRunner, workspace domain.WorkspaceID, at time.Time) error {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji_revisions(workspace_id, changed_at) VALUES (?, ?) ON CONFLICT(workspace_id) DO UPDATE SET changed_at = CASE WHEN excluded.changed_at > custom_emoji_revisions.changed_at THEN excluded.changed_at ELSE custom_emoji_revisions.changed_at END`, workspace, at.UnixMicro())
+	return err
+}
+
+func (s *Store) EmojiRevision(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	var micros int64
+	err := s.db.QueryRowContext(ctx, `SELECT changed_at FROM custom_emoji_revisions WHERE workspace_id = ?`, workspace).Scan(&micros)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMicro(micros).UTC(), nil
+}
+
 func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([]domain.CustomEmoji, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, name, url, alias_for FROM custom_emoji WHERE workspace_id = ? ORDER BY name`, workspace)
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, name, url, alias_for, created_at, created_by FROM custom_emoji WHERE workspace_id = ? ORDER BY name`, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -12351,8 +12407,12 @@ func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([
 	result := make([]domain.CustomEmoji, 0)
 	for rows.Next() {
 		var value domain.CustomEmoji
-		if err := rows.Scan(&value.WorkspaceID, &value.Name, &value.URL, &value.AliasFor); err != nil {
+		var createdAt int64
+		if err := rows.Scan(&value.WorkspaceID, &value.Name, &value.URL, &value.AliasFor, &createdAt, &value.CreatedBy); err != nil {
 			return nil, err
+		}
+		if createdAt != 0 {
+			value.CreatedAt = time.Unix(createdAt, 0).UTC()
 		}
 		result = append(result, value)
 	}
@@ -12362,6 +12422,9 @@ func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([
 	return result, nil
 }
 
+// RemoveEmoji removes a custom emoji together with every alias that points at
+// it. Slack removes the aliases with their target; leaving them behind listed
+// `alias:<gone>` entries that no client can render.
 func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
@@ -12379,12 +12442,20 @@ func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, n
 	if changed != 1 {
 		return store.ErrNotFound
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM custom_emoji WHERE workspace_id = ? AND alias_for = ?`, workspace, name); err != nil {
+		return err
+	}
+	if err := touchEmojiRevision(ctx, tx, workspace, event.CreatedAt); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+// RenameEmoji renames a custom emoji and retargets the aliases that pointed
+// at the old name, so a rename cannot leave them dangling.
 func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
@@ -12405,6 +12476,12 @@ func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, o
 			return store.ErrNotFound
 		}
 		return store.ErrAlreadyExists
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE custom_emoji SET alias_for = ? WHERE workspace_id = ? AND alias_for = ?`, newName, workspace, oldName); err != nil {
+		return err
+	}
+	if err := touchEmojiRevision(ctx, tx, workspace, event.CreatedAt); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
