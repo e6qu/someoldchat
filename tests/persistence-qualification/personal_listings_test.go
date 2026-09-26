@@ -58,11 +58,14 @@ func personalListingsStopAtALeftPrivateConversation(t *testing.T, open opener) {
 		for _, item := range reactionPage.Items {
 			reactions[item.Message.ID] = item.Message.Text
 		}
-		starPage, _, _, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 10})
+		starPage, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, star := range starPage {
+		if starPage.Total != len(starPage.Stars) {
+			t.Fatalf("star total %d counts stars the member cannot list (%d listed)", starPage.Total, len(starPage.Stars))
+		}
+		for _, star := range starPage.Stars {
 			stars[star.Message.ID] = star.Message.Text
 		}
 		return reactions, stars

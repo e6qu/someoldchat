@@ -81,6 +81,9 @@ const (
 	ScopeAuthorizationsRead      Scope = "authorizations:read"
 	ScopeLinksWrite              Scope = "links:write"
 	ScopeIdentityBasic           Scope = "identity.basic"
+	ScopeIdentityEmail           Scope = "identity.email"
+	ScopeIdentityAvatar          Scope = "identity.avatar"
+	ScopeIdentityTeam            Scope = "identity.team"
 	ScopeRTMStream               Scope = "rtm:stream"
 	ScopeConnectionsWrite        Scope = "connections:write"
 	ScopeDatastoreRead           Scope = "datastore:read"
@@ -569,6 +572,9 @@ var allScopes = []Scope{
 	ScopeAuthorizationsRead,
 	ScopeLinksWrite,
 	ScopeIdentityBasic,
+	ScopeIdentityEmail,
+	ScopeIdentityAvatar,
+	ScopeIdentityTeam,
 	ScopeRTMStream,
 	ScopeConnectionsWrite,
 	ScopeDatastoreRead,

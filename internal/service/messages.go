@@ -76,17 +76,28 @@ var (
 	ErrReminderTimeInPast            = errors.New("reminder time is in the past")
 	ErrReminderRecurring             = errors.New("a recurring reminder cannot be marked complete")
 	ErrReminderOwnedByOther          = errors.New("a reminder can only be completed by the member it is for")
-	ErrScheduledTimeInPast           = errors.New("scheduled message time is in the past")
-	ErrScheduledTimeTooFar           = errors.New("scheduled message time is more than 120 days away")
-	ErrScheduledTooMany              = errors.New("too many messages are scheduled in the channel window")
-	ErrInvalidUserGroup              = errors.New("user group name, handle, and members are invalid")
-	ErrInvalidCall                   = errors.New("call external id and join URL are required")
-	ErrInvalidEphemeral              = errors.New("ephemeral message recipient, conversation, and text are required")
-	ErrInvalidAccessLog              = errors.New("access log fields are invalid")
-	ErrInvalidEmoji                  = errors.New("custom emoji name or URL is invalid")
-	ErrEmojiAlreadyExists            = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile             = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest          = errors.New("invite request is invalid")
+	// The sentinels below each carry one Slack error code their operation's
+	// contract declares, so the handler can name the failure exactly rather
+	// than folding it into a generic invalid or not-found answer.
+	ErrSnoozeNotActive       = errors.New("no snooze is active")                          // dnd.endSnooze: snooze_not_active
+	ErrSnoozeTooLong         = errors.New("a snooze may last at most 1440 minutes")       // dnd.setSnooze: too_long
+	ErrReminderUnparseable   = errors.New("reminder time could not be parsed")            // reminders.add: cannot_parse
+	ErrNotStarred            = errors.New("the item is not starred")                      // stars.remove: not_starred
+	ErrUserGroupNameTaken    = errors.New("a user group with this name already exists")   // name_already_exists
+	ErrUserGroupHandleTaken  = errors.New("a user group with this handle already exists") // handle_already_exists
+	ErrInvalidUserGroupUsers = errors.New("a user group member is not in the workspace")  // usergroups.users.update: invalid_users
+	ErrCannotUnfurlURL       = errors.New("the URL does not appear in the message")       // chat.unfurl: cannot_unfurl_url
+	ErrScheduledTimeInPast   = errors.New("scheduled message time is in the past")
+	ErrScheduledTimeTooFar   = errors.New("scheduled message time is more than 120 days away")
+	ErrScheduledTooMany      = errors.New("too many messages are scheduled in the channel window")
+	ErrInvalidUserGroup      = errors.New("user group name, handle, and members are invalid")
+	ErrInvalidCall           = errors.New("call external id and join URL are required")
+	ErrInvalidEphemeral      = errors.New("ephemeral message recipient, conversation, and text are required")
+	ErrInvalidAccessLog      = errors.New("access log fields are invalid")
+	ErrInvalidEmoji          = errors.New("custom emoji name or URL is invalid")
+	ErrEmojiAlreadyExists    = errors.New("custom emoji already exists")
+	ErrInvalidRemoteFile     = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest  = errors.New("invite request is invalid")
 	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
 	// person reading it needs to know whether to ask for a new invitation or
 	// to check which address they signed in with.
@@ -1132,7 +1143,7 @@ func (m Messages) SearchMessages(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.MessagePage{}, ErrInvalidSearch
 	}
-	parsed, err := parseSearchQuery(request.Query)
+	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
 		return domain.MessagePage{}, ErrInvalidSearch
 	}
@@ -1183,7 +1194,7 @@ func (m Messages) SearchFiles(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return domain.FilePage{}, ErrInvalidSearch
 	}
-	parsed, err := parseSearchQuery(request.Query)
+	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
 		return domain.FilePage{}, ErrInvalidSearch
 	}
@@ -1251,24 +1262,74 @@ type parsedSearchQuery struct {
 	hasLink                              bool
 }
 
+// searchClock is the searcher's "now" and time zone. Slack resolves today,
+// yesterday, a bare month and a calendar date against the searcher's own day,
+// not the server's: at 01:00 in Tokyo, "on:today" is not the UTC date.
+type searchClock struct {
+	now      time.Time
+	location *time.Location
+}
+
+// MemberLocation is the zone a member's day is reckoned in: the one their
+// notification schedule carries - the only zone this product records for a
+// member, supplied by their own browser - and UTC when they have none.
+func (m Messages) MemberLocation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) *time.Location {
+	preferences, err := m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
+	if err == nil && preferences.Schedule.TimeZone != "" {
+		if location, loadErr := time.LoadLocation(preferences.Schedule.TimeZone); loadErr == nil {
+			return location
+		}
+	}
+	return time.UTC
+}
+
+// searchClockFor is the searcher's clock, in their MemberLocation.
+func (m Messages) searchClockFor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) searchClock {
+	return searchClock{now: time.Now(), location: m.MemberLocation(ctx, workspaceID, userID)}
+}
+
+// day parses a search date: an ISO calendar date, today, or yesterday, as the
+// start of that day in the searcher's zone.
+func (clock searchClock) day(value string) (time.Time, bool) {
+	now := clock.now.In(clock.location)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, clock.location)
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "today":
+		return today, true
+	case "yesterday":
+		return today.AddDate(0, 0, -1), true
+	}
+	if date, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(value), clock.location); err == nil {
+		return date, true
+	}
+	return time.Time{}, false
+}
+
 // parseSearchPeriod accepts the forms Slack's search help shows for during:.
 // A month alone means that month of the current year, which is what a member
-// typing "during:July" in July means; a year alone means the whole year. The
-// numeric form is kept because it is unambiguous and was already accepted.
-func parseSearchPeriod(value string) (time.Time, time.Time, bool) {
+// typing "during:July" in July means; a year alone means the whole year; today
+// and yesterday mean that day. The numeric form is kept because it is
+// unambiguous and was already accepted. Every period is in the searcher's zone.
+func parseSearchPeriod(value string, clock searchClock) (time.Time, time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return time.Time{}, time.Time{}, false
 	}
-	if month, err := time.Parse("2006-01", value); err == nil {
+	if day, ok := clock.day(value); ok && !strings.Contains(value, "-") {
+		return day, day.AddDate(0, 0, 1), true
+	}
+	if month, err := time.ParseInLocation("2006-01", value, clock.location); err == nil {
 		return month, month.AddDate(0, 1, 0), true
 	}
+	if day, err := time.ParseInLocation("2006-01-02", value, clock.location); err == nil {
+		return day, day.AddDate(0, 0, 1), true
+	}
 	for _, layout := range []string{"January 2006", "Jan 2006"} {
-		if month, err := time.Parse(layout, value); err == nil {
+		if month, err := time.ParseInLocation(layout, value, clock.location); err == nil {
 			return month, month.AddDate(0, 1, 0), true
 		}
 	}
-	if year, err := time.Parse("2006", value); err == nil {
+	if year, err := time.ParseInLocation("2006", value, clock.location); err == nil {
 		return year, year.AddDate(1, 0, 0), true
 	}
 	for _, layout := range []string{"January", "Jan"} {
@@ -1276,14 +1337,56 @@ func parseSearchPeriod(value string) (time.Time, time.Time, bool) {
 			// A bare month means this year. Reading it as year zero would
 			// return nothing and look like "no results" rather than a
 			// misunderstanding.
-			dated := time.Date(time.Now().UTC().Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+			dated := time.Date(clock.now.In(clock.location).Year(), month.Month(), 1, 0, 0, 0, 0, clock.location)
 			return dated, dated.AddDate(0, 1, 0), true
 		}
 	}
 	return time.Time{}, time.Time{}, false
 }
 
-func parseSearchQuery(raw string) (parsedSearchQuery, error) {
+// searchTerm is one free-text search word. Slack's `term*` is a prefix
+// search; terms already match as substrings of the folded text, so the
+// wildcard is removed rather than searched for as a literal asterisk, which
+// matched nothing.
+func searchTerm(token string) (string, bool) {
+	term := strings.TrimRight(token, "*")
+	if strings.Trim(term, "\"") == "" {
+		return "", false
+	}
+	return domain.FoldSearchText(term), true
+}
+
+// SearchHighlightTerms are the free-text words of a search query that
+// highlight=true marks in each match: the ones a match must contain, without
+// modifiers, exclusions or wildcards.
+func SearchHighlightTerms(query string) []string {
+	tokens, err := domain.SearchQueryTokens(query)
+	if err != nil {
+		return nil
+	}
+	terms := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if strings.HasPrefix(token, "-") && len(token) > 1 {
+			continue
+		}
+		if name, _, modifier := strings.Cut(token, ":"); modifier && searchModifiers[strings.ToLower(name)] {
+			continue
+		}
+		if term := strings.Trim(strings.TrimRight(token, "*"), "\""); term != "" {
+			terms = append(terms, term)
+		}
+	}
+	return terms
+}
+
+// searchModifiers are the `name:` prefixes parseSearchQuery reads as a
+// modifier rather than as text.
+var searchModifiers = map[string]bool{
+	"in": true, "from": true, "with": true, "before": true, "after": true, "on": true,
+	"during": true, "is": true, "has": true, "type": true,
+}
+
+func parseSearchQuery(raw string, clock searchClock) (parsedSearchQuery, error) {
 	tokens, err := domain.SearchQueryTokens(raw)
 	if err != nil {
 		return parsedSearchQuery{}, err
@@ -1321,9 +1424,9 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 				if excluded {
 					break
 				}
-				date, parseErr := time.Parse("2006-01-02", value)
-				if parseErr != nil {
-					return parsedSearchQuery{}, parseErr
+				date, parsed := clock.day(value)
+				if !parsed {
+					return parsedSearchQuery{}, errors.New("invalid search date")
 				}
 				switch name {
 				case "before":
@@ -1338,7 +1441,7 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 				if excluded {
 					break
 				}
-				after, before, parsed := parseSearchPeriod(value)
+				after, before, parsed := parseSearchPeriod(value, clock)
 				if !parsed {
 					return parsedSearchQuery{}, errors.New("invalid during: period")
 				}
@@ -1391,10 +1494,14 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 				}
 			}
 		}
+		term, ok := searchTerm(token)
+		if !ok {
+			continue
+		}
 		if excluded {
-			result.excludedTerms = append(result.excludedTerms, domain.FoldSearchText(token))
+			result.excludedTerms = append(result.excludedTerms, term)
 		} else {
-			result.terms = append(result.terms, domain.FoldSearchText(token))
+			result.terms = append(result.terms, term)
 		}
 	}
 	if len(result.terms) == 0 && result.conversation == "" && result.author == "" && result.withUser == "" && result.after.IsZero() && result.before.IsZero() && !result.threadOnly && !result.hasFiles && !result.hasPins && !result.hasReactions && !result.hasLink && !result.saved && result.fileType == "" {
@@ -3446,7 +3553,8 @@ func (m Messages) DeleteScheduledUserStatus(ctx context.Context, workspaceID dom
 	return m.Store.DeleteScheduledStatus(ctx, workspaceID, userID, id)
 }
 
-const maxUserPhotoBytes = 10 << 20
+// MaxUserPhotoBytes is the largest profile photo users.setPhoto accepts.
+const MaxUserPhotoBytes = 10 << 20
 
 // userPhotoContentTypes is the closed set of types a profile photo may be. It is
 // an allow-list rather than an "image/" prefix test because the prefix admits
@@ -3563,7 +3671,7 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 		return domain.User{}, ErrBlobUnavailable
 	}
 	mimeType = normalizeImageContentType(mimeType)
-	if !userPhotoContentTypes[mimeType] || size <= 0 || size > maxUserPhotoBytes || source == nil {
+	if !userPhotoContentTypes[mimeType] || size <= 0 || size > MaxUserPhotoBytes || source == nil {
 		return domain.User{}, ErrInvalidProfile
 	}
 	user, err := m.Store.GetUser(ctx, userID)
@@ -3709,8 +3817,12 @@ func (m Messages) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.DoNotDisturb{}, err
 	}
-	if minutes < 1 || minutes > 1440 {
+	if minutes < 1 {
 		return domain.DoNotDisturb{}, ErrInvalidSnooze
+	}
+	// Slack's own code for a snooze past a day.
+	if minutes > 1440 {
+		return domain.DoNotDisturb{}, ErrSnoozeTooLong
 	}
 	value, err := m.Store.GetDoNotDisturb(ctx, workspaceID, userID)
 	if err != nil {
@@ -3734,6 +3846,12 @@ func (m Messages) EndSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 	value, err := m.Store.GetDoNotDisturb(ctx, workspaceID, userID)
 	if err != nil {
 		return domain.DoNotDisturb{}, err
+	}
+	// Ending a snooze that is not running changes nothing, so it is refused
+	// with Slack's snooze_not_active rather than announced to every client as
+	// a dnd_updated_user that says nothing happened.
+	if !value.SnoozeEnabled(time.Now().UTC()) {
+		return domain.DoNotDisturb{}, ErrSnoozeNotActive
 	}
 	value.SnoozeUntil = time.Time{}
 	event, err := newEvent(workspaceID, userID, dndEventPayload("user.dnd_snooze_ended", userID, value, time.Now().UTC()), time.Now().UTC())
@@ -6045,6 +6163,16 @@ func (m Messages) Emojis(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return m.Store.ListEmojis(ctx, workspaceID)
 }
 
+// EmojiRevision is when the workspace's custom emoji set last changed, which
+// emoji.list reports as cache_ts. It is the zero time for a workspace whose
+// custom set never changed.
+func (m Messages) EmojiRevision(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (time.Time, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return time.Time{}, err
+	}
+	return m.Store.EmojiRevision(ctx, workspaceID)
+}
+
 func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, imageURL string) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return err
@@ -6058,11 +6186,12 @@ func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.Workspac
 	if nameShadowsBuiltInEmoji(name) {
 		return ErrEmojiAlreadyExists
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name), events.String("value", imageURL)), time.Now().UTC())
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name), events.String("value", imageURL)), now)
 	if err != nil {
 		return err
 	}
-	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: imageURL}, event)
+	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: imageURL, CreatedAt: now, CreatedBy: userID}, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -6080,25 +6209,39 @@ func (m Messages) AdminAddEmojiAlias(ctx context.Context, workspaceID domain.Wor
 	if nameShadowsBuiltInEmoji(name) {
 		return ErrEmojiAlreadyExists
 	}
-	emojis, err := m.Store.ListEmojis(ctx, workspaceID)
-	if err != nil {
-		return err
-	}
+	// Slack lets an alias name either a custom emoji or a built-in one
+	// (`:thumbsup_all:` → `:+1:`). An alias of an alias is resolved to its
+	// target so a client never has to follow a chain.
 	found := false
-	for _, value := range emojis {
-		if value.Name == target {
-			found = true
-			break
+	if nameShadowsBuiltInEmoji(target) {
+		found = true
+	} else {
+		emojis, err := m.Store.ListEmojis(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		for _, value := range emojis {
+			if value.Name == target {
+				found = true
+				if value.AliasFor != "" {
+					target = value.AliasFor
+				}
+				break
+			}
 		}
 	}
 	if !found {
 		return store.ErrNotFound
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.alias_added", events.String("name", name), events.String("alias_for", target)), time.Now().UTC())
+	if target == name {
+		return ErrInvalidEmoji
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.alias_added", events.String("name", name), events.String("alias_for", target)), now)
 	if err != nil {
 		return err
 	}
-	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, AliasFor: target}, event)
+	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, AliasFor: target, CreatedAt: now, CreatedBy: userID}, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -6113,7 +6256,20 @@ func (m Messages) AdminRemoveEmoji(ctx context.Context, workspaceID domain.Works
 	if name == "" {
 		return ErrInvalidEmoji
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.removed", events.String("name", name)), time.Now().UTC())
+	// The store removes the aliases that point at the emoji with it, so the
+	// emoji_changed event names them too: a client that only drops `name`
+	// would keep rendering aliases of an image that is gone.
+	emojis, err := m.Store.ListEmojis(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	names := []string{name}
+	for _, value := range emojis {
+		if value.AliasFor == name {
+			names = append(names, value.Name)
+		}
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.removed", events.String("name", name), events.Strings("names", names)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -7099,35 +7255,61 @@ func (m Messages) Pins(ctx context.Context, workspaceID domain.WorkspaceID, user
 	return m.Store.ListPins(ctx, conversationID, request)
 }
 
+// AddStar stars a message, or - with no timestamp - the channel itself, as
+// stars.add does when it is given only a channel.
 func (m Messages) AddStar(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) error {
-	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	star, err := m.starTarget(ctx, workspaceID, userID, conversationID, timestamp)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("star.added", message.ID, conversationID, userID, timestamp), now)
+	star.CreatedAt = now
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.added", star.Message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.AddStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID, CreatedAt: now}, event)
+	return m.Store.AddStar(ctx, star, event)
 }
 
+// RemoveStar unstars a message or a channel. Removing a star that is not
+// there is Slack's not_starred; it used to be reported as the message itself
+// not being found.
 func (m Messages) RemoveStar(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) error {
-	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	star, err := m.starTarget(ctx, workspaceID, userID, conversationID, timestamp)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("star.removed", message.ID, conversationID, userID, timestamp), now)
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.removed", star.Message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID}, event)
+	if err := m.Store.RemoveStar(ctx, star, event); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrNotStarred
+		}
+		return err
+	}
+	return nil
 }
 
-func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+func (m Messages) starTarget(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Star, error) {
+	if timestamp == "" {
+		if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+			return domain.Star{}, err
+		}
+		return domain.Star{Conversation: conversationID, UserID: userID}, nil
+	}
+	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	if err != nil {
+		return domain.Star{}, err
+	}
+	return domain.Star{Message: message, Conversation: conversationID, UserID: userID}, nil
+}
+
+func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	return m.Store.ListStars(ctx, workspaceID, userID, request)
 }
@@ -7360,7 +7542,7 @@ func bookmarkPayload(topic string, id domain.BookmarkID, conversationID domain.C
 	return events.NewPayload(topic, events.String("bookmark_id", string(id)), events.String("channel_id", string(conversationID)))
 }
 
-func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, due time.Time) (domain.Reminder, error) {
+func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, schedule domain.ReminderSchedule) (domain.Reminder, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Reminder{}, err
 	}
@@ -7375,14 +7557,23 @@ func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Reminder{}, store.ErrNotFound
 	}
 	text = strings.TrimSpace(text)
-	if text == "" || len(text) > 3000 || due.IsZero() {
+	if text == "" || len(text) > 3000 || schedule.Due.IsZero() || !schedule.Recurrence.Valid() {
+		return domain.Reminder{}, ErrInvalidReminder
+	}
+	timeZone := strings.TrimSpace(schedule.TimeZone)
+	if timeZone == "" {
+		timeZone = "UTC"
+	}
+	if _, err := time.LoadLocation(timeZone); err != nil {
 		return domain.Reminder{}, ErrInvalidReminder
 	}
 	id, err := domain.NewReminderID()
 	if err != nil {
 		return domain.Reminder{}, err
 	}
-	reminder := domain.Reminder{WorkspaceID: workspaceID, ID: id, Creator: userID, User: targetID, Text: text, Time: due.UTC()}
+	due := schedule.Due.UTC()
+	reminder := domain.Reminder{WorkspaceID: workspaceID, ID: id, Creator: userID, User: targetID, Text: text, Time: due,
+		Recurring: schedule.Recurrence != domain.ReminderOnce, Recurrence: schedule.Recurrence, TimeZone: timeZone, RecurrenceAnchor: due}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.created", events.String("reminder_id", string(id)), events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return domain.Reminder{}, err
@@ -7419,6 +7610,14 @@ func (m Messages) CompleteReminder(ctx context.Context, workspaceID domain.Works
 	reminder, err := m.Store.ReminderInWorkspace(ctx, workspaceID, reminderID)
 	if err != nil {
 		return err
+	}
+	// A reminder the caller neither set nor receives is not_found, as
+	// reminders.info and reminders.delete answer; cannot_complete_others is
+	// for one the caller set for someone else. It used to answer
+	// cannot_complete_others for anybody's reminder, confirming that an ID
+	// existed to a member who could not otherwise see it.
+	if reminder.User != userID && reminder.Creator != userID {
+		return store.ErrNotFound
 	}
 	if reminder.User != userID {
 		return ErrReminderOwnedByOther
@@ -8056,10 +8255,71 @@ func (m Messages) SentMessages(ctx context.Context, workspaceID domain.Workspace
 	return m.Store.ListAuthoredMessages(ctx, workspaceID, userID, request)
 }
 
-func normalizeUserGroupHandle(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.Join(strings.Fields(value), "-")
-	return value
+// userGroupHandle validates a handle a caller supplied. Slack handles are
+// lowercase letters, digits, hyphens, underscores and periods; a leading @ is
+// how the handle is written in a mention and is dropped, and letter case is
+// folded. Anything else is refused: the handle used to be silently rewritten
+// ("Front End!" became "front-end!"), so the group answered to a mention
+// nobody asked for.
+func userGroupHandle(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
+	if value == "" || len(value) > 255 {
+		return "", false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' && character != '_' && character != '.' {
+			return "", false
+		}
+	}
+	return value, true
+}
+
+// userGroupHandleFromName derives the handle a group created without one gets:
+// its name lower-cased, with runs of anything a handle cannot hold turned into
+// a single hyphen.
+func userGroupHandleFromName(name string) string {
+	var result strings.Builder
+	pendingHyphen := false
+	for _, character := range strings.ToLower(name) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_' || character == '.' {
+			if pendingHyphen && result.Len() > 0 {
+				result.WriteByte('-')
+			}
+			pendingHyphen = false
+			result.WriteRune(character)
+			continue
+		}
+		pendingHyphen = true
+	}
+	return result.String()
+}
+
+// requireUniqueUserGroup refuses a name or handle another group in the
+// workspace already uses. Names compare without regard to case, as Slack's
+// do; the SQL store's unique index backs the handle check against a race.
+func (m Messages) requireUniqueUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, self domain.UserGroupID, name, handle string) error {
+	request := domain.PageRequest{Limit: 200}
+	for {
+		page, err := m.Store.ListUserGroups(ctx, workspaceID, true, request)
+		if err != nil {
+			return err
+		}
+		for _, group := range page.Groups {
+			if group.ID == self {
+				continue
+			}
+			if strings.EqualFold(group.Name, name) {
+				return ErrUserGroupNameTaken
+			}
+			if group.Handle == handle {
+				return ErrUserGroupHandleTaken
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
+			return nil
+		}
+		request.Cursor = page.NextCursor
+	}
 }
 
 func normalizeUserGroupUsers(values []domain.UserID) ([]domain.UserID, error) {
@@ -8111,16 +8371,23 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		return domain.UserGroup{}, err
 	}
 	name = strings.TrimSpace(name)
-	handle = normalizeUserGroupHandle(handle)
 	description = strings.TrimSpace(description)
 	if name == "" {
 		return domain.UserGroup{}, ErrInvalidUserGroup
 	}
-	if handle == "" {
-		handle = normalizeUserGroupHandle(name)
+	if strings.TrimSpace(handle) == "" {
+		handle = userGroupHandleFromName(name)
+	} else {
+		valid := false
+		if handle, valid = userGroupHandle(handle); !valid {
+			return domain.UserGroup{}, ErrInvalidUserGroup
+		}
 	}
 	if handle == "" || len(name) > 255 || len(handle) > 255 || len(description) > 2000 {
 		return domain.UserGroup{}, ErrInvalidUserGroup
+	}
+	if err := m.requireUniqueUserGroup(ctx, workspaceID, "", name, handle); err != nil {
+		return domain.UserGroup{}, err
 	}
 	defaults, err := m.userGroupDefaultChannels(ctx, workspaceID, channels)
 	if err != nil {
@@ -8141,6 +8408,9 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		return domain.UserGroup{}, err
 	}
 	if err := m.Store.CreateUserGroup(ctx, value, event); err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			return domain.UserGroup{}, ErrUserGroupHandleTaken
+		}
 		return domain.UserGroup{}, err
 	}
 	return value, nil
@@ -8160,7 +8430,10 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		value.Name = strings.TrimSpace(name)
 	}
 	if strings.TrimSpace(handle) != "" {
-		value.Handle = normalizeUserGroupHandle(handle)
+		valid := false
+		if value.Handle, valid = userGroupHandle(handle); !valid {
+			return domain.UserGroup{}, ErrInvalidUserGroup
+		}
 	}
 	if description != "" {
 		value.Description = strings.TrimSpace(description)
@@ -8173,6 +8446,9 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	if value.Name == "" || value.Handle == "" || len(value.Name) > 255 || len(value.Handle) > 255 || len(value.Description) > 2000 {
 		return domain.UserGroup{}, ErrInvalidUserGroup
 	}
+	if err := m.requireUniqueUserGroup(ctx, workspaceID, id, value.Name, value.Handle); err != nil {
+		return domain.UserGroup{}, err
+	}
 	value.UpdatedBy = actor
 	value.UpdatedAt = time.Now().UTC()
 	payload, err := userGroupEventPayload("usergroup.updated", value)
@@ -8184,6 +8460,9 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		return domain.UserGroup{}, err
 	}
 	if err := m.Store.UpdateUserGroup(ctx, value, event); err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			return domain.UserGroup{}, ErrUserGroupHandleTaken
+		}
 		return domain.UserGroup{}, err
 	}
 	return value, nil
@@ -8240,18 +8519,20 @@ func (m Messages) SetUserGroupUsers(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	for _, userID := range normalized {
-		user, getErr := m.Store.GetUser(ctx, userID)
-		if getErr != nil || user.WorkspaceID != workspaceID || user.Deleted {
-			return domain.UserGroup{}, store.ErrNotFound
-		}
-		if _, getErr = m.Store.GetWorkspaceMembership(ctx, workspaceID, userID); getErr != nil {
-			return domain.UserGroup{}, store.ErrNotFound
-		}
-	}
 	previous, err := m.Store.GetUserGroup(ctx, workspaceID, id)
 	if err != nil {
 		return domain.UserGroup{}, err
+	}
+	// A member who is not in the workspace is Slack's invalid_users. It was
+	// reported as the group not being found, naming the wrong missing thing.
+	for _, userID := range normalized {
+		user, getErr := m.Store.GetUser(ctx, userID)
+		if getErr != nil || user.WorkspaceID != workspaceID || user.Deleted {
+			return domain.UserGroup{}, ErrInvalidUserGroupUsers
+		}
+		if _, getErr = m.Store.GetWorkspaceMembership(ctx, workspaceID, userID); getErr != nil {
+			return domain.UserGroup{}, ErrInvalidUserGroupUsers
+		}
 	}
 	snapshot := previous
 	snapshot.Users = normalized
@@ -8291,6 +8572,45 @@ func normalizeCallUsers(values []domain.UserID) ([]domain.UserID, error) {
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left] < result[right] })
 	return result, nil
+}
+
+// splitCallParticipants separates a calls-API `users` list into the members
+// it names and the external participants it names, each deduplicated and in
+// a stable order. An entry naming neither, or both, is invalid, as is an
+// external participant whose fields exceed what the calls API documents.
+func splitCallParticipants(values []domain.CallParticipant) ([]domain.UserID, []domain.ExternalCallParticipant, error) {
+	users := make([]domain.UserID, 0, len(values))
+	externals := make([]domain.ExternalCallParticipant, 0)
+	seen := make(map[string]struct{})
+	for _, value := range values {
+		slackID := domain.UserID(strings.TrimSpace(string(value.SlackID)))
+		external := domain.ExternalCallParticipant{
+			ExternalID:  strings.TrimSpace(value.External.ExternalID),
+			DisplayName: strings.TrimSpace(value.External.DisplayName),
+			AvatarURL:   strings.TrimSpace(value.External.AvatarURL),
+		}
+		switch {
+		case slackID != "" && external.ExternalID == "":
+			users = append(users, slackID)
+		case slackID == "" && external.ExternalID != "":
+			if len(external.ExternalID) > 255 || len(external.DisplayName) > 255 || len(external.AvatarURL) > 2048 {
+				return nil, nil, ErrInvalidCall
+			}
+			if _, duplicate := seen[external.ExternalID]; duplicate {
+				continue
+			}
+			seen[external.ExternalID] = struct{}{}
+			externals = append(externals, external)
+		default:
+			return nil, nil, ErrInvalidCall
+		}
+	}
+	normalized, err := normalizeCallUsers(users)
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(externals, func(left, right int) bool { return externals[left].ExternalID < externals[right].ExternalID })
+	return normalized, externals, nil
 }
 
 func (m Messages) validateCallUsers(ctx context.Context, workspaceID domain.WorkspaceID, users []domain.UserID) error {
@@ -8584,7 +8904,7 @@ func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic stri
 	), at)
 }
 
-func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, users []domain.UserID) (domain.Call, error) {
+func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.CallParticipant) (domain.Call, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
 	}
@@ -8597,7 +8917,7 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	} else {
 		startedAt = startedAt.UTC()
 	}
-	normalized, err := normalizeCallUsers(users)
+	normalized, externals, err := splitCallParticipants(participants)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8617,7 +8937,7 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if err != nil {
 		return domain.Call{}, err
 	}
-	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, StartedAt: startedAt}
+	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, ExternalParticipants: externals, StartedAt: startedAt}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("call.created", events.String("call_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err
@@ -8671,7 +8991,7 @@ func (m Messages) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	return m.Store.EndCall(ctx, workspaceID, id, duration, event)
 }
 
-func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID, add bool) error {
+func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant, add bool) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
@@ -8679,7 +8999,7 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 	if err != nil {
 		return err
 	}
-	changed, err := normalizeCallUsers(users)
+	changed, changedExternals, err := splitCallParticipants(participants)
 	if err != nil {
 		return err
 	}
@@ -8700,19 +9020,27 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 		}
 	}
 	set := make(map[domain.UserID]struct{}, len(value.Participants)+len(changed))
-	if add {
-		for _, userID := range value.Participants {
+	for _, userID := range value.Participants {
+		set[userID] = struct{}{}
+	}
+	externals := make(map[string]domain.ExternalCallParticipant, len(value.ExternalParticipants)+len(changedExternals))
+	for _, external := range value.ExternalParticipants {
+		externals[external.ExternalID] = external
+	}
+	for _, userID := range changed {
+		if add {
 			set[userID] = struct{}{}
-		}
-		for _, userID := range changed {
-			set[userID] = struct{}{}
-		}
-	} else {
-		for _, userID := range value.Participants {
-			set[userID] = struct{}{}
-		}
-		for _, userID := range changed {
+		} else {
 			delete(set, userID)
+		}
+	}
+	for _, external := range changedExternals {
+		if add {
+			// Adding an external participant again refreshes the name and
+			// avatar the provider reports for them.
+			externals[external.ExternalID] = external
+		} else {
+			delete(externals, external.ExternalID)
 		}
 	}
 	result := make([]domain.UserID, 0, len(set))
@@ -8723,18 +9051,26 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 	if err != nil && len(result) != 0 {
 		return err
 	}
-	event, err := newEvent(workspaceID, actor, events.NewPayload("call.participants_changed", events.String("call_id", string(id)), events.Strings("user_ids", userIDStrings(result))), time.Now().UTC())
+	externalResult := make([]domain.ExternalCallParticipant, 0, len(externals))
+	externalIDs := make([]string, 0, len(externals))
+	for _, external := range externals {
+		externalResult = append(externalResult, external)
+		externalIDs = append(externalIDs, external.ExternalID)
+	}
+	sort.Slice(externalResult, func(left, right int) bool { return externalResult[left].ExternalID < externalResult[right].ExternalID })
+	sort.Strings(externalIDs)
+	event, err := newEvent(workspaceID, actor, events.NewPayload("call.participants_changed", events.String("call_id", string(id)), events.Strings("user_ids", userIDStrings(result)), events.Strings("external_ids", externalIDs)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetCallParticipants(ctx, workspaceID, id, result, event)
+	return m.Store.SetCallParticipants(ctx, workspaceID, id, result, externalResult, event)
 }
 
-func (m Messages) AddCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID) error {
-	return m.changeCallParticipants(ctx, workspaceID, actor, id, users, true)
+func (m Messages) AddCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant) error {
+	return m.changeCallParticipants(ctx, workspaceID, actor, id, participants, true)
 }
-func (m Messages) RemoveCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID) error {
-	return m.changeCallParticipants(ctx, workspaceID, actor, id, users, false)
+func (m Messages) RemoveCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant) error {
+	return m.changeCallParticipants(ctx, workspaceID, actor, id, participants, false)
 }
 
 func (m Messages) messageForTimestamp(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Message, error) {
@@ -8786,11 +9122,12 @@ func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.Workspace
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
 		return store.ErrNotFound
 	}
-	ip, userAgent = strings.TrimSpace(ip), strings.TrimSpace(userAgent)
+	ip, userAgent = domain.AccessLogIP(ip), strings.TrimSpace(userAgent)
 	if len(ip) > 128 || len(userAgent) > 1024 {
 		return ErrInvalidAccessLog
 	}
-	return m.Store.RecordAccess(ctx, domain.AccessLog{WorkspaceID: workspaceID, UserID: userID, Username: user.Name, CreatedAt: time.Now().UTC(), IP: ip, UserAgent: userAgent})
+	now := time.Now().UTC()
+	return m.Store.RecordAccess(ctx, domain.AccessLog{WorkspaceID: workspaceID, UserID: userID, Username: user.Name, FirstAt: now, CreatedAt: now, Count: 1, IP: ip, UserAgent: userAgent})
 }
 
 // AnalyticsBusiestChannels bounds the busiest-channel list the dashboard asks
@@ -8826,9 +9163,16 @@ func (m Messages) WorkspaceAnalytics(ctx context.Context, workspaceID domain.Wor
 	return m.Store.WorkspaceAnalytics(ctx, workspaceID, since.UTC(), AnalyticsBusiestChannels)
 }
 
-func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
-		return nil, false, err
+// MaxAccessLogPages is the deepest page team.accessLogs serves; Slack answers
+// over_pagination_limit past it.
+const MaxAccessLogPages = 100
+
+// ListAccessLogs answers team.accessLogs. It discloses every member's IP
+// addresses and devices, so it is administrative, like IntegrationLogs; any
+// member could read it before.
+func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
+		return domain.AccessLogPage{}, err
 	}
 	return m.Store.ListAccessLogs(ctx, workspaceID, before, limit, page)
 }
@@ -9119,8 +9463,22 @@ func (m Messages) PostIncomingWebhook(ctx context.Context, workspaceID domain.Wo
 	return m.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, text, blocks, "", threadTimestamp, idempotencyKey)
 }
 
+// Unfurl attaches link previews to a message.
+//
+// An app unfurls links in other people's messages, so the authority is
+// membership of the conversation (with links:write, which the transport
+// checks), not authorship: requiring the author refused every unfurl an app
+// was asked to make. Each key must be a URL the message actually contains -
+// Slack answers cannot_unfurl_url otherwise - and a call adds or replaces
+// previews per URL, leaving the previews of other URLs in place.
 func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
-	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
+	if strings.TrimSpace(string(conversation)) == "" {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversation); err != nil {
+		return domain.Message{}, err
+	}
+	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversation, timestamp)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -9134,7 +9492,22 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if err != nil {
 		return domain.Message{}, ErrInvalidMessage
 	}
-	message.Unfurls = normalized
+	for link := range normalized {
+		if !messageContainsLink(message, link) {
+			return domain.Message{}, ErrCannotUnfurlURL
+		}
+	}
+	merged := make(map[string]string, len(message.Unfurls)+len(normalized))
+	for link, preview := range message.Unfurls {
+		merged[link] = preview
+	}
+	for link, preview := range normalized {
+		merged[link] = preview
+	}
+	if messageUnfurlsTooLong(merged) {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	message.Unfurls = merged
 	event, err := messageEvent(workspaceID, "message.unfurled", message)
 	if err != nil {
 		return domain.Message{}, err
@@ -9143,6 +9516,23 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return domain.Message{}, err
 	}
 	return message, nil
+}
+
+// messageContainsLink reports whether a URL appears in a message's text,
+// blocks or attachments. Slack's text escapes `&` as `&amp;`, and a JSON
+// encoder may escape `/` as `\/`, so both are undone before comparing.
+func messageContainsLink(message domain.Message, link string) bool {
+	link = strings.TrimSpace(link)
+	if link == "" {
+		return false
+	}
+	unescape := strings.NewReplacer("&amp;", "&", `\/`, "/", `\u0026`, "&")
+	for _, surface := range []string{message.Text, message.Blocks, message.Attachments} {
+		if strings.Contains(unescape.Replace(surface), link) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Messages) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {
@@ -9713,8 +10103,10 @@ func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, w
 // first-party client. Keeping this coordinate in one place lets the web client
 // preserve thread context through ScheduleMessageAs without duplicating the
 // ownership contract used by list and delete.
+// InternalScheduledCredential is the owner of a message a member schedules
+// through the first-party client: the member, with no app.
 func InternalScheduledCredential(workspaceID domain.WorkspaceID, userID domain.UserID) string {
-	return domain.HashToken("internal-scheduled\x00" + string(workspaceID) + "\x00" + string(userID))
+	return domain.ScheduledMessageOwner(workspaceID, userID, "", "")
 }
 
 func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ScheduledMessageRequest) (domain.ScheduledMessage, error) {

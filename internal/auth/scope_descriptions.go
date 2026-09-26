@@ -62,6 +62,9 @@ var scopeDescriptions = map[Scope]string{
 	ScopeAuthorizationsRead:  "View the app's own installations",
 	ScopeLinksWrite:          "Unfurl links it posts into rich previews",
 	ScopeIdentityBasic:       "View the signed-in person's basic identity",
+	ScopeIdentityEmail:       "View the signed-in person's email address",
+	ScopeIdentityAvatar:      "View the signed-in person's profile photo",
+	ScopeIdentityTeam:        "View the signed-in person's workspace name and domain",
 
 	ScopeRTMStream:        "Connect to the real-time message stream",
 	ScopeConnectionsWrite: "Open a Socket Mode connection",

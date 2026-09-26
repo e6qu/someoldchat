@@ -37,6 +37,9 @@ type readBack struct {
 	// the shape is pinned by the method's own tests, and what this asks is
 	// whether the value crossed from one method to another at all.
 	expect string
+	// asUser runs the journey with U1's user token, for a method Slack serves
+	// to user tokens only.
+	asUser bool
 }
 
 func TestEveryMutationIsVisibleToAnotherMethod(t *testing.T) {
@@ -46,6 +49,9 @@ func TestEveryMutationIsVisibleToAnotherMethod(t *testing.T) {
 				t.Fatalf("%s reads back through the method that wrote it, which only proves the method agrees with itself", journey.name)
 			}
 			handler, _ := testHandlerWithStore()
+			if journey.asUser {
+				handler, _ = testUserHandlerWithStore()
+			}
 			mutation := readBackCall(t, handler, journey.mutate, journey.form)
 			if ok, _ := mutation["ok"].(bool); !ok {
 				t.Fatalf("%s answered %v", journey.mutate, mutation)
@@ -120,7 +126,7 @@ func readBackJourneys() []readBack {
 			name:   "a do-not-disturb snooze is visible to the DND read",
 			mutate: "/api/dnd.setSnooze", form: url.Values{"num_minutes": {"30"}},
 			read: "/api/dnd.info", readForm: url.Values{},
-			expect: `"snooze_enabled":true`,
+			expect: `"snooze_enabled":true`, asUser: true,
 		},
 		{
 			name:   "a custom emoji is in the emoji list",

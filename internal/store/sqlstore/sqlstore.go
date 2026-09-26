@@ -356,11 +356,12 @@ CREATE TABLE IF NOT EXISTS outbox (
  lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', next_attempt_at TEXT NOT NULL DEFAULT '',
  undeliverable INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS access_logs (
- id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
- username TEXT NOT NULL, created_at INTEGER NOT NULL, ip TEXT NOT NULL, user_agent TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS access_logins (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), ip TEXT NOT NULL, user_agent TEXT NOT NULL,
+ username TEXT NOT NULL, access_count INTEGER NOT NULL, date_first INTEGER NOT NULL, date_last INTEGER NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, ip, user_agent)
 );
-CREATE INDEX IF NOT EXISTS access_logs_workspace_created ON access_logs(workspace_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS access_logins_workspace_last ON access_logins(workspace_id, date_last DESC);
 CREATE TABLE IF NOT EXISTS lifecycle_state (
  id INTEGER PRIMARY KEY CHECK(id = 1), state TEXT NOT NULL, generation INTEGER NOT NULL,
  wake_deadline TEXT NOT NULL DEFAULT ''
@@ -430,6 +431,10 @@ CREATE TABLE IF NOT EXISTS stars (
  PRIMARY KEY (user_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS stars_user_created ON stars(user_id, created_at, message_id);
+CREATE TABLE IF NOT EXISTS channel_stars (
+ user_id TEXT NOT NULL REFERENCES users(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), created_at TEXT NOT NULL,
+ PRIMARY KEY (user_id, conversation_id)
+);
 CREATE TABLE IF NOT EXISTS saved_items (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  message_id TEXT NOT NULL REFERENCES messages(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
@@ -447,7 +452,7 @@ CREATE INDEX IF NOT EXISTS bookmarks_conversation_rank ON bookmarks(workspace_id
 CREATE TABLE IF NOT EXISTS reminders (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), creator_id TEXT NOT NULL REFERENCES users(id),
  user_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, due_at INTEGER NOT NULL, complete_at INTEGER NOT NULL DEFAULT 0,
- recurring INTEGER NOT NULL DEFAULT 0
+ recurring INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT '', time_zone TEXT NOT NULL DEFAULT 'UTC', recurrence_anchor INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS reminders_user_due ON reminders(workspace_id, user_id, due_at, id);
 CREATE TABLE IF NOT EXISTS later_reminders (
@@ -521,9 +526,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id
 CREATE TABLE IF NOT EXISTS call_participants (
  call_id TEXT NOT NULL REFERENCES calls(id), user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY (call_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS call_external_participants (
+ call_id TEXT NOT NULL REFERENCES calls(id), external_id TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY (call_id, external_id)
+);
 CREATE TABLE IF NOT EXISTS custom_emoji (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', alias_for TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL DEFAULT '',
  PRIMARY KEY (workspace_id, name)
+);
+CREATE TABLE IF NOT EXISTS custom_emoji_revisions (
+ workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), changed_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS lists (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
@@ -578,7 +591,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 182
+const schemaVersion = 188
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -756,45 +769,169 @@ func (s *Store) AppendEvent(ctx context.Context, event events.Event) error {
 	return err
 }
 
+// upsertAccessLoginStatement counts accesses into the aggregate row for their
+// member, address and user agent.
+const upsertAccessLoginStatement = `INSERT INTO access_logins(workspace_id, user_id, ip, user_agent, username, access_count, date_first, date_last) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(workspace_id, user_id, ip, user_agent) DO UPDATE SET
+ username = excluded.username,
+ access_count = access_logins.access_count + excluded.access_count,
+ date_first = CASE WHEN excluded.date_first < access_logins.date_first THEN excluded.date_first ELSE access_logins.date_first END,
+ date_last = CASE WHEN excluded.date_last > access_logins.date_last THEN excluded.date_last ELSE access_logins.date_last END`
+
 func (s *Store) RecordAccess(ctx context.Context, value domain.AccessLog) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO access_logs(workspace_id, user_id, username, created_at, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)`, value.WorkspaceID, value.UserID, value.Username, value.CreatedAt.UTC().Unix(), value.IP, value.UserAgent)
+	first, last := value.FirstAt, value.CreatedAt
+	if first.IsZero() {
+		first = last
+	}
+	count := value.Count
+	if count <= 0 {
+		count = 1
+	}
+	_, err := s.db.ExecContext(ctx, upsertAccessLoginStatement, value.WorkspaceID, value.UserID, value.IP, value.UserAgent, value.Username, count, first.UTC().Unix(), last.UTC().Unix())
 	return err
 }
-func (s *Store) ListAccessLogs(ctx context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
-	if limit <= 0 || limit > 1000 || page <= 0 {
-		return nil, false, store.InvalidArgument("access log page parameters are invalid")
+
+func rekeyScheduledMessageOwners(ctx context.Context, db queryExecutor) error {
+	type owner struct {
+		workspace domain.WorkspaceID
+		author    domain.UserID
+		app       domain.AppID
+		bot       domain.BotID
 	}
-	query := `SELECT workspace_id, user_id, username, created_at, ip, user_agent FROM access_logs WHERE workspace_id = ?`
-	args := []any{workspace}
-	if !before.IsZero() {
-		query += ` AND created_at <= ?`
-		args = append(args, before.UTC().Unix())
-	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
-	args = append(args, limit+1, (page-1)*limit)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT workspace_id, author_id, app_id, bot_id FROM scheduled_messages`)
 	if err != nil {
-		return nil, false, err
+		return fmt.Errorf("read scheduled message owners: %w", err)
 	}
-	defer rows.Close()
-	values := make([]domain.AccessLog, 0, limit+1)
+	owners := make([]owner, 0)
+	for rows.Next() {
+		var value owner
+		if err := rows.Scan(&value.workspace, &value.author, &value.app, &value.bot); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("read scheduled message owner: %w", err)
+		}
+		owners = append(owners, value)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("read scheduled message owners: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, value := range owners {
+		key := domain.ScheduledMessageOwner(value.workspace, value.author, value.app, value.bot)
+		if _, err := db.ExecContext(ctx, `UPDATE scheduled_messages SET credential_hash = ? WHERE workspace_id = ? AND author_id = ? AND app_id = ? AND bot_id = ?`, key, value.workspace, value.author, value.app, value.bot); err != nil {
+			return fmt.Errorf("rekey scheduled message owner: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateAccessLogins folds the per-request access_logs rows into
+// access_logins. The IP has its port removed in Go, where net.SplitHostPort
+// knows IPv6 brackets; SQL string functions do not.
+func (s *Store) migrateAccessLogins(ctx context.Context, db queryExecutor) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS access_logins (
+		workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), ip TEXT NOT NULL, user_agent TEXT NOT NULL,
+		username TEXT NOT NULL, access_count INTEGER NOT NULL, date_first INTEGER NOT NULL, date_last INTEGER NOT NULL,
+		PRIMARY KEY (workspace_id, user_id, ip, user_agent)
+	)`); err != nil {
+		return fmt.Errorf("migrate access logins: %w", err)
+	}
+	legacy, err := s.tableColumns(ctx, db, "access_logs")
+	if err != nil {
+		return fmt.Errorf("find legacy access logs: %w", err)
+	}
+	if len(legacy) == 0 {
+		return nil
+	}
+	type key struct{ workspace, user, ip, agent string }
+	aggregated := make(map[key]*domain.AccessLog)
+	order := make([]key, 0)
+	rows, err := db.QueryContext(ctx, `SELECT workspace_id, user_id, username, created_at, ip, user_agent FROM access_logs ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("read legacy access logs: %w", err)
+	}
 	for rows.Next() {
 		var value domain.AccessLog
 		var created int64
 		if err := rows.Scan(&value.WorkspaceID, &value.UserID, &value.Username, &created, &value.IP, &value.UserAgent); err != nil {
-			return nil, false, err
+			_ = rows.Close()
+			return fmt.Errorf("read legacy access log: %w", err)
 		}
-		value.CreatedAt = time.Unix(created, 0).UTC()
-		values = append(values, value)
+		at := time.Unix(created, 0).UTC()
+		value.IP = domain.AccessLogIP(value.IP)
+		id := key{string(value.WorkspaceID), string(value.UserID), value.IP, value.UserAgent}
+		existing, ok := aggregated[id]
+		if !ok {
+			value.FirstAt, value.CreatedAt, value.Count = at, at, 1
+			aggregated[id] = &value
+			order = append(order, id)
+			continue
+		}
+		existing.Count++
+		existing.Username = value.Username
+		if at.Before(existing.FirstAt) {
+			existing.FirstAt = at
+		}
+		if at.After(existing.CreatedAt) {
+			existing.CreatedAt = at
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false, err
+		_ = rows.Close()
+		return fmt.Errorf("read legacy access logs: %w", err)
 	}
-	hasMore := len(values) > limit
-	if hasMore {
-		values = values[:limit]
+	if err := rows.Close(); err != nil {
+		return err
 	}
-	return values, hasMore, nil
+	for _, id := range order {
+		value := aggregated[id]
+		if _, err := db.ExecContext(ctx, upsertAccessLoginStatement, value.WorkspaceID, value.UserID, value.IP, value.UserAgent, value.Username, value.Count, value.FirstAt.Unix(), value.CreatedAt.Unix()); err != nil {
+			return fmt.Errorf("fold legacy access log: %w", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE access_logs`); err != nil {
+		return fmt.Errorf("drop legacy access logs: %w", err)
+	}
+	return nil
+}
+func (s *Store) ListAccessLogs(ctx context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
+	if limit <= 0 || limit > 1000 || page <= 0 {
+		return domain.AccessLogPage{}, store.InvalidArgument("access log page parameters are invalid")
+	}
+	filter := ` WHERE workspace_id = ?`
+	args := []any{workspace}
+	if !before.IsZero() {
+		filter += ` AND date_first <= ?`
+		args = append(args, before.UTC().Unix())
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM access_logins`+filter, args...).Scan(&total); err != nil {
+		return domain.AccessLogPage{}, err
+	}
+	query := `SELECT workspace_id, user_id, username, date_first, date_last, access_count, ip, user_agent FROM access_logins` + filter +
+		` ORDER BY date_last DESC, date_first DESC, user_id, ip, user_agent LIMIT ? OFFSET ?`
+	rows, err := s.db.QueryContext(ctx, query, append(args, limit, (page-1)*limit)...)
+	if err != nil {
+		return domain.AccessLogPage{}, err
+	}
+	defer rows.Close()
+	result := domain.AccessLogPage{Logins: make([]domain.AccessLog, 0, limit), Total: total}
+	for rows.Next() {
+		var value domain.AccessLog
+		var first, last int64
+		if err := rows.Scan(&value.WorkspaceID, &value.UserID, &value.Username, &first, &last, &value.Count, &value.IP, &value.UserAgent); err != nil {
+			return domain.AccessLogPage{}, err
+		}
+		value.FirstAt, value.CreatedAt = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
+		result.Logins = append(result.Logins, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.AccessLogPage{}, err
+	}
+	result.HasMore = (page-1)*limit+len(result.Logins) < total
+	return result, nil
 }
 
 // sqlitePragmas are connection settings, not database settings: SQLite applies
@@ -3411,6 +3548,98 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 188 {
+		// reminders.add accepts "every Thursday" and "every day at 9am". A
+		// recurring reminder needs its cadence, the zone its wall-clock time is
+		// in, and the anchor its month-end clamping is computed from; the
+		// recurring flag alone could not say when it next came due.
+		columns, err := s.tableColumns(ctx, db, "reminders")
+		if err != nil {
+			return err
+		}
+		for _, column := range []struct{ name, definition string }{
+			{"recurrence", "TEXT NOT NULL DEFAULT ''"},
+			{"time_zone", "TEXT NOT NULL DEFAULT 'UTC'"},
+			{"recurrence_anchor", "INTEGER NOT NULL DEFAULT 0"},
+		} {
+			if !columns[column.name] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE reminders ADD COLUMN `+column.name+` `+column.definition); err != nil {
+					return fmt.Errorf("migrate reminder %s: %w", column.name, err)
+				}
+			}
+		}
+	}
+	if version < 187 {
+		// stars.add given only a channel stars the channel. stars could only
+		// hold messages, so a channel star was refused.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS channel_stars (
+			user_id TEXT NOT NULL REFERENCES users(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), created_at TEXT NOT NULL,
+			PRIMARY KEY (user_id, conversation_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate channel stars: %w", err)
+		}
+	}
+	if version < 186 {
+		// A scheduled message belongs to the bot, or the member and app, that
+		// scheduled it rather than to the exact bearer token, so a rotated
+		// token keeps its schedules. Every row already carries its author, app
+		// and bot, so each is rekeyed from them - including rows from before
+		// schema 102, which had no token identity at all and so were invisible
+		// to every list and delete; they now belong to their author with no
+		// app, as a first-party schedule does.
+		if err := rekeyScheduledMessageOwners(ctx, db); err != nil {
+			return err
+		}
+	}
+	if version < 185 {
+		// team.accessLogs reports one row per member, IP address and user
+		// agent with a count and the first and last time it was seen. The
+		// access_logs table held a row per request, and its IP carried the
+		// ephemeral source port, so one login was listed thousands of times.
+		// Existing rows are folded into the aggregate with their port removed,
+		// then the per-request table is dropped.
+		if err := s.migrateAccessLogins(ctx, db); err != nil {
+			return err
+		}
+	}
+	if version < 184 {
+		// An app-registered call's participants who have no account here. The
+		// calls API names them by the provider's external_id with a display
+		// name and avatar; call_participants can only hold member IDs, so these
+		// were previously stored as if their external_id were a user ID and
+		// then silently dropped by the users join.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS call_external_participants (
+			call_id TEXT NOT NULL REFERENCES calls(id), external_id TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (call_id, external_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate call external participants: %w", err)
+		}
+	}
+	if version < 183 {
+		// admin.emoji.list reports who uploaded each custom emoji and when, and
+		// emoji.list's cache_ts has to move whenever the custom set changes so a
+		// client's cached copy is invalidated. Rows written before this step keep
+		// zero values: the uploader and upload time were never recorded.
+		columns, err := s.tableColumns(ctx, db, "custom_emoji")
+		if err != nil {
+			return err
+		}
+		if !columns["created_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE custom_emoji ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate custom emoji created_at: %w", err)
+			}
+		}
+		if !columns["created_by"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE custom_emoji ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate custom emoji created_by: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS custom_emoji_revisions (
+			workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), changed_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate custom emoji revisions: %w", err)
+		}
+	}
 	if version < 182 {
 		// Direct conversation keys were joined with NUL, which PostgreSQL text
 		// refuses, so no direct message could be opened there; SQLite and
@@ -4632,12 +4861,14 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 // an information_schema query; an unlisted name is a programming error, not a
 // caller's input.
 var migratableTables = []string{
+	"access_logs",
 	"activity_items",
 	"app_installations",
 	"app_tokens",
 	"calls",
 	"canvases",
 	"conversations",
+	"custom_emoji",
 	"draft_attachments",
 	"drafts",
 	"ephemeral_messages",
@@ -7691,12 +7922,14 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		// belonging to this conversation are removed, never an app-registered call
 		// that names no conversation.
 		`DELETE FROM call_participants WHERE call_id IN (SELECT id FROM calls WHERE conversation_id = ?)`,
+		`DELETE FROM call_external_participants WHERE call_id IN (SELECT id FROM calls WHERE conversation_id = ?)`,
 		`DELETE FROM calls WHERE conversation_id = ?`,
 		`DELETE FROM closed_direct_conversations WHERE conversation_id = ?`,
 		`DELETE FROM scheduled_messages WHERE channel_id = ?`,
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM stars WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM channel_stars WHERE conversation_id = ?`,
 		// saved_items.message_id carries an enforced foreign key, so deleting a
 		// conversation in which anyone had saved a message failed outright
 		// until this line existed. activity_items and idempotency have no key
@@ -12584,8 +12817,11 @@ func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event ev
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji(workspace_id, name, url, alias_for) VALUES (?, ?, ?, ?)`, value.WorkspaceID, value.Name, value.URL, value.AliasFor); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji(workspace_id, name, url, alias_for, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)`, value.WorkspaceID, value.Name, value.URL, value.AliasFor, unixSeconds(value.CreatedAt), value.CreatedBy); err != nil {
 		return classify(err)
+	}
+	if err := touchEmojiRevision(ctx, tx, value.WorkspaceID, event.CreatedAt); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -12593,8 +12829,31 @@ func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event ev
 	return tx.Commit()
 }
 
+// touchEmojiRevision records that a workspace's custom emoji set changed, so
+// emoji.list's cache_ts moves with it. It never moves backwards: two changes in
+// the same second keep the later instant.
+func touchEmojiRevision(ctx context.Context, tx txRunner, workspace domain.WorkspaceID, at time.Time) error {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji_revisions(workspace_id, changed_at) VALUES (?, ?) ON CONFLICT(workspace_id) DO UPDATE SET changed_at = CASE WHEN excluded.changed_at > custom_emoji_revisions.changed_at THEN excluded.changed_at ELSE custom_emoji_revisions.changed_at END`, workspace, at.UnixMicro())
+	return err
+}
+
+func (s *Store) EmojiRevision(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	var micros int64
+	err := s.db.QueryRowContext(ctx, `SELECT changed_at FROM custom_emoji_revisions WHERE workspace_id = ?`, workspace).Scan(&micros)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMicro(micros).UTC(), nil
+}
+
 func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([]domain.CustomEmoji, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, name, url, alias_for FROM custom_emoji WHERE workspace_id = ? ORDER BY name`, workspace)
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, name, url, alias_for, created_at, created_by FROM custom_emoji WHERE workspace_id = ? ORDER BY name`, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -12602,8 +12861,12 @@ func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([
 	result := make([]domain.CustomEmoji, 0)
 	for rows.Next() {
 		var value domain.CustomEmoji
-		if err := rows.Scan(&value.WorkspaceID, &value.Name, &value.URL, &value.AliasFor); err != nil {
+		var createdAt int64
+		if err := rows.Scan(&value.WorkspaceID, &value.Name, &value.URL, &value.AliasFor, &createdAt, &value.CreatedBy); err != nil {
 			return nil, err
+		}
+		if createdAt != 0 {
+			value.CreatedAt = time.Unix(createdAt, 0).UTC()
 		}
 		result = append(result, value)
 	}
@@ -12613,6 +12876,9 @@ func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([
 	return result, nil
 }
 
+// RemoveEmoji removes a custom emoji together with every alias that points at
+// it. Slack removes the aliases with their target; leaving them behind listed
+// `alias:<gone>` entries that no client can render.
 func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
@@ -12630,12 +12896,20 @@ func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, n
 	if changed != 1 {
 		return store.ErrNotFound
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM custom_emoji WHERE workspace_id = ? AND alias_for = ?`, workspace, name); err != nil {
+		return err
+	}
+	if err := touchEmojiRevision(ctx, tx, workspace, event.CreatedAt); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+// RenameEmoji renames a custom emoji and retargets the aliases that pointed
+// at the old name, so a rename cannot leave them dangling.
 func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
@@ -12656,6 +12930,12 @@ func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, o
 			return store.ErrNotFound
 		}
 		return store.ErrAlreadyExists
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE custom_emoji SET alias_for = ? WHERE workspace_id = ? AND alias_for = ?`, newName, workspace, oldName); err != nil {
+		return err
+	}
+	if err := touchEmojiRevision(ctx, tx, workspace, event.CreatedAt); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -15635,9 +15915,14 @@ func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Even
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO stars(user_id, message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, message_id) DO NOTHING`, star.UserID, star.Message.ID, domain.NewStoredTime(star.CreatedAt))
+	var result sql.Result
+	if star.IsChannel() {
+		result, err = tx.ExecContext(ctx, `INSERT INTO channel_stars(user_id, conversation_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, conversation_id) DO NOTHING`, star.UserID, star.Conversation, domain.NewStoredTime(star.CreatedAt))
+	} else {
+		result, err = tx.ExecContext(ctx, `INSERT INTO stars(user_id, message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, message_id) DO NOTHING`, star.UserID, star.Message.ID, domain.NewStoredTime(star.CreatedAt))
+	}
 	if err != nil {
-		return err
+		return classify(err)
 	}
 	count, err := result.RowsAffected()
 	if err != nil {
@@ -15658,7 +15943,12 @@ func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.E
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `DELETE FROM stars WHERE user_id = ? AND message_id = ?`, star.UserID, star.Message.ID)
+	var result sql.Result
+	if star.IsChannel() {
+		result, err = tx.ExecContext(ctx, `DELETE FROM channel_stars WHERE user_id = ? AND conversation_id = ?`, star.UserID, star.Conversation)
+	} else {
+		result, err = tx.ExecContext(ctx, `DELETE FROM stars WHERE user_id = ? AND message_id = ?`, star.UserID, star.Message.ID)
+	}
 	if err != nil {
 		return err
 	}
@@ -15675,82 +15965,110 @@ func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.E
 	return tx.Commit()
 }
 
-func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+// starredItems is every message and channel star of one member in one
+// workspace, as one relation ordered by (created_at, item_key). A channel's
+// item_key is "channel:" and its ID, which no message ID can equal. A star in
+// a private conversation is listed only while the member still belongs to it,
+// the rule reactions and saved items apply: leaving a private channel ends
+// access to its messages' text.
+const starredItems = `SELECT s.created_at AS created_at, s.message_id AS item_key, 0 AS is_channel, m.conversation AS conversation,
+	m.id AS message_id, m.workspace_id AS workspace_id, m.author_id AS author_id, m.app_id AS app_id, m.text AS text, m.blocks AS blocks,
+	m.attachments AS attachments, m.thread_timestamp AS thread_timestamp, m.created_at AS message_created_at, m.deleted AS deleted
+	FROM stars s JOIN messages m ON m.id = s.message_id JOIN conversations c ON c.id = m.conversation
+	WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0
+	AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = s.user_id))
+	UNION ALL
+	SELECT c.created_at, 'channel:' || c.conversation_id, 1, c.conversation_id, '', v.workspace_id, '', '', '', '', '', '', '', 0
+	FROM channel_stars c JOIN conversations v ON v.id = c.conversation_id WHERE c.user_id = ? AND v.workspace_id = ?
+	AND (v.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = c.conversation_id AND cm.user_id = c.user_id))`
+
+func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
-	// A star in a private conversation is listed only while the user is still a
-	// member, the rule ListUserReactions and saved items already apply: leaving
-	// a private channel must end access to its messages' text, and a starred
-	// message used to keep it readable here indefinitely.
-	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id JOIN conversations c ON c.id = m.conversation WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
-	args := []any{user, workspace, user}
+	var page domain.StarPage
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+starredItems+`) AS starred`, user, workspace, user, workspace).Scan(&page.Total); err != nil {
+		return domain.StarPage{}, err
+	}
+	query := `SELECT created_at, item_key, is_channel, conversation, message_id, workspace_id, author_id, app_id, text, blocks, attachments, thread_timestamp, message_created_at, deleted FROM (` + starredItems + `) AS starred`
+	args := []any{user, workspace, user, workspace}
 	if after != "" {
 		separator := strings.IndexByte(after, 0)
 		if separator < 1 || separator == len(after)-1 {
-			return nil, "", false, domain.ErrInvalidCursor
+			return domain.StarPage{}, domain.ErrInvalidCursor
 		}
-		created, messageID := after[:separator], after[separator+1:]
-		query += ` AND (s.created_at > ? OR (s.created_at = ? AND s.message_id > ?))`
-		args = append(args, created, created, messageID)
+		created, key := after[:separator], after[separator+1:]
+		query += ` WHERE (created_at > ? OR (created_at = ? AND item_key > ?))`
+		args = append(args, created, created, key)
 	}
-	query += ` ORDER BY s.created_at, s.message_id LIMIT ?`
+	query += ` ORDER BY created_at, item_key LIMIT ?`
 	args = append(args, request.Limit+1)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	defer rows.Close()
 	values := make([]domain.Star, 0, request.Limit+1)
+	keys := make([]string, 0, request.Limit+1)
 	for rows.Next() {
 		var star domain.Star
-		var starCreated, messageCreated string
-		var deleted int
-		if err := rows.Scan(&starCreated, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.Conversation, &star.Message.AuthorID, &star.Message.AppID, &star.Message.Text, &star.Message.Blocks, &star.Message.Attachments, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
-			return nil, "", false, err
+		var starCreated, key, messageCreated string
+		var isChannel, deleted int
+		if err := rows.Scan(&starCreated, &key, &isChannel, &star.Conversation, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.AuthorID, &star.Message.AppID, &star.Message.Text, &star.Message.Blocks, &star.Message.Attachments, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
+			return domain.StarPage{}, err
 		}
 		star.UserID = user
-		star.Conversation = star.Message.Conversation
-		star.Message.Deleted = deleted != 0
 		star.CreatedAt, err = domain.ParseStoredTime(starCreated)
 		if err != nil {
-			return nil, "", false, err
+			return domain.StarPage{}, err
 		}
-		star.Message.CreatedAt, err = domain.ParseStoredTime(messageCreated)
-		if err != nil {
-			return nil, "", false, err
+		if isChannel != 0 {
+			star.Message = domain.Message{}
+		} else {
+			star.Message.Conversation = star.Conversation
+			star.Message.Deleted = deleted != 0
+			star.Message.CreatedAt, err = domain.ParseStoredTime(messageCreated)
+			if err != nil {
+				return domain.StarPage{}, err
+			}
 		}
 		values = append(values, star)
+		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
-	hasMore := len(values) > request.Limit
-	if hasMore {
+	page.HasMore = len(values) > request.Limit
+	if page.HasMore {
 		values = values[:request.Limit]
 	}
-	messages := make([]domain.Message, len(values))
+	messages := make([]domain.Message, 0, len(values))
+	positions := make([]int, 0, len(values))
 	for index := range values {
-		messages[index] = values[index].Message
-	}
-	if err := s.hydrateMessageFiles(ctx, messages); err != nil {
-		return nil, "", false, err
-	}
-	for index := range values {
-		values[index].Message = messages[index]
-	}
-	var next domain.Cursor
-	if hasMore {
-		next, err = domain.NewListCursor(string(domain.NewStoredTime(values[len(values)-1].CreatedAt)) + "\x00" + string(values[len(values)-1].Message.ID))
-		if err != nil {
-			return nil, "", false, err
+		if !values[index].IsChannel() {
+			messages = append(messages, values[index].Message)
+			positions = append(positions, index)
 		}
 	}
-	return values, next, hasMore, nil
+	if err := s.hydrateMessageFiles(ctx, messages); err != nil {
+		return domain.StarPage{}, err
+	}
+	for index, position := range positions {
+		values[position].Message = messages[index]
+	}
+	page.Stars = values
+	if page.HasMore {
+		last := len(values) - 1
+		page.NextCursor, err = domain.NewListCursor(string(domain.NewStoredTime(values[last].CreatedAt)) + "\x00" + keys[last])
+		if err != nil {
+			return domain.StarPage{}, err
+		}
+	}
+	return page, nil
 }
 
 const savedItemColumns = `id, workspace_id, user_id, message_id, conversation_id, state, created_at, updated_at`
@@ -17028,7 +17346,7 @@ func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, ev
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring), string(reminder.Recurrence), reminderTimeZone(reminder.TimeZone), unixSeconds(reminder.RecurrenceAnchor)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -17037,14 +17355,14 @@ func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, ev
 	return tx.Commit()
 }
 
-func (s *Store) GetReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID) (domain.Reminder, error) {
+// reminderColumns is the one column list every reminder read uses.
+const reminderColumns = `id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor`
+
+func scanReminder(row rowScanner) (domain.Reminder, error) {
 	var reminder domain.Reminder
-	var due, complete, recurring int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring FROM reminders WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user).Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Reminder{}, store.ErrNotFound
-	}
-	if err != nil {
+	var due, complete, recurring, anchor int64
+	var recurrence string
+	if err := row.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring, &recurrence, &reminder.TimeZone, &anchor); err != nil {
 		return domain.Reminder{}, err
 	}
 	reminder.Time = time.Unix(due, 0).UTC()
@@ -17052,25 +17370,34 @@ func (s *Store) GetReminder(ctx context.Context, workspace domain.WorkspaceID, u
 		reminder.CompleteAt = time.Unix(complete, 0).UTC()
 	}
 	reminder.Recurring = recurring != 0
+	reminder.Recurrence = domain.ReminderRecurrence(recurrence)
+	if anchor != 0 {
+		reminder.RecurrenceAnchor = time.Unix(anchor, 0).UTC()
+	}
 	return reminder, nil
 }
 
-func (s *Store) ReminderInWorkspace(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID) (domain.Reminder, error) {
-	var reminder domain.Reminder
-	var due, complete, recurring int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring)
+func reminderTimeZone(value string) string {
+	if value == "" {
+		return "UTC"
+	}
+	return value
+}
+
+func (s *Store) GetReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID) (domain.Reminder, error) {
+	reminder, err := scanReminder(s.db.QueryRowContext(ctx, `SELECT `+reminderColumns+` FROM reminders WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Reminder{}, store.ErrNotFound
 	}
-	if err != nil {
-		return domain.Reminder{}, err
+	return reminder, err
+}
+
+func (s *Store) ReminderInWorkspace(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID) (domain.Reminder, error) {
+	reminder, err := scanReminder(s.db.QueryRowContext(ctx, `SELECT `+reminderColumns+` FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Reminder{}, store.ErrNotFound
 	}
-	reminder.Time = time.Unix(due, 0).UTC()
-	if complete != 0 {
-		reminder.CompleteAt = time.Unix(complete, 0).UTC()
-	}
-	reminder.Recurring = recurring != 0
-	return reminder, nil
+	return reminder, err
 }
 
 func (s *Store) ListReminders(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.ReminderPage, error) {
@@ -17081,23 +17408,19 @@ func (s *Store) ListReminders(ctx context.Context, workspace domain.WorkspaceID,
 	if err != nil {
 		return domain.ReminderPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring FROM reminders WHERE workspace_id = ? AND user_id = ? AND id > ? ORDER BY id LIMIT ?`, workspace, user, after, request.Limit+1)
+	// The member's own reminders and the ones they set for someone else, as
+	// Slack's reminders.list returns; the second half used to be missing.
+	rows, err := s.db.QueryContext(ctx, `SELECT `+reminderColumns+` FROM reminders WHERE workspace_id = ? AND (user_id = ? OR creator_id = ?) AND id > ? ORDER BY id LIMIT ?`, workspace, user, user, after, request.Limit+1)
 	if err != nil {
 		return domain.ReminderPage{}, err
 	}
 	defer rows.Close()
 	values := make([]domain.Reminder, 0, request.Limit+1)
 	for rows.Next() {
-		var reminder domain.Reminder
-		var due, complete, recurring int64
-		if err := rows.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring); err != nil {
+		reminder, err := scanReminder(rows)
+		if err != nil {
 			return domain.ReminderPage{}, err
 		}
-		reminder.Time = time.Unix(due, 0).UTC()
-		if complete != 0 {
-			reminder.CompleteAt = time.Unix(complete, 0).UTC()
-		}
-		reminder.Recurring = recurring != 0
 		values = append(values, reminder)
 	}
 	if err := rows.Err(); err != nil {
@@ -17206,7 +17529,7 @@ func (s *Store) DueReminders(ctx context.Context, workspace domain.WorkspaceID, 
 	if limit <= 0 || now.IsZero() {
 		return nil, store.InvalidArgument("due reminders need a positive limit and a current time")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring
+	rows, err := s.db.QueryContext(ctx, `SELECT `+reminderColumns+`
 		FROM reminders
 		WHERE (? = '' OR workspace_id = ?) AND delivered_at = 0 AND complete_at = 0 AND due_at <= ?
 		ORDER BY due_at, id LIMIT ?`, workspace, workspace, now.UTC().Unix(), limit)
@@ -17216,23 +17539,16 @@ func (s *Store) DueReminders(ctx context.Context, workspace domain.WorkspaceID, 
 	defer rows.Close()
 	values := make([]domain.Reminder, 0, limit)
 	for rows.Next() {
-		var value domain.Reminder
-		var due, complete int64
-		var recurring int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Creator, &value.User, &value.Text, &due, &complete, &recurring); err != nil {
+		value, err := scanReminder(rows)
+		if err != nil {
 			return nil, err
 		}
-		value.Time = time.Unix(due, 0).UTC()
-		if complete != 0 {
-			value.CompleteAt = time.Unix(complete, 0).UTC()
-		}
-		value.Recurring = recurring != 0
 		values = append(values, value)
 	}
 	return values, rows.Err()
 }
 
-func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
+func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt, next time.Time, event events.Event) (bool, error) {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
@@ -17240,8 +17556,16 @@ func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.Work
 	defer tx.Rollback()
 	// The claim is the update. Two workers reading the same batch both try, and
 	// only the one whose update finds delivered_at still zero writes the notice.
-	result, err := tx.ExecContext(ctx, `UPDATE reminders SET delivered_at = ? WHERE id = ? AND workspace_id = ? AND delivered_at = 0`,
-		deliveredAt.UTC().Unix(), id, workspace)
+	// A recurring reminder is claimed by moving its due time to the next
+	// occurrence, which takes it out of the due set the same way.
+	var result sql.Result
+	if next.IsZero() {
+		result, err = tx.ExecContext(ctx, `UPDATE reminders SET delivered_at = ? WHERE id = ? AND workspace_id = ? AND delivered_at = 0 AND due_at <= ?`,
+			deliveredAt.UTC().Unix(), id, workspace, deliveredAt.UTC().Unix())
+	} else {
+		result, err = tx.ExecContext(ctx, `UPDATE reminders SET due_at = ? WHERE id = ? AND workspace_id = ? AND delivered_at = 0 AND due_at <= ?`,
+			next.UTC().Unix(), id, workspace, deliveredAt.UTC().Unix())
+	}
 	if err != nil {
 		return false, classify(err)
 	}
@@ -18862,6 +19186,9 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 			return err
 		}
 	}
+	if err := insertExternalCallParticipants(ctx, tx, value.ID, value.ExternalParticipants); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
@@ -18882,6 +19209,38 @@ func scanCall(row rowScanner) (domain.Call, error) {
 		value.EndedAt = time.Unix(ended, 0).UTC()
 	}
 	return value, nil
+}
+
+func insertExternalCallParticipants(ctx context.Context, tx txRunner, id domain.CallID, values []domain.ExternalCallParticipant) error {
+	for _, value := range values {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO call_external_participants(call_id, external_id, display_name, avatar_url) VALUES (?, ?, ?, ?)`, id, value.ExternalID, value.DisplayName, value.AvatarURL); err != nil {
+			return classify(err)
+		}
+	}
+	return nil
+}
+
+// fillCallParticipants reads both participant sets of a call.
+func fillCallParticipants(ctx context.Context, query rowQuerier, value *domain.Call) error {
+	participants, err := callParticipants(ctx, query, value.ID)
+	if err != nil {
+		return err
+	}
+	value.Participants = participants
+	rows, err := query.QueryContext(ctx, `SELECT external_id, display_name, avatar_url FROM call_external_participants WHERE call_id = ? ORDER BY external_id`, value.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	value.ExternalParticipants = nil
+	for rows.Next() {
+		var external domain.ExternalCallParticipant
+		if err := rows.Scan(&external.ExternalID, &external.DisplayName, &external.AvatarURL); err != nil {
+			return err
+		}
+		value.ExternalParticipants = append(value.ExternalParticipants, external)
+	}
+	return rows.Err()
 }
 
 func callParticipants(ctx context.Context, query rowQuerier, id domain.CallID) ([]domain.UserID, error) {
@@ -18929,7 +19288,7 @@ func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joi
 				return domain.Call{}, false, err
 			}
 		}
-		existing.Participants, err = callParticipants(ctx, tx, existing.ID)
+		err = fillCallParticipants(ctx, tx, &existing)
 		if err != nil {
 			return domain.Call{}, false, err
 		}
@@ -18974,7 +19333,7 @@ func (s *Store) ActiveHuddle(ctx context.Context, workspace domain.WorkspaceID, 
 	if err != nil {
 		return domain.Call{}, translateNotFound(err)
 	}
-	value.Participants, err = callParticipants(ctx, s.db, value.ID)
+	err = fillCallParticipants(ctx, s.db, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -19003,7 +19362,7 @@ func (s *Store) JoinCall(ctx context.Context, workspace domain.WorkspaceID, id d
 			return domain.Call{}, err
 		}
 	}
-	value.Participants, err = callParticipants(ctx, tx, id)
+	err = fillCallParticipants(ctx, tx, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -19035,7 +19394,7 @@ func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id 
 		return domain.Call{}, err
 	}
 	if removed == 0 {
-		value.Participants, err = callParticipants(ctx, tx, id)
+		err = fillCallParticipants(ctx, tx, &value)
 		if err != nil {
 			return domain.Call{}, err
 		}
@@ -19044,7 +19403,7 @@ func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id 
 	if err := insertOutbox(ctx, tx, left); err != nil {
 		return domain.Call{}, err
 	}
-	value.Participants, err = callParticipants(ctx, tx, id)
+	err = fillCallParticipants(ctx, tx, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -19076,7 +19435,7 @@ func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	if err != nil {
 		return domain.Call{}, err
 	}
-	value.Participants, err = callParticipants(ctx, s.db, id)
+	err = fillCallParticipants(ctx, s.db, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -19142,7 +19501,7 @@ func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	return tx.Commit()
 }
 
-func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) error {
+func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, externals []domain.ExternalCallParticipant, event events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
@@ -19162,6 +19521,12 @@ func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.Worksp
 		if _, err := tx.ExecContext(ctx, `INSERT INTO call_participants(call_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0`, id, userID, workspace); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM call_external_participants WHERE call_id = ?`, id); err != nil {
+		return err
+	}
+	if err := insertExternalCallParticipants(ctx, tx, id, externals); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err

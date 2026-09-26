@@ -194,6 +194,26 @@ func itemEvent(eventType string, withReaction bool) builder {
 		required = append(required, "reaction")
 	}
 	return func(delivered Delivered, _ Surface) ([]Inner, error) {
+		// A star may be on a channel rather than a message; its item is then
+		// {"type":"channel","channel":...} with no ts. Only a star can be.
+		if timestamp, _ := delivered.Field("ts"); timestamp == "" && !withReaction && strings.HasPrefix(eventType, "star_") {
+			values, err := stringFields(delivered, "channel_id", "user_id")
+			if err != nil {
+				return nil, err
+			}
+			item, err := encodeObject(map[string]json.RawMessage{
+				payloadTypeField: mustEncodeString("channel"),
+				"channel":        mustEncodeString(values["channel_id"]),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrPayloadFieldInvalid, err)
+			}
+			inner, err := newInner(eventType, delivered, String("user", values["user_id"]), JSON("item", item))
+			if err != nil {
+				return nil, err
+			}
+			return []Inner{inner}, nil
+		}
 		values, err := stringFields(delivered, required...)
 		if err != nil {
 			return nil, err
@@ -851,7 +871,11 @@ func emojiChanged(subtype string) builder {
 			if err != nil {
 				return nil, err
 			}
-			fields = append(fields, Strings("names", []string{values["name"]}))
+			names := []string{values["name"]}
+			if removed, ok := delivered.Strings("names"); ok && len(removed) > 0 {
+				names = removed
+			}
+			fields = append(fields, Strings("names", names))
 		case "rename":
 			values, err := stringFields(delivered, "old_name", "new_name")
 			if err != nil {

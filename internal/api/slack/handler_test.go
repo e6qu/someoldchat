@@ -230,7 +230,18 @@ func testHandlerWithStoredTokenAuth(scopes ...auth.Scope) (http.Handler, *memory
 }
 
 func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store) {
-	h, s := testHandlerValue(stored, scopes...)
+	return testFixtureAs(stored, domain.TokenBot, scopes...)
+}
+
+// testUserHandlerWithStore is the shared fixture with `token` as U1's user
+// token rather than the app's bot token, for the methods Slack serves to user
+// tokens only.
+func testUserHandlerWithStore() (http.Handler, *memory.Store) {
+	return testFixtureAs(false, domain.TokenUser, defaultTestScopes()...)
+}
+
+func testFixtureAs(stored bool, tokenType domain.TokenType, scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	h, s := testHandlerValueAs(stored, tokenType, scopes...)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	return mux, s
@@ -239,6 +250,10 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 // testHandlerValue is testFixture before registration, for a test that has to
 // configure the Handler itself — mounting a limiter, for one.
 func testHandlerValue(stored bool, scopes ...auth.Scope) (Handler, *memory.Store) {
+	return testHandlerValueAs(stored, domain.TokenBot, scopes...)
+}
+
+func testHandlerValueAs(stored bool, tokenType domain.TokenType, scopes ...auth.Scope) (Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
@@ -305,8 +320,12 @@ func testHandlerValue(stored bool, scopes ...auth.Scope) (Handler, *memory.Store
 		names = append(names, string(scope))
 	}
 	var authenticator auth.Authenticator
+	botID := domain.BotID("B1")
+	if tokenType == domain.TokenUser {
+		botID = ""
+	}
 	if stored {
-		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: names}); err != nil {
+		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: names}); err != nil {
 			panic(err)
 		}
 		value, err := auth.NewStored(s)
@@ -315,7 +334,7 @@ func testHandlerValue(stored bool, scopes ...auth.Scope) (Handler, *memory.Store
 		}
 		authenticator = value
 	} else {
-		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: granted})
+		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: granted})
 		if err != nil {
 			panic(err)
 		}
@@ -472,7 +491,7 @@ func TestAdminUsersSessionInvalidateRevokesSession(t *testing.T) {
 }
 
 func TestDoNotDisturbEndClearsEnabledState(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	if err := store.SetDoNotDisturb(context.Background(), domain.DoNotDisturb{WorkspaceID: "T1", UserID: "U1", Enabled: true}, events.Event{ID: "event-dnd-enabled", WorkspaceID: "T1", ActorID: "U1", Topic: "user.dnd_enabled", Payload: "U1", CreatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -882,7 +901,7 @@ func TestTeamPreferencesListReturnsEnforcedWorkspacePolicies(t *testing.T) {
 }
 
 func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/team.integrationLogs?token=token&app_id=A1&team_id=Tother", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/team.integrationLogs?token=token&app_id=A1&team_id=Tother&count=25", nil)
 	response := httptest.NewRecorder()
 	testHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -894,11 +913,16 @@ func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
 			AppID  string `json:"app_id"`
 			UserID string `json:"user_id"`
 		} `json:"logs"`
+		Paging struct {
+			Count, Page, Pages, Total int
+		} `json:"paging"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.OK || len(body.Logs) != 1 || body.Logs[0].AppID != "A1" || body.Logs[0].UserID != "U1" {
+	// paging.count is the page size requested, not the length of this page.
+	if !body.OK || len(body.Logs) != 1 || body.Logs[0].AppID != "A1" || body.Logs[0].UserID != "U1" ||
+		body.Paging.Count != 25 || body.Paging.Total != 1 || body.Paging.Pages != 1 {
 		t.Fatalf("unexpected body: %s", response.Body)
 	}
 }
@@ -1361,7 +1385,8 @@ func TestCallsLifecycle(t *testing.T) {
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"title":"Updated call"`) {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
 	}
-	participantsAdd := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users=U2"))
+	externalUsers := url.QueryEscape(`[{"slack_id":"U2"},{"external_id":"guest-1","display_name":"Guest","avatar_url":"https://call.example/guest.png"}]`)
+	participantsAdd := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users="+externalUsers))
 	participantsAdd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	participantsAdd.Header.Set("Authorization", "Bearer token")
 	participantsAdded := httptest.NewRecorder()
@@ -1375,6 +1400,27 @@ func TestCallsLifecycle(t *testing.T) {
 	handler.ServeHTTP(got, info)
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), response.Call.ID) {
 		t.Fatalf("info status=%d body=%s", got.Code, got.Body)
+	}
+	// Slack's Call object lists participants as objects, not bare IDs; an
+	// external participant keeps its provider-given name and avatar.
+	var infoBody struct {
+		Call struct {
+			Users []map[string]string `json:"users"`
+		} `json:"call"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &infoBody); err != nil || len(infoBody.Call.Users) != 2 ||
+		infoBody.Call.Users[0]["slack_id"] != "U2" ||
+		infoBody.Call.Users[1]["external_id"] != "guest-1" || infoBody.Call.Users[1]["display_name"] != "Guest" ||
+		infoBody.Call.Users[1]["avatar_url"] != "https://call.example/guest.png" {
+		t.Fatalf("info users=%s err=%v", got.Body, err)
+	}
+	malformed := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users=%5B%7B"))
+	malformed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	malformed.Header.Set("Authorization", "Bearer token")
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, malformed)
+	if rejected.Code != http.StatusOK || !strings.Contains(rejected.Body.String(), `"error":"invalid_arguments"`) {
+		t.Fatalf("malformed users status=%d body=%s", rejected.Code, rejected.Body)
 	}
 	participants := httptest.NewRequest(http.MethodPost, "/api/calls.participants.remove", strings.NewReader("id="+response.Call.ID+"&users=U2"))
 	participants.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1440,20 +1486,65 @@ func TestTeamBillableInfoUsesDurableMembershipState(t *testing.T) {
 }
 
 func TestAccessLogsRequireAdminAndExposeRecordedAccess(t *testing.T) {
-	handler := testHandler()
-	request := httptest.NewRequest(http.MethodGet, "/api/users.info?user=U1", nil)
-	request.Header.Set("Authorization", "Bearer token")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("recorded request status=%d body=%s", response.Code, response.Body)
+	handler, s := testHandlerWithStore()
+	port := 40000
+	get := func(path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("User-Agent", "access-log-test")
+		// Each request arrives from a different ephemeral source port.
+		port++
+		request.RemoteAddr = "192.0.2.10:" + strconv.Itoa(port)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
 	}
-	logs := httptest.NewRequest(http.MethodGet, "/api/team.accessLogs", nil)
-	logs.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, logs)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"user_id":"U1"`) {
-		t.Fatalf("logs status=%d body=%s", result.Code, result.Body)
+	for range 3 {
+		if response := get("/api/users.info?user=U1"); response.Code != http.StatusOK {
+			t.Fatalf("recorded request status=%d body=%s", response.Code, response.Body)
+		}
+	}
+	result := get("/api/team.accessLogs?count=10")
+	var body struct {
+		OK     bool `json:"ok"`
+		Logins []struct {
+			UserID    string `json:"user_id"`
+			IP        string `json:"ip"`
+			UserAgent string `json:"user_agent"`
+			Count     int    `json:"count"`
+			DateFirst int64  `json:"date_first"`
+			DateLast  int64  `json:"date_last"`
+		} `json:"logins"`
+		Paging struct {
+			Count, Page, Pages, Total int
+		} `json:"paging"`
+	}
+	if err := json.Unmarshal(result.Body.Bytes(), &body); err != nil || !body.OK {
+		t.Fatalf("logs status=%d body=%s err=%v", result.Code, result.Body, err)
+	}
+	// One row per member, address (without its port) and user agent, counting
+	// every access; paging.count is the page size asked for.
+	var found bool
+	for _, login := range body.Logins {
+		if login.UserID == "U1" && login.UserAgent == "access-log-test" {
+			found = true
+			if login.IP != "192.0.2.10" || login.Count < 3 || login.DateFirst == 0 || login.DateLast < login.DateFirst {
+				t.Fatalf("aggregated login=%+v", login)
+			}
+		}
+	}
+	if !found || body.Paging.Count != 10 || body.Paging.Page != 1 || body.Paging.Total != len(body.Logins) || body.Paging.Pages != 1 {
+		t.Fatalf("logins=%s", result.Body)
+	}
+	if result := get("/api/team.accessLogs?page=101"); !strings.Contains(result.Body.String(), `"error":"over_pagination_limit"`) {
+		t.Fatalf("page 101=%s", result.Body)
+	}
+	// Every member's addresses and devices are an administrator's to read.
+	if err := s.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	if result := get("/api/team.accessLogs"); !strings.Contains(result.Body.String(), `"ok":false`) {
+		t.Fatalf("member read the access logs: %s", result.Body)
 	}
 }
 
@@ -3399,7 +3490,15 @@ func TestPostMessageRejectsArchivedChannelWithSlackCode(t *testing.T) {
 
 func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	handler := testHandler()
-	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=link"))
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/chat.unfurl", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, request)
+		return result
+	}
+	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text="+url.QueryEscape("see <https://example.com> and https://example.org/b?x=1&y=2")))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	post.Header.Set("Authorization", "Bearer token")
 	posted := httptest.NewRecorder()
@@ -3410,13 +3509,34 @@ func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	if err := json.NewDecoder(posted.Body).Decode(&body); err != nil || body.TS == "" {
 		t.Fatalf("post body=%s err=%v", posted.Body, err)
 	}
-	unfurl := httptest.NewRequest(http.MethodPost, "/api/chat.unfurl", strings.NewReader("channel=C1&ts="+body.TS+"&unfurls=%7B%22https%3A%2F%2Fexample.com%22%3A%7B%22title%22%3A%22Example%22%7D%7D"))
-	unfurl.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	unfurl.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, unfurl)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"unfurls":{"https://example.com":{"title":"Example"}}`) {
+	unfurls := func(value string) string { return url.QueryEscape(value) }
+	// The success schema is exactly {"ok":true}.
+	if result := call("channel=C1&ts=" + body.TS + "&unfurls=" + unfurls(`{"https://example.com":{"title":"Example"}}`)); result.Code != http.StatusOK || strings.TrimSpace(result.Body.String()) != `{"ok":true}` {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+	// A second call names the message by unfurl_id, and adds a preview for
+	// another URL without dropping the first.
+	unfurlID := url.QueryEscape("C1." + body.TS)
+	if result := call("source=conversations_history&unfurl_id=" + unfurlID + "&unfurls=" + unfurls(`{"https://example.org/b?x=1&y=2":{"title":"B"}}`)); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("unfurl_id status=%d body=%s", result.Code, result.Body)
+	}
+	history := httptest.NewRequest(http.MethodGet, "/api/conversations.history?channel=C1&limit=1", nil)
+	history.Header.Set("Authorization", "Bearer token")
+	read := httptest.NewRecorder()
+	handler.ServeHTTP(read, history)
+	if !strings.Contains(read.Body.String(), `"title":"Example"`) || !strings.Contains(read.Body.String(), `"title":"B"`) {
+		t.Fatalf("history after two unfurls=%s", read.Body)
+	}
+	// A URL the message does not contain cannot be unfurled, and neither can a
+	// composer unfurl, which names no posted message.
+	for _, rejected := range []string{
+		"channel=C1&ts=" + body.TS + "&unfurls=" + unfurls(`{"https://elsewhere.example":{"title":"X"}}`),
+		"source=composer&unfurl_id=" + unfurlID + "&unfurls=" + unfurls(`{"https://example.com":{"title":"X"}}`),
+		"channel=C1&ts=1.000001&unfurls=" + unfurls(`{"https://example.com":{"title":"X"}}`),
+	} {
+		if result := call(rejected); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"error":"cannot_unfurl_url"`) {
+			t.Fatalf("%s: status=%d body=%s", rejected, result.Code, result.Body)
+		}
 	}
 }
 
@@ -4067,14 +4187,55 @@ func TestAdminEmojiLifecycle(t *testing.T) {
 	list.Header.Set("Authorization", "Bearer token")
 	listed := httptest.NewRecorder()
 	handler.ServeHTTP(listed, list)
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"hello":"alias:shipit"`) {
-		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body)
+	// admin.emoji.list answers objects, not emoji.list's strings: the Java
+	// SDK's admin Emoji model failed to decode a bare URL.
+	var adminList struct {
+		OK    bool `json:"ok"`
+		Emoji map[string]struct {
+			URL         string `json:"url"`
+			DateCreated int64  `json:"date_created"`
+			UploadedBy  string `json:"uploaded_by"`
+		} `json:"emoji"`
+		ResponseMetadata struct {
+			NextCursor string `json:"next_cursor"`
+		} `json:"response_metadata"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &adminList); err != nil || listed.Code != http.StatusOK || !adminList.OK ||
+		adminList.Emoji["hello"].URL != "alias:shipit" || adminList.Emoji["shipit"].URL != "https://cdn.example/shipit.png" ||
+		adminList.Emoji["shipit"].DateCreated == 0 || adminList.Emoji["shipit"].UploadedBy == "" {
+		t.Fatalf("list status=%d body=%s err=%v", listed.Code, listed.Body, err)
+	}
+	// limit=1 pages by name and hands back a cursor for the rest.
+	first := call("admin.emoji.list", "limit=1")
+	adminList.Emoji = nil
+	if err := json.Unmarshal(first.Body.Bytes(), &adminList); err != nil || len(adminList.Emoji) != 1 || adminList.Emoji["hello"].URL == "" || adminList.ResponseMetadata.NextCursor == "" {
+		t.Fatalf("first page=%s err=%v", first.Body, err)
+	}
+	second := call("admin.emoji.list", "limit=1&cursor="+adminList.ResponseMetadata.NextCursor)
+	adminList.Emoji = nil
+	if err := json.Unmarshal(second.Body.Bytes(), &adminList); err != nil || len(adminList.Emoji) != 1 || adminList.Emoji["shipit"].URL == "" || adminList.ResponseMetadata.NextCursor != "" {
+		t.Fatalf("second page=%s err=%v", second.Body, err)
+	}
+	// emoji.list's cache_ts is Slack's seconds.micros and moves with the set.
+	cacheTS := func() string {
+		var body struct {
+			CacheTS string `json:"cache_ts"`
+		}
+		_ = json.Unmarshal(call("emoji.list", "").Body.Bytes(), &body)
+		return body.CacheTS
+	}
+	before := cacheTS()
+	if !regexp.MustCompile(`^[1-9][0-9]*\.[0-9]{6}$`).MatchString(before) {
+		t.Fatalf("cache_ts=%q", before)
 	}
 	if res := call("admin.emoji.rename", "name=hello&new_name=greeting"); res.Code != http.StatusOK {
 		t.Fatalf("rename status=%d body=%s", res.Code, res.Body)
 	}
 	if res := call("admin.emoji.remove", "name=shipit"); res.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", res.Code, res.Body)
+	}
+	if after := cacheTS(); after == before {
+		t.Fatalf("cache_ts did not move after a removal: %q", after)
 	}
 }
 
@@ -4229,7 +4390,8 @@ func TestUsersIdentity(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/users.identity", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
-	testHandler().ServeHTTP(res, req)
+	handler, _ := testUserHandlerWithStore()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"user":{"id":"U1","name":"alice"}`) || !strings.Contains(res.Body.String(), `"team":{"id":"T1"}`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
@@ -4239,7 +4401,8 @@ func TestUsersDeletePhoto(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/users.deletePhoto", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
-	testHandler().ServeHTTP(res, req)
+	handler, _ := testUserHandlerWithStore()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || res.Body.String() != "{\"ok\":true}\n" {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
@@ -4263,21 +4426,38 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	for _, contentType := range []string{"image/png", "application/octet-stream"} {
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	jpeg := []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01")
+	for _, test := range []struct {
+		contentType string
+		content     []byte
+		want        string
+	}{
+		// A real signature: the profile service sniffs the bytes and refuses a
+		// stream whose content disagrees with the declared type, which is the
+		// upload half of the stored-XSS repair.
+		{"image/png", png, `"ok":true`},
+		// What Web API 8 emits for a Buffer.
+		{"application/octet-stream", png, `"ok":true`},
+		// What slack-api-client 1.49.0 labels every photo, whatever its
+		// format; it used to be taken for PNG, so a JPEG was refused.
+		{"imageData/*", jpeg, `"ok":true`},
+		{"imageData/*", png, `"ok":true`},
+		// Bytes that are no allow-listed image, or that contradict their
+		// declared type, are the pinned bad_image.
+		{"imageData/*", []byte("<svg onload=alert(1)>"), `"error":"bad_image"`},
+		{"image/png", jpeg, `"error":"bad_image"`},
+	} {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		part, err := writer.CreatePart(textproto.MIMEHeader{
-			"Content-Disposition": {`form-data; name="image"; filename="photo.png"`},
-			"Content-Type":        {contentType},
+			"Content-Disposition": {`form-data; name="image"; filename="photo"`},
+			"Content-Type":        {test.contentType},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A real PNG signature: the profile service sniffs the bytes and refuses a
-		// stream whose content disagrees with the declared type, which is the upload
-		// half of the stored-XSS repair. The octet-stream case is what Web API 8
-		// emits for a Buffer.
-		if _, err := part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")); err != nil {
+		if _, err := part.Write(test.content); err != nil {
 			t.Fatal(err)
 		}
 		if err := writer.Close(); err != nil {
@@ -4288,8 +4468,8 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		result := httptest.NewRecorder()
 		mux.ServeHTTP(result, req)
-		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
-			t.Fatalf("content-type=%s status=%d body=%s", contentType, result.Code, result.Body)
+		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), test.want) {
+			t.Fatalf("content-type=%s status=%d body=%s, want %s", test.contentType, result.Code, result.Body, test.want)
 		}
 	}
 }
@@ -4321,7 +4501,7 @@ func TestUsersSetActiveAndAdminTeamRoleLists(t *testing.T) {
 }
 
 func TestDoNotDisturbLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler, _ := testUserHandlerWithStore()
 	info := httptest.NewRequest(http.MethodGet, "/api/dnd.info", nil)
 	info.Header.Set("Authorization", "Bearer token")
 	infoResult := httptest.NewRecorder()
@@ -5112,7 +5292,7 @@ func TestScheduleMessagePreservesCurrentSlackMessageOptionsUntilDelivery(t *test
 	if scheduled["ok"] != true || id == "" {
 		t.Fatalf("schedule response=%v", scheduled)
 	}
-	item, err := backing.ClaimScheduledMessageForCredential(context.Background(), "T1", domain.HashToken("token"), domain.ScheduledMessageID(id), "delivery", time.Minute)
+	item, err := backing.ClaimScheduledMessageForCredential(context.Background(), "T1", domain.ScheduledMessageOwner("T1", "U1", "A1", "B1"), domain.ScheduledMessageID(id), "delivery", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5151,11 +5331,21 @@ func TestScheduleMessageRejectsMarkdownConflictsAndInvalidBooleans(t *testing.T)
 	}
 }
 
-func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
+func TestScheduledMessageAPIIsScopedToTheSchedulingIdentity(t *testing.T) {
 	handler, store := testHandlerWithStoredTokenAuth(auth.ScopeChatWrite)
-	store.SeedToken(context.Background(), "other-token", domain.TokenRecord{
+	// A rotated token of the same bot, a different app's bot, and a user
+	// token of the same member and app.
+	store.SeedToken(context.Background(), "rotated-token", domain.TokenRecord{
 		WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1",
 		TokenType: "bot", Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	store.SeedToken(context.Background(), "foreign-bot-token", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A9", BotID: "B9",
+		TokenType: "bot", Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	store.SeedToken(context.Background(), "user-token", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1",
+		TokenType: "user", Scopes: []string{string(auth.ScopeChatWrite)},
 	})
 	call := func(token, path, body string) map[string]any {
 		t.Helper()
@@ -5175,7 +5365,7 @@ func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
 	}
 	postAt := time.Now().UTC().Add(time.Hour).Unix()
 	scheduled := call("token", "/api/chat.scheduleMessage", url.Values{
-		"channel": {"C1"}, "text": {"token-owned"}, "post_at": {strconv.FormatInt(postAt, 10)},
+		"channel": {"C1"}, "text": {"bot-owned"}, "post_at": {strconv.FormatInt(postAt, 10)},
 	}.Encode())
 	id, _ := scheduled["scheduled_message_id"].(string)
 	if scheduled["ok"] != true || id == "" {
@@ -5185,21 +5375,46 @@ func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
 	if scheduled["post_at"] != strconv.FormatInt(postAt, 10) || message["bot_id"] != "B1" || message["type"] != "delayed_message" || message["subtype"] != "bot_message" {
 		t.Fatalf("schedule response lost Slack post_at or bot attribution: %v", scheduled)
 	}
-	otherPage := call("other-token", "/api/chat.scheduledMessages.list", "")
-	if items, _ := otherPage["scheduled_messages"].([]any); otherPage["ok"] != true || len(items) != 0 {
-		t.Fatalf("another token saw scheduled messages: %v", otherPage)
-	}
-	otherDelete := call("other-token", "/api/chat.deleteScheduledMessage", url.Values{
-		"channel": {"C1"}, "scheduled_message_id": {id},
-	}.Encode())
-	if otherDelete["error"] != "invalid_scheduled_message_id" {
-		t.Fatalf("another token deleted the schedule: %v", otherDelete)
+	// Neither another app's bot nor a user token sees or deletes the bot's
+	// schedule.
+	for _, token := range []string{"foreign-bot-token", "user-token"} {
+		page := call(token, "/api/chat.scheduledMessages.list", "")
+		if items, _ := page["scheduled_messages"].([]any); page["ok"] != true || len(items) != 0 {
+			t.Fatalf("%s saw the bot's scheduled messages: %v", token, page)
+		}
+		deleted := call(token, "/api/chat.deleteScheduledMessage", url.Values{
+			"channel": {"C1"}, "scheduled_message_id": {id},
+		}.Encode())
+		if deleted["error"] != "invalid_scheduled_message_id" {
+			t.Fatalf("%s deleted the bot's schedule: %v", token, deleted)
+		}
 	}
 	ownerPage := call("token", "/api/chat.scheduledMessages.list", url.Values{
 		"oldest": {strconv.FormatInt(postAt-1, 10)}, "latest": {strconv.FormatInt(postAt+1, 10)},
 	}.Encode())
 	if items, _ := ownerPage["scheduled_messages"].([]any); ownerPage["ok"] != true || len(items) != 1 {
 		t.Fatalf("creating token could not list its schedule: %v", ownerPage)
+	}
+	// A filter naming no visible channel is invalid_channel, and a post_at
+	// that is not a whole Unix time is invalid_time.
+	if unknown := call("token", "/api/chat.scheduledMessages.list", "channel=CNOPE"); unknown["error"] != "invalid_channel" {
+		t.Fatalf("unknown channel filter=%v", unknown)
+	}
+	for _, bad := range []string{"soon", "1700000000.5", "-5"} {
+		if rejected := call("token", "/api/chat.scheduleMessage", url.Values{"channel": {"C1"}, "text": {"x"}, "post_at": {bad}}.Encode()); rejected["error"] != "invalid_time" {
+			t.Fatalf("post_at=%q answered %v", bad, rejected)
+		}
+	}
+	// A rotated token of the same bot still owns the schedule: Slack scopes
+	// it to the bot, and a token hash lost it on every rotation.
+	rotatedPage := call("rotated-token", "/api/chat.scheduledMessages.list", "")
+	if items, _ := rotatedPage["scheduled_messages"].([]any); rotatedPage["ok"] != true || len(items) != 1 {
+		t.Fatalf("a rotated token lost the bot's schedule: %v", rotatedPage)
+	}
+	if deleted := call("rotated-token", "/api/chat.deleteScheduledMessage", url.Values{
+		"channel": {"C1"}, "scheduled_message_id": {id},
+	}.Encode()); deleted["ok"] != true {
+		t.Fatalf("a rotated token could not delete the bot's schedule: %v", deleted)
 	}
 }
 
@@ -5510,5 +5725,288 @@ func TestMessageResponseCarriesEditedAndSubtype(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("history did not contain the narrated message: %s", read.Body)
+	}
+}
+
+// The methods Slack serves to user tokens only answer a bot token with the
+// code their contract names, before touching anything.
+func TestUserTokenOnlyMethodsRefuseABotToken(t *testing.T) {
+	handler, _ := testHandlerWithStore()
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/dnd.setSnooze", "num_minutes=5", "user_is_bot"},
+		{"/api/dnd.endSnooze", "", "user_is_bot"},
+		{"/api/dnd.endDnd", "", "user_is_bot"},
+		{"/api/users.identity", "", "user_is_bot"},
+		{"/api/users.deletePhoto", "", "user_is_bot"},
+		{"/api/stars.add", "channel=C1", "user_is_bot"},
+		{"/api/stars.remove", "channel=C1", "user_is_bot"},
+		{"/api/stars.list", "", "user_is_bot"},
+		{"/api/search.messages", "query=x", "not_allowed_token_type"},
+		{"/api/search.files", "query=x", "not_allowed_token_type"},
+		{"/api/search.all", "query=x", "not_allowed_token_type"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("%s with a bot token: want %q, got %q", item.path, item.want, code)
+		}
+	}
+}
+
+// dnd.endSnooze with no snooze running is snooze_not_active and emits
+// nothing; a snooze past a day is too_long; another member's DND state omits
+// the snooze fields, which are the caller's own.
+func TestDoNotDisturbSnoozeContracts(t *testing.T) {
+	handler, store := testUserHandlerWithStore()
+	before := len(store.Outbox())
+	if code := errorCode(t, postForm(handler, "/api/dnd.endSnooze", "")); code != "snooze_not_active" {
+		t.Fatalf("endSnooze with no snooze: %q", code)
+	}
+	for _, event := range store.Outbox()[before:] {
+		if strings.HasPrefix(event.Topic, "user.dnd") {
+			t.Fatalf("an inactive endSnooze emitted %s", event.Topic)
+		}
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.setSnooze", "num_minutes=1441")); code != "too_long" {
+		t.Fatalf("setSnooze 1441: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.setSnooze", "num_minutes=10")); code != "" {
+		t.Fatalf("setSnooze 10: %q", code)
+	}
+	own := getAPI(handler, "/api/dnd.info")
+	if !strings.Contains(own.Body.String(), `"snooze_enabled":true`) {
+		t.Fatalf("own dnd.info=%s", own.Body)
+	}
+	other := getAPI(handler, "/api/dnd.info?user=U2")
+	if !strings.Contains(other.Body.String(), `"ok":true`) || strings.Contains(other.Body.String(), "snooze_") {
+		t.Fatalf("another member's dnd.info=%s", other.Body)
+	}
+	var team struct {
+		Users map[string]map[string]any `json:"users"`
+	}
+	if err := json.Unmarshal(getAPI(handler, "/api/dnd.teamInfo?users=U1,U2").Body.Bytes(), &team); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := team.Users["U1"]["snooze_enabled"]; !ok {
+		t.Fatalf("teamInfo omitted the caller's snooze: %+v", team.Users)
+	}
+	if _, ok := team.Users["U2"]["snooze_enabled"]; ok {
+		t.Fatalf("teamInfo disclosed another member's snooze: %+v", team.Users)
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.endSnooze", "")); code != "" {
+		t.Fatalf("endSnooze of an active snooze: %q", code)
+	}
+}
+
+// highlight=true wraps each matched term in Slack's private-use markers.
+func TestSearchHighlightUsesSlacksMarkers(t *testing.T) {
+	for _, item := range []struct {
+		text  string
+		terms []string
+		want  string
+	}{
+		{"Deploy the deployment", []string{"deploy"}, "\ue000Deploy\ue001 the \ue000deploy\ue001ment"},
+		{"ab abc", []string{"ab", "abc"}, "\ue000ab\ue001 \ue000abc\ue001"},
+		{"nothing here", []string{"deploy"}, "nothing here"},
+	} {
+		if got := highlightSearchText(item.text, item.terms); got != item.want {
+			t.Errorf("highlight(%q, %q) = %q, want %q", item.text, item.terms, got, item.want)
+		}
+	}
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	repository.SeedConversationMember("C1", "U1")
+	if _, err := (service.Messages{Store: repository}).Post(context.Background(), "T1", "U1", "C1", "Deploying the release", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	handler := userSearchHandler(t, repository)
+	body := getAPIWithToken(handler, "/api/search.messages?query=depl*&highlight=true", "user-token").Body.String()
+	if !strings.Contains(body, "\"text\":\"\ue000Depl\ue001oying the release\"") {
+		t.Fatalf("highlighted search=%s", body)
+	}
+	plain := getAPIWithToken(handler, "/api/search.messages?query=depl*", "user-token").Body.String()
+	if !strings.Contains(plain, `"text":"Deploying the release"`) {
+		t.Fatalf("unhighlighted search=%s", plain)
+	}
+}
+
+// stars.add with only a channel stars the channel; removing a star that is
+// not there is not_starred; an unknown channel is channel_not_found; and the
+// legacy count/page paging describes the whole set.
+func TestStarsChannelItemsErrorsAndPaging(t *testing.T) {
+	handler, _ := testUserHandlerWithStore()
+	var timestamps []string
+	for _, text := range []string{"one", "two", "three"} {
+		var posted struct {
+			TS string `json:"ts"`
+		}
+		if err := json.Unmarshal(postForm(handler, "/api/chat.postMessage", "channel=C1&text="+text).Body.Bytes(), &posted); err != nil || posted.TS == "" {
+			t.Fatalf("post %s: %v", text, err)
+		}
+		timestamps = append(timestamps, posted.TS)
+		if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1&timestamp="+posted.TS)); code != "" {
+			t.Fatalf("stars.add message: %q", code)
+		}
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1")); code != "" {
+		t.Fatalf("stars.add channel: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1")); code != "already_starred" {
+		t.Fatalf("stars.add channel twice: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=CNOPE&timestamp="+timestamps[0])); code != "channel_not_found" {
+		t.Fatalf("stars.add unknown channel: %q", code)
+	}
+	var list struct {
+		OK     bool             `json:"ok"`
+		Items  []map[string]any `json:"items"`
+		Paging struct {
+			PerPage int `json:"per_page"`
+			Page    int `json:"page"`
+			Pages   int `json:"pages"`
+			Total   int `json:"total"`
+		} `json:"paging"`
+	}
+	if err := json.Unmarshal(getAPI(handler, "/api/stars.list?count=3&page=2").Body.Bytes(), &list); err != nil || !list.OK {
+		t.Fatalf("stars.list: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0]["type"] != "channel" || list.Items[0]["channel"] != "C1" ||
+		list.Paging.PerPage != 3 || list.Paging.Page != 2 || list.Paging.Pages != 2 || list.Paging.Total != 4 {
+		t.Fatalf("stars.list page 2=%+v", list)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1")); code != "" {
+		t.Fatalf("stars.remove channel: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1")); code != "not_starred" {
+		t.Fatalf("stars.remove channel twice: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1&timestamp="+timestamps[0])); code != "" {
+		t.Fatalf("stars.remove message: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1&timestamp="+timestamps[0])); code != "not_starred" {
+		t.Fatalf("stars.remove message twice: %q", code)
+	}
+}
+
+// usergroups.* name a taken name or handle, an invalid handle, a member who is
+// not in the workspace, and a caller who may not manage groups.
+func TestUserGroupValidationAndPermissionCodes(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	var created struct {
+		Usergroup struct {
+			ID     string `json:"id"`
+			Handle string `json:"handle"`
+		} `json:"usergroup"`
+	}
+	if err := json.Unmarshal(postForm(handler, "/api/usergroups.create", "name=Front+End&handle=frontend").Body.Bytes(), &created); err != nil || created.Usergroup.ID == "" {
+		t.Fatalf("create: %v", err)
+	}
+	var derived struct {
+		Usergroup struct {
+			Handle string `json:"handle"`
+		} `json:"usergroup"`
+	}
+	if err := json.Unmarshal(postForm(handler, "/api/usergroups.create", "name=Site+Reliability!").Body.Bytes(), &derived); err != nil || derived.Usergroup.Handle != "site-reliability" {
+		t.Fatalf("derived handle=%+v err=%v", derived, err)
+	}
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/usergroups.create", "name=front+end&handle=other", "name_already_exists"},
+		{"/api/usergroups.create", "name=Other&handle=frontend", "handle_already_exists"},
+		{"/api/usergroups.create", "name=Other&handle=Front+End!", "invalid_arg_name"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&handle=site-reliability", "handle_already_exists"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&name=Site+Reliability!", "name_already_exists"},
+		{"/api/usergroups.users.update", "usergroup=" + created.Usergroup.ID + "&users=U1,UNOBODY", "invalid_users"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("%s %s: want %q, got %q", item.path, item.form, item.want, code)
+		}
+	}
+	// Renaming a group to its own name, in another case, is not a collision.
+	if code := errorCode(t, postForm(handler, "/api/usergroups.update", "usergroup="+created.Usergroup.ID+"&name=FRONT+END&handle=frontend")); code != "" {
+		t.Fatalf("self rename: %q", code)
+	}
+	if err := store.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/usergroups.create", "name=Another", "permission_denied"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&name=Renamed", "permission_denied"},
+		{"/api/usergroups.disable", "usergroup=" + created.Usergroup.ID, "permission_denied"},
+		{"/api/usergroups.enable", "usergroup=" + created.Usergroup.ID, "no_permission"},
+		{"/api/usergroups.users.update", "usergroup=" + created.Usergroup.ID + "&users=U1", "permission_denied"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("member %s: want %q, got %q", item.path, item.want, code)
+		}
+	}
+}
+
+// team.profile.get's visibility argument filters hidden fields in or out.
+func TestTeamProfileGetFiltersByVisibility(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	now := time.Now().UTC()
+	for _, definition := range []domain.ProfileFieldDefinition{
+		{WorkspaceID: "T1", ID: "Xf1", Label: "Title", Type: domain.ProfileFieldText, CreatedAt: now},
+		{WorkspaceID: "T1", ID: "Xf2", Label: "Salary band", Type: domain.ProfileFieldText, IsHidden: true, Ordering: 1, CreatedAt: now},
+	} {
+		if err := store.SetWorkspaceProfileField(context.Background(), definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	labels := func(query string) []string {
+		var body struct {
+			OK      bool   `json:"ok"`
+			Error   string `json:"error"`
+			Profile struct {
+				Fields []struct {
+					Label string `json:"label"`
+				} `json:"fields"`
+			} `json:"profile"`
+		}
+		if err := json.Unmarshal(getAPI(handler, "/api/team.profile.get"+query).Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.OK {
+			return []string{"error:" + body.Error}
+		}
+		result := []string{}
+		for _, field := range body.Profile.Fields {
+			result = append(result, field.Label)
+		}
+		return result
+	}
+	for query, want := range map[string]string{
+		"":                    "Title,Salary band",
+		"?visibility=all":     "Title,Salary band",
+		"?visibility=visible": "Title",
+		"?visibility=hidden":  "Salary band",
+		"?visibility=secret":  "error:invalid_arg_name",
+	} {
+		if got := strings.Join(labels(query), ","); got != want {
+			t.Errorf("team.profile.get%s = %q, want %q", query, got, want)
+		}
+	}
+}
+
+// users.identity widens with each identity scope the token holds.
+func TestUsersIdentityFollowsItsScopes(t *testing.T) {
+	basic, _ := testFixtureAs(false, domain.TokenUser, auth.ScopeIdentityBasic)
+	body := getAPI(basic, "/api/users.identity").Body.String()
+	if !strings.Contains(body, `"user":{"id":"U1","name":"alice"}`) || !strings.Contains(body, `"team":{"id":"T1"}`) {
+		t.Fatalf("basic identity=%s", body)
+	}
+	full, store := testFixtureAs(false, domain.TokenUser, auth.ScopeIdentityBasic, auth.ScopeIdentityEmail, auth.ScopeIdentityAvatar, auth.ScopeIdentityTeam)
+	if err := store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	var identity struct {
+		User map[string]any `json:"user"`
+		Team map[string]any `json:"team"`
+	}
+	if err := json.Unmarshal(getAPI(full, "/api/users.identity").Body.Bytes(), &identity); err != nil {
+		t.Fatal(err)
+	}
+	if _, hasPhoto := identity.User["image_192"]; identity.User["email"] != "alice@example.com" || !hasPhoto || identity.Team["name"] != "test" || identity.Team["domain"] != "testing" {
+		t.Fatalf("full identity=%+v", identity)
 	}
 }

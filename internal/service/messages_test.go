@@ -105,7 +105,7 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 	due := time.Now().UTC().Add(time.Hour)
 
 	// A member's own one-off reminder completes.
-	own, err := messages.AddReminder(ctx, "T1", "U1", "U1", "water the plants", due)
+	own, err := messages.AddReminder(ctx, "T1", "U1", "U1", "water the plants", domain.ReminderSchedule{Due: due})
 	if err != nil {
 		t.Fatalf("add own reminder: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 	}
 
 	// A reminder U1 sets for U2 belongs to U2; U1 cannot complete it.
-	forOther, err := messages.AddReminder(ctx, "T1", "U1", "U2", "call the vet", due)
+	forOther, err := messages.AddReminder(ctx, "T1", "U1", "U2", "call the vet", domain.ReminderSchedule{Due: due})
 	if err != nil {
 		t.Fatalf("add reminder for U2: %v", err)
 	}
@@ -126,11 +126,35 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 		t.Fatalf("U2 reminder after refusal: complete=%v err=%v", outstanding.CompleteAt, infoErr)
 	}
 
-	// A recurring reminder cannot be marked complete. AddReminder never mints one,
-	// so it is written directly — the store carries the recurring flag and column.
-	recurring := domain.Reminder{WorkspaceID: "T1", ID: "Rm-standup", Creator: "U1", User: "U1", Text: "daily standup", Time: due, Recurring: true}
-	if err := s.CreateReminder(ctx, recurring, events.Event{ID: "E-recur", WorkspaceID: "T1", Topic: "reminder.created", CreatedAt: time.Now().UTC()}); err != nil {
-		t.Fatalf("seed recurring reminder: %v", err)
+	// A reminder U2 set for themselves is not U1's to see: completing it is
+	// not_found, as reminders.info and reminders.delete answer, rather than
+	// cannot_complete_others confirming that it exists.
+	private, err := messages.AddReminder(ctx, "T1", "U2", "U2", "private errand", domain.ReminderSchedule{Due: due})
+	if err != nil {
+		t.Fatalf("add U2's own reminder: %v", err)
+	}
+	if err := messages.CompleteReminder(ctx, "T1", "U1", private.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("complete a stranger's reminder error = %v, want %v", err, store.ErrNotFound)
+	}
+
+	// U1's list carries U1's own reminders and the one U1 set for U2, and not
+	// U2's private one.
+	listed, err := messages.Reminders(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[domain.ReminderID]bool{}
+	for _, reminder := range listed.Reminders {
+		seen[reminder.ID] = true
+	}
+	if !seen[own.ID] || !seen[forOther.ID] || seen[private.ID] {
+		t.Fatalf("U1's reminders = %+v", listed.Reminders)
+	}
+
+	// A recurring reminder cannot be marked complete.
+	recurring, err := messages.AddReminder(ctx, "T1", "U1", "U1", "daily standup", domain.ReminderSchedule{Due: due, Recurrence: domain.ReminderDaily, TimeZone: "Europe/Paris"})
+	if err != nil || !recurring.Recurring || recurring.Recurrence != domain.ReminderDaily || recurring.TimeZone != "Europe/Paris" {
+		t.Fatalf("add recurring reminder = %+v err=%v", recurring, err)
 	}
 	if err := messages.CompleteReminder(ctx, "T1", "U1", recurring.ID); !errors.Is(err, ErrReminderRecurring) {
 		t.Fatalf("complete recurring reminder error = %v, want %v", err, ErrReminderRecurring)
@@ -1080,6 +1104,23 @@ func TestUnfurlPersistsNormalizedMetadata(t *testing.T) {
 	if err != nil || loaded.Unfurls["https://example.com"] != `{"title":"Example"}` {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
+
+	// Any member of the conversation may unfurl - the app is rarely the
+	// author - but a non-member may not, and neither may anyone unfurl a URL
+	// the message does not contain.
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1"})
+	s.SeedConversationMember("C1", "U2")
+	timestamp := domain.NewMessageTimestamp(message.CreatedAt)
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "C1", timestamp, map[string]string{"https://example.com": `{"title":"Again"}`}); err != nil {
+		t.Fatalf("member unfurl err=%v", err)
+	}
+	if _, err := messages.Unfurl(context.Background(), "T1", "U3", "C1", timestamp, map[string]string{"https://example.com": `{"title":"X"}`}); !errors.Is(err, ErrNotInConversation) {
+		t.Fatalf("non-member unfurl err=%v", err)
+	}
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "C1", timestamp, map[string]string{"https://other.example": `{"title":"X"}`}); !errors.Is(err, ErrCannotUnfurlURL) {
+		t.Fatalf("foreign URL unfurl err=%v", err)
+	}
 }
 
 func TestDeleteFileCommentIsDurableAndWorkspaceScoped(t *testing.T) {
@@ -1171,12 +1212,43 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "greeting"); err != nil {
 		t.Fatal(err)
 	}
+	// The rename carried the alias along with the name, and the uploader and
+	// upload time admin.emoji.list reports were recorded.
+	values, err = messages.Emojis(ctx, "T1", "U1")
+	if err != nil || len(values) != 2 || values[0].Name != "greeting" || values[0].AliasFor != "shipit" ||
+		values[1].CreatedBy != "U1" || values[1].CreatedAt.IsZero() {
+		t.Fatalf("renamed values=%+v err=%v", values, err)
+	}
+	// An alias may name a built-in emoji, as Slack's `:thumbsup_all:` does.
+	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "yes", "thumbsup"); err != nil {
+		t.Fatalf("AdminAddEmojiAlias(built-in) error=%v", err)
+	}
+	before, err := messages.EmojiRevision(ctx, "T1", "U1")
+	if err != nil || before.IsZero() {
+		t.Fatalf("revision=%v err=%v", before, err)
+	}
+	// Removing an emoji removes the aliases that point at it; the alias of the
+	// built-in emoji is untouched, and the revision moves.
+	time.Sleep(time.Millisecond)
 	if err := messages.AdminRemoveEmoji(ctx, "T1", "U1", "shipit"); err != nil {
 		t.Fatal(err)
 	}
 	values, err = messages.Emojis(ctx, "T1", "U1")
-	if err != nil || len(values) != 1 || values[0].Name != "greeting" {
+	if err != nil || len(values) != 1 || values[0].Name != "yes" || values[0].AliasFor != "thumbsup" {
 		t.Fatalf("final values=%+v err=%v", values, err)
+	}
+	after, err := messages.EmojiRevision(ctx, "T1", "U1")
+	if err != nil || !after.After(before) {
+		t.Fatalf("revision after removal=%v before=%v err=%v", after, before, err)
+	}
+	removed := false
+	for _, event := range s.Outbox() {
+		if event.Topic == "emoji.removed" && strings.Contains(event.Payload, `"greeting"`) {
+			removed = true
+		}
+	}
+	if !removed {
+		t.Fatalf("the emoji.removed event did not name the removed alias: %+v", s.Outbox())
 	}
 }
 
@@ -1326,18 +1398,28 @@ func TestCallLifecycleNormalizesParticipants(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
 	messages := Messages{Store: s}
-	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{}, []domain.UserID{"U2", "U1", "U2"})
+	guest := domain.ExternalCallParticipant{ExternalID: "guest-1", DisplayName: "Guest", AvatarURL: "https://call.example/guest.png"}
+	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{},
+		[]domain.CallParticipant{{SlackID: "U2"}, {SlackID: "U1"}, {SlackID: "U2"}, {External: guest}, {External: guest}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(value.Participants) != 2 || value.Participants[0] != "U1" || value.Participants[1] != "U2" {
-		t.Fatalf("participants=%v", value.Participants)
+	if len(value.Participants) != 2 || value.Participants[0] != "U1" || value.Participants[1] != "U2" ||
+		len(value.ExternalParticipants) != 1 || value.ExternalParticipants[0] != guest {
+		t.Fatalf("participants=%v external=%v", value.Participants, value.ExternalParticipants)
 	}
-	if err := messages.RemoveCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.UserID{"U2"}); err != nil {
+	// An entry that names both a member and an external participant, or
+	// neither, is not a participant.
+	for _, invalid := range []domain.CallParticipant{{}, {SlackID: "U1", External: guest}} {
+		if err := messages.AddCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{invalid}); !errors.Is(err, ErrInvalidCall) {
+			t.Fatalf("AddCallParticipants(%+v) error=%v", invalid, err)
+		}
+	}
+	if err := messages.RemoveCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{{SlackID: "U2"}, {External: domain.ExternalCallParticipant{ExternalID: "guest-1"}}}); err != nil {
 		t.Fatal(err)
 	}
 	value, err = messages.GetCall(context.Background(), "T1", "U1", value.ID)
-	if err != nil || len(value.Participants) != 1 || value.Participants[0] != "U1" {
+	if err != nil || len(value.Participants) != 1 || value.Participants[0] != "U1" || len(value.ExternalParticipants) != 0 {
 		t.Fatalf("call=%+v err=%v", value, err)
 	}
 	if err := messages.EndCall(context.Background(), "T1", "U1", value.ID, 42); err != nil {

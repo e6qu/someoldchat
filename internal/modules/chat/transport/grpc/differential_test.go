@@ -994,10 +994,11 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				logs, more, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Time{}, 5, 1)
+				accessPage, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Time{}, 5, 1)
 				if err != nil {
 					return nil, err
 				}
+				logs, more := accessPage.Logins, accessPage.HasMore
 				integration, err := chat.IntegrationLogs(ctx, "T1", "UA", "", "", "", "", 5, 1)
 				if err != nil {
 					return nil, err
@@ -1013,7 +1014,7 @@ func parityCases() []parityCase {
 				// A member cannot read any of them.
 				_, memberInvites := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInvitePending, domain.PageRequest{Limit: 5})
 				_, memberRequests := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestPending, domain.PageRequest{Limit: 5})
-				_, _, memberLogs := chat.ListAccessLogs(ctx, "T1", "U1", time.Time{}, 5, 1)
+				_, memberLogs := chat.ListAccessLogs(ctx, "T1", "U1", time.Time{}, 5, 1)
 				return []any{
 					len(invites.Invites), invites.HasMore, len(requests.Requests), requests.HasMore,
 					len(logs), more, len(integration.Logs),
@@ -1571,9 +1572,13 @@ func parityCases() []parityCase {
 				}
 				names := make([]string, 0, len(listed))
 				for _, emoji := range listed {
-					names = append(names, emoji.Name+"="+emoji.AliasFor)
+					names = append(names, emoji.Name+"="+emoji.AliasFor+" by "+string(emoji.CreatedBy)+" dated "+strconv.FormatBool(!emoji.CreatedAt.IsZero()))
 				}
 				sort.Strings(names)
+				revision, err := chat.EmojiRevision(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
 				if err := chat.AdminRemoveEmoji(ctx, "T1", "UA", "partyparrot"); err != nil {
 					return nil, err
 				}
@@ -1582,8 +1587,13 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				movedRevision, err := chat.EmojiRevision(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
 				return []any{names, len(after), duplicate != nil, aliasOfNothing != nil,
-					renameMissing != nil, member != nil, removeMissing != nil}, nil
+					renameMissing != nil, member != nil, removeMissing != nil,
+					!revision.IsZero(), !movedRevision.Before(revision)}, nil
 			},
 		},
 		{
@@ -1696,7 +1706,7 @@ func parityCases() []parityCase {
 			name: "a reminder is read, completed, and deleted identically",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				due := time.Unix(1_900_000_000, 0).UTC()
-				created, err := chat.AddReminder(ctx, "T1", "U1", "U1", "water the plants", due)
+				created, err := chat.AddReminder(ctx, "T1", "U1", "U1", "water the plants", domain.ReminderSchedule{Due: due})
 				if err != nil {
 					return nil, err
 				}
@@ -1710,7 +1720,7 @@ func parityCases() []parityCase {
 				// refused as cannot_complete_others in both compositions, and the
 				// sentinel has to survive the seam as itself rather than collapsing
 				// to a generic not_found.
-				forOther, err := chat.AddReminder(ctx, "T1", "U1", "U2", "call the vet", due)
+				forOther, err := chat.AddReminder(ctx, "T1", "U1", "U2", "call the vet", domain.ReminderSchedule{Due: due})
 				if err != nil {
 					return nil, err
 				}
@@ -3734,18 +3744,21 @@ func parityCases() []parityCase {
 				started := time.Now().UTC().Truncate(time.Second)
 				call, err := chat.AddCall(ctx, "T1", "U1", "ext-call-1", "EXT-1",
 					"https://example.com/join", "https://example.com/desktop", "Design review", started,
-					[]domain.UserID{"U1", "U2"})
+					[]domain.CallParticipant{{SlackID: "U1"}, {SlackID: "U2"},
+						{External: domain.ExternalCallParticipant{ExternalID: "ext-9", DisplayName: "Guest", AvatarURL: "https://example.com/g.png"}}})
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.AddCallParticipants(ctx, "T1", "U1", call.ID, []domain.UserID{"UA"}); err != nil {
+				if err := chat.AddCallParticipants(ctx, "T1", "U1", call.ID, []domain.CallParticipant{{SlackID: "UA"},
+					{External: domain.ExternalCallParticipant{ExternalID: "ext-10", DisplayName: "Second guest"}}}); err != nil {
 					return nil, err
 				}
 				added, err := chat.GetCall(ctx, "T1", "U1", call.ID)
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.RemoveCallParticipants(ctx, "T1", "U1", call.ID, []domain.UserID{"U2"}); err != nil {
+				if err := chat.RemoveCallParticipants(ctx, "T1", "U1", call.ID, []domain.CallParticipant{{SlackID: "U2"},
+					{External: domain.ExternalCallParticipant{ExternalID: "ext-9"}}}); err != nil {
 					return nil, err
 				}
 				removed, err := chat.GetCall(ctx, "T1", "U1", call.ID)
@@ -3768,6 +3781,9 @@ func parityCases() []parityCase {
 					names := make([]string, 0, len(call.Participants))
 					for _, participant := range call.Participants {
 						names = append(names, string(participant))
+					}
+					for _, external := range call.ExternalParticipants {
+						names = append(names, "external:"+external.ExternalID+"/"+external.DisplayName+"/"+external.AvatarURL)
 					}
 					sort.Strings(names)
 					return names
@@ -4132,19 +4148,21 @@ func parityCases() []parityCase {
 				// Reading the access back is what gives the record teeth: the
 				// write reports nothing, so a dropped field is invisible until
 				// somebody asks for the log.
-				logs, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), 10, 1)
+				accessPage, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), 10, 1)
 				if err != nil {
 					return nil, err
 				}
+				logs := accessPage.Logins
 				// The Unix epoch is a real instant, not an absent one: asking
 				// for accesses before it must answer with none. It used to
 				// answer none locally and everything remotely, because the
 				// seam encoded the instant as a bare int64 whose zero also
 				// meant "no filter".
-				beforeEpoch, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Unix(0, 0).UTC(), 10, 1)
+				beforeEpochPage, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Unix(0, 0).UTC(), 10, 1)
 				if err != nil {
 					return nil, err
 				}
+				beforeEpoch := beforeEpochPage.Logins
 				accesses := make([]string, 0, len(logs))
 				for _, entry := range logs {
 					accesses = append(accesses, strings.Join([]string{string(entry.UserID), entry.IP, entry.UserAgent}, "|"))
@@ -6011,7 +6029,7 @@ func parityCases() []parityCase {
 		{
 			name: "reminders and scheduled messages",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				reminder, err := chat.AddReminder(ctx, "T1", "U1", "", "water the plants", time.Now().UTC().Add(time.Hour))
+				reminder, err := chat.AddReminder(ctx, "T1", "U1", "", "water the plants", domain.ReminderSchedule{Due: time.Now().UTC().Add(time.Hour)})
 				if err != nil {
 					return nil, err
 				}
@@ -6220,15 +6238,30 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				stars, _, starsMore, err := chat.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err := chat.AddStar(ctx, "T1", "U1", "C1", ""); err != nil {
+					return nil, err
+				}
+				starred, err := chat.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
+				stars, starsMore := starred.Stars, starred.HasMore
+				channelStars := 0
+				for _, star := range stars {
+					if star.IsChannel() {
+						channelStars++
+					}
+				}
+				unstarTwice := chat.RemoveStar(ctx, "T1", "U1", "C1", "")
+				if unstarTwice != nil {
+					return nil, unstarTwice
+				}
+				notStarred := chat.RemoveStar(ctx, "T1", "U1", "C1", "")
 				names := make([]string, 0, len(reactions))
 				for _, reaction := range reactions {
 					names = append(names, reaction.Name)
 				}
-				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore}, nil
+				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore, starred.Total, channelStars, errors.Is(notStarred, service.ErrNotStarred)}, nil
 			},
 		},
 		{

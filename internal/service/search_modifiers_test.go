@@ -85,23 +85,23 @@ func TestLinkSearchFindsMessagesCarryingAURL(t *testing.T) {
 func TestDuringAcceptsTheFormsSlackDocuments(t *testing.T) {
 	year := time.Now().UTC().Year()
 	for _, value := range []string{"2024-07", "July 2024", "Jul 2024"} {
-		after, before, ok := parseSearchPeriod(value)
+		after, before, ok := parseSearchPeriod(value, utcSearchClock())
 		if !ok || after.Year() != 2024 || after.Month() != time.July || !before.Equal(after.AddDate(0, 1, 0)) {
 			t.Fatalf("during:%s = %s..%s ok=%v, want July 2024", value, after, before, ok)
 		}
 	}
-	after, before, ok := parseSearchPeriod("2024")
+	after, before, ok := parseSearchPeriod("2024", utcSearchClock())
 	if !ok || after.Year() != 2024 || !before.Equal(after.AddDate(1, 0, 0)) {
 		t.Fatalf("during:2024 = %s..%s ok=%v, want the whole year", after, before, ok)
 	}
-	after, before, ok = parseSearchPeriod("July")
+	after, before, ok = parseSearchPeriod("July", utcSearchClock())
 	if !ok || after.Year() != year || after.Month() != time.July || !before.Equal(after.AddDate(0, 1, 0)) {
 		t.Fatalf("during:July = %s..%s ok=%v, want July of %d", after, before, ok, year)
 	}
-	if _, _, ok := parseSearchPeriod("Julyish"); ok {
+	if _, _, ok := parseSearchPeriod("Julyish", utcSearchClock()); ok {
 		t.Fatal("a period that is not one was accepted")
 	}
-	if _, _, ok := parseSearchPeriod(""); ok {
+	if _, _, ok := parseSearchPeriod("", utcSearchClock()); ok {
 		t.Fatal("an empty period was accepted")
 	}
 }
@@ -119,5 +119,55 @@ func TestAModifierOnlySearchIsAnswerable(t *testing.T) {
 	}
 	if len(found.Messages) != 1 {
 		t.Fatalf("has:link alone = %+v, want the linked message", found.Messages)
+	}
+}
+
+func utcSearchClock() searchClock {
+	return searchClock{now: time.Now(), location: time.UTC}
+}
+
+// today and yesterday resolve against the searcher's day in their own zone,
+// for on:, before:, after: and during: alike.
+func TestSearchDatesResolveRelativeDaysInTheSearchersZone(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Skip("no time zone database")
+	}
+	// 20:00 UTC on 1 March is already 2 March in Tokyo.
+	clock := searchClock{now: time.Date(2026, time.March, 1, 20, 0, 0, 0, time.UTC), location: tokyo}
+	startOfToday := time.Date(2026, time.March, 2, 0, 0, 0, 0, tokyo)
+	parsed, err := parseSearchQuery("deploy on:today", clock)
+	if err != nil || !parsed.after.Equal(startOfToday) || !parsed.before.Equal(startOfToday.AddDate(0, 0, 1)) {
+		t.Fatalf("on:today = %s..%s err=%v", parsed.after, parsed.before, err)
+	}
+	parsed, err = parseSearchQuery("deploy after:yesterday before:today", clock)
+	if err != nil || !parsed.after.Equal(startOfToday.AddDate(0, 0, -1)) || !parsed.before.Equal(startOfToday) {
+		t.Fatalf("after:yesterday before:today = %s..%s err=%v", parsed.after, parsed.before, err)
+	}
+	parsed, err = parseSearchQuery("deploy during:yesterday", clock)
+	if err != nil || !parsed.after.Equal(startOfToday.AddDate(0, 0, -1)) || !parsed.before.Equal(startOfToday) {
+		t.Fatalf("during:yesterday = %s..%s err=%v", parsed.after, parsed.before, err)
+	}
+	// A calendar date is that day in the searcher's zone too.
+	parsed, err = parseSearchQuery("deploy on:2026-01-05", clock)
+	if err != nil || !parsed.after.Equal(time.Date(2026, time.January, 5, 0, 0, 0, 0, tokyo)) {
+		t.Fatalf("on:2026-01-05 = %s err=%v", parsed.after, err)
+	}
+	if _, err := parseSearchQuery("deploy on:someday", clock); err == nil {
+		t.Fatal("on:someday was accepted")
+	}
+}
+
+// Slack's `term*` is a prefix search, not a literal asterisk.
+func TestSearchTrailingWildcardIsAPrefix(t *testing.T) {
+	parsed, err := parseSearchQuery("depl* -stag*", utcSearchClock())
+	if err != nil || len(parsed.terms) != 1 || parsed.terms[0] != "depl" || len(parsed.excludedTerms) != 1 || parsed.excludedTerms[0] != "stag" {
+		t.Fatalf("parsed=%+v err=%v", parsed, err)
+	}
+	if _, err := parseSearchQuery("*", utcSearchClock()); err == nil {
+		t.Fatal("a bare wildcard was accepted as a query")
+	}
+	if terms := SearchHighlightTerms(`depl* in:#general -noise "exact phrase" from:@alice`); len(terms) != 2 || terms[0] != "depl" || terms[1] != "exact phrase" {
+		t.Fatalf("highlight terms=%q", terms)
 	}
 }

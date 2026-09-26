@@ -1047,13 +1047,13 @@ assert.equal((await client.chat.delete({ channel: "C1", ts: scheduledRoot.ts }))
 const dndInfo = await client.dnd.info();
 assert.equal(dndInfo.ok, true);
 assert.equal(dndInfo.dnd_enabled, false);
-const dndSnooze = await client.dnd.setSnooze({ num_minutes: 5 });
+const dndSnooze = await reminderClient.dnd.setSnooze({ num_minutes: 5 });
 assert.equal(dndSnooze.ok, true);
 assert.equal(dndSnooze.snooze_enabled, true);
-const dndEndSnooze = await client.dnd.endSnooze();
+const dndEndSnooze = await reminderClient.dnd.endSnooze();
 assert.equal(dndEndSnooze.ok, true);
 assert.equal(dndEndSnooze.snooze_enabled, false);
-const dndEnd = await client.dnd.endDnd();
+const dndEnd = await reminderClient.dnd.endDnd();
 assert.equal(dndEnd.ok, true);
 const dndTeam = await client.dnd.teamInfo();
 assert.equal(dndTeam.ok, true);
@@ -1090,13 +1090,21 @@ await assert.rejects(
 	reminderClient.reminders.add({ text: "not another user's reminder", time: 300, user: "U2" }),
 	(error) => error?.data?.error === "cannot_add_others",
 );
+// Slack's documented natural-language forms are read; a recurring one is
+// reported as recurring.
+const phrased = await reminderClient.reminders.add({ text: "documented natural language", time: "in 15 minutes" });
+assert.equal(phrased.ok, true);
+assert.ok(phrased.reminder.time > Date.now() / 1000 + 14 * 60);
+const recurringReminder = await reminderClient.reminders.add({ text: "weekly sync", time: "every Thursday at 9am" });
+assert.equal(recurringReminder.ok, true);
+assert.equal(recurringReminder.reminder.recurring, true);
 await assert.rejects(
-	reminderClient.reminders.add({ text: "documented natural language", time: "in 15 minutes" }),
+	reminderClient.reminders.add({ text: "undocumented phrasing", time: "whenever" }),
 	(error) => error?.data?.error === "cannot_parse",
 );
 const reminders = await reminderClient.reminders.list();
 assert.equal(reminders.ok, true);
-assert.equal(reminders.reminders.length, 1);
+assert.equal(reminders.reminders.length, 3);
 const reminderInfo = await reminderClient.reminders.info({ reminder: reminder.reminder.id });
 assert.equal(reminderInfo.ok, true);
 assert.equal(reminderInfo.reminder.id, reminder.reminder.id);
@@ -1174,12 +1182,12 @@ assert.equal(profile.profile.display_name, "alice");
 // uploaded document being served back from this origin. A fixture that sends a
 // lie asserts the product accepts one.
 const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");
-const photo = await client.users.setPhoto({ image });
+const photo = await reminderClient.users.setPhoto({ image });
 assert.equal(photo.ok, true);
-const deletedPhoto = await client.users.deletePhoto();
+const deletedPhoto = await reminderClient.users.deletePhoto();
 assert.equal(deletedPhoto.ok, true);
 
-const root = await client.chat.postMessage({ channel: "C1", text: "thread root" });
+const root = await client.chat.postMessage({ channel: "C1", text: "thread root <https://example.com/qualification>" });
 assert.equal(root.ok, true);
 // Exercise Slack's current high-level ChatStreamer, not only raw method names.
 // It buffers fragments, starts on the first flush, appends against the returned
@@ -1271,12 +1279,12 @@ assert.equal(meMessage.ok, true);
 const ephemeral = await client.chat.postEphemeral({ channel: "C1", user: "U1", text: "ephemeral qualification" });
 assert.equal(ephemeral.ok, true);
 assert.equal(typeof ephemeral.message_ts, "string");
-const starred = await client.stars.add({ channel: "C1", timestamp: root.ts });
+const starred = await reminderClient.stars.add({ channel: "C1", timestamp: root.ts });
 assert.equal(starred.ok, true);
-const stars = await client.stars.list({ limit: 10 });
+const stars = await reminderClient.stars.list({ limit: 10 });
 assert.equal(stars.ok, true);
 assert.equal(stars.items.length, 1);
-const unstarred = await client.stars.remove({ channel: "C1", timestamp: root.ts });
+const unstarred = await reminderClient.stars.remove({ channel: "C1", timestamp: root.ts });
 assert.equal(unstarred.ok, true);
 const permalink = await client.chat.getPermalink({ channel: "C1", message_ts: root.ts });
 assert.equal(permalink.ok, true);
@@ -1295,7 +1303,7 @@ const emoji = await client.emoji.list({ include_categories: true });
 assert.equal(emoji.ok, true);
 assert.equal(emoji.categories_version, "097705020bcf82331c9ef10df3425aad15f5043c");
 assert.equal(emoji.categories.some((category) => category.name === "Smileys & Emotion" && category.emoji_names.includes("grinning")), true);
-const identityResult = await client.users.identity();
+const identityResult = await reminderClient.users.identity();
 assert.equal(identityResult.ok, true);
 assert.equal(identityResult.user.id, "U1");
 const byEmail = await client.users.lookupByEmail({ email: "alice@example.com" });
