@@ -5583,7 +5583,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			forwardDestinations = options
 		}
 	}
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, ForwardDestinations: forwardDestinations})
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, ForwardDestinations: forwardDestinations})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -5993,7 +5993,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		messages = history.Messages
 	}
 	fragmentSummaries, fragmentLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, messages, isMember)
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead})
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead})
 	h.writeFragment(w, list)
 }
 
@@ -6288,11 +6288,17 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			values = nil
 		}
 		for _, value := range values {
+			// An ephemeral message sent with thread_ts belongs to that thread
+			// and nowhere else: it used to be rendered in the channel view and
+			// never in the thread it answered.
+			if string(value.ThreadTimestamp) != request.Thread {
+				continue
+			}
 			ephemeralIDs[value.ID] = struct{}{}
 			messages = append(messages, domain.Message{
 				ID: value.ID, WorkspaceID: value.WorkspaceID, Conversation: value.Conversation,
 				AuthorID: value.AuthorID, AppID: value.AppID, Text: value.Text, Blocks: value.Blocks,
-				Attachments: value.Attachments, CreatedAt: value.CreatedAt,
+				Attachments: value.Attachments, ThreadTimestamp: value.ThreadTimestamp, CreatedAt: value.CreatedAt,
 			})
 		}
 		sort.Slice(messages, func(left, right int) bool {
@@ -6301,7 +6307,9 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			}
 			return messages[left].CreatedAt.Before(messages[right].CreatedAt)
 		})
-		if len(messages) > timelineWindow {
+		// A channel window keeps its newest messages; a thread keeps its root,
+		// which trimming from the front would drop.
+		if request.Thread == "" && len(messages) > timelineWindow {
 			messages = messages[len(messages)-timelineWindow:]
 		}
 	}
