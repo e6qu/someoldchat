@@ -60,6 +60,7 @@ var scopeDescriptions = map[Scope]string{
 	ScopeTeamPreferencesRead: "View the workspace's preferences",
 	ScopeEmojiRead:           "View custom emoji",
 	ScopeAuthorizationsRead:  "View the app's own installations",
+	ScopeLinksRead:           "View links to its domains shared in messages",
 	ScopeLinksWrite:          "Unfurl links it posts into rich previews",
 	ScopeIdentityBasic:       "View the signed-in person's basic identity",
 

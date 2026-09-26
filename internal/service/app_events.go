@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
@@ -419,7 +420,7 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 	case strings.HasPrefix(event.Topic, "workspace."):
 		return []string{"team:read"}, nil
 	case strings.HasPrefix(event.Topic, "link."):
-		return []string{"links:read"}, nil
+		return []string{string(auth.ScopeLinksRead)}, nil
 	}
 	channelID, scoped := eventChannelID(event)
 	if !scoped {
