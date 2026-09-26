@@ -346,7 +346,7 @@ func authorityMatrix() map[string]authority {
 		"List":                                    authorityAnyMember,
 		"ListAccess":                              authorityAnyMember,
 		"ListAccessFor":                           authorityAnyMember,
-		"ListAccessLogs":                          authorityAnyMember,
+		"ListAccessLogs":                          authorityAdmin,
 		"ListAppShortcuts":                        authorityAnyMember,
 		"ListDeveloperApps":                       authorityAnyMember,
 		"ListEphemeralMessages":                   authorityAnyMember,

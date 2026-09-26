@@ -128,7 +128,8 @@ func (h Handler) auditPage(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthAdminProblem(w, r, auditReadProblem(err, "The activity record could not be read."))
 		return
 	}
-	logs, hasMoreAccess, err := h.Messages.ListAccessLogs(r.Context(), principal.WorkspaceID, principal.UserID, time.Time{}, limit, accessPage)
+	accessLogs, err := h.Messages.ListAccessLogs(r.Context(), principal.WorkspaceID, principal.UserID, time.Time{}, limit, accessPage)
+	logs, hasMoreAccess := accessLogs.Logins, accessLogs.HasMore
 	if err != nil {
 		h.writeAuthAdminProblem(w, r, auditReadProblem(err, "The access record could not be read."))
 		return

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -3831,13 +3832,39 @@ type ChannelActivity struct {
 	Messages       int
 }
 
+// AccessLog is one row of team.accessLogs: every access by one member from
+// one IP address with one user agent, aggregated. Slack reports each such
+// combination once with how many times it was seen and when first and last;
+// recording a row per request answered the same login thousands of times.
 type AccessLog struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	Username    string
-	CreatedAt   time.Time
-	IP          string
-	UserAgent   string
+	// FirstAt and CreatedAt are date_first and date_last.
+	FirstAt   time.Time
+	CreatedAt time.Time
+	Count     int64
+	IP        string
+	UserAgent string
+}
+
+// AccessLogPage is one page of the aggregated access log and the size of the
+// whole log it pages through.
+type AccessLogPage struct {
+	Logins  []AccessLog
+	Total   int
+	HasMore bool
+}
+
+// AccessLogIP is the address an access is attributed to: the host part of a
+// remote address, without the ephemeral source port that made every request
+// from one machine look like a different address.
+func AccessLogIP(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 type IntegrationLog struct {

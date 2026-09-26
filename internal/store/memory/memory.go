@@ -192,41 +192,65 @@ func (s *Store) InviteToHuddle(_ context.Context, event events.Event) error {
 func (s *Store) RecordAccess(_ context.Context, value domain.AccessLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	value.FirstAt, value.CreatedAt = value.FirstAt.Truncate(time.Second).UTC(), value.CreatedAt.Truncate(time.Second).UTC()
+	if value.FirstAt.IsZero() {
+		value.FirstAt = value.CreatedAt
+	}
+	if value.Count <= 0 {
+		value.Count = 1
+	}
+	for index, existing := range s.accessLogs {
+		if existing.WorkspaceID == value.WorkspaceID && existing.UserID == value.UserID && existing.IP == value.IP && existing.UserAgent == value.UserAgent {
+			existing.Count += value.Count
+			existing.Username = value.Username
+			if value.CreatedAt.After(existing.CreatedAt) {
+				existing.CreatedAt = value.CreatedAt
+			}
+			s.accessLogs[index] = existing
+			return nil
+		}
+	}
 	s.accessLogs = append(s.accessLogs, value)
 	return nil
 }
-func (s *Store) ListAccessLogs(_ context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
+
+func (s *Store) ListAccessLogs(_ context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
 	if limit <= 0 || limit > 1000 || page <= 0 {
-		return nil, false, store.InvalidArgument("access log page parameters are invalid")
+		return domain.AccessLogPage{}, store.InvalidArgument("access log page parameters are invalid")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]domain.AccessLog, 0, limit+1)
+	matched := make([]domain.AccessLog, 0)
+	for _, value := range s.accessLogs {
+		if value.WorkspaceID != workspace || (!before.IsZero() && value.FirstAt.After(before)) {
+			continue
+		}
+		matched = append(matched, value)
+	}
+	// The SQL store's order: most recently seen first, then most recently
+	// first seen, then by member, address and user agent.
+	sort.Slice(matched, func(left, right int) bool {
+		a, b := matched[left], matched[right]
+		switch {
+		case !a.CreatedAt.Equal(b.CreatedAt):
+			return a.CreatedAt.After(b.CreatedAt)
+		case !a.FirstAt.Equal(b.FirstAt):
+			return a.FirstAt.After(b.FirstAt)
+		case a.UserID != b.UserID:
+			return a.UserID < b.UserID
+		case a.IP != b.IP:
+			return a.IP < b.IP
+		default:
+			return a.UserAgent < b.UserAgent
+		}
+	})
+	result := domain.AccessLogPage{Logins: []domain.AccessLog{}, Total: len(matched)}
 	start := (page - 1) * limit
-	matched := 0
-	for index := len(s.accessLogs) - 1; index >= 0; index-- {
-		value := s.accessLogs[index]
-		if value.WorkspaceID != workspace || (!before.IsZero() && value.CreatedAt.After(before)) {
-			continue
-		}
-		if matched < start {
-			matched++
-			continue
-		}
-		if len(values) == limit+1 {
-			break
-		}
-		values = append(values, value)
-		matched++
+	for position := start; position < len(matched) && position < start+limit; position++ {
+		result.Logins = append(result.Logins, matched[position])
 	}
-	if len(values) == 0 {
-		return []domain.AccessLog{}, false, nil
-	}
-	hasMore := len(values) > limit
-	if hasMore {
-		values = values[:limit]
-	}
-	return values, hasMore, nil
+	result.HasMore = start+limit < len(matched)
+	return result, nil
 }
 
 type memoryLease struct {

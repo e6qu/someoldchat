@@ -521,7 +521,7 @@ func decodeProtoWorkspaceAnalytics(value *chatv1.WorkspaceAnalytics) domain.Work
 	return result
 }
 
-func (r Remote) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
+func (r Remote) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
 	input := &chatv1.AccessLogsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(limit), Page: int32(page)}
 	if !before.IsZero() {
 		// Set through the pointer rather than as a value: the Unix epoch is a
@@ -532,17 +532,17 @@ func (r Remote) ListAccessLogs(ctx context.Context, workspaceID domain.Workspace
 	}
 	out, err := r.audit.AccessLogs(ctx, input)
 	if err != nil {
-		return nil, false, err
+		return domain.AccessLogPage{}, err
 	}
-	result := make([]domain.AccessLog, 0, len(out.GetLogs()))
+	result := domain.AccessLogPage{Logins: make([]domain.AccessLog, 0, len(out.GetLogs())), Total: int(out.GetTotal()), HasMore: out.GetHasMore()}
 	for _, item := range out.GetLogs() {
 		value, err := decodeProtoAccessLog(item)
 		if err != nil {
-			return nil, false, err
+			return domain.AccessLogPage{}, err
 		}
-		result = append(result, value)
+		result.Logins = append(result.Logins, value)
 	}
-	return result, out.GetHasMore(), nil
+	return result, nil
 }
 
 func (r Remote) IntegrationLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID, changeType, serviceID, userFilter string, count, page int) (domain.IntegrationLogPage, error) {
@@ -8521,12 +8521,12 @@ func (s *Server) AccessLogs(ctx context.Context, input *chatv1.AccessLogsRequest
 	if input.Before != nil {
 		before = time.Unix(input.GetBefore(), 0).UTC()
 	}
-	values, hasMore, err := s.implementation.ListAccessLogs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), before, seamPage(int(input.GetLimit())), int(input.GetPage()))
+	value, err := s.implementation.ListAccessLogs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), before, seamPage(int(input.GetLimit())), int(input.GetPage()))
 	if err != nil {
 		return nil, mapError(err)
 	}
-	result := &chatv1.AccessLogsResponse{Logs: make([]*chatv1.AccessLog, 0, len(values)), HasMore: hasMore}
-	for _, value := range values {
+	result := &chatv1.AccessLogsResponse{Logs: make([]*chatv1.AccessLog, 0, len(value.Logins)), HasMore: value.HasMore, Total: int64(value.Total)}
+	for _, value := range value.Logins {
 		result.Logs = append(result.Logs, encodeProtoAccessLog(value))
 	}
 	return result, nil
@@ -11815,7 +11815,7 @@ func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.Ephemer
 }
 
 func encodeProtoAccessLog(value domain.AccessLog) *chatv1.AccessLog {
-	return &chatv1.AccessLog{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Username: value.Username, CreatedAt: value.CreatedAt.Unix(), Ip: value.IP, UserAgent: value.UserAgent}
+	return &chatv1.AccessLog{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Username: value.Username, CreatedAt: value.CreatedAt.Unix(), DateFirst: value.FirstAt.Unix(), Count: value.Count, Ip: value.IP, UserAgent: value.UserAgent}
 }
 func decodeProtoAccessLog(value *chatv1.AccessLog) (domain.AccessLog, error) {
 	// created_at is a Unix timestamp and is decoded as sent; the local path does
@@ -11823,7 +11823,7 @@ func decodeProtoAccessLog(value *chatv1.AccessLog) (domain.AccessLog, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetUsername() == "" {
 		return domain.AccessLog{}, errors.New("typed access log is incomplete")
 	}
-	return domain.AccessLog{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Username: value.GetUsername(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), IP: value.GetIp(), UserAgent: value.GetUserAgent()}, nil
+	return domain.AccessLog{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Username: value.GetUsername(), FirstAt: time.Unix(value.GetDateFirst(), 0).UTC(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), Count: value.GetCount(), IP: value.GetIp(), UserAgent: value.GetUserAgent()}, nil
 }
 
 func encodeProtoMessagePage(page domain.MessagePage) *chatv1.MessagePage {

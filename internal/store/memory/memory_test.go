@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -447,18 +448,26 @@ func TestRemindersAreDurableAndCompletable(t *testing.T) {
 func TestAccessLogsPaginationDoesNotMaterializeHistory(t *testing.T) {
 	ctx := context.Background()
 	s := New()
+	// Four addresses, so four aggregate rows; a repeat of the first address
+	// counts into its row instead of adding a fifth.
 	for index := 0; index < 4; index++ {
-		if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", CreatedAt: time.Unix(int64(index+1), 0).UTC()}); err != nil {
+		if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", IP: "10.0.0." + strconv.Itoa(index), CreatedAt: time.Unix(int64(index+1), 0).UTC()}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	values, more, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 1)
-	if err != nil || len(values) != 2 || !more || values[0].CreatedAt.Unix() != 4 || values[1].CreatedAt.Unix() != 3 {
-		t.Fatalf("first page=%+v more=%v err=%v", values, more, err)
+	if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", IP: "10.0.0.0", CreatedAt: time.Unix(10, 0).UTC()}); err != nil {
+		t.Fatal(err)
 	}
-	values, more, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 2)
-	if err != nil || len(values) != 2 || more || values[0].CreatedAt.Unix() != 2 || values[1].CreatedAt.Unix() != 1 {
-		t.Fatalf("second page=%+v more=%v err=%v", values, more, err)
+	page, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 1)
+	values := page.Logins
+	if err != nil || len(values) != 2 || !page.HasMore || page.Total != 4 || values[0].IP != "10.0.0.0" || values[0].Count != 2 ||
+		values[0].FirstAt.Unix() != 1 || values[0].CreatedAt.Unix() != 10 || values[1].CreatedAt.Unix() != 4 {
+		t.Fatalf("first page=%+v err=%v", page, err)
+	}
+	page, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 2)
+	values = page.Logins
+	if err != nil || len(values) != 2 || page.HasMore || values[0].CreatedAt.Unix() != 3 || values[1].CreatedAt.Unix() != 2 {
+		t.Fatalf("second page=%+v err=%v", page, err)
 	}
 }
 

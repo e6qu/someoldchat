@@ -339,11 +339,12 @@ CREATE TABLE IF NOT EXISTS outbox (
  lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', next_attempt_at TEXT NOT NULL DEFAULT '',
  undeliverable INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS access_logs (
- id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
- username TEXT NOT NULL, created_at INTEGER NOT NULL, ip TEXT NOT NULL, user_agent TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS access_logins (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), ip TEXT NOT NULL, user_agent TEXT NOT NULL,
+ username TEXT NOT NULL, access_count INTEGER NOT NULL, date_first INTEGER NOT NULL, date_last INTEGER NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, ip, user_agent)
 );
-CREATE INDEX IF NOT EXISTS access_logs_workspace_created ON access_logs(workspace_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS access_logins_workspace_last ON access_logins(workspace_id, date_last DESC);
 CREATE TABLE IF NOT EXISTS lifecycle_state (
  id INTEGER PRIMARY KEY CHECK(id = 1), state TEXT NOT NULL, generation INTEGER NOT NULL,
  wake_deadline TEXT NOT NULL DEFAULT ''
@@ -569,7 +570,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 177
+const schemaVersion = 178
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -688,45 +689,133 @@ func (s *Store) AppendEvent(ctx context.Context, event events.Event) error {
 	return err
 }
 
+// upsertAccessLoginStatement counts accesses into the aggregate row for their
+// member, address and user agent.
+const upsertAccessLoginStatement = `INSERT INTO access_logins(workspace_id, user_id, ip, user_agent, username, access_count, date_first, date_last) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(workspace_id, user_id, ip, user_agent) DO UPDATE SET
+ username = excluded.username,
+ access_count = access_logins.access_count + excluded.access_count,
+ date_first = CASE WHEN excluded.date_first < access_logins.date_first THEN excluded.date_first ELSE access_logins.date_first END,
+ date_last = CASE WHEN excluded.date_last > access_logins.date_last THEN excluded.date_last ELSE access_logins.date_last END`
+
 func (s *Store) RecordAccess(ctx context.Context, value domain.AccessLog) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO access_logs(workspace_id, user_id, username, created_at, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)`, value.WorkspaceID, value.UserID, value.Username, value.CreatedAt.UTC().Unix(), value.IP, value.UserAgent)
+	first, last := value.FirstAt, value.CreatedAt
+	if first.IsZero() {
+		first = last
+	}
+	count := value.Count
+	if count <= 0 {
+		count = 1
+	}
+	_, err := s.db.ExecContext(ctx, upsertAccessLoginStatement, value.WorkspaceID, value.UserID, value.IP, value.UserAgent, value.Username, count, first.UTC().Unix(), last.UTC().Unix())
 	return err
 }
-func (s *Store) ListAccessLogs(ctx context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
-	if limit <= 0 || limit > 1000 || page <= 0 {
-		return nil, false, store.InvalidArgument("access log page parameters are invalid")
+
+// migrateAccessLogins folds the per-request access_logs rows into
+// access_logins. The IP has its port removed in Go, where net.SplitHostPort
+// knows IPv6 brackets; SQL string functions do not.
+func (s *Store) migrateAccessLogins(ctx context.Context, db queryExecutor) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS access_logins (
+		workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), ip TEXT NOT NULL, user_agent TEXT NOT NULL,
+		username TEXT NOT NULL, access_count INTEGER NOT NULL, date_first INTEGER NOT NULL, date_last INTEGER NOT NULL,
+		PRIMARY KEY (workspace_id, user_id, ip, user_agent)
+	)`); err != nil {
+		return fmt.Errorf("migrate access logins: %w", err)
 	}
-	query := `SELECT workspace_id, user_id, username, created_at, ip, user_agent FROM access_logs WHERE workspace_id = ?`
-	args := []any{workspace}
-	if !before.IsZero() {
-		query += ` AND created_at <= ?`
-		args = append(args, before.UTC().Unix())
-	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
-	args = append(args, limit+1, (page-1)*limit)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	legacy, err := s.tableColumns(ctx, db, "access_logs")
 	if err != nil {
-		return nil, false, err
+		return fmt.Errorf("find legacy access logs: %w", err)
 	}
-	defer rows.Close()
-	values := make([]domain.AccessLog, 0, limit+1)
+	if len(legacy) == 0 {
+		return nil
+	}
+	type key struct{ workspace, user, ip, agent string }
+	aggregated := make(map[key]*domain.AccessLog)
+	order := make([]key, 0)
+	rows, err := db.QueryContext(ctx, `SELECT workspace_id, user_id, username, created_at, ip, user_agent FROM access_logs ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("read legacy access logs: %w", err)
+	}
 	for rows.Next() {
 		var value domain.AccessLog
 		var created int64
 		if err := rows.Scan(&value.WorkspaceID, &value.UserID, &value.Username, &created, &value.IP, &value.UserAgent); err != nil {
-			return nil, false, err
+			_ = rows.Close()
+			return fmt.Errorf("read legacy access log: %w", err)
 		}
-		value.CreatedAt = time.Unix(created, 0).UTC()
-		values = append(values, value)
+		at := time.Unix(created, 0).UTC()
+		value.IP = domain.AccessLogIP(value.IP)
+		id := key{string(value.WorkspaceID), string(value.UserID), value.IP, value.UserAgent}
+		existing, ok := aggregated[id]
+		if !ok {
+			value.FirstAt, value.CreatedAt, value.Count = at, at, 1
+			aggregated[id] = &value
+			order = append(order, id)
+			continue
+		}
+		existing.Count++
+		existing.Username = value.Username
+		if at.Before(existing.FirstAt) {
+			existing.FirstAt = at
+		}
+		if at.After(existing.CreatedAt) {
+			existing.CreatedAt = at
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false, err
+		_ = rows.Close()
+		return fmt.Errorf("read legacy access logs: %w", err)
 	}
-	hasMore := len(values) > limit
-	if hasMore {
-		values = values[:limit]
+	if err := rows.Close(); err != nil {
+		return err
 	}
-	return values, hasMore, nil
+	for _, id := range order {
+		value := aggregated[id]
+		if _, err := db.ExecContext(ctx, upsertAccessLoginStatement, value.WorkspaceID, value.UserID, value.IP, value.UserAgent, value.Username, value.Count, value.FirstAt.Unix(), value.CreatedAt.Unix()); err != nil {
+			return fmt.Errorf("fold legacy access log: %w", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE access_logs`); err != nil {
+		return fmt.Errorf("drop legacy access logs: %w", err)
+	}
+	return nil
+}
+func (s *Store) ListAccessLogs(ctx context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
+	if limit <= 0 || limit > 1000 || page <= 0 {
+		return domain.AccessLogPage{}, store.InvalidArgument("access log page parameters are invalid")
+	}
+	filter := ` WHERE workspace_id = ?`
+	args := []any{workspace}
+	if !before.IsZero() {
+		filter += ` AND date_first <= ?`
+		args = append(args, before.UTC().Unix())
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM access_logins`+filter, args...).Scan(&total); err != nil {
+		return domain.AccessLogPage{}, err
+	}
+	query := `SELECT workspace_id, user_id, username, date_first, date_last, access_count, ip, user_agent FROM access_logins` + filter +
+		` ORDER BY date_last DESC, date_first DESC, user_id, ip, user_agent LIMIT ? OFFSET ?`
+	rows, err := s.db.QueryContext(ctx, query, append(args, limit, (page-1)*limit)...)
+	if err != nil {
+		return domain.AccessLogPage{}, err
+	}
+	defer rows.Close()
+	result := domain.AccessLogPage{Logins: make([]domain.AccessLog, 0, limit), Total: total}
+	for rows.Next() {
+		var value domain.AccessLog
+		var first, last int64
+		if err := rows.Scan(&value.WorkspaceID, &value.UserID, &value.Username, &first, &last, &value.Count, &value.IP, &value.UserAgent); err != nil {
+			return domain.AccessLogPage{}, err
+		}
+		value.FirstAt, value.CreatedAt = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
+		result.Logins = append(result.Logins, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.AccessLogPage{}, err
+	}
+	result.HasMore = (page-1)*limit+len(result.Logins) < total
+	return result, nil
 }
 
 // sqlitePragmas are connection settings, not database settings: SQLite applies
@@ -3343,6 +3432,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 178 {
+		// team.accessLogs reports one row per member, IP address and user
+		// agent with a count and the first and last time it was seen. The
+		// access_logs table held a row per request, and its IP carried the
+		// ephemeral source port, so one login was listed thousands of times.
+		// Existing rows are folded into the aggregate with their port removed,
+		// then the per-request table is dropped.
+		if err := s.migrateAccessLogins(ctx, db); err != nil {
+			return err
+		}
+	}
 	if version < 177 {
 		// An app-registered call's participants who have no account here. The
 		// calls API names them by the provider's external_id with a display
@@ -4474,6 +4574,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 // an information_schema query; an unlisted name is a programming error, not a
 // caller's input.
 var migratableTables = []string{
+	"access_logs",
 	"activity_items",
 	"app_tokens",
 	"calls",

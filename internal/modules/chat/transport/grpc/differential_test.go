@@ -994,10 +994,11 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				logs, more, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Time{}, 5, 1)
+				accessPage, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Time{}, 5, 1)
 				if err != nil {
 					return nil, err
 				}
+				logs, more := accessPage.Logins, accessPage.HasMore
 				integration, err := chat.IntegrationLogs(ctx, "T1", "UA", "", "", "", "", 5, 1)
 				if err != nil {
 					return nil, err
@@ -1013,7 +1014,7 @@ func parityCases() []parityCase {
 				// A member cannot read any of them.
 				_, memberInvites := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInvitePending, domain.PageRequest{Limit: 5})
 				_, memberRequests := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestPending, domain.PageRequest{Limit: 5})
-				_, _, memberLogs := chat.ListAccessLogs(ctx, "T1", "U1", time.Time{}, 5, 1)
+				_, memberLogs := chat.ListAccessLogs(ctx, "T1", "U1", time.Time{}, 5, 1)
 				return []any{
 					len(invites.Invites), invites.HasMore, len(requests.Requests), requests.HasMore,
 					len(logs), more, len(integration.Logs),
@@ -4146,19 +4147,21 @@ func parityCases() []parityCase {
 				// Reading the access back is what gives the record teeth: the
 				// write reports nothing, so a dropped field is invisible until
 				// somebody asks for the log.
-				logs, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), 10, 1)
+				accessPage, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), 10, 1)
 				if err != nil {
 					return nil, err
 				}
+				logs := accessPage.Logins
 				// The Unix epoch is a real instant, not an absent one: asking
 				// for accesses before it must answer with none. It used to
 				// answer none locally and everything remotely, because the
 				// seam encoded the instant as a bare int64 whose zero also
 				// meant "no filter".
-				beforeEpoch, _, err := chat.ListAccessLogs(ctx, "T1", "U1", time.Unix(0, 0).UTC(), 10, 1)
+				beforeEpochPage, err := chat.ListAccessLogs(ctx, "T1", "UA", time.Unix(0, 0).UTC(), 10, 1)
 				if err != nil {
 					return nil, err
 				}
+				beforeEpoch := beforeEpochPage.Logins
 				accesses := make([]string, 0, len(logs))
 				for _, entry := range logs {
 					accesses = append(accesses, strings.Join([]string{string(entry.UserID), entry.IP, entry.UserAgent}, "|"))

@@ -1255,9 +1255,14 @@ func TestSQLiteAccessLogsAreBoundedAndDurable(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	values, hasMore, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 1)
-	if err != nil || len(values) != 2 || !hasMore {
-		t.Fatalf("values=%+v hasMore=%v err=%v", values, hasMore, err)
+	if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", Username: "alice", CreatedAt: created, IP: "192.0.2.1", UserAgent: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	// Three accesses from one address and agent are one row counted three
+	// times; the fourth, from another address, is its own row.
+	page, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 1, 1)
+	if err != nil || len(page.Logins) != 1 || !page.HasMore || page.Total != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
@@ -1267,9 +1272,75 @@ func TestSQLiteAccessLogsAreBoundedAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	values, _, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 10, 1)
-	if err != nil || len(values) != 3 {
-		t.Fatalf("durable values=%+v err=%v", values, err)
+	page, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 10, 1)
+	if err != nil || len(page.Logins) != 2 || page.Total != 2 || page.HasMore {
+		t.Fatalf("durable page=%+v err=%v", page, err)
+	}
+	aggregated := page.Logins[0]
+	if aggregated.IP != "127.0.0.1" || aggregated.Count != 3 || !aggregated.FirstAt.Equal(created) || !aggregated.CreatedAt.Equal(created.Add(2*time.Second)) {
+		t.Fatalf("aggregated=%+v", aggregated)
+	}
+	// Only rows first seen by `before` are listed.
+	page, err = s.ListAccessLogs(ctx, "T1", created.Add(-time.Second), 10, 1)
+	if err != nil || len(page.Logins) != 0 || page.Total != 0 {
+		t.Fatalf("before page=%+v err=%v", page, err)
+	}
+}
+
+// Schema 178 folds the per-request access_logs rows into the aggregate,
+// removing the source port the IP used to carry, and drops the old table.
+func TestSchema178FoldsPerRequestAccessLogs(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "access-logs-legacy.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE access_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), username TEXT NOT NULL, created_at INTEGER NOT NULL, ip TEXT NOT NULL, user_agent TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for index, ip := range []string{"198.51.100.4:50001", "198.51.100.4:50002", "[2001:db8::1]:443", "198.51.100.4:50003"} {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO access_logs(workspace_id, user_id, username, created_at, ip, user_agent) VALUES ('T1', 'U1', 'alice', ?, ?, 'agent')`, 1700000000+index, ip); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 178`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (177, '')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	page, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 10, 1)
+	if err != nil || page.Total != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	byIP := map[string]domain.AccessLog{}
+	for _, login := range page.Logins {
+		byIP[login.IP] = login
+	}
+	if v4 := byIP["198.51.100.4"]; v4.Count != 3 || v4.FirstAt.Unix() != 1700000000 || v4.CreatedAt.Unix() != 1700000003 {
+		t.Fatalf("folded v4 row=%+v", v4)
+	}
+	if v6 := byIP["2001:db8::1"]; v6.Count != 1 {
+		t.Fatalf("folded v6 row=%+v", v6)
+	}
+	var legacy int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'access_logs'`).Scan(&legacy); err != nil || legacy != 0 {
+		t.Fatalf("legacy table remains=%d err=%v", legacy, err)
 	}
 }
 

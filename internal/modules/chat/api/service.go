@@ -93,7 +93,7 @@ type Service interface {
 	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
-	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
+	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) (domain.AccessLogPage, error)
 	WorkspaceAnalytics(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (domain.WorkspaceAnalytics, error)
 	UserWorkspaces(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.WorkspaceMembershipSummary, error)
 	// The Slack Connect invitation lifecycle. Approval and acceptance are

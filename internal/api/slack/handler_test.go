@@ -836,7 +836,7 @@ func TestTeamPreferencesListReturnsEnforcedWorkspacePolicies(t *testing.T) {
 }
 
 func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/team.integrationLogs?token=token&app_id=A1&team_id=Tother", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/team.integrationLogs?token=token&app_id=A1&team_id=Tother&count=25", nil)
 	response := httptest.NewRecorder()
 	testHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -848,11 +848,16 @@ func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
 			AppID  string `json:"app_id"`
 			UserID string `json:"user_id"`
 		} `json:"logs"`
+		Paging struct {
+			Count, Page, Pages, Total int
+		} `json:"paging"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.OK || len(body.Logs) != 1 || body.Logs[0].AppID != "A1" || body.Logs[0].UserID != "U1" {
+	// paging.count is the page size requested, not the length of this page.
+	if !body.OK || len(body.Logs) != 1 || body.Logs[0].AppID != "A1" || body.Logs[0].UserID != "U1" ||
+		body.Paging.Count != 25 || body.Paging.Total != 1 || body.Paging.Pages != 1 {
 		t.Fatalf("unexpected body: %s", response.Body)
 	}
 }
@@ -1416,20 +1421,65 @@ func TestTeamBillableInfoUsesDurableMembershipState(t *testing.T) {
 }
 
 func TestAccessLogsRequireAdminAndExposeRecordedAccess(t *testing.T) {
-	handler := testHandler()
-	request := httptest.NewRequest(http.MethodGet, "/api/users.info?user=U1", nil)
-	request.Header.Set("Authorization", "Bearer token")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("recorded request status=%d body=%s", response.Code, response.Body)
+	handler, s := testHandlerWithStore()
+	port := 40000
+	get := func(path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("User-Agent", "access-log-test")
+		// Each request arrives from a different ephemeral source port.
+		port++
+		request.RemoteAddr = "192.0.2.10:" + strconv.Itoa(port)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
 	}
-	logs := httptest.NewRequest(http.MethodGet, "/api/team.accessLogs", nil)
-	logs.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, logs)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"user_id":"U1"`) {
-		t.Fatalf("logs status=%d body=%s", result.Code, result.Body)
+	for range 3 {
+		if response := get("/api/users.info?user=U1"); response.Code != http.StatusOK {
+			t.Fatalf("recorded request status=%d body=%s", response.Code, response.Body)
+		}
+	}
+	result := get("/api/team.accessLogs?count=10")
+	var body struct {
+		OK     bool `json:"ok"`
+		Logins []struct {
+			UserID    string `json:"user_id"`
+			IP        string `json:"ip"`
+			UserAgent string `json:"user_agent"`
+			Count     int    `json:"count"`
+			DateFirst int64  `json:"date_first"`
+			DateLast  int64  `json:"date_last"`
+		} `json:"logins"`
+		Paging struct {
+			Count, Page, Pages, Total int
+		} `json:"paging"`
+	}
+	if err := json.Unmarshal(result.Body.Bytes(), &body); err != nil || !body.OK {
+		t.Fatalf("logs status=%d body=%s err=%v", result.Code, result.Body, err)
+	}
+	// One row per member, address (without its port) and user agent, counting
+	// every access; paging.count is the page size asked for.
+	var found bool
+	for _, login := range body.Logins {
+		if login.UserID == "U1" && login.UserAgent == "access-log-test" {
+			found = true
+			if login.IP != "192.0.2.10" || login.Count < 3 || login.DateFirst == 0 || login.DateLast < login.DateFirst {
+				t.Fatalf("aggregated login=%+v", login)
+			}
+		}
+	}
+	if !found || body.Paging.Count != 10 || body.Paging.Page != 1 || body.Paging.Total != len(body.Logins) || body.Paging.Pages != 1 {
+		t.Fatalf("logins=%s", result.Body)
+	}
+	if result := get("/api/team.accessLogs?page=101"); !strings.Contains(result.Body.String(), `"error":"over_pagination_limit"`) {
+		t.Fatalf("page 101=%s", result.Body)
+	}
+	// Every member's addresses and devices are an administrator's to read.
+	if err := s.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	if result := get("/api/team.accessLogs"); !strings.Contains(result.Body.String(), `"ok":false`) {
+		t.Fatalf("member read the access logs: %s", result.Body)
 	}
 }
 

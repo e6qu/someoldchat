@@ -256,7 +256,11 @@ type Store interface {
 	// Activity in one write, so the notification and the durable record agree.
 	InviteToHuddle(context.Context, events.Event) error
 	RecordAccess(context.Context, domain.AccessLog) error
-	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) ([]domain.AccessLog, bool, error)
+	// RecordAccess counts one access into the row for its member, IP address
+	// and user agent, creating the row on the first access.
+	// ListAccessLogs pages those rows, most recently seen first, keeping only
+	// rows first seen at or before the given instant when it is not zero.
+	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) (domain.AccessLogPage, error)
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppToken(context.Context, string, domain.AppTokenRecord) error

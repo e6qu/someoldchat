@@ -2919,20 +2919,34 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		before = time.Unix(seconds, 0).UTC()
 	}
-	values, hasMore, err := h.Messages.ListAccessLogs(r.Context(), principal.WorkspaceID, principal.UserID, before, limit, page)
+	// Slack serves at most 100 pages of access logs and names the refusal.
+	if page > service.MaxAccessLogPages {
+		writeError(w, "over_pagination_limit")
+		return
+	}
+	value, err := h.Messages.ListAccessLogs(r.Context(), principal.WorkspaceID, principal.UserID, before, limit, page)
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	logins := make([]map[string]any, 0, len(values))
-	for _, value := range values {
-		logins = append(logins, map[string]any{"count": 1, "country": nil, "date_first": value.CreatedAt.Unix(), "date_last": value.CreatedAt.Unix(), "ip": value.IP, "isp": nil, "region": nil, "user_agent": value.UserAgent, "user_id": value.UserID, "username": value.Username})
+	logins := make([]map[string]any, 0, len(value.Logins))
+	for _, login := range value.Logins {
+		logins = append(logins, map[string]any{"count": login.Count, "country": nil, "date_first": login.FirstAt.Unix(), "date_last": login.CreatedAt.Unix(), "ip": login.IP, "isp": nil, "region": nil, "user_agent": login.UserAgent, "user_id": login.UserID, "username": login.Username})
 	}
-	pages := page
-	if hasMore {
-		pages++
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logins": logins, "paging": legacyPaging(limit, page, value.Total)})
+}
+
+// legacyPaging is the page-numbered `paging` object: count is the page size
+// the caller asked for (Slack's own example answers count 100 for two
+// results), total is the size of the whole collection, and pages is how many
+// pages of that size cover it - never fewer than one. The access log used to
+// answer count and total with the length of the page it returned.
+func legacyPaging(count, page, total int) map[string]any {
+	pages := 1
+	if total > 0 {
+		pages = (total + count - 1) / count
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logins": logins, "paging": map[string]any{"count": len(logins), "page": page, "pages": pages, "total": len(logins)}})
+	return map[string]any{"count": count, "page": page, "pages": pages, "total": total}
 }
 
 func (h Handler) integrationLogs(w http.ResponseWriter, r *http.Request) {
@@ -2975,7 +2989,7 @@ func (h Handler) integrationLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		logs = append(logs, log)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logs": logs, "paging": map[string]any{"count": len(logs), "page": value.Page, "pages": value.Pages, "total": value.Total}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logs": logs, "paging": map[string]any{"count": count, "page": value.Page, "pages": value.Pages, "total": value.Total}})
 }
 
 func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {

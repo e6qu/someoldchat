@@ -8677,11 +8677,12 @@ func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.Workspace
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
 		return store.ErrNotFound
 	}
-	ip, userAgent = strings.TrimSpace(ip), strings.TrimSpace(userAgent)
+	ip, userAgent = domain.AccessLogIP(ip), strings.TrimSpace(userAgent)
 	if len(ip) > 128 || len(userAgent) > 1024 {
 		return ErrInvalidAccessLog
 	}
-	return m.Store.RecordAccess(ctx, domain.AccessLog{WorkspaceID: workspaceID, UserID: userID, Username: user.Name, CreatedAt: time.Now().UTC(), IP: ip, UserAgent: userAgent})
+	now := time.Now().UTC()
+	return m.Store.RecordAccess(ctx, domain.AccessLog{WorkspaceID: workspaceID, UserID: userID, Username: user.Name, FirstAt: now, CreatedAt: now, Count: 1, IP: ip, UserAgent: userAgent})
 }
 
 // AnalyticsBusiestChannels bounds the busiest-channel list the dashboard asks
@@ -8717,9 +8718,16 @@ func (m Messages) WorkspaceAnalytics(ctx context.Context, workspaceID domain.Wor
 	return m.Store.WorkspaceAnalytics(ctx, workspaceID, since.UTC(), AnalyticsBusiestChannels)
 }
 
-func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
-		return nil, false, err
+// MaxAccessLogPages is the deepest page team.accessLogs serves; Slack answers
+// over_pagination_limit past it.
+const MaxAccessLogPages = 100
+
+// ListAccessLogs answers team.accessLogs. It discloses every member's IP
+// addresses and devices, so it is administrative, like IntegrationLogs; any
+// member could read it before.
+func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
+		return domain.AccessLogPage{}, err
 	}
 	return m.Store.ListAccessLogs(ctx, workspaceID, before, limit, page)
 }
