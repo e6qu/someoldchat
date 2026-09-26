@@ -37,8 +37,15 @@ import (
 type Handler struct {
 	Messages      chatapi.Service
 	Authenticator auth.Authenticator
-	SocketMode    socketmode.Service
-	SocketAuth    auth.Authenticator
+	// appAuthenticator and socketMode are fixed at construction (see
+	// WithAppAuthenticator and WithSocketMode). Register binds every route to
+	// a copy of the Handler, so a field assigned after Register is invisible to
+	// the routes: cmd/server configured Socket Mode after Register and answered
+	// every apps.connections.open with socket_mode_unavailable, while the
+	// qualification fixture, which configured it first, passed. Unexported
+	// fields set only by construction options make that ordering impossible.
+	appAuthenticator auth.Authenticator
+	socketMode       *socketmode.Service
 	// Limiter enforces the Web API rate-limiting contract over every /api/
 	// route when set. Production wiring sets it; a zero Handler serves
 	// unlimited, which is what the package's own request-shaped tests and the
@@ -50,14 +57,53 @@ var errAccessLogging = errors.New("access logging failed")
 
 const oauthTokenLifetime = 12 * time.Hour
 
-func NewHandler(messages chatapi.Service, authenticator auth.Authenticator) (Handler, error) {
+// HandlerOption configures a Handler at construction, before any route can
+// capture it.
+type HandlerOption func(*Handler) error
+
+// WithAppAuthenticator authenticates app-level (xapp-) tokens, which
+// apps.event.authorizations.list and apps.connections.open accept.
+func WithAppAuthenticator(authenticator auth.Authenticator) HandlerOption {
+	return func(h *Handler) error {
+		if authenticator == nil {
+			return errors.New("Slack API app-token authenticator is nil")
+		}
+		h.appAuthenticator = authenticator
+		return nil
+	}
+}
+
+// WithSocketMode serves apps.connections.open from service. It requires
+// WithAppAuthenticator: an app-level token is the method's only credential,
+// and a Socket Mode service nobody can authenticate to is a permanently
+// broken feature that would otherwise be reported as a transient outage.
+func WithSocketMode(service socketmode.Service) HandlerOption {
+	return func(h *Handler) error {
+		if service.Store == nil {
+			return errors.New("Slack API Socket Mode requires a connection store")
+		}
+		h.socketMode = &service
+		return nil
+	}
+}
+
+func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, options ...HandlerOption) (Handler, error) {
 	if messages == nil {
 		return Handler{}, errors.New("Slack API requires a chat service")
 	}
 	if authenticator == nil {
 		return Handler{}, errors.New("Slack API requires an authenticator")
 	}
-	return Handler{Messages: messages, Authenticator: authenticator}, nil
+	handler := Handler{Messages: messages, Authenticator: authenticator}
+	for _, option := range options {
+		if err := option(&handler); err != nil {
+			return Handler{}, err
+		}
+	}
+	if handler.socketMode != nil && handler.appAuthenticator == nil {
+		return Handler{}, errors.New("Slack API Socket Mode requires an app-token authenticator")
+	}
+	return handler, nil
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
@@ -605,16 +651,8 @@ func (h Handler) unknownMethod(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, "unknown_method")
 }
 
-func (h *Handler) ConfigureSocketMode(service socketmode.Service, authenticator auth.Authenticator) {
-	if h == nil {
-		return
-	}
-	h.SocketMode = service
-	h.SocketAuth = authenticator
-}
-
 func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
-	if h.SocketAuth == nil || h.SocketMode.Store == nil {
+	if h.appAuthenticator == nil || h.socketMode == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "socket_mode_unavailable"})
 		return
 	}
@@ -622,7 +660,7 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 	// transport; collapsing them here told an app holding a revoked token that it
 	// had sent no credential, and a missing connections:write grant produced no
 	// `needed`/`provided` at all.
-	principal, err := h.SocketAuth.Authenticate(r)
+	principal, err := h.appAuthenticator.Authenticate(r)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -635,7 +673,20 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_auth")
 		return
 	}
-	result, err := h.SocketMode.Open(r.Context(), principal.AppID)
+	// The connection URL follows the origin the client reached this method on
+	// (X-Forwarded-Proto included), so an SDK pointed at a TLS-terminating
+	// proxy is handed a wss:// URL on the same host. An operator-configured
+	// Socket Mode host still wins.
+	result, err := h.socketMode.Open(r.Context(), principal.AppID, requestOrigin(r))
+	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
+		// Holding the maximum number of connections is a temporary condition
+		// that clears when one closes. It used to fall through to fatal_error,
+		// which every official Socket Mode client treats as permanent. Slack
+		// documents no dedicated code for it; 429 with Retry-After is the one
+		// answer every official Web API client retries on its own.
+		writeRateLimited(w, socketmode.ConnectionLimitRetryAfter)
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
@@ -2823,12 +2874,15 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	scheme := "ws"
-	if r.TLS != nil {
-		scheme = "wss"
+	// The scheme follows the request origin, X-Forwarded-Proto included. It
+	// was read from r.TLS alone, so behind a TLS-terminating proxy every RTM
+	// client was handed a ws:// URL the proxy does not serve.
+	streamURL, err := socketmode.WebSocketURL(requestOrigin(r), "/rtm", url.Values{"session_id": []string{connection.ID}})
+	if err != nil {
+		writeError(w, "fatal_error")
+		return
 	}
-	streamURL := url.URL{Scheme: scheme, Host: r.Host, Path: "/rtm", RawQuery: url.Values{"session_id": []string{connection.ID}}.Encode()}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL.String(), "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.Domain}, "self": map[string]any{"id": user.ID, "name": user.Name}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.Domain}, "self": map[string]any{"id": user.ID, "name": user.Name}})
 }
 
 func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
@@ -11119,8 +11173,9 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrIdempotencyConflict) {
 		return "invalid_arg_name"
 	}
-	// apps.connections.open is absent from the pinned snapshot; the Socket Mode
-	// connection limit reuses the recorded Socket Mode deviation code.
+	// apps.connections.open answers the connection limit itself, with 429 and
+	// Retry-After. This classification only keeps the sentinel from reading
+	// as fatal_error should another route ever surface it.
 	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
 		return "socket_mode_unavailable"
 	}
@@ -11704,10 +11759,10 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 }
 
 func (h Handler) authenticateApp(r *http.Request, scope auth.Scope) (auth.Principal, error) {
-	if h.SocketAuth == nil {
+	if h.appAuthenticator == nil {
 		return auth.Principal{}, auth.ErrInvalidToken
 	}
-	principal, err := h.SocketAuth.Authenticate(r)
+	principal, err := h.appAuthenticator.Authenticate(r)
 	if err != nil {
 		return auth.Principal{}, err
 	}

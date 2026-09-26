@@ -276,7 +276,7 @@ them.
 | `POST /auth/oidc/backchannel-logout`, `GET /auth/shauth/logout/complete` | provider-initiated logout |
 | `GET /events` | server-sent event stream, 16 KiB message ceiling |
 | `GET /rtm` | Real Time Messaging WebSocket |
-| `/socket-mode` | Socket Mode WebSocket, registered only when a connection store exists |
+| `/socket-mode` | Socket Mode WebSocket, mounted with the Web API and RTM by `slack.Mount` in every composition |
 | `POST /services/{workspace}/{app}/{secret}` | incoming webhook delivery; see [incoming webhooks](incoming-webhooks.md) |
 | `POST /internal/admin/incoming-webhooks/create`, `/enable` | webhook administration |
 | `GET /internal/slack-lists/download.csv` | `slackLists` CSV export |

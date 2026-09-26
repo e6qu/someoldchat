@@ -23,11 +23,9 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"github.com/sameoldchat/sameoldchat/internal/realtime"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackapp"
-	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
@@ -338,18 +336,23 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	handler, err := slack.NewHandler(messages, authenticator)
-	if err != nil {
-		panic(err)
-	}
-	responses := &qualificationResponseSink{store: store, messages: messages, values: make(map[string]string)}
+	responses := &qualificationResponseSink{messages: messages, values: make(map[string]string)}
 	appAuthenticator, err := auth.NewAppStored(store)
 	if err != nil {
 		panic(err)
 	}
-	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "127.0.0.1:18080"}, appAuthenticator)
 	mux := http.NewServeMux()
-	handler.Register(mux)
+	// The Slack surface — Web API, Socket Mode and RTM — is mounted by the
+	// same composition cmd/server uses, so what qualifies here is the
+	// production wiring. No Socket Mode host is configured: connection URLs
+	// follow the origin each SDK called apps.connections.open on, exactly as
+	// they do in a deployment that sets none. The rate limiter stays off
+	// because this fixture seeds and drives the SDKs at superhuman rates.
+	if err := slack.Mount(mux, slack.Surface{
+		Messages: messages, Authenticator: authenticator, AppAuthenticator: appAuthenticator, Responses: responses,
+	}); err != nil {
+		panic(err)
+	}
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -367,12 +370,6 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, value)
 	})
-	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
-	rtmHandler, err := realtime.NewRTMHandler(messages, messages, messages, messages)
-	if err != nil {
-		panic(err)
-	}
-	rtmHandler.RegisterRTM(mux)
 	mux.HandleFunc("GET /qualification/socket-mode-response", func(w http.ResponseWriter, r *http.Request) {
 		envelopeID := r.URL.Query().Get("envelope_id")
 		payload, ok := responses.get(envelopeID)
@@ -572,7 +569,6 @@ func (r *sdkMethodRecorder) ServeHTTP(w http.ResponseWriter, request *http.Reque
 }
 
 type qualificationResponseSink struct {
-	store    *memory.Store
 	messages service.Messages
 	mu       sync.RWMutex
 	values   map[string]string

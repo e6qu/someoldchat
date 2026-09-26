@@ -29,7 +29,6 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/observability"
 	"github.com/sameoldchat/sameoldchat/internal/realtime"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
-	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/web"
 	"google.golang.org/grpc"
@@ -136,8 +135,8 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	bootstrapAdminEmail := flags.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
 	appToken := flags.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
 	appID := flags.String("app-id", os.Getenv("SAMEOLDCHAT_APP_ID"), "Socket Mode app identifier")
-	socketHost := flags.String("socket-host", os.Getenv("SAMEOLDCHAT_SOCKET_HOST"), "public host used in Socket Mode connection URLs")
-	socketTLS := flags.Bool("socket-tls", os.Getenv("SAMEOLDCHAT_SOCKET_TLS") == "1", "use secure WebSocket URLs for Socket Mode")
+	socketHost := flags.String("socket-host", os.Getenv("SAMEOLDCHAT_SOCKET_HOST"), "public host:port Socket Mode connection URLs name; empty follows the host each client called apps.connections.open on")
+	socketTLS := flags.Bool("socket-tls", os.Getenv("SAMEOLDCHAT_SOCKET_TLS") == "1", "hand out wss:// Socket Mode URLs; with -socket-host it selects the scheme, without it it forces wss:// behind a TLS proxy that sends no X-Forwarded-Proto")
 	googleClientID := flags.String("google-client-id", "", "Google OAuth client ID")
 	googleClientSecret := flags.String("google-client-secret", "", "Google OAuth client secret")
 	githubClientID := flags.String("github-client-id", "", "GitHub OAuth client ID")
@@ -211,7 +210,6 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// broadcast presence events alongside it.
 	var sfuManager *huddlesfu.Manager
 	var huddleStore store.Store
-	var socketModeStore socketmode.ConnectionStore
 	var socketModeAuth auth.Authenticator
 	switch settings.chatMode {
 	case "local":
@@ -230,7 +228,6 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			}
 		}()
 		chatService = runtime.Service
-		socketModeStore = runtime.Store
 		manager, sfuErr := huddlesfu.NewManager(web.HuddleSignalEmitter{Store: runtime.Store}, huddlesfu.Config{PublicIP: *huddlePublicIP, UDPPort: *huddleUDPPort})
 		if sfuErr != nil {
 			return startupFailure(applicationContext, logger, "configure huddle SFU", sfuErr)
@@ -335,42 +332,39 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		}
 		sessionRevoker = remoteSessionRevoker
 	}
-	if socketModeStore == nil {
-		if value, ok := chatService.(socketmode.ConnectionStore); ok {
-			socketModeStore = value
+	if socketModeAuth == nil {
+		// Distributed composition authenticates app-level tokens through the
+		// generated chat boundary. Socket Mode is served in every composition,
+		// so a chat client that cannot authenticate them is a configuration
+		// fault, not a feature to drop silently.
+		value, ok := chatService.(auth.AppTokenStore)
+		if !ok {
+			logger.Error("chat service cannot authenticate Socket Mode app tokens", "mode", settings.chatMode)
+			return exitConfiguration
 		}
-		if value, ok := chatService.(auth.AppTokenStore); ok {
-			configured, configureErr := auth.NewAppStored(value)
-			if configureErr != nil {
-				logger.Error("configure distributed Socket Mode authenticator", "error", configureErr)
-				return exitConfiguration
-			}
-			socketModeAuth = configured
+		configured, configureErr := auth.NewAppStored(value)
+		if configureErr != nil {
+			logger.Error("configure distributed Socket Mode authenticator", "error", configureErr)
+			return exitConfiguration
 		}
-	}
-	// A registered /socket-mode route with no authenticator answers
-	// apps.connections.open with 503 socket_mode_unavailable for the lifetime of
-	// the process, reporting a permanently broken feature as a transient outage.
-	// Incomplete configuration must fail at startup instead.
-	if socketModeStore != nil && socketModeAuth == nil {
-		logger.Error("Socket Mode connection store has no app-token authenticator", "mode", settings.chatMode)
-		return exitConfiguration
-	}
-	slackHandler, err := slack.NewHandler(chatService, authenticator)
-	if err != nil {
-		logger.Error("configure Slack API", "error", err)
-		return exitConfiguration
+		socketModeAuth = configured
 	}
 	// The Web API rate-limiting contract is production behavior: official
 	// SDKs key their retry handling on 429 + Retry-After. Only qualification
 	// harnesses, which seed fixtures at superhuman request rates, turn it off.
+	var limiter *slack.RateLimiter
 	if *apiRateLimit {
-		slackHandler.Limiter = slack.NewRateLimiter()
+		limiter = slack.NewRateLimiter()
 	}
-	slackHandler.Register(mux)
-	if socketModeStore != nil {
-		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: resolved.socketHost, TLS: *socketTLS}, socketModeAuth)
-		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Queue: chatService, Interactions: chatService, Responses: chatService, Logger: logger})
+	// The Web API, Socket Mode and RTM are mounted by the one composition the
+	// SDK qualification fixture also uses, so qualification exercises this
+	// wiring rather than a copy of it.
+	if err := slack.Mount(mux, slack.Surface{
+		Messages: chatService, Authenticator: authenticator, AppAuthenticator: socketModeAuth,
+		SocketHost: resolved.socketHost, SocketTLS: *socketTLS, Limiter: limiter, Logger: logger,
+	}); err != nil {
+		logger.Error("configure Slack API", "error", err)
+		return exitConfiguration
 	}
 	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, defaultConversation, *authCookieDomain)
 	if err != nil {
@@ -443,13 +437,6 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// to slog.Default() instead of this process's configured handler.
 	sseHandler.Logger = logger
 	sseHandler.Register(mux)
-	rtmHandler, err := realtime.NewRTMHandler(chatService, chatService, chatService, chatService)
-	if err != nil {
-		logger.Error("configure RTM", "error", err)
-		return exitConfiguration
-	}
-	rtmHandler.Logger = logger
-	rtmHandler.RegisterRTM(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
@@ -769,12 +756,15 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 	if (c.appToken != "") != (c.appID != "") {
 		return resolvedConfig{}, errors.New("Socket Mode requires both -app-token and -app-id")
 	}
+	// An empty Socket Mode host is not a fault: apps.connections.open then
+	// names the origin the client reached it on, which is the one address
+	// that client is known to be able to reach. A value derived from the
+	// listen address named localhost, or an internal port behind a proxy.
 	resolved.socketHost = strings.TrimSpace(c.socketHost)
-	if resolved.socketHost == "" {
-		if c.appToken != "" {
-			return resolvedConfig{}, errors.New("-socket-host is required when Socket Mode is configured because apps.connections.open hands the value to clients")
+	if resolved.socketHost != "" {
+		if strings.ContainsAny(resolved.socketHost, "/?#@ ") {
+			return resolvedConfig{}, fmt.Errorf("-socket-host must be a host or host:port, not %q", resolved.socketHost)
 		}
-		resolved.socketHost = socketHostDefault(c.addr)
 	}
 	switch c.chatMode {
 	case "local":
@@ -996,22 +986,6 @@ func releaseRevisionDefault() string {
 		return configured
 	}
 	return releaseRevision
-}
-
-// socketHostDefault derives the Socket Mode connection host from the listen
-// address. It was hardcoded to "localhost:8080" and ignored -addr, so a server
-// started on another port or behind a real hostname handed every Socket Mode
-// client an unreachable ws:// URL from apps.connections.open.
-func socketHostDefault(addr string) string {
-	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
-	if err != nil {
-		return "localhost:8080"
-	}
-	switch strings.TrimSpace(host) {
-	case "", "0.0.0.0", "::", "[::]":
-		host = "localhost"
-	}
-	return net.JoinHostPort(host, port)
 }
 
 func databaseDSNDefault() string {

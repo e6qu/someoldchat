@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/sameoldchat/sameoldchat/internal/app/localchat"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -100,8 +103,8 @@ func TestResolveAcceptsTheSmallestLocalConfiguration(t *testing.T) {
 	if resolved.workspace != defaultWorkspace || resolved.lookupUser != defaultLookupUser {
 		t.Fatalf("workspace=%q user=%q", resolved.workspace, resolved.lookupUser)
 	}
-	if resolved.socketHost != "localhost:8080" {
-		t.Fatalf("socket host = %q", resolved.socketHost)
+	if resolved.socketHost != "" {
+		t.Fatalf("socket host = %q, want none: connection URLs follow the request origin", resolved.socketHost)
 	}
 }
 
@@ -400,24 +403,140 @@ func TestResolveDatabaseDSNRejectsUnknownComposition(t *testing.T) {
 	}
 }
 
-// The Socket Mode connection host used to be hardcoded to "localhost:8080",
-// which ignored -addr entirely, so a server on another port handed every Socket
-// Mode client an unreachable URL from apps.connections.open.
-func TestSocketHostDefaultFollowsTheListenAddress(t *testing.T) {
-	for _, testCase := range []struct{ addr, want string }{
-		{addr: ":8080", want: "localhost:8080"},
-		{addr: ":9000", want: "localhost:9000"},
-		{addr: " :9000 ", want: "localhost:9000"},
-		{addr: "0.0.0.0:9100", want: "localhost:9100"},
-		{addr: "[::]:9200", want: "localhost:9200"},
-		{addr: "chat.example.com:443", want: "chat.example.com:443"},
-		{addr: "10.0.0.5:8080", want: "10.0.0.5:8080"},
-		{addr: "not-an-address", want: "localhost:8080"},
-	} {
-		if got := socketHostDefault(testCase.addr); got != testCase.want {
-			t.Errorf("socketHostDefault(%q) = %q, want %q", testCase.addr, got, testCase.want)
+// -socket-host names a host, and a URL there would be embedded verbatim in
+// every connection URL apps.connections.open hands out.
+func TestResolveRejectsASocketHostThatIsNotAHost(t *testing.T) {
+	for _, host := range []string{"https://chat.example.com", "chat.example.com/socket-mode", "user@chat.example.com"} {
+		config := localConfig()
+		config.socketHost = host
+		if _, err := config.resolve(); err == nil || !strings.Contains(err.Error(), "-socket-host") {
+			t.Errorf("-socket-host %q: error=%v, want a -socket-host rejection", host, err)
 		}
 	}
+	config := localConfig()
+	config.socketHost = "chat.example.com:443"
+	if _, err := config.resolve(); err != nil {
+		t.Fatalf("-socket-host chat.example.com:443 rejected: %v", err)
+	}
+}
+
+// startServer runs this binary's composition on a free loopback port and
+// returns its base URL once it answers.
+func startServer(t *testing.T, arguments ...string) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	exited := make(chan int, 1)
+	go func() { exited <- run(ctx, discardLogger(), append([]string{"-addr", addr}, arguments...)) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-exited:
+		case <-time.After(15 * time.Second):
+			t.Error("server did not stop")
+		}
+	})
+	base := "http://" + addr
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		response, err := http.Get(base + "/healthz")
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return base
+			}
+		}
+		select {
+		case code := <-exited:
+			t.Fatalf("server exited with %d before answering", code)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not answer: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func postAPI(t *testing.T, base, method, token string, header http.Header) map[string]any {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, base+"/api/"+method, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	for name, values := range header {
+		request.Header[name] = values
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["ok"] != true {
+		t.Fatalf("%s status=%d body=%v", method, response.StatusCode, body)
+	}
+	return body
+}
+
+func dialHello(t *testing.T, address string) map[string]any {
+	t.Helper()
+	client, _, err := websocket.DefaultDialer.Dial(address, nil)
+	if err != nil {
+		t.Fatalf("dial %s: %v", address, err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var hello map[string]any
+	if err := client.ReadJSON(&hello); err != nil {
+		t.Fatal(err)
+	}
+	if hello["type"] != "hello" {
+		t.Fatalf("hello=%v", hello)
+	}
+	return hello
+}
+
+// This drives the production composition itself, not a copy of it. cmd/server
+// configured Socket Mode after Register had bound every route to a copy of the
+// handler, so apps.connections.open answered socket_mode_unavailable in every
+// real deployment while the SDK qualification fixture, which wired the same
+// pieces in the other order, passed.
+func TestProductionCompositionServesSocketModeAndRTM(t *testing.T) {
+	base := startServer(t, "-chat-mode", "local", "-store", "memory", "-api-token", "xoxb-test", "-api-rate-limit=false",
+		"-app-token", "xapp-test", "-app-id", "A0TEST")
+	opened := postAPI(t, base, "apps.connections.open", "xapp-test", nil)
+	address, _ := opened["url"].(string)
+	if want := "ws" + strings.TrimPrefix(base, "http") + "/socket-mode?"; !strings.HasPrefix(address, want) {
+		t.Fatalf("apps.connections.open url=%q, want the origin the client called: %s", address, want)
+	}
+	hello := dialHello(t, address)
+	if info, _ := hello["connection_info"].(map[string]any); info["app_id"] != "A0TEST" {
+		t.Fatalf("Socket Mode hello=%v", hello)
+	}
+	behindProxy := postAPI(t, base, "apps.connections.open", "xapp-test", http.Header{"X-Forwarded-Proto": []string{"https"}})
+	if address, _ := behindProxy["url"].(string); !strings.HasPrefix(address, "wss://") {
+		t.Fatalf("apps.connections.open behind a TLS proxy url=%q, want wss://", address)
+	}
+	connected := postAPI(t, base, "rtm.connect", "xoxb-test", nil)
+	rtmAddress, _ := connected["url"].(string)
+	if !strings.HasPrefix(rtmAddress, "ws"+strings.TrimPrefix(base, "http")+"/rtm?") {
+		t.Fatalf("rtm.connect url=%q", rtmAddress)
+	}
+	dialHello(t, rtmAddress)
 }
 
 // The service layer enforces conversation membership on chat.postMessage and
