@@ -1132,6 +1132,13 @@ func (m Messages) HandleAppResponse(ctx context.Context, responseToken, payload 
 func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
 	interaction, err := m.Store.GetSocketModeInteraction(ctx, appID, strings.TrimSpace(envelopeID))
 	if errors.Is(err, store.ErrNotFound) {
+		// An event envelope acknowledged with {} carries no response: several
+		// official SDKs attach an empty payload to every acknowledgement.
+		// Journalling it wrote one row per event for a response processor that
+		// has nothing to do with it.
+		if emptyJSONObject(payload) {
+			return nil
+		}
 		return m.Store.RecordSocketModeResponse(ctx, domain.SocketModeResponse{
 			AppID: appID, EnvelopeID: strings.TrimSpace(envelopeID), Payload: string(payload), ReceivedAt: time.Now().UTC(),
 		})
@@ -1176,6 +1183,11 @@ func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.App
 		return err
 	}
 	return m.applyAppResponse(ctx, interaction.Response, payload, "socket-mode:"+string(appID)+":"+interaction.EnvelopeID)
+}
+
+func emptyJSONObject(payload []byte) bool {
+	var object map[string]json.RawMessage
+	return json.Unmarshal(payload, &object) == nil && object != nil && len(object) == 0
 }
 
 func emptyViewAcknowledgement(payload []byte) bool {

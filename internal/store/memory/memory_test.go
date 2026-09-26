@@ -200,15 +200,15 @@ func TestSocketModeResponseRenewalKeepsSlowLeaseOwned(t *testing.T) {
 	if err := s.RecordSocketModeResponse(ctx, response); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-1", 1, 30*time.Millisecond)
+	claimed, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-1", 1, 200*time.Millisecond)
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
-	time.Sleep(10 * time.Millisecond)
-	if err := s.RenewSocketModeResponses(ctx, "worker-1", claimed, 100*time.Millisecond); err != nil {
+	time.Sleep(20 * time.Millisecond)
+	if err := s.RenewSocketModeResponses(ctx, "worker-1", claimed, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	if replacement, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-2", 1, time.Minute); err != nil || len(replacement) != 0 {
 		t.Fatalf("renewed response was reclaimed=%+v err=%v", replacement, err)
 	}

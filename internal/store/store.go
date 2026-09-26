@@ -85,6 +85,14 @@ const MaxSearchHistoryEntries = 50
 // the metrics computed over them, match.
 const AppDeliveryAttemptRetention = 50
 
+// SocketModeAcknowledgedRetention is how long an acknowledged Socket Mode
+// response or interaction row is kept. Acknowledged rows were never deleted,
+// so every event an SDK acknowledged with a payload, and every interaction,
+// grew both tables for the life of the deployment. The window keeps a replayed
+// acknowledgement idempotent for far longer than any SDK retries one. Both
+// store profiles prune on the same write paths so their contents match.
+const SocketModeAcknowledgedRetention = 24 * time.Hour
+
 // The access levels a list or canvas grant can carry. They are the values the
 // service layer already writes through SetListAccess and SetCanvasAccess; naming
 // them here keeps the readers, the writers and the authorization decision that

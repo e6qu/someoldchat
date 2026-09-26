@@ -6223,6 +6223,12 @@ func (s *Store) RecordSocketModeResponse(_ context.Context, value domain.SocketM
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cutoff := time.Now().UTC().Add(-store.SocketModeAcknowledgedRetention)
+	for key, stored := range s.socketResponses {
+		if stored.AppID == value.AppID && !stored.AcknowledgedAt.IsZero() && stored.AcknowledgedAt.Before(cutoff) {
+			delete(s.socketResponses, key)
+		}
+	}
 	key := socketModeResponseKey(value.AppID, value.EnvelopeID)
 	if existing, ok := s.socketResponses[key]; ok {
 		if existing.Payload != value.Payload {
@@ -6466,6 +6472,12 @@ func (s *Store) AckSocketModeInteraction(_ context.Context, appID domain.AppID, 
 	value.LeaseOwner = ""
 	value.LeaseExpiresAt = time.Time{}
 	s.socketInteractions[envelopeID] = value
+	cutoff := now.Add(-store.SocketModeAcknowledgedRetention)
+	for key, stored := range s.socketInteractions {
+		if stored.AppID == appID && !stored.AcknowledgedAt.IsZero() && stored.AcknowledgedAt.Before(cutoff) {
+			delete(s.socketInteractions, key)
+		}
+	}
 	return nil
 }
 

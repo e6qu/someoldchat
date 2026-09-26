@@ -11306,6 +11306,12 @@ func (s *Store) RecordSocketModeResponse(ctx context.Context, value domain.Socke
 	if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" || strings.TrimSpace(value.Payload) == "" || value.ReceivedAt.IsZero() {
 		return store.InvalidArgument("invalid Socket Mode response")
 	}
+	// Acknowledged rows past the retention window are pruned on the write
+	// path, the same way the memory profile prunes them.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM socket_mode_responses WHERE app_id = ? AND acknowledged_at > 0 AND acknowledged_at < ?`,
+		value.AppID, s.now().UTC().Add(-store.SocketModeAcknowledgedRetention).UnixNano()); err != nil {
+		return err
+	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO socket_mode_responses(app_id, envelope_id, payload, received_at) VALUES (?, ?, ?, ?) ON CONFLICT(app_id, envelope_id) DO NOTHING`, value.AppID, value.EnvelopeID, value.Payload, value.ReceivedAt.UTC().UnixNano())
 	if err != nil {
 		return err
@@ -11617,18 +11623,33 @@ func (s *Store) ClaimSocketModeInteraction(ctx context.Context, appID domain.App
 }
 
 func (s *Store) AckSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner string) error {
-	now := time.Now().UTC().UnixNano()
-	result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_interactions SET acknowledged_at = ?, lease_owner = '', lease_expires_at = 0
-		WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ? AND lease_expires_at > ?`, now, appID, envelopeID, owner, now)
-	if err != nil {
-		return err
-	}
-	if changed, err := result.RowsAffected(); err != nil {
-		return err
-	} else if changed != 1 {
-		return store.ErrLeaseConflict
-	}
-	return nil
+	return underContention(ctx, func() error {
+		tx, err := s.beginWrite(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		now := time.Now().UTC().UnixNano()
+		result, err := tx.ExecContext(ctx, `UPDATE socket_mode_interactions SET acknowledged_at = ?, lease_owner = '', lease_expires_at = 0
+			WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ? AND lease_expires_at > ?`, now, appID, envelopeID, owner, now)
+		if err != nil {
+			return err
+		}
+		if changed, err := result.RowsAffected(); err != nil {
+			return err
+		} else if changed != 1 {
+			return store.ErrLeaseConflict
+		}
+		// Acknowledged interactions past the retention window are pruned in
+		// the same transaction, the way the memory profile prunes them. The
+		// claim index leads with (app_id, acknowledged_at), so this is a range
+		// delete.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM socket_mode_interactions WHERE app_id = ? AND acknowledged_at > 0 AND acknowledged_at < ?`,
+			appID, now-int64(store.SocketModeAcknowledgedRetention)); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }
 
 func (s *Store) ReleaseSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner, reason string, retryAt time.Time) error {
