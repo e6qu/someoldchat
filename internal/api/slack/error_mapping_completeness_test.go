@@ -481,6 +481,8 @@ func perOperationExemptions() map[string]map[string]string {
 		"/users.conversations":        {"team_not_found": workspaceUnreadable},
 		"/users.deletePhoto":          {"user_not_found": "the enum declares no missing-user code, though the operation is defined entirely in terms of a user"},
 		"/users.profile.set":          {"user_not_found": "the enum declares reserved_name, invalid_profile and profile_set_failed but no missing-user code"},
+		"/stars.add":                  {"user_is_bot": "stars.* serve user tokens only; stars.list declares user_is_bot for a bot token and the snapshot's stars.add enum omits it"},
+		"/stars.remove":               {"user_is_bot": "stars.* serve user tokens only; stars.list declares user_is_bot for a bot token and the snapshot's stars.remove enum omits it"},
 		"/files.upload":               {"fatal_error": "the enum declares no server-side failure code; /users.setPhoto, which shares this spool, declares fatal_error", "file_not_found": "the enum declares no not-found code for the workspace the upload is written to"},
 		"/admin.conversations.search": {"fatal_error": "this enum is one of the short admin.* lists and declares no server-side failure code"},
 	}

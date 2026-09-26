@@ -712,13 +712,13 @@ public final class Qualification {
             com.slack.api.methods.response.dnd.DndInfoResponse dndInfo = methods.dndInfo(
                     com.slack.api.methods.request.dnd.DndInfoRequest.builder().build());
             require(dndInfo.isOk() && !dndInfo.isDndEnabled(), "dnd.info failed: " + dndInfo.getError());
-            com.slack.api.methods.response.dnd.DndSetSnoozeResponse dndSnooze = methods.dndSetSnooze(
+            com.slack.api.methods.response.dnd.DndSetSnoozeResponse dndSnooze = reminderMethods.dndSetSnooze(
                     com.slack.api.methods.request.dnd.DndSetSnoozeRequest.builder().numMinutes(5).build());
             require(dndSnooze.isOk() && dndSnooze.isSnoozeEnabled(), "dnd.setSnooze failed: " + dndSnooze.getError());
-            com.slack.api.methods.response.dnd.DndEndSnoozeResponse dndEndSnooze = methods.dndEndSnooze(
+            com.slack.api.methods.response.dnd.DndEndSnoozeResponse dndEndSnooze = reminderMethods.dndEndSnooze(
                     com.slack.api.methods.request.dnd.DndEndSnoozeRequest.builder().build());
             require(dndEndSnooze.isOk(), "dnd.endSnooze failed: " + dndEndSnooze.getError());
-            com.slack.api.methods.response.dnd.DndEndDndResponse dndEnd = methods.dndEndDnd(
+            com.slack.api.methods.response.dnd.DndEndDndResponse dndEnd = reminderMethods.dndEndDnd(
                     com.slack.api.methods.request.dnd.DndEndDndRequest.builder().build());
             require(dndEnd.isOk(), "dnd.endDnd failed: " + dndEnd.getError());
             com.slack.api.methods.response.dnd.DndTeamInfoResponse dndTeam = methods.dndTeamInfo(
@@ -830,13 +830,13 @@ public final class Qualification {
             // the bytes and refuses a stream that is not the image it claims to be.
             java.nio.file.Files.write(image.toPath(), java.util.Base64.getDecoder().decode(
                     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="));
-            com.slack.api.methods.response.users.UsersSetPhotoResponse photo = methods.usersSetPhoto(
+            com.slack.api.methods.response.users.UsersSetPhotoResponse photo = reminderMethods.usersSetPhoto(
                     com.slack.api.methods.request.users.UsersSetPhotoRequest.builder().image(image).build());
             if (!image.delete()) {
                 throw new IllegalStateException("could not delete temporary qualification image");
             }
             require(photo.isOk(), "users.setPhoto failed: " + photo.getError());
-            com.slack.api.methods.response.users.UsersDeletePhotoResponse deletedPhoto = methods.usersDeletePhoto(
+            com.slack.api.methods.response.users.UsersDeletePhotoResponse deletedPhoto = reminderMethods.usersDeletePhoto(
                     com.slack.api.methods.request.users.UsersDeletePhotoRequest.builder().build());
             require(deletedPhoto.isOk(), "users.deletePhoto failed: " + deletedPhoto.getError());
 
@@ -962,15 +962,15 @@ public final class Qualification {
                             .channel("C1").user("U1").text("ephemeral qualification").build());
             require(ephemeral.isOk() && ephemeral.getMessageTs() != null,
                     "chat.postEphemeral failed: " + ephemeral.getError());
-            com.slack.api.methods.response.stars.StarsAddResponse starred = methods.starsAdd(
+            com.slack.api.methods.response.stars.StarsAddResponse starred = reminderMethods.starsAdd(
                     com.slack.api.methods.request.stars.StarsAddRequest.builder()
                             .channel("C1").timestamp(root.getTs()).build());
             require(starred.isOk(), "stars.add failed: " + starred.getError());
-            com.slack.api.methods.response.stars.StarsListResponse stars = methods.starsList(
+            com.slack.api.methods.response.stars.StarsListResponse stars = reminderMethods.starsList(
                     com.slack.api.methods.request.stars.StarsListRequest.builder().limit(10).build());
             require(stars.isOk() && stars.getItems() != null && stars.getItems().size() == 1,
                     "stars.list failed: " + stars.getError());
-            com.slack.api.methods.response.stars.StarsRemoveResponse unstarred = methods.starsRemove(
+            com.slack.api.methods.response.stars.StarsRemoveResponse unstarred = reminderMethods.starsRemove(
                     com.slack.api.methods.request.stars.StarsRemoveRequest.builder()
                             .channel("C1").timestamp(root.getTs()).build());
             require(unstarred.isOk(), "stars.remove failed: " + unstarred.getError());
@@ -1002,7 +1002,7 @@ public final class Qualification {
                                     "Smileys & Emotion".equals(category.getName())
                                             && category.getEmojiNames().contains("grinning")),
                     "emoji.list categories failed: " + emoji.getError());
-            UsersIdentityResponse identityResult = methods.usersIdentity(
+            UsersIdentityResponse identityResult = reminderMethods.usersIdentity(
                     com.slack.api.methods.request.users.UsersIdentityRequest.builder().build());
             require(identityResult.isOk() && identityResult.getUser() != null
                             && "U1".equals(identityResult.getUser().getId()), "users.identity failed");

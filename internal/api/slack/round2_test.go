@@ -569,6 +569,10 @@ func TestCollisionsNameTheirOwnOperationsCode(t *testing.T) {
 		{"/api/reactions.add", "already_reacted"},
 	} {
 		handler, _ := testHandlerWithStore()
+		if item.path == "/api/stars.add" {
+			// stars.* serve user tokens only.
+			handler, _ = testUserHandlerWithStore()
+		}
 		timestamp := postSeed(t, handler)
 		form := "channel=C1&timestamp=" + timestamp
 		if item.path == "/api/reactions.add" {
@@ -634,7 +638,6 @@ func TestTamperedCursorsAreRefusedWithADeclaredCode(t *testing.T) {
 		{"/api/conversations.list", "invalid_arg_name"},
 		{"/api/reminders.list", "invalid_arg_name"},
 		{"/api/pins.list?channel=C1", "invalid_arg_name"},
-		{"/api/stars.list", "invalid_arg_name"},
 		{"/api/conversations.history?channel=C1", "invalid_arg_name"},
 		{"/api/reactions.get?channel=C1&timestamp=1", "invalid_arg_name"},
 		{"/api/chat.scheduledMessages.list", "invalid_arg_name"},
@@ -648,6 +651,10 @@ func TestTamperedCursorsAreRefusedWithADeclaredCode(t *testing.T) {
 		if code := errorCode(t, result); code != item.want {
 			t.Errorf("%s: want %q, got %q", item.target, item.want, code)
 		}
+	}
+	userHandler, _ := testUserHandlerWithStore()
+	if code := errorCode(t, getAPI(userHandler, "/api/stars.list?cursor=%21%21%21%21")); code != "invalid_arg_name" {
+		t.Errorf("stars.list: want invalid_arg_name, got %q", code)
 	}
 	searchHandler := userSearchHandler(t, repository)
 	if code := errorCode(t, getAPIWithToken(searchHandler, "/api/search.messages?query=x&cursor=%21%21%21%21", "user-token")); code != "invalid_arg_name" {
@@ -680,7 +687,6 @@ func TestOperationsNameCodesTheirOwnEnumDeclares(t *testing.T) {
 	handler, _ := testHandlerWithStore()
 	cases := []struct{ path, form, want string }{
 		{"/api/chat.unfurl", "channel=C1&ts=1", "missing_unfurls"},
-		{"/api/dnd.setSnooze", "", "missing_duration"},
 		{"/api/dialog.open", "dialog=%7B%7D", "missing_trigger"},
 		{"/api/dialog.open", "trigger_id=T", "missing_dialog"},
 		{"/api/migration.exchange", "team_id=TOTHER&users=U1", "invalid_arg_name"},
@@ -689,6 +695,11 @@ func TestOperationsNameCodesTheirOwnEnumDeclares(t *testing.T) {
 		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
 			t.Errorf("%s %q: want %q, got %q", item.path, item.form, item.want, code)
 		}
+	}
+	// dnd.setSnooze serves user tokens only.
+	userHandler, _ := testUserHandlerWithStore()
+	if code := errorCode(t, postForm(userHandler, "/api/dnd.setSnooze", "")); code != "missing_duration" {
+		t.Errorf("/api/dnd.setSnooze: want missing_duration, got %q", code)
 	}
 }
 

@@ -6051,6 +6051,9 @@ func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "invalid_auth"))
@@ -6249,11 +6252,19 @@ func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func dndResponse(value domain.DoNotDisturb, now time.Time) map[string]any {
-	return map[string]any{
+// dndResponse renders a member's Do Not Disturb state. The snooze fields are
+// the caller's own: Slack reports another member's schedule but not whether,
+// or until when, they have snoozed notifications.
+func dndResponse(value domain.DoNotDisturb, now time.Time, includeSnooze bool) map[string]any {
+	response := map[string]any{
 		"ok": true, "dnd_enabled": value.Enabled, "next_dnd_start_ts": unixSeconds(value.NextStartAt), "next_dnd_end_ts": unixSeconds(value.NextEndAt),
-		"snooze_enabled": value.SnoozeEnabled(now), "snooze_endtime": unixSeconds(value.SnoozeUntil), "snooze_remaining": value.SnoozeRemaining(now),
 	}
+	if includeSnooze {
+		response["snooze_enabled"] = value.SnoozeEnabled(now)
+		response["snooze_endtime"] = unixSeconds(value.SnoozeUntil)
+		response["snooze_remaining"] = value.SnoozeRemaining(now)
+	}
+	return response
 }
 
 func unixSeconds(value time.Time) int64 {
@@ -6280,13 +6291,16 @@ func (h Handler) dndInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC()))
+	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC(), requested == "" || requested == principal.UserID))
 }
 
 func (h Handler) dndEnd(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeDNDWrite)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if refuseBotToken(w, principal) {
 		return
 	}
 	// /dnd.endDnd declares `unknown_error`; `dnd_not_active` is in no pinned enum.
@@ -6303,19 +6317,25 @@ func (h Handler) dndEndSnooze(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	// /dnd.endSnooze declares `snooze_not_active`, which was never emitted.
 	value, err := h.Messages.EndSnooze(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "snooze_not_active"))
 		return
 	}
-	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC()))
+	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC(), true))
 }
 
 func (h Handler) dndSetSnooze(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeDNDWrite)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if refuseBotToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -6340,7 +6360,7 @@ func (h Handler) dndSetSnooze(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "snooze_failed"))
 		return
 	}
-	response := dndResponse(value, time.Now().UTC())
+	response := dndResponse(value, time.Now().UTC(), true)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -6417,7 +6437,7 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 			writeError(w, mapServiceError(infoErr, "user_not_found"))
 			return
 		}
-		response := dndResponse(value, now)
+		response := dndResponse(value, now, requestedID == principal.UserID)
 		delete(response, "ok")
 		users[string(requestedID)] = response
 	}
@@ -6528,6 +6548,9 @@ func (h Handler) deleteUserPhoto(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	if err := h.Messages.DeleteUserPhoto(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -6559,6 +6582,9 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, err)
 			return
 		}
+	}
+	if refuseBotToken(w, principal) {
+		return
 	}
 	temporary := spool.file
 	stat, err := temporary.Stat()
@@ -7646,6 +7672,9 @@ func (h Handler) addStar(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
@@ -7682,6 +7711,9 @@ func (h Handler) removeStar(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
@@ -7715,6 +7747,9 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeStarsRead)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if refuseBotToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -8072,14 +8107,43 @@ func (h Handler) listReminders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reminders": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
+// isBotPrincipal is the one test of whether a caller holds a bot token, for
+// the methods Slack serves to user tokens only - the ones that act on a
+// person's own snooze, identity, photo, saved items or search. search.* used
+// to check inline and dnd.*, users.identity, users.setPhoto/deletePhoto and
+// stars.* not at all, so a bot token could set a member's snooze and photo
+// and read their saved items.
+func isBotPrincipal(principal auth.Principal) bool {
+	return principal.TokenType.IsBot() || principal.BotID != ""
+}
+
+// refuseBotToken answers a bot token with user_is_bot, the code the user-only
+// methods' pinned enums declare, and reports whether it did.
+func refuseBotToken(w http.ResponseWriter, principal auth.Principal) bool {
+	if !isBotPrincipal(principal) {
+		return false
+	}
+	writeError(w, "user_is_bot")
+	return true
+}
+
+// refuseBotSearchToken is refuseBotToken for search.*, which declares no enum;
+// Slack answers a bot token there with not_allowed_token_type.
+func refuseBotSearchToken(w http.ResponseWriter, principal auth.Principal) bool {
+	if !isBotPrincipal(principal) {
+		return false
+	}
+	writeError(w, "not_allowed_token_type")
+	return true
+}
+
 func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeSearchRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType.IsBot() || principal.BotID != "" {
-		writeError(w, "not_allowed_token_type")
+	if refuseBotSearchToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -8114,8 +8178,7 @@ func (h Handler) searchFiles(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType.IsBot() || principal.BotID != "" {
-		writeError(w, "not_allowed_token_type")
+	if refuseBotSearchToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -8145,8 +8208,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType.IsBot() || principal.BotID != "" {
-		writeError(w, "not_allowed_token_type")
+	if refuseBotSearchToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)

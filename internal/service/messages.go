@@ -3628,8 +3628,12 @@ func (m Messages) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.DoNotDisturb{}, err
 	}
-	if minutes < 1 || minutes > 1440 {
+	if minutes < 1 {
 		return domain.DoNotDisturb{}, ErrInvalidSnooze
+	}
+	// Slack's own code for a snooze past a day.
+	if minutes > 1440 {
+		return domain.DoNotDisturb{}, ErrSnoozeTooLong
 	}
 	value, err := m.Store.GetDoNotDisturb(ctx, workspaceID, userID)
 	if err != nil {
@@ -3653,6 +3657,12 @@ func (m Messages) EndSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 	value, err := m.Store.GetDoNotDisturb(ctx, workspaceID, userID)
 	if err != nil {
 		return domain.DoNotDisturb{}, err
+	}
+	// Ending a snooze that is not running changes nothing, so it is refused
+	// with Slack's snooze_not_active rather than announced to every client as
+	// a dnd_updated_user that says nothing happened.
+	if !value.SnoozeEnabled(time.Now().UTC()) {
+		return domain.DoNotDisturb{}, ErrSnoozeNotActive
 	}
 	value.SnoozeUntil = time.Time{}
 	event, err := newEvent(workspaceID, userID, dndEventPayload("user.dnd_snooze_ended", userID, value, time.Now().UTC()), time.Now().UTC())

@@ -193,3 +193,19 @@ func TestParseRejectsMalformedCurrentManifestFields(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRejectsUserOnlyScopesRequestedForTheBot(t *testing.T) {
+	for _, scope := range []string{"dnd:write", "identity.basic", "identity.email", "stars:read", "stars:write", "search:read", "users.profile:write"} {
+		_, problems := Parse(`{"display_information": {"name": "Scoped"}, "oauth_config": {"scopes": {"bot": ["chat:write", "` + scope + `"]}}}`)
+		if len(problems) != 1 || problems[0].Pointer != "/oauth_config/scopes/bot" || !strings.Contains(problems[0].Message, scope) {
+			t.Fatalf("bot %s: problems=%+v", scope, problems)
+		}
+		if _, problems := Parse(`{"display_information": {"name": "Scoped"}, "oauth_config": {"scopes": {"user": ["` + scope + `"]}}}`); len(problems) != 0 {
+			t.Fatalf("user %s: problems=%+v", scope, problems)
+		}
+	}
+	// dnd:read and users.profile:read are bot scopes.
+	if _, problems := Parse(`{"display_information": {"name": "Scoped"}, "oauth_config": {"scopes": {"bot": ["dnd:read", "users.profile:read"]}}}`); len(problems) != 0 {
+		t.Fatalf("bot read scopes: problems=%+v", problems)
+	}
+}

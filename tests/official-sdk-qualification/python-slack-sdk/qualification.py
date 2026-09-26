@@ -13,6 +13,8 @@ client = WebClient(
     token=os.environ.get("SAMEOLDCHAT_API_TOKEN", "xoxb-test"),
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
 )
+# The user token: reminders, snooze, identity, photo and stars are methods
+# Slack serves to user tokens only.
 reminder_client = WebClient(
     token="xoxp-reminder-qualification",
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
@@ -634,13 +636,13 @@ assert client.chat_delete(channel="C1", ts=scheduled_root["ts"])["ok"] is True
 dnd_info = client.dnd_info()
 assert dnd_info["ok"] is True
 assert dnd_info["dnd_enabled"] is False
-dnd_snooze = client.dnd_setSnooze(num_minutes=5)
+dnd_snooze = reminder_client.dnd_setSnooze(num_minutes=5)
 assert dnd_snooze["ok"] is True
 assert dnd_snooze["snooze_enabled"] is True
-dnd_end_snooze = client.dnd_endSnooze()
+dnd_end_snooze = reminder_client.dnd_endSnooze()
 assert dnd_end_snooze["ok"] is True
 assert dnd_end_snooze["snooze_enabled"] is False
-dnd_end = client.dnd_endDnd()
+dnd_end = reminder_client.dnd_endDnd()
 assert dnd_end["ok"] is True
 dnd_team = client.dnd_teamInfo(users="U1")
 assert dnd_team["ok"] is True
@@ -734,9 +736,9 @@ assert profile["profile"]["display_name"] == "alice"
 # bytes and refuses a stream that is not the image it claims to be.
 image = io.BytesIO(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="))
 image.name = "qualification.png"
-photo = client.users_setPhoto(image=image)
+photo = reminder_client.users_setPhoto(image=image)
 assert photo["ok"] is True
-deleted_photo = client.users_deletePhoto()
+deleted_photo = reminder_client.users_deletePhoto()
 assert deleted_photo["ok"] is True
 
 root = client.chat_postMessage(channel="C1", text="thread root <https://example.com/qualification>")
@@ -792,12 +794,12 @@ assert me_message["ok"] is True
 ephemeral = client.chat_postEphemeral(channel="C1", user="U1", text="ephemeral qualification")
 assert ephemeral["ok"] is True
 assert isinstance(ephemeral["message_ts"], str)
-starred = client.stars_add(channel="C1", timestamp=root["ts"])
+starred = reminder_client.stars_add(channel="C1", timestamp=root["ts"])
 assert starred["ok"] is True
-stars = client.stars_list(limit=10)
+stars = reminder_client.stars_list(limit=10)
 assert stars["ok"] is True
 assert len(stars["items"]) == 1
-unstarred = client.stars_remove(channel="C1", timestamp=root["ts"])
+unstarred = reminder_client.stars_remove(channel="C1", timestamp=root["ts"])
 assert unstarred["ok"] is True
 permalink = client.chat_getPermalink(channel="C1", message_ts=root["ts"])
 assert permalink["ok"] is True
@@ -814,7 +816,7 @@ emoji = client.emoji_list(include_categories=True)
 assert emoji["ok"] is True
 assert emoji["categories_version"] == "097705020bcf82331c9ef10df3425aad15f5043c"
 assert any(category["name"] == "Smileys & Emotion" and "grinning" in category["emoji_names"] for category in emoji["categories"])
-identity_result = client.users_identity()
+identity_result = reminder_client.users_identity()
 assert identity_result["ok"] is True
 assert identity_result["user"]["id"] == "U1"
 by_email = client.users_lookupByEmail(email="alice@example.com")

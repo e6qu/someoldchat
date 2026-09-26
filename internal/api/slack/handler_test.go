@@ -231,6 +231,17 @@ func testHandlerWithStoredTokenAuth(scopes ...auth.Scope) (http.Handler, *memory
 }
 
 func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	return testFixtureAs(stored, domain.TokenBot, scopes...)
+}
+
+// testUserHandlerWithStore is the shared fixture with `token` as U1's user
+// token rather than the app's bot token, for the methods Slack serves to user
+// tokens only.
+func testUserHandlerWithStore() (http.Handler, *memory.Store) {
+	return testFixtureAs(false, domain.TokenUser, defaultTestScopes()...)
+}
+
+func testFixtureAs(stored bool, tokenType domain.TokenType, scopes ...auth.Scope) (http.Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
@@ -297,8 +308,12 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 		names = append(names, string(scope))
 	}
 	var authenticator auth.Authenticator
+	botID := domain.BotID("B1")
+	if tokenType == domain.TokenUser {
+		botID = ""
+	}
 	if stored {
-		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: names}); err != nil {
+		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: names}); err != nil {
 			panic(err)
 		}
 		value, err := auth.NewStored(s)
@@ -307,7 +322,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 		}
 		authenticator = value
 	} else {
-		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: granted})
+		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: granted})
 		if err != nil {
 			panic(err)
 		}
@@ -466,7 +481,7 @@ func TestAdminUsersSessionInvalidateRevokesSession(t *testing.T) {
 }
 
 func TestDoNotDisturbEndClearsEnabledState(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	if err := store.SetDoNotDisturb(context.Background(), domain.DoNotDisturb{WorkspaceID: "T1", UserID: "U1", Enabled: true}, events.Event{ID: "event-dnd-enabled", WorkspaceID: "T1", ActorID: "U1", Topic: "user.dnd_enabled", Payload: "U1", CreatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -4325,7 +4340,8 @@ func TestUsersIdentity(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/users.identity", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
-	testHandler().ServeHTTP(res, req)
+	handler, _ := testUserHandlerWithStore()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"user":{"id":"U1","name":"alice"}`) || !strings.Contains(res.Body.String(), `"team":{"id":"T1"}`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
@@ -4335,7 +4351,8 @@ func TestUsersDeletePhoto(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/users.deletePhoto", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
-	testHandler().ServeHTTP(res, req)
+	handler, _ := testUserHandlerWithStore()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || res.Body.String() != "{\"ok\":true}\n" {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
@@ -4434,7 +4451,7 @@ func TestUsersSetActiveAndAdminTeamRoleLists(t *testing.T) {
 }
 
 func TestDoNotDisturbLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler, _ := testUserHandlerWithStore()
 	info := httptest.NewRequest(http.MethodGet, "/api/dnd.info", nil)
 	info.Header.Set("Authorization", "Bearer token")
 	infoResult := httptest.NewRecorder()
@@ -5641,5 +5658,73 @@ func TestMessageResponseCarriesEditedAndSubtype(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("history did not contain the narrated message: %s", read.Body)
+	}
+}
+
+// The methods Slack serves to user tokens only answer a bot token with the
+// code their contract names, before touching anything.
+func TestUserTokenOnlyMethodsRefuseABotToken(t *testing.T) {
+	handler, _ := testHandlerWithStore()
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/dnd.setSnooze", "num_minutes=5", "user_is_bot"},
+		{"/api/dnd.endSnooze", "", "user_is_bot"},
+		{"/api/dnd.endDnd", "", "user_is_bot"},
+		{"/api/users.identity", "", "user_is_bot"},
+		{"/api/users.deletePhoto", "", "user_is_bot"},
+		{"/api/stars.add", "channel=C1", "user_is_bot"},
+		{"/api/stars.remove", "channel=C1", "user_is_bot"},
+		{"/api/stars.list", "", "user_is_bot"},
+		{"/api/search.messages", "query=x", "not_allowed_token_type"},
+		{"/api/search.files", "query=x", "not_allowed_token_type"},
+		{"/api/search.all", "query=x", "not_allowed_token_type"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("%s with a bot token: want %q, got %q", item.path, item.want, code)
+		}
+	}
+}
+
+// dnd.endSnooze with no snooze running is snooze_not_active and emits
+// nothing; a snooze past a day is too_long; another member's DND state omits
+// the snooze fields, which are the caller's own.
+func TestDoNotDisturbSnoozeContracts(t *testing.T) {
+	handler, store := testUserHandlerWithStore()
+	before := len(store.Outbox())
+	if code := errorCode(t, postForm(handler, "/api/dnd.endSnooze", "")); code != "snooze_not_active" {
+		t.Fatalf("endSnooze with no snooze: %q", code)
+	}
+	for _, event := range store.Outbox()[before:] {
+		if strings.HasPrefix(event.Topic, "user.dnd") {
+			t.Fatalf("an inactive endSnooze emitted %s", event.Topic)
+		}
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.setSnooze", "num_minutes=1441")); code != "too_long" {
+		t.Fatalf("setSnooze 1441: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.setSnooze", "num_minutes=10")); code != "" {
+		t.Fatalf("setSnooze 10: %q", code)
+	}
+	own := getAPI(handler, "/api/dnd.info")
+	if !strings.Contains(own.Body.String(), `"snooze_enabled":true`) {
+		t.Fatalf("own dnd.info=%s", own.Body)
+	}
+	other := getAPI(handler, "/api/dnd.info?user=U2")
+	if !strings.Contains(other.Body.String(), `"ok":true`) || strings.Contains(other.Body.String(), "snooze_") {
+		t.Fatalf("another member's dnd.info=%s", other.Body)
+	}
+	var team struct {
+		Users map[string]map[string]any `json:"users"`
+	}
+	if err := json.Unmarshal(getAPI(handler, "/api/dnd.teamInfo?users=U1,U2").Body.Bytes(), &team); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := team.Users["U1"]["snooze_enabled"]; !ok {
+		t.Fatalf("teamInfo omitted the caller's snooze: %+v", team.Users)
+	}
+	if _, ok := team.Users["U2"]["snooze_enabled"]; ok {
+		t.Fatalf("teamInfo disclosed another member's snooze: %+v", team.Users)
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.endSnooze", "")); code != "" {
+		t.Fatalf("endSnooze of an active snooze: %q", code)
 	}
 }

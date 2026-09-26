@@ -98,7 +98,6 @@ func TestHandledFailuresAreHTTP200WithAPinnedErrorCode(t *testing.T) {
 		{"unknown reminder", http.MethodPost, "/api/reminders.info", "reminder=Rnope", "not_found"},
 		{"missing reaction item", http.MethodPost, "/api/reactions.add", "name=tada", "no_item_specified"},
 		{"missing pin item", http.MethodPost, "/api/pins.add", "", "no_item_specified"},
-		{"missing star item", http.MethodPost, "/api/stars.add", "", "no_item_specified"},
 		{"missing emoji name", http.MethodPost, "/api/reactions.add", "channel=C1&timestamp=1700000000.000000", "invalid_name"},
 		{"malformed timestamp", http.MethodPost, "/api/reactions.add", "channel=C1&timestamp=not-a-ts&name=tada", "bad_timestamp"},
 		{"missing channel to join", http.MethodPost, "/api/conversations.join", "", "channel_not_found"},
@@ -107,6 +106,12 @@ func TestHandledFailuresAreHTTP200WithAPinnedErrorCode(t *testing.T) {
 		{"missing users to open", http.MethodPost, "/api/conversations.open", "", "users_list_not_supplied"},
 		{"missing usergroup", http.MethodGet, "/api/usergroups.users.list", "", "invalid_arg_name"},
 		{"missing call id", http.MethodPost, "/api/calls.update", "title=x", "invalid_arg_name"},
+	}
+	// stars.* serve user tokens only, so its missing-item answer is asked
+	// of U1's user token.
+	userHandler, _ := testUserHandlerWithStore()
+	if envelope := decodeEnvelope(t, callAPI(t, userHandler, http.MethodPost, "/api/stars.add", "")); envelope.OK || envelope.Error != "no_item_specified" {
+		t.Errorf("missing star item: body=%+v, want ok=false error=\"no_item_specified\"", envelope)
 	}
 	for _, testCase := range cases {
 		response := callAPI(t, handler, testCase.method, testCase.path, testCase.body)
@@ -428,7 +433,7 @@ func decodeFilesList(t *testing.T, handler http.Handler, query string) []string 
 // stars.list dropped the store's cursor and emitted an invented `spill` key, so a
 // workspace with more stars than one page could never be read past page one.
 func TestStarsListEmitsTheCursorThatReachesPageTwo(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, _ := testUserHandlerWithStore()
 	for _, text := range []string{"one", "two"} {
 		posted := callAPI(t, handler, http.MethodPost, "/api/chat.postMessage", "channel=C1&text="+text)
 		var body struct {
