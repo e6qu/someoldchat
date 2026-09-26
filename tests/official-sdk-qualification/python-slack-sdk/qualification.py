@@ -880,6 +880,55 @@ assert client.api_call(
 assert client.api_call("admin.users.session.reset", params={"user_id": "U2"})["ok"] is True
 assert client.admin_users_remove(team_id="T1", user_id="U2")["ok"] is True
 
+# The message object as history, replies, pins and reactions return it,
+# read through the official client exactly as an app written against Slack
+# reads it. Every absolute URL is on the origin the client was pointed at.
+api_origin = os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/").rstrip("/")
+api_origin = api_origin[: -len("/api")] if api_origin.endswith("/api") else api_origin
+assert identity["url"] == api_origin + "/"
+contract_blocks = [{"type": "section", "text": {"type": "plain_text", "text": "contract block"}}]
+contract_root = client.chat_postMessage(channel="#general", text="contract root", blocks=contract_blocks)
+assert contract_root["channel"] == "C1"
+bot_message = contract_root["message"]
+assert bot_message["bot_id"] == "B1" and bot_message["team"] == "T1"
+assert bot_message["bot_profile"]["id"] == "B1" and bot_message["bot_profile"]["app_id"] == "A1"
+quiet = client.chat_postMessage(channel="C1", text="contract quiet reply", thread_ts=contract_root["ts"])
+loud = client.chat_postMessage(channel="C1", text="contract loud reply", thread_ts=contract_root["ts"], reply_broadcast=True)
+nested = client.chat_postMessage(channel="C1", text="contract reply to a reply", thread_ts=quiet["ts"])
+assert nested["message"]["thread_ts"] == contract_root["ts"]
+assert client.reactions_add(channel="C1", timestamp=contract_root["ts"], name="eyes")["ok"] is True
+assert client.pins_add(channel="C1", timestamp=contract_root["ts"])["ok"] is True
+window = client.conversations_history(channel="C1", latest=contract_root["ts"], inclusive=True, limit=1)
+assert [message["ts"] for message in window["messages"]] == [contract_root["ts"]]
+parent = window["messages"][0]
+assert parent["thread_ts"] == contract_root["ts"]
+assert parent["reply_count"] == 3 and parent["reply_users"] == ["U1"] and parent["reply_users_count"] == 1
+assert parent["latest_reply"] == nested["ts"]
+assert parent["reactions"] == [{"name": "eyes", "users": ["U1"], "count": 1}]
+assert parent["pinned_to"] == ["C1"]
+assert parent["blocks"][0]["text"]["text"] == "contract block"
+recent = [message["text"] for message in client.conversations_history(channel="C1", oldest=contract_root["ts"])["messages"]]
+assert recent == ["contract loud reply"], recent
+whole_thread = client.conversations_replies(channel="C1", ts=quiet["ts"])
+assert [message["ts"] for message in whole_thread["messages"]] == [contract_root["ts"], quiet["ts"], loud["ts"], nested["ts"]]
+pinned_items = [item for item in client.pins_list(channel="C1")["items"] if item["message"]["ts"] == contract_root["ts"]]
+assert len(pinned_items) == 1 and pinned_items[0]["message"]["text"] == "contract root"
+assert pinned_items[0]["message"]["permalink"].startswith(api_origin + "/archives/C1/p")
+reacted = client.reactions_get(channel="C1", timestamp=contract_root["ts"])
+assert reacted["type"] == "message" and reacted["channel"] == "C1" and reacted["message"]["text"] == "contract root"
+assert client.chat_getPermalink(channel="C1", message_ts=contract_root["ts"])["permalink"].startswith(api_origin + "/archives/C1/p")
+kept = client.chat_update(channel="C1", ts=contract_root["ts"], text="contract root edited")
+assert kept["message"]["blocks"][0]["text"]["text"] == "contract block"
+try:
+    client.chat_update(channel="C1", ts=quiet["ts"], text="")
+except SlackApiError as error:
+    assert error.response["error"] == "no_text"
+else:
+    raise AssertionError("an update that empties a text-only message was accepted")
+assert client.users_list(limit=0)["ok"] is True
+assert client.conversations_history(channel="C1", limit=0)["ok"] is True
+assert client.pins_remove(channel="C1", timestamp=contract_root["ts"])["ok"] is True
+
 try:
     client.api_test(error="synthetic")
 except SlackApiError as error:
