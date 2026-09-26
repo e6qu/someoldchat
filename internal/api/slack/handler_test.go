@@ -230,6 +230,15 @@ func testHandlerWithStoredTokenAuth(scopes ...auth.Scope) (http.Handler, *memory
 }
 
 func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	h, s := testHandlerValue(stored, scopes...)
+	mux := http.NewServeMux()
+	h.Register(mux)
+	return mux, s
+}
+
+// testHandlerValue is testFixture before registration, for a test that has to
+// configure the Handler itself — mounting a limiter, for one.
+func testHandlerValue(stored bool, scopes ...auth.Scope) (Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
@@ -316,9 +325,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	if err != nil {
 		panic(err)
 	}
-	mux := http.NewServeMux()
-	h.Register(mux)
-	return mux, s
+	return h, s
 }
 
 func TestListDownloadStreamsCSVAndPreservesArchiveOption(t *testing.T) {
@@ -5302,6 +5309,10 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Mounted the way production mounts it. The upload URL is outside /api/,
+	// and a limiter-fronted Register once left it answering 404 while this test,
+	// registered without a limiter, passed.
+	handler.Limiter = NewRateLimiter()
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	create := func(name string, content string, sdkMultipart bool) string {

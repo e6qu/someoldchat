@@ -348,6 +348,11 @@ func main() {
 		panic(err)
 	}
 	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "127.0.0.1:18080"}, appAuthenticator)
+	// The SDKs qualify against the production registration, limiter included.
+	// Registering without one once hid that the limited registration left every
+	// route outside /api/ — the files_upload_v2 upload URL among them — answering
+	// 404 in the default production configuration.
+	handler.Limiter = slack.NewRateLimiter()
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {

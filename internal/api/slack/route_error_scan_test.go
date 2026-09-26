@@ -91,15 +91,17 @@ func parseHandlerSource(t *testing.T) (*token.FileSet, []*ast.File) {
 	return fileSet, files
 }
 
-// registeredRoutes reads every mux.HandleFunc call in Register.
+// registeredRoutes reads every mux.HandleFunc call in Register and the
+// registration functions it delegates to.
 func registeredRoutes(t *testing.T) []registeredRoute {
 	t.Helper()
 	fileSet, parsed := parseHandlerSource(t)
+	registrationFunctions := registrationFunctionNames(parsed)
 	routes := make([]registeredRoute, 0, 400)
 	for _, file := range parsed {
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Name.Name != "Register" {
+			if !ok || !registrationFunctions[function.Name.Name] {
 				continue
 			}
 			ast.Inspect(function.Body, func(node ast.Node) bool {
@@ -137,6 +139,33 @@ func registeredRoutes(t *testing.T) []registeredRoute {
 		t.Fatalf("only %d routes discovered; the Register scan is broken", len(routes))
 	}
 	return routes
+}
+
+// registrationFunctionNames is Register plus every method of this package it
+// delegates registration to (h.registerWebAPI, h.registerSurfaces). Reading them
+// from Register's body, rather than naming them here, keeps a route registered
+// in a newly split-out function visible to the scan.
+func registrationFunctionNames(parsed []*ast.File) map[string]bool {
+	names := map[string]bool{"Register": true}
+	for _, file := range parsed {
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Name.Name != "Register" {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if selector, ok := call.Fun.(*ast.SelectorExpr); ok && strings.HasPrefix(selector.Sel.Name, "register") {
+					names[selector.Sel.Name] = true
+				}
+				return true
+			})
+		}
+	}
+	return names
 }
 
 func stringLiteral(expression ast.Expr) (string, bool) {

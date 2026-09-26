@@ -102,6 +102,25 @@ func (l *RateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// limitedIncomingWebhook applies Slack's documented incoming-webhook allowance
+// — one message per second per webhook, short bursts tolerated — before the
+// webhook handler runs. The webhook URL is the webhook's identity, so the
+// bucket is keyed by a hash of the path: the path carries the secret, and the
+// limiter must not hold it in plain text. Incoming webhooks answer in plain
+// text, so a limited delivery answers 429 with Retry-After and the plain-text
+// body `rate_limited`, which is what the official WebhookClient retry handlers
+// key on. A Handler without a limiter serves unlimited, like the Web API.
+func (h Handler) limitedIncomingWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.Limiter != nil {
+		if retryAfter, limited := h.Limiter.take("webhook\x00"+domain.HashToken(r.URL.Path), postMessageBurst, postMessagePerSecond); limited {
+			w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
+			writePlain(w, http.StatusTooManyRequests, "rate_limited")
+			return
+		}
+	}
+	h.incomingWebhook(w, r)
+}
+
 // take draws one token from the named bucket, reporting how long the caller
 // must wait when the bucket is dry.
 func (l *RateLimiter) take(key string, capacity, perSecond float64) (time.Duration, bool) {
@@ -208,10 +227,16 @@ func readCloserWithRest(read []byte, rest io.ReadCloser) io.ReadCloser {
 // on at the HTTP layer: status 429 and Retry-After, with the pinned
 // rate_limited code in the body for callers that read it there.
 func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate_limited"})
+}
+
+// retryAfterSeconds renders a wait as the whole, positive number of seconds
+// Retry-After carries.
+func retryAfterSeconds(retryAfter time.Duration) string {
 	seconds := int(math.Ceil(retryAfter.Seconds()))
 	if seconds < 1 {
 		seconds = 1
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate_limited"})
+	return strconv.Itoa(seconds)
 }

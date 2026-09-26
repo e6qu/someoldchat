@@ -7,6 +7,12 @@ Someoldchat implements Slack Incoming Webhook delivery through the
 `attachments` is rejected with `invalid_payload`. A successful request returns
 the plain-text body `ok`.
 
+With `-api-rate-limit` on (the default), each webhook URL carries Slack's
+documented allowance of one message per second with a short burst. A delivery
+beyond it answers HTTP 429 with a `Retry-After` header and the plain-text body
+`rate_limited`, which the official SDK webhook clients' retry handlers read.
+The budget is replica-local, as the Web API budgets are.
+
 Each webhook belongs to one workspace, application, and conversation. The
 endpoint does not accept a channel override. The secret is returned once by
 the internal administrative API and stored only as a SHA-256 hash.

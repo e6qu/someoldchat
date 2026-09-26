@@ -135,6 +135,15 @@ snapshot for the same reason.
 ## HTTP behavior
 
 - Web API methods MUST be served beneath `/api/{method}`.
+- Every Web API method MUST accept both `GET` and `POST`, as Slack does; the
+  verb the OpenAPI snapshot lists for an operation is not a restriction.
+  Official SDKs differ in which they send (python-slack-sdk's async client
+  sends `GET` for several methods). An unknown method name, and any other
+  verb, answers the `unknown_method` envelope.
+- Routes outside `/api/` (external upload URLs, incoming and trigger
+  webhooks, public file and photo URLs) MUST be reachable in the default,
+  rate-limited deployment configuration; the Web API limiter fronts `/api/`
+  only.
 - The decoder MUST accept the request encodings supported by the selected
   contract, including query, URL-encoded form, multipart, and JSON.
 - JSON, form, and query parameters MUST NOT be combined where Slack forbids it.
