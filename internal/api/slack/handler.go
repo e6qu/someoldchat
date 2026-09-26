@@ -7798,9 +7798,11 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	// The store pages reaction rows; Slack lists one item per message, carrying
-	// every reaction on it. Rows of the same message collapse into one item,
-	// and each conversation's messages are projected in one batch.
+	// Slack lists one item per message, carrying every reaction on it. The
+	// store pages by message and returns each message's reaction rows
+	// together (domain.UserReactionPage), so the rows collapse into one item
+	// here and a message never repeats on the next page. Each conversation's
+	// messages are projected in one batch.
 	type reactedMessage struct {
 		conversation domain.ConversationID
 		message      domain.Message

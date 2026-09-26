@@ -15415,18 +15415,48 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return domain.UserReactionPage{}, err
 	}
-	query := `SELECT m.conversation, m.id, m.workspace_id, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, r.name, r.user_id, r.created_at FROM reactions r JOIN messages m ON m.id = r.message_id JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND r.user_id = ? AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	// The page is cut by reacted message, not by reaction row: first the
+	// messages, then every one of this member's reactions on them. Cutting by
+	// row split a message reacted to twice across pages.
+	visible := ` FROM reactions r JOIN messages m ON m.id = r.message_id JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND r.user_id = ? AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user, user}
 	if after != "" {
-		parts := strings.Split(after, "\x00")
-		if len(parts) != 4 || parts[0] == "" || parts[1] == "" || parts[2] == "" || parts[3] == "" {
+		created, message, ok := domain.ParseUserReactionCursorKey(after)
+		if !ok {
 			return domain.UserReactionPage{}, store.InvalidArgument("invalid user reaction cursor")
 		}
-		query += ` AND (m.created_at > ? OR (m.created_at = ? AND r.message_id > ?) OR (m.created_at = ? AND r.message_id = ? AND r.name > ?) OR (m.created_at = ? AND r.message_id = ? AND r.name = ? AND r.user_id > ?))`
-		args = append(args, parts[0], parts[0], parts[1], parts[0], parts[1], parts[2], parts[0], parts[1], parts[2], parts[3])
+		visible += ` AND (m.created_at > ? OR (m.created_at = ? AND m.id > ?))`
+		args = append(args, created, created, string(message))
 	}
-	query += ` ORDER BY m.created_at, r.message_id, r.name, r.user_id LIMIT ?`
-	args = append(args, request.Limit+1)
+	messageRows, err := s.db.QueryContext(ctx, `SELECT m.id, m.created_at`+visible+` GROUP BY m.id, m.created_at ORDER BY m.created_at, m.id LIMIT ?`, append(append([]any(nil), args...), request.Limit+1)...)
+	if err != nil {
+		return domain.UserReactionPage{}, err
+	}
+	pageMessages := make([]any, 0, request.Limit+1)
+	for messageRows.Next() {
+		var id, created string
+		if err := messageRows.Scan(&id, &created); err != nil {
+			messageRows.Close()
+			return domain.UserReactionPage{}, err
+		}
+		pageMessages = append(pageMessages, id)
+	}
+	if err := messageRows.Close(); err != nil {
+		return domain.UserReactionPage{}, err
+	}
+	if err := messageRows.Err(); err != nil {
+		return domain.UserReactionPage{}, err
+	}
+	hasMore := len(pageMessages) > request.Limit
+	if hasMore {
+		pageMessages = pageMessages[:request.Limit]
+	}
+	if len(pageMessages) == 0 {
+		return domain.UserReactionPage{Items: []domain.UserReaction{}}, nil
+	}
+	query := `SELECT m.conversation, m.id, m.workspace_id, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, r.name, r.user_id, r.created_at` + visible +
+		` AND m.id IN (?` + strings.Repeat(`, ?`, len(pageMessages)-1) + `) ORDER BY m.created_at, r.message_id, r.name, r.user_id`
+	args = append(args, pageMessages...)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return domain.UserReactionPage{}, err
@@ -15455,10 +15485,6 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	if err := rows.Err(); err != nil {
 		return domain.UserReactionPage{}, err
 	}
-	hasMore := len(items) > request.Limit
-	if hasMore {
-		items = items[:request.Limit]
-	}
 	messages := make([]domain.Message, len(items))
 	for index := range items {
 		messages[index] = items[index].Message
@@ -15471,13 +15497,9 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	}
 	page := domain.UserReactionPage{Items: items, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(userReactionCursorKey(items[len(items)-1]))
+		page.NextCursor, err = domain.NewListCursor(domain.UserReactionCursorKey(items[len(items)-1].Message))
 	}
 	return page, err
-}
-
-func userReactionCursorKey(value domain.UserReaction) string {
-	return string(domain.NewStoredTime(value.Message.CreatedAt)) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
 }
 
 func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) error {

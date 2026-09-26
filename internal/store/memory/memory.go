@@ -8713,6 +8713,14 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return domain.UserReactionPage{}, err
 	}
+	position := ""
+	if after != "" {
+		created, message, ok := domain.ParseUserReactionCursorKey(after)
+		if !ok {
+			return domain.UserReactionPage{}, store.InvalidArgument("invalid user reaction cursor")
+		}
+		position = created + "\x00" + string(message)
+	}
 	s.mu.RLock()
 	values := make([]domain.UserReaction, 0, request.Limit+1)
 	for conversationID, messages := range s.messages {
@@ -8727,25 +8735,34 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 			if message.WorkspaceID != workspace {
 				continue
 			}
+			if position != "" && domain.UserReactionCursorKey(message) <= position {
+				continue
+			}
 			for _, reaction := range s.reactions[message.ID] {
 				if reaction.UserID != user {
 					continue
 				}
-				item := domain.UserReaction{Conversation: conversationID, Message: s.cloneMessage(message), Reaction: reaction}
-				if after == "" || userReactionKey(item) > after {
-					values = appendSorted(values, item, request.Limit+1, func(left, right domain.UserReaction) bool { return userReactionKey(left) < userReactionKey(right) })
-				}
+				values = append(values, domain.UserReaction{Conversation: conversationID, Message: s.cloneMessage(message), Reaction: reaction})
 			}
 		}
 	}
 	s.mu.RUnlock()
-	hasMore := len(values) > request.Limit
-	if hasMore {
-		values = values[:request.Limit]
+	sort.Slice(values, func(left, right int) bool { return userReactionKey(values[left]) < userReactionKey(values[right]) })
+	// A page is Limit messages with every reaction row of each.
+	page := domain.UserReactionPage{Items: make([]domain.UserReaction, 0, len(values))}
+	messages := 0
+	for _, value := range values {
+		if len(page.Items) == 0 || page.Items[len(page.Items)-1].Message.ID != value.Message.ID {
+			messages++
+			if messages > request.Limit {
+				page.HasMore = true
+				break
+			}
+		}
+		page.Items = append(page.Items, value)
 	}
-	page := domain.UserReactionPage{Items: values, HasMore: hasMore}
-	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(userReactionKey(values[len(values)-1]))
+	if page.HasMore {
+		page.NextCursor, err = domain.NewListCursor(domain.UserReactionCursorKey(page.Items[len(page.Items)-1].Message))
 		if err != nil {
 			return domain.UserReactionPage{}, err
 		}
@@ -8770,13 +8787,12 @@ func (s *Store) memberMayReadLocked(conversationID domain.ConversationID, user d
 	return member
 }
 
-// userReactionKey is an ordering key AND a keyset cursor, compared with plain
-// string comparison. It must therefore use the fixed-width encoding, exactly as
-// the SQL repositories do: time.RFC3339Nano strips trailing zeros, so ".12Z"
-// sorts after ".123456Z" and the cursor minted from the earlier row skips the
-// later ones on the next page.
+// userReactionKey orders reaction rows by message, then reaction, compared
+// with plain string comparison. It must therefore use the fixed-width
+// encoding, exactly as the SQL repositories do: time.RFC3339Nano strips
+// trailing zeros, so ".12Z" sorts after ".123456Z".
 func userReactionKey(value domain.UserReaction) string {
-	return string(domain.NewStoredTime(value.Message.CreatedAt)) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
+	return domain.UserReactionCursorKey(value.Message) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
 }
 
 func pinKey(pin domain.Pin) string { return string(pin.Message) + "\x00" + string(pin.UserID) }
