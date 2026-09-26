@@ -141,6 +141,7 @@ test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzReminderTimeNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/socketmode -run '^$$' -fuzz FuzzEncodeEventMatchesDeliverability -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNoRouteAnswersFiveHundred -fuzztime=15000x -parallel=1 -timeout=10m
+	GOCACHE=$(GOCACHE) go test ./internal/web -run '^$$' -fuzz FuzzMarkingPreservesTheText -fuzztime=25000x -parallel=1 -timeout=2m
 
 generate:
 	$(MAKE) proto-tools

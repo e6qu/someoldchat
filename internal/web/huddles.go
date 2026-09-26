@@ -268,22 +268,34 @@ func (h Handler) huddleInvite(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app?channel="+url.QueryEscape(string(channel))+"&notice="+url.QueryEscape("Invitation sent"))
 }
 
+// decodeFetchMutation is decodeMutation for the huddle's fetch endpoints. The
+// two differ only in that decodeMutation reports its failures as pages, which a
+// fetch endpoint must not do: an unreadable body is a 400 naming invalid, and a
+// missing or forged CSRF token is a 403. Every huddle POST goes through it, so
+// none can decode a body without also proving the request came from this
+// origin — the media and presence routes used to do the first without the
+// second, and answered an unreadable body with an empty 200.
+func decodeFetchMutation(w http.ResponseWriter, r *http.Request, invalid string) (map[string]string, bool) {
+	fields, err := decodeFormFields(w, r)
+	if err != nil {
+		writeJSONRefusal(w, http.StatusBadRequest, invalid)
+		return nil, false
+	}
+	if err := auth.ValidateCSRF(r); err != nil {
+		writeJSONRefusal(w, http.StatusForbidden, "invalid_csrf")
+		return nil, false
+	}
+	return fields, true
+}
+
 func (h Handler) huddleSignal(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
 		writeJSONAuthError(w, err)
 		return
 	}
-	// decodeFormFields rather than decodeMutation: the two differ only in that
-	// decodeMutation reports its own failures as pages, which is what this
-	// route must not do. The CSRF check it also performs is kept, below.
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
-		writeJSONRefusal(w, http.StatusBadRequest, "invalid_signal")
-		return
-	}
-	if err := auth.ValidateCSRF(r); err != nil {
-		writeJSONRefusal(w, http.StatusForbidden, "invalid_csrf")
+	fields, ok := decodeFetchMutation(w, r, "invalid_signal")
+	if !ok {
 		return
 	}
 	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))
@@ -313,16 +325,8 @@ func (h Handler) huddleReact(w http.ResponseWriter, r *http.Request) {
 		writeJSONAuthError(w, err)
 		return
 	}
-	// Like huddleSignal this is a fetch endpoint, so it reports its own failures
-	// as JSON rather than pages while keeping the CSRF check decodeMutation would
-	// otherwise perform.
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
-		writeJSONRefusal(w, http.StatusBadRequest, "invalid_reaction")
-		return
-	}
-	if err := auth.ValidateCSRF(r); err != nil {
-		writeJSONRefusal(w, http.StatusForbidden, "invalid_csrf")
+	fields, ok := decodeFetchMutation(w, r, "invalid_reaction")
+	if !ok {
 		return
 	}
 	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))

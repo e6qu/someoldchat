@@ -235,6 +235,15 @@ Browsers reconnect with `Last-Event-ID`, and a replica reads missed events from
 the journal before subscribing to best-effort live notification. Replica-local
 fan-out is an optimization only.
 
+Both live streams — SSE and RTM — read the journal only through the per-user
+projection (`ListUserEventsAfter`): records about conversations the reader is
+not a member of are withheld, and content-bearing records are hydrated only
+after membership is proven. `realtime.NewHandler` and `NewRTMHandler` accept
+nothing else, so a stream cannot be wired to the raw workspace journal. Each
+projected page reports the last sequence it examined, visible or not, and a
+stream resumes after that sequence, so withheld records are read once rather
+than on every poll.
+
 Journal records written before the typed payload contract cannot be delivered
 and cannot be repaired. The upgrade quarantines them once — marked
 `undeliverable`, excluded from every consumer read, each recorded in
@@ -254,6 +263,18 @@ web replicas may stop.
 - Message timestamps are stored in an exact sortable representation, never as
   floating point.
 - Ordering that must be global is allocated within the database transaction.
+- The journal (outbox) sequence is allocated in commit order on every profile,
+  because every reader resumes with `sequence > cursor` and a record that
+  became visible below a cursor would never be delivered. SQLite allocates it
+  under its database write lock and dqlite applies one transaction at a time.
+  PostgreSQL allocates an identity at insert time, so there a row is inserted
+  with a provisional negative sequence and a deferred constraint trigger gives
+  it its final sequence at commit, under a transaction-scoped advisory lock
+  held until the commit is visible. The cost is that event-producing commits
+  on PostgreSQL are serialized and forgo group commit: on a local PostgreSQL
+  16, sixteen concurrent writers doing nothing but appending events went from
+  roughly 4,300–6,500 to 1,600–2,500 appends a second. Writes that produce no
+  event, and everything a transaction does before its commit, are unaffected.
 - Every lifecycle and writer lease includes a fencing generation so a process
   from a previous activation cannot write after hibernation begins.
 

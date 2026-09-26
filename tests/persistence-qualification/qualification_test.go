@@ -94,6 +94,7 @@ func runQualification(t *testing.T, open opener) {
 		{"blob references tolerate an arbitrary profile photo URL", blobReferencesTolerateAnArbitraryProfilePhotoURL},
 		{"email identity is not Unicode case folded", emailIdentityIsNotUnicodeCaseFolded},
 		{"stars page in chronological order", starsPageInChronologicalOrder},
+		{"personal listings stop at a private conversation the reader left", personalListingsStopAtALeftPrivateConversation},
 		{"messages resolve by their own creation instant", messagesResolveByTheirOwnCreationInstant},
 		{"lists are created with their items or not at all", listsAreCreatedWithTheirItemsOrNotAtAll},
 		{"profile changes commit with every event they carry", profileChangesCommitWithEveryEventTheyCarry},

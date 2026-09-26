@@ -3773,6 +3773,17 @@ func searchModifiersMeanTheSame(t *testing.T, open opener) {
 	if err := f.repository.CreateMessage(ctx, linked, f.event("link", "message.created", string(linked.ID)), ""); err != nil {
 		t.Fatal(err)
 	}
+	// A scheme in capitals is still a link. SQLite's LIKE ignores ASCII case
+	// and PostgreSQL's does not, so matching the raw text found this message
+	// on one SQL profile and not the other.
+	shouted := domain.Message{
+		ID: domain.MessageID("M-shouted-link-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "SEE HTTPS://EXAMPLE.TEST/REPORT", Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Unix(1_700_000_350, 0).UTC()),
+	}
+	if err := f.repository.CreateMessage(ctx, shouted, f.event("shouted-link", "message.created", string(shouted.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
 	for _, reaction := range []struct {
 		message domain.MessageID
 		name    string
@@ -3809,8 +3820,12 @@ func searchModifiersMeanTheSame(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(links.Messages) != 1 || links.Messages[0].ID != linked.ID {
-		t.Fatalf("has:link = %+v, want only the message carrying a URL", links.Messages)
+	found := map[domain.MessageID]bool{}
+	for _, message := range links.Messages {
+		found[message.ID] = true
+	}
+	if len(links.Messages) != 2 || !found[linked.ID] || !found[shouted.ID] {
+		t.Fatalf("has:link = %+v, want exactly the two messages carrying a URL, whatever its case", links.Messages)
 	}
 }
 

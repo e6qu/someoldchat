@@ -288,10 +288,15 @@ func (x *EventsRequest) GetUserId() string {
 }
 
 type EventsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Records       []*EventRecord         `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Records []*EventRecord         `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
+	// The last journal sequence a user-scoped read examined, visible or not, so
+	// a live stream resumes past records its reader may not see instead of
+	// re-reading them on every poll. Zero from a server that predates the field;
+	// the client then falls back to the last record it was given.
+	ScannedThrough uint64 `protobuf:"varint,2,opt,name=scanned_through,json=scannedThrough,proto3" json:"scanned_through,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *EventsResponse) Reset() {
@@ -329,6 +334,13 @@ func (x *EventsResponse) GetRecords() []*EventRecord {
 		return x.Records
 	}
 	return nil
+}
+
+func (x *EventsResponse) GetScannedThrough() uint64 {
+	if x != nil {
+		return x.ScannedThrough
+	}
+	return 0
 }
 
 type AppEventClaimRequest struct {
@@ -689,9 +701,10 @@ const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
 	"\x05after\x18\x02 \x01(\x04R\x05after\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x15\n" +
 	"\x06app_id\x18\x04 \x01(\tR\x05appId\x12\x17\n" +
-	"\auser_id\x18\x05 \x01(\tR\x06userId\"L\n" +
+	"\auser_id\x18\x05 \x01(\tR\x06userId\"u\n" +
 	"\x0eEventsResponse\x12:\n" +
-	"\arecords\x18\x01 \x03(\v2 .sameoldchat.chat.v1.EventRecordR\arecords\"~\n" +
+	"\arecords\x18\x01 \x03(\v2 .sameoldchat.chat.v1.EventRecordR\arecords\x12'\n" +
+	"\x0fscanned_through\x18\x02 \x01(\x04R\x0escannedThrough\"~\n" +
 	"\x14AppEventClaimRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x18\n" +
 	"\asurface\x18\x02 \x01(\tR\asurface\x12\x14\n" +

@@ -1034,3 +1034,28 @@ func TestAnUploadStreamThatNeverDeliversAByteIsBounded(t *testing.T) {
 			maxEmptyUploadFrames+64, err, status.Code(err))
 	}
 }
+
+// withholdingChat answers a user-scoped journal read the way the projection
+// answers a reader who may see none of what it examined.
+type withholdingChat struct {
+	chatapi.Service
+}
+
+func (withholdingChat) ListUserEventsAfter(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, after uint64, _ int) (events.UserEventPage, error) {
+	return events.UserEventPage{Through: after + 42}, nil
+}
+
+// How far a user-scoped read examined crosses the seam. Without it the
+// distributed composition's live streams re-read every withheld record on
+// every poll even after the local composition stopped doing so.
+func TestAUserEventPageCarriesHowFarItExaminedAcrossTheSeam(t *testing.T) {
+	target := seededStore(t)
+	remote, _ := serve(t, withholdingChat{Service: service.Messages{Store: target}}, target, Observer{})
+	page, err := remote.ListUserEventsAfter(context.Background(), "T1", "U1", 8, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Records) != 0 || page.Through != 50 {
+		t.Fatalf("page=%+v, want no records through 50", page)
+	}
+}

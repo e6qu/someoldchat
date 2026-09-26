@@ -20,7 +20,11 @@ import (
 )
 
 type Handler struct {
-	Source         events.Source
+	// Source is the per-reader projection of the journal. It is deliberately
+	// not the raw workspace journal (events.Source): that carries records about
+	// private channels and direct messages the reader is not in, and a stream
+	// wired to it told every member of the workspace their names and activity.
+	Source         UserEventSource
 	Authenticator  auth.Authenticator
 	RTMConnections RTMConnectionSource
 	Messages       RTMMessageService
@@ -104,8 +108,11 @@ type RTMMessageService interface {
 	Post(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.MessageTimestamp, string) (domain.Message, error)
 }
 
-type RTMUserEventSource interface {
-	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) ([]events.Record, error)
+// UserEventSource reads the journal as one user may see it. Both live streams
+// require it; there is no fallback to the unfiltered journal, because a
+// fallback is how the SSE stream came to be wired to one.
+type UserEventSource interface {
+	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) (events.UserEventPage, error)
 }
 
 const maxRTMMessageBytes = 16 << 10
@@ -118,7 +125,7 @@ var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
 // reader may switch into. A construction-time workspace both decided nothing
 // once the streams followed their credentials and, while it did decide, made a
 // switch unserviceable from the same process.
-func NewHandler(source events.Source, authenticator auth.Authenticator, typing TypingSource) (Handler, error) {
+func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing TypingSource) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("SSE requires an event source")
 	}
@@ -134,7 +141,7 @@ func NewHandler(source events.Source, authenticator auth.Authenticator, typing T
 	return Handler{Source: source, Authenticator: authenticator, Typing: typing}, nil
 }
 
-func NewRTMHandler(source events.Source, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource) (Handler, error) {
+func NewRTMHandler(source UserEventSource, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("RTM requires an event source")
 	}
@@ -231,13 +238,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	// that is already gone cannot be told goodbye.
 	sayGoodbye := func() { _ = websocket.Message.Send(conn, `{"type":"goodbye"}`) }
 	for {
-		var records []events.Record
-		var listErr error
-		if projected, ok := h.Source.(RTMUserEventSource); ok {
-			records, listErr = projected.ListUserEventsAfter(request.Context(), workspace, connection.UserID, after, 100)
-		} else {
-			records, listErr = h.Source.ListEventsAfter(request.Context(), workspace, after, 100)
-		}
+		page, listErr := h.Source.ListUserEventsAfter(request.Context(), workspace, connection.UserID, after, 100)
 		if listErr != nil {
 			if request.Context().Err() == nil {
 				h.logger().Error("RTM stream ended on an event source failure", "workspace", workspace, "user", connection.UserID, "error", listErr)
@@ -245,8 +246,10 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			sayGoodbye()
 			return
 		}
-		for _, record := range records {
-			after = record.Sequence
+		// The cursor moves past everything the projection examined, not only
+		// what it returned, so records this reader may not see are read once.
+		after = max(after, page.Through)
+		for _, record := range page.Records {
 			// The durable journal also carries internal worker records and
 			// records written before the typed payload contract; neither is a
 			// deliverable event, and neither may end the stream.
@@ -527,7 +530,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	announcer := newTypingAnnouncer()
 	unresolved := 0
 	for {
-		records, err := h.Source.ListEventsAfter(r.Context(), workspace, after, 100)
+		page, err := h.Source.ListUserEventsAfter(r.Context(), workspace, principal.UserID, after, 100)
 		if err != nil {
 			if r.Context().Err() == nil {
 				h.logger().Error("event stream ended on an event source failure", "workspace", workspace, "user", principal.UserID, "error", err)
@@ -535,8 +538,9 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 			return
 		}
 		wrote := false
-		for _, record := range records {
-			after = record.Sequence
+		// Records the projection withheld are passed, not re-read: see RTM.
+		after = max(after, page.Through)
+		for _, record := range page.Records {
 			delivered, decodeErr := events.Deliverable(record.Event)
 			if decodeErr != nil {
 				// One undeliverable record must not end a durable stream: the

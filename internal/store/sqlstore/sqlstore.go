@@ -282,6 +282,12 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_conversation_created ON messages(conversation, created_at, id);
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(conversation, thread_timestamp, created_at, id);
+-- The messages a member wrote across every conversation (ListAuthoredMessages,
+-- the Sent view) page by author and time. The only other message
+-- indexes lead with conversation, so that listing read every message in the
+-- workspace. Base-schema indexes run after the version ladder on databases of
+-- every age, so an existing database gains this one on its next start.
+CREATE INDEX IF NOT EXISTS messages_workspace_author_created ON messages(workspace_id, author_id, created_at, id);
 CREATE TABLE IF NOT EXISTS ephemeral_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  conversation_id TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
@@ -561,7 +567,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 175
+const schemaVersion = 176
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -626,6 +632,65 @@ func insertOutbox(ctx context.Context, tx txRunner, event events.Event) error {
 func insertOutboxForConversation(ctx context.Context, tx txRunner, event events.Event, conversation domain.ConversationID) error {
 	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt), conversation)
 	return err
+}
+
+// outboxCommitOrderStatements make an outbox sequence's order its commit order
+// on PostgreSQL.
+//
+// Every journal reader resumes with "sequence > cursor". That is only sound if
+// no record can become visible below a sequence a reader has already passed.
+// A PostgreSQL identity is allocated when the row is inserted, not when its
+// transaction commits, so two writers could commit out of order: B inserted
+// after A, committed first, a reader advanced past B, and A — committed a
+// moment later below the reader's cursor — was never delivered to any stream,
+// app or worker that reads by cursor.
+//
+// The row is inserted with a provisional, negative identity, which no reader
+// can pass: every cursor is non-negative, and the row is invisible to other
+// transactions until it commits anyway. A deferred constraint trigger runs at
+// commit time, after every other statement of the transaction, takes a
+// transaction-scoped advisory lock and only then gives the row its final
+// sequence from sameoldchat_outbox_committed. The lock is released after the
+// commit is visible, so the next committer's sequence is higher than every
+// sequence already visible: allocation order is commit order. Because the lock
+// is taken only in the commit phase, after the transaction's own row locks are
+// all held, it cannot form a deadlock with them, which taking it at insert time
+// would.
+//
+// What it costs: event-producing commits are serialized with one another —
+// other writes, and everything before the commit, still run concurrently — and
+// each outbox row is written twice. The committed sequence stays dense apart
+// from rolled-back transactions, as it was.
+//
+// SQLite and dqlite need none of this: SQLite allocates AUTOINCREMENT under the
+// database write lock, which is held until commit, and dqlite applies one
+// transaction at a time through its Raft leader, so on both a later sequence is
+// always a later commit.
+var outboxCommitOrderStatements = []string{
+	// The ALTER comes first because it holds the table exclusively until the
+	// migration commits, so no writer can take a sequence between the counter
+	// being positioned and the provisional range taking over.
+	`ALTER TABLE outbox ALTER COLUMN sequence SET INCREMENT BY -1 SET MINVALUE -9223372036854775808 SET MAXVALUE -1 SET START WITH -1 RESTART WITH -1`,
+	`CREATE SEQUENCE IF NOT EXISTS sameoldchat_outbox_committed AS BIGINT`,
+	`SELECT setval('sameoldchat_outbox_committed', COALESCE(MAX(sequence), 0) + 1, false) FROM outbox`,
+	`CREATE OR REPLACE FUNCTION sameoldchat_outbox_commit_order() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	PERFORM pg_advisory_xact_lock(hashtext(current_database() || '.' || current_schema()), hashtext('sameoldchat-outbox-commit-order'));
+	UPDATE outbox SET sequence = nextval('sameoldchat_outbox_committed') WHERE id = NEW.id;
+	RETURN NULL;
+END
+$$`,
+	`DROP TRIGGER IF EXISTS sameoldchat_outbox_commit_order ON outbox`,
+	`CREATE CONSTRAINT TRIGGER sameoldchat_outbox_commit_order AFTER INSERT ON outbox DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION sameoldchat_outbox_commit_order()`,
+}
+
+func installOutboxCommitOrder(ctx context.Context, db queryExecutor) error {
+	for _, statement := range outboxCommitOrderStatements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("install outbox commit order: %w", err)
+		}
+	}
+	return nil
 }
 
 type Store struct {
@@ -3333,6 +3398,11 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 176 && !s.sqliteDialect {
+		if err := installOutboxCommitOrder(ctx, db); err != nil {
+			return err
 		}
 	}
 	if version < 175 {
@@ -7560,6 +7630,11 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		// to enforce it, so they orphaned silently instead.
 		`DELETE FROM saved_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM activity_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		// Activity about the conversation itself — an invitation to it, a huddle
+		// started in it, a shared-invite decision — names no message, so the
+		// statement above left it behind pointing at a channel that no longer
+		// exists. Memory already removes Activity by conversation.
+		`DELETE FROM activity_items WHERE conversation_id = ?`,
 		`DELETE FROM idempotency WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM thread_follows WHERE conversation_id = ?`,
 		`DELETE FROM message_files WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
@@ -13541,9 +13616,6 @@ func (s *Store) listGrants(ctx context.Context, scope accessScope, workspace dom
 	return grants, closeRows(rows)
 }
 
-// RecordSharedInviteDecision writes the news that a request this member made
-// has been decided. One row per invitation, so a decision that is later changed
-// replaces the news rather than stacking a contradictory second copy.
 // InviteToHuddle journals the invitation and lands its Activity item in one
 // transaction, the way conversation invitations do, so the event and the
 // Activity row are never half-written relative to each other.
@@ -13576,6 +13648,9 @@ func (s *Store) InviteToHuddle(ctx context.Context, event events.Event) error {
 	return tx.Commit()
 }
 
+// RecordSharedInviteDecision writes the news that a request this member made
+// has been decided. One row per invitation, so a decision that is later changed
+// replaces the news rather than stacking a contradictory second copy.
 func (s *Store) RecordSharedInviteDecision(ctx context.Context, invite domain.SharedInvite, actor domain.UserID, occurredAt time.Time) error {
 	if invite.ID == "" || invite.InvitedBy == "" {
 		return store.InvalidArgument("a shared invite decision requires an invitation and a requester")
@@ -15330,8 +15405,12 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	if err != nil {
 		return nil, "", false, err
 	}
-	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0`
-	args := []any{user, workspace}
+	// A star in a private conversation is listed only while the user is still a
+	// member, the rule ListUserReactions and saved items already apply: leaving
+	// a private channel must end access to its messages' text, and a starred
+	// message used to keep it readable here indefinitely.
+	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id JOIN conversations c ON c.id = m.conversation WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	args := []any{user, workspace, user}
 	if after != "" {
 		separator := strings.IndexByte(after, 0)
 		if separator < 1 || separator == len(after)-1 {
@@ -20286,11 +20365,9 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	return page, nil
 }
 
-func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
-	if err := store.CheckPage(request); err != nil {
-		return domain.MessagePage{}, err
-	}
-	query := `SELECT ` + qualifiedMessageSelectColumns + `
+// authoredMessagesQuery is served by messages_workspace_author_created, which
+// TestAuthoredMessagesAreReadThroughTheAuthorIndex holds it to.
+const authoredMessagesQuery = `SELECT ` + qualifiedMessageSelectColumns + `
 		FROM messages m
 		JOIN conversations c ON c.id = m.conversation
 		WHERE m.workspace_id = ? AND m.author_id = ? AND m.deleted = 0
@@ -20298,6 +20375,12 @@ func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.Works
 			SELECT 1 FROM conversation_members cm
 			WHERE cm.conversation_id = m.conversation AND cm.user_id = ?
 		))`
+
+func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
+	if err := store.CheckPage(request); err != nil {
+		return domain.MessagePage{}, err
+	}
+	query := authoredMessagesQuery
 	args := []any{workspace, user, user}
 	if request.Cursor != "" {
 		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
@@ -20416,7 +20499,12 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		// scheme whether the member typed it or pasted it, and matching the
 		// scheme finds both without a second parser to disagree with the
 		// renderer.
-		querySQL += ` AND (m.text LIKE ? ESCAPE '\' OR m.text LIKE ? ESCAPE '\')`
+		//
+		// It matches the folded text, as the term search does and as
+		// domain.TextCarriesLink does in memory. SQLite's LIKE ignores ASCII case
+		// and PostgreSQL's does not, so matching m.text found "HTTPS://" on one
+		// profile and not the other.
+		querySQL += ` AND (m.text_folded LIKE ? ESCAPE '\' OR m.text_folded LIKE ? ESCAPE '\')`
 		args = append(args, "%http://%", "%https://%")
 	}
 	if search.SavedBy != "" {
