@@ -1570,7 +1570,7 @@ func (h Handler) appsEventAuthorizationsList(w http.ResponseWriter, r *http.Requ
 		writeError(w, mapServiceError(err, "internal_error"))
 		return
 	}
-	if len(records) != 1 || records[0].Sequence != sequence || records[0].Event.ID != eventID {
+	if len(records) != 1 || records[0].Sequence != sequence || !events.EventIDBelongsToRecord(eventID, records[0].Event.ID) {
 		writeError(w, "invalid_event_context")
 		return
 	}
@@ -2540,7 +2540,7 @@ func (h Handler) oauthV2ExchangeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, oauthExchangeFailure(err, "invalid_auth"))
 		return
 	}
-	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, false))
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(h.origin(r), token, false))
 }
 
 func (h Handler) appsManifestValidate(w http.ResponseWriter, r *http.Request) {
@@ -2841,7 +2841,7 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userO
 	// A code redeemed for a user token — a user-scope-only install — is
 	// answered the way oauth.v2.user.access answers: the credential under
 	// authed_user and no bot fields at the top level.
-	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, userOnly || !refreshing && !token.TokenType.IsBot()))
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(h.origin(r), token, userOnly || !refreshing && !token.TokenType.IsBot()))
 }
 
 // oauthExchangeFailure names a failed code or token exchange. The client and
@@ -2865,7 +2865,7 @@ func oauthExchangeFailure(err error, notFound string) string {
 	}
 }
 
-func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any {
+func oauthV2TokenResponse(origin string, token domain.OAuthToken, userOnly bool) map[string]any {
 	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType, "team": map[string]any{"id": token.WorkspaceID, "name": token.WorkspaceName}, "enterprise": nil, "is_enterprise_install": false}
 	if token.RefreshToken != "" {
 		response["refresh_token"] = token.RefreshToken
@@ -2903,12 +2903,12 @@ func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any
 	}
 	// An install that requested the incoming-webhook scope and chose a channel
 	// gets the minted hook back here, the one time the app ever sees its URL.
-	if token.IncomingWebhookURL != "" {
+	if token.IncomingWebhookPath != "" {
 		response["incoming_webhook"] = map[string]any{
 			"channel":           "#" + token.IncomingWebhookChannelName,
 			"channel_id":        token.IncomingWebhookChannel,
-			"url":               token.IncomingWebhookURL,
-			"configuration_url": token.IncomingWebhookConfigURL,
+			"url":               originURL(origin, token.IncomingWebhookPath),
+			"configuration_url": originURL(origin, token.IncomingWebhookConfigPath),
 		}
 	}
 	return response
@@ -13110,13 +13110,44 @@ type incomingWebhookPayload struct {
 	Attachments json.RawMessage `json:"attachments"`
 }
 
+// maxIncomingWebhookBody bounds what an incoming webhook reads, in either
+// encoding.
+const maxIncomingWebhookBody = 1 << 20
+
+// incomingWebhookBody returns the JSON message an incoming webhook POST
+// carries. Slack accepts it as the request body or, as older integrations and
+// `curl --data-urlencode` send it, as the `payload` field of a form-encoded
+// body; the second used to be refused as invalid_payload.
+func incomingWebhookBody(r *http.Request) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxIncomingWebhookBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxIncomingWebhookBody {
+		return nil, errors.New("incoming webhook body is too large")
+	}
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaType != "application/x-www-form-urlencoded" && !bytes.HasPrefix(bytes.TrimSpace(body), []byte("payload=")) {
+		return body, nil
+	}
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return nil, err
+	}
+	payload := values.Get("payload")
+	if payload == "" {
+		return nil, errors.New("form-encoded incoming webhook has no payload field")
+	}
+	return []byte(payload), nil
+}
+
 func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 	workspaceID := domain.WorkspaceID(r.PathValue("workspace"))
 	appID := domain.AppID(r.PathValue("app"))
 	secret := r.PathValue("secret")
 	var payload incomingWebhookPayload
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	if err := decoder.Decode(&payload); err != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
+	raw, err := incomingWebhookBody(r)
+	if err != nil || json.Unmarshal(raw, &payload) != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
 		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
@@ -13224,7 +13255,7 @@ func (h Handler) adminIncomingWebhookCreate(w http.ResponseWriter, r *http.Reque
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": "https://hooks.slack.com/services/" + string(webhook.WorkspaceID) + "/" + string(webhook.AppID) + "/" + secret}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": originURL(h.origin(r), service.IncomingWebhookPath(webhook.WorkspaceID, webhook.AppID, secret))}})
 }
 
 func (h Handler) adminIncomingWebhookEnable(w http.ResponseWriter, r *http.Request) {

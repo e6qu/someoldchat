@@ -1324,7 +1324,7 @@ func TestSQLiteStarsAreDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := time.Unix(300, 0).UTC()
-	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section"}]`, CreatedAt: created}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section","block_id":"b1"}]`, CreatedAt: created}
 	if err := s.CreateMessage(ctx, message, events.Event{ID: "message-1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -2088,7 +2088,7 @@ func TestSQLiteMessageUnfurlsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", Blocks: `[{"type":"section","text":{"type":"plain_text","text":"hello"}}]`, CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
+	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", Blocks: `[{"type":"section","block_id":"b1","text":{"type":"plain_text","text":"hello"}}]`, CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
 	if err := s.CreateMessage(ctx, value, events.Event{ID: "evt_unfurl", WorkspaceID: "T1", Topic: "message.created", Payload: string(value.ID), CreatedAt: now}, ""); err != nil {
 		t.Fatal(err)
 	}

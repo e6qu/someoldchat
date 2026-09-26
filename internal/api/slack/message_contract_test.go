@@ -225,14 +225,17 @@ func TestReplyingToAReplyJoinsTheRootThread(t *testing.T) {
 func TestChatUpdateKeepsWhatItWasNotGiven(t *testing.T) {
 	handler := testHandler()
 	blocks := `[{"type":"section","text":{"type":"mrkdwn","text":"rich"}}]`
-	ts := post(t, handler, url.Values{"channel": {"C1"}, "text": {"fallback"}, "blocks": {blocks}})
+	posted := slackCall(t, handler, "token", "chat.postMessage", url.Values{"channel": {"C1"}, "text": {"fallback"}, "blocks": {blocks}})
+	requireOK(t, "chat.postMessage", posted)
+	ts, _ := posted["ts"].(string)
 	updated := slackCall(t, handler, "token", "chat.update", url.Values{"channel": {"C1"}, "ts": {ts}, "text": {"new fallback"}})
 	requireOK(t, "chat.update", updated)
-	var want any
-	if err := json.Unmarshal([]byte(blocks), &want); err != nil {
-		t.Fatal(err)
+	// The blocks as stored — with the block_id Slack generates for a block
+	// that came without one — are what a text-only update must leave alone.
+	wantEncoded, _ := json.Marshal(posted["message"].(map[string]any)["blocks"])
+	if !strings.Contains(string(wantEncoded), `"rich"`) {
+		t.Fatalf("posted blocks = %s", wantEncoded)
 	}
-	wantEncoded, _ := json.Marshal(want)
 	if encoded, _ := json.Marshal(updated["message"].(map[string]any)["blocks"]); string(encoded) != string(wantEncoded) {
 		t.Fatalf("a text-only update changed the blocks to %s", encoded)
 	}

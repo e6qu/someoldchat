@@ -74,6 +74,7 @@ type Store struct {
 	socketInteractions            map[string]domain.SocketModeInteraction
 	socketCursors                 map[domain.AppID]uint64
 	appEventCursors               map[string]memoryAppEventCursor
+	appEventDeliveries            map[string]map[uint64]*memoryAppEventDelivery
 	appDeliveryAttempts           map[string][]domain.AppDeliveryAttempt
 	memberships                   map[domain.ConversationID]map[domain.UserID]struct{}
 	tokens                        map[string]domain.TokenRecord
@@ -237,14 +238,23 @@ type memoryLease struct {
 	Expires time.Time
 }
 
+// memoryAppEventCursor is an app transport's journal position: every record
+// at or below Sequence has been handed to delivery, and those not yet settled
+// are in appEventDeliveries.
 type memoryAppEventCursor struct {
-	Sequence       uint64
-	LeasedSequence uint64
-	LeaseOwner     string
-	LeaseUntil     time.Time
-	RetryAt        time.Time
-	RetryCount     int
-	RetryReason    string
+	Sequence uint64
+}
+
+// memoryAppEventDelivery is one claimed, unsettled record's own lease and
+// retry state, mirroring the SQL app_event_deliveries row.
+type memoryAppEventDelivery struct {
+	Sequence    uint64
+	LeaseOwner  string
+	LeaseUntil  time.Time
+	RetryAt     time.Time
+	Attempt     int
+	RetryReason string
+	Delivered   []string
 }
 
 func New() *Store {
@@ -307,6 +317,7 @@ func New() *Store {
 		socketInteractions:            make(map[string]domain.SocketModeInteraction),
 		socketCursors:                 make(map[domain.AppID]uint64),
 		appEventCursors:               make(map[string]memoryAppEventCursor),
+		appEventDeliveries:            make(map[string]map[uint64]*memoryAppEventDelivery),
 		appDeliveryAttempts:           make(map[string][]domain.AppDeliveryAttempt),
 		memberships:                   make(map[domain.ConversationID]map[domain.UserID]struct{}),
 		tokens:                        make(map[string]domain.TokenRecord),
@@ -11101,9 +11112,24 @@ func validAppEventSurface(surface string) bool {
 	return surface == "http" || surface == "socket"
 }
 
-func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+// appEventRecordEligible reports whether the journal record at index belongs
+// to an app whose installations are described by workspaces (enabled) and
+// uninstalled (disabled): an installed workspace's record, or the uninstall
+// announcement of a workspace that removed the app.
+func appEventRecordEligible(event events.Event, workspaces, uninstalled map[domain.WorkspaceID]struct{}) bool {
+	if store.InternalTopic(event.Topic) {
+		return false
+	}
+	if _, installed := workspaces[event.WorkspaceID]; installed {
+		return true
+	}
+	_, wasInstalled := uninstalled[event.WorkspaceID]
+	return wasInstalled && event.Topic == "app.uninstalled"
+}
+
+func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.AppEventClaim, bool, error) {
 	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || lease <= 0 {
-		return events.Record{}, 0, "", false, store.InvalidArgument("app event claim fields are invalid")
+		return events.AppEventClaim{}, false, store.InvalidArgument("app event claim fields are invalid")
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -11118,33 +11144,62 @@ func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, ow
 		}
 	}
 	if len(workspaces) == 0 && len(uninstalled) == 0 {
-		return events.Record{}, 0, "", false, store.ErrNotFound
+		return events.AppEventClaim{}, false, store.ErrNotFound
 	}
 	key := appEventCursorKey(appID, surface)
-	cursor := s.appEventCursors[key]
-	if cursor.LeasedSequence != 0 && cursor.LeaseUntil.After(now) {
-		return events.Record{}, 0, "", false, nil
+	deliveries := s.appEventDeliveries[key]
+	// A released record whose retry is due comes first, lowest sequence first,
+	// so a retried record is not starved by a busy journal. A record whose
+	// worker died is due once its lease lapses.
+	due := make([]uint64, 0, len(deliveries))
+	for sequence, delivery := range deliveries {
+		if !delivery.LeaseUntil.After(now) && !delivery.RetryAt.After(now) {
+			due = append(due, sequence)
+		}
 	}
-	if cursor.RetryAt.After(now) {
-		return events.Record{}, 0, "", false, nil
-	}
-	for index, event := range s.outbox {
-		sequence := uint64(index + 1)
-		if sequence <= cursor.Sequence || store.InternalTopic(event.Topic) {
+	slices.Sort(due)
+	for _, sequence := range due {
+		delivery := deliveries[sequence]
+		index := int(sequence) - 1
+		if index < 0 || index >= len(s.outbox) || !appEventRecordEligible(s.outbox[index], workspaces, uninstalled) {
+			// The record left the app's reach while it waited — the workspace
+			// uninstalled the app — so there is nothing left to retry.
+			delete(deliveries, sequence)
 			continue
 		}
-		if _, installed := workspaces[event.WorkspaceID]; !installed {
-			if _, wasInstalled := uninstalled[event.WorkspaceID]; !wasInstalled || event.Topic != "app.uninstalled" {
-				continue
-			}
-		}
-		cursor.LeasedSequence = sequence
-		cursor.LeaseOwner = owner
-		cursor.LeaseUntil = now.Add(lease)
-		s.appEventCursors[key] = cursor
-		return events.Record{Sequence: sequence, Event: event}, cursor.RetryCount, cursor.RetryReason, true, nil
+		delivery.LeaseOwner = owner
+		delivery.LeaseUntil = now.Add(lease)
+		return events.AppEventClaim{
+			Record: events.Record{Sequence: sequence, Event: s.outbox[index]}, Attempt: delivery.Attempt,
+			RetryReason: delivery.RetryReason, Delivered: slices.Clone(delivery.Delivered),
+		}, true, nil
 	}
-	return events.Record{}, 0, "", false, nil
+	cursor := s.appEventCursors[key]
+	for index, event := range s.outbox {
+		sequence := uint64(index + 1)
+		if sequence <= cursor.Sequence || !appEventRecordEligible(event, workspaces, uninstalled) {
+			continue
+		}
+		cursor.Sequence = sequence
+		s.appEventCursors[key] = cursor
+		if deliveries == nil {
+			deliveries = make(map[uint64]*memoryAppEventDelivery)
+			s.appEventDeliveries[key] = deliveries
+		}
+		deliveries[sequence] = &memoryAppEventDelivery{Sequence: sequence, LeaseOwner: owner, LeaseUntil: now.Add(lease)}
+		return events.AppEventClaim{Record: events.Record{Sequence: sequence, Event: event}}, true, nil
+	}
+	return events.AppEventClaim{}, false, nil
+}
+
+// leasedAppEventLocked returns the delivery owner holds for sequence, or
+// ErrLeaseConflict when the lease is someone else's or has lapsed.
+func (s *Store) leasedAppEventLocked(key, owner string, sequence uint64, now time.Time) (*memoryAppEventDelivery, error) {
+	delivery, exists := s.appEventDeliveries[key][sequence]
+	if !exists || delivery.LeaseOwner != owner || !delivery.LeaseUntil.After(now) {
+		return nil, store.ErrLeaseConflict
+	}
+	return delivery, nil
 }
 
 func (s *Store) AckAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
@@ -11155,24 +11210,13 @@ func (s *Store) AckAppEvent(_ context.Context, appID domain.AppID, surface, owne
 	key := appEventCursorKey(appID, surface)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cursor, exists := s.appEventCursors[key]
-	if !exists || cursor.LeasedSequence != sequence || cursor.LeaseOwner != owner {
-		return store.ErrLeaseConflict
+	delivery, err := s.leasedAppEventLocked(key, owner, sequence, now)
+	if err != nil {
+		return err
 	}
-	if !cursor.LeaseUntil.After(now) {
-		return store.ErrLeaseConflict
-	}
-	attempt := cursor.RetryCount + 1
-	cursor.Sequence = sequence
-	cursor.LeasedSequence = 0
-	cursor.LeaseOwner = ""
-	cursor.LeaseUntil = time.Time{}
-	cursor.RetryAt = time.Time{}
-	cursor.RetryCount = 0
-	cursor.RetryReason = ""
-	s.appEventCursors[key] = cursor
+	delete(s.appEventDeliveries[key], sequence)
 	s.recordAppDeliveryAttemptLocked(key, domain.AppDeliveryAttempt{
-		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: true, AttemptedAt: now,
+		AppID: appID, Surface: surface, Sequence: sequence, Attempt: delivery.Attempt + 1, Delivered: true, AttemptedAt: now,
 	})
 	return nil
 }
@@ -11205,50 +11249,71 @@ func (s *Store) ListAppDeliveryAttempts(_ context.Context, appID domain.AppID, s
 	return attempts, nil
 }
 
-func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
-	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || strings.TrimSpace(reason) == "" || retryAt.IsZero() {
+func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64, release events.AppEventRelease) error {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || !release.Valid() {
 		return store.InvalidArgument("app event release fields are invalid")
 	}
 	now := time.Now().UTC()
 	key := appEventCursorKey(appID, surface)
+	reason := strings.TrimSpace(release.Reason)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cursor, exists := s.appEventCursors[key]
-	if !exists || cursor.LeasedSequence != sequence || cursor.LeaseOwner != owner {
-		return store.ErrLeaseConflict
+	delivery, err := s.leasedAppEventLocked(key, owner, sequence, now)
+	if err != nil {
+		return err
 	}
-	if !cursor.LeaseUntil.After(now) {
-		return store.ErrLeaseConflict
+	attempt := delivery.Attempt + 1
+	delivery.LeaseOwner = ""
+	delivery.LeaseUntil = time.Time{}
+	delivery.RetryAt = release.RetryAt.UTC()
+	delivery.Delivered = events.NormalizeDelivered(release.Delivered)
+	if !release.Internal {
+		delivery.Attempt++
+		delivery.RetryReason = reason
 	}
-	attempt := cursor.RetryCount + 1
-	cursor.LeasedSequence = 0
-	cursor.LeaseOwner = ""
-	cursor.LeaseUntil = time.Time{}
-	cursor.RetryAt = retryAt.UTC()
-	cursor.RetryCount++
-	cursor.RetryReason = strings.TrimSpace(reason)
-	s.appEventCursors[key] = cursor
 	s.recordAppDeliveryAttemptLocked(key, domain.AppDeliveryAttempt{
-		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: false, Reason: strings.TrimSpace(reason), AttemptedAt: now,
+		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: false, Reason: reason, AttemptedAt: now,
 	})
 	return nil
 }
 
+// GetAppEventCursor summarises an app transport's delivery state: the
+// position below which every record is settled, the earliest record in
+// flight, and the earliest record waiting for a retry.
 func (s *Store) GetAppEventCursor(_ context.Context, appID domain.AppID, surface string) (domain.AppEventCursor, error) {
 	if appID == "" || !validAppEventSurface(surface) {
 		return domain.AppEventCursor{}, store.InvalidArgument("app ID and event surface are required")
 	}
+	now := time.Now().UTC()
+	key := appEventCursorKey(appID, surface)
 	s.mu.RLock()
-	cursor, exists := s.appEventCursors[appEventCursorKey(appID, surface)]
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
+	cursor, exists := s.appEventCursors[key]
 	if !exists {
 		return domain.AppEventCursor{}, store.ErrNotFound
 	}
-	return domain.AppEventCursor{
-		AppID: appID, Surface: surface, AcknowledgedSequence: cursor.Sequence,
-		InFlightSequence: cursor.LeasedSequence, InFlightUntil: cursor.LeaseUntil,
-		RetryAt: cursor.RetryAt, RetryCount: cursor.RetryCount, RetryReason: cursor.RetryReason,
-	}, nil
+	summary := domain.AppEventCursor{AppID: appID, Surface: surface, AcknowledgedSequence: cursor.Sequence}
+	var inFlight, waiting *memoryAppEventDelivery
+	for _, delivery := range s.appEventDeliveries[key] {
+		if delivery.Sequence <= summary.AcknowledgedSequence {
+			summary.AcknowledgedSequence = delivery.Sequence - 1
+		}
+		if delivery.LeaseUntil.After(now) {
+			if inFlight == nil || delivery.Sequence < inFlight.Sequence {
+				inFlight = delivery
+			}
+		} else if waiting == nil || delivery.Sequence < waiting.Sequence {
+			waiting = delivery
+		}
+	}
+	summary.Pending = len(s.appEventDeliveries[key])
+	if inFlight != nil {
+		summary.InFlightSequence, summary.InFlightUntil = inFlight.Sequence, inFlight.LeaseUntil
+	}
+	if waiting != nil {
+		summary.RetryAt, summary.RetryCount, summary.RetryReason = waiting.RetryAt, waiting.Attempt, waiting.RetryReason
+	}
+	return summary, nil
 }
 
 func (s *Store) ClaimEvents(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]events.Record, error) {

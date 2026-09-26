@@ -901,6 +901,42 @@ func TestHandlerRedeliversAnUnacknowledgedEventWithRetryMetadata(t *testing.T) {
 	}
 }
 
+// A fanned-out record the app acknowledged only in part is retried only for
+// the envelopes it did not acknowledge; the store keeps the accepted ones with
+// the record's own delivery state. Resending all of them delivered the same
+// event to a listener that had already handled it.
+func TestHandlerRetriesOnlyTheUnacknowledgedFanOutEnvelopes(t *testing.T) {
+	connections := memory.New()
+	record := producedRecord(t, 4, "event-4", "conversation.members_invited",
+		events.String("channel_id", "C1"),
+		events.Strings("user_ids", []string{"U2", "U3"}),
+	)
+	installAppEvents(t, connections, record)
+	queue := &observedQueue{Store: connections}
+	client := dialHandler(t, Handler{Store: connections, Queue: queue, Responses: new(testResponseSink), EnvelopeTimeout: 100 * time.Millisecond, Logger: quietLogger()}, connections)
+	first, second := readFrame(t, client), readFrame(t, client)
+	if first["envelope_id"] != "event-4#0" || second["envelope_id"] != "event-4#1" {
+		t.Fatalf("fan-out envelopes=%v %v", first["envelope_id"], second["envelope_id"])
+	}
+	if err := client.WriteJSON(map[string]any{"envelope_id": "event-4#0"}); err != nil {
+		t.Fatal(err)
+	}
+	retried := readFrame(t, client)
+	if retried["envelope_id"] != "event-4#1" || retried["retry_attempt"] != float64(1) {
+		t.Fatalf("retry=%v, want only the unacknowledged envelope event-4#1", retried)
+	}
+	if err := client.WriteJSON(map[string]any{"envelope_id": "event-4#1"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !queue.acknowledged(1) {
+		if time.Now().After(deadline) {
+			t.Fatal("the record was not consumed once its last envelope was acknowledged")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // Slack gives up on an event after three retries. Retrying for ever pinned an
 // app's whole event stream behind one envelope it would never acknowledge.
 func TestHandlerDropsAnEventWhoseRetriesAreSpent(t *testing.T) {
@@ -908,11 +944,11 @@ func TestHandlerDropsAnEventWhoseRetriesAreSpent(t *testing.T) {
 	installAppEvents(t, connections, translatedRecord(t, 1, "event-1"), translatedRecord(t, 2, "event-2"))
 	ctx := context.Background()
 	for range maxDeliveryRetries {
-		record, _, _, found, err := connections.ClaimAppEvent(ctx, "A123", "socket", "earlier-connection", time.Minute)
-		if err != nil || !found || record.Event.ID != "event-1" {
-			t.Fatalf("claim record=%+v found=%v err=%v", record, found, err)
+		claim, found, err := connections.ClaimAppEvent(ctx, "A123", "socket", "earlier-connection", time.Minute)
+		if err != nil || !found || claim.Record.Event.ID != "event-1" {
+			t.Fatalf("claim=%+v found=%v err=%v", claim, found, err)
 		}
-		if err := connections.ReleaseAppEvent(ctx, "A123", "socket", "earlier-connection", record.Sequence, "ack_timeout", time.Now().Add(-time.Second)); err != nil {
+		if err := connections.ReleaseAppEvent(ctx, "A123", "socket", "earlier-connection", claim.Record.Sequence, events.AppEventRelease{Reason: "ack_timeout", RetryAt: time.Now().Add(-time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}

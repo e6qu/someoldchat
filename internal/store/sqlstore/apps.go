@@ -409,8 +409,11 @@ func (s *Store) UseAppResponseURL(ctx context.Context, tokenHash string) (domain
 			return translateNotFound(err)
 		}
 		now := time.Now().UTC().UnixNano()
-		if value.UsesRemaining <= 0 || expiresAt <= now {
-			return store.ErrNotFound
+		if expiresAt <= now {
+			return store.ErrCapabilityExpired
+		}
+		if value.UsesRemaining <= 0 {
+			return store.ErrCapabilityExhausted
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE app_response_urls SET uses_remaining = uses_remaining - 1 WHERE token_hash = ? AND uses_remaining > 0 AND expires_at > ?`, tokenHash, now)
 		if err != nil {
@@ -421,7 +424,9 @@ func (s *Store) UseAppResponseURL(ctx context.Context, tokenHash string) (domain
 			return err
 		}
 		if changed != 1 {
-			return store.ErrNotFound
+			// A concurrent use took the last one between the read and the
+			// update.
+			return store.ErrCapabilityExhausted
 		}
 		value.UsesRemaining--
 		value.CreatedAt = time.Unix(0, createdAt).UTC()

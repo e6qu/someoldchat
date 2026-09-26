@@ -2465,10 +2465,12 @@ decisions:
       retry_attempt and retry_reason; an unacknowledged envelope is retried
       three times on Slack's Events API schedule (immediately, after one
       minute, after five minutes) and then dropped; interactions are delivered
-      concurrently, but an app's events stay one record at a time across its
-      connections because the store keeps one delivery position per app —
-      Slack delivers events concurrently, and that ordering is a recorded
-      deviation.
+      concurrently. Event delivery state is per record, so a record waiting
+      for its retry does not hold back later ones and an app's connections
+      lease different records at once, but each connection holds one event
+      record in flight at a time — Slack delivers events concurrently on a
+      connection, and that limit is a recorded deviation. A fanned-out record
+      is retried only for the envelopes the app did not acknowledge.
   - method: functions.completeSuccess
     evidence: https://docs.slack.dev/reference/methods/functions.completeSuccess/
     decision: The current official method reference defines this POST method, but the pinned OpenAPI snapshot does not contain it. Track it as a supplemental Slack method until the vendored snapshot is refreshed.

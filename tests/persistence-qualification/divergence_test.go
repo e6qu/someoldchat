@@ -1566,10 +1566,10 @@ func uninstallAnnouncementOutlivesTheInstallation(t *testing.T, open opener) {
 	// the shape an open Socket Mode connection is in when the uninstall lands.
 	// Anything the priming claim leased is acknowledged immediately, so no
 	// lease can outlive this setup and stall the loop below.
-	if record, _, _, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute); err != nil {
+	if recordClaim, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute); err != nil {
 		t.Fatal(err)
 	} else if claimed {
-		if err := f.repository.AckAppEvent(ctx, appID, "socket", "conn-1", record.Sequence); err != nil {
+		if err := f.repository.AckAppEvent(ctx, appID, "socket", "conn-1", recordClaim.Record.Sequence); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1604,7 +1604,8 @@ func uninstallAnnouncementOutlivesTheInstallation(t *testing.T, open opener) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		record, _, _, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute)
+		recordClaim, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute)
+		record := recordClaim.Record
 		if err != nil {
 			t.Fatal(err)
 		}

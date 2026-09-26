@@ -10,7 +10,8 @@ import (
 // This file is the one place the Slack transport decides which absolute origin
 // the URLs it emits are built on: file downloads (url_private,
 // url_private_download, permalink, permalink_public), the files.* v2 upload
-// URL, the OAuth authorize URL a manifest create returns, message permalinks
+// URL, the OAuth authorize URL a manifest create returns, the incoming webhook
+// url and configuration_url an install returns, message permalinks
 // (chat.getPermalink, pins, reactions, search) and auth.test's url. Official SDKs
 // fetch those URLs verbatim — @slack/web-api's files.uploadV2 POSTs to
 // upload_url, and every client downloads url_private with its bearer token —
@@ -47,6 +48,20 @@ func (h Handler) origin(r *http.Request) string {
 		return strings.TrimRight(h.PublicURL, "/")
 	}
 	return requestOrigin(r)
+}
+
+// originURL resolves a server-relative path — a permalink or incoming webhook
+// path the service minted — against origin. A value that is already absolute
+// passes through unchanged: a chat process from before paths were minted may
+// still answer during a rolling deploy.
+func originURL(origin, path string) string {
+	if path == "" || strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return strings.TrimRight(origin, "/") + path
 }
 
 // requestOrigin derives scheme://host from the request alone. It is the

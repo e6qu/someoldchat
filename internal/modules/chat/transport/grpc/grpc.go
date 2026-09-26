@@ -4406,8 +4406,8 @@ func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
 		IncomingWebhookChannel:     domain.ConversationID(value.GetIncomingWebhookChannel()),
 		IncomingWebhookChannelName: value.GetIncomingWebhookChannelName(),
 		IncomingWebhookID:          domain.IncomingWebhookID(value.GetIncomingWebhookId()),
-		IncomingWebhookURL:         value.GetIncomingWebhookUrl(),
-		IncomingWebhookConfigURL:   value.GetIncomingWebhookConfigUrl(),
+		IncomingWebhookPath:        value.GetIncomingWebhookUrl(),
+		IncomingWebhookConfigPath:  value.GetIncomingWebhookConfigUrl(),
 	}
 	if value.GetExpiresAtUnixNano() != 0 {
 		token.ExpiresAt = time.Unix(0, value.GetExpiresAtUnixNano()).UTC()
@@ -5705,19 +5705,21 @@ func (r Remote) ListUserEventsAfter(ctx context.Context, workspaceID domain.Work
 	return page, nil
 }
 
-func (r Remote) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+func (r Remote) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.AppEventClaim, bool, error) {
 	out, err := r.events.ClaimAppEvent(ctx, &chatv1.AppEventClaimRequest{AppId: string(appID), Surface: surface, Owner: owner, LeaseNanos: int64(lease)})
 	if err != nil {
-		return events.Record{}, 0, "", false, err
+		return events.AppEventClaim{}, false, err
 	}
 	if !out.GetFound() {
-		return events.Record{}, int(out.GetAttempt()), out.GetRetryReason(), false, nil
+		return events.AppEventClaim{}, false, nil
 	}
 	record, err := decodeProtoEventRecord(out.GetRecord())
 	if err != nil {
-		return events.Record{}, 0, "", false, err
+		return events.AppEventClaim{}, false, err
 	}
-	return record, int(out.GetAttempt()), out.GetRetryReason(), true, nil
+	return events.AppEventClaim{
+		Record: record, Attempt: int(out.GetAttempt()), RetryReason: out.GetRetryReason(), Delivered: out.GetDeliveredEventIds(),
+	}, true, nil
 }
 
 func (r Remote) AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
@@ -5728,8 +5730,11 @@ func (r Remote) AckAppEvent(ctx context.Context, appID domain.AppID, surface, ow
 	return requireAcknowledgement(out.GetOk(), "app event acknowledgement")
 }
 
-func (r Remote) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
-	out, err := r.events.ReleaseAppEvent(ctx, &chatv1.AppEventReleaseRequest{AppId: string(appID), Surface: surface, Owner: owner, Sequence: sequence, RetryReason: reason, RetryAtUnixNano: retryAt.UTC().UnixNano()})
+func (r Remote) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, release events.AppEventRelease) error {
+	out, err := r.events.ReleaseAppEvent(ctx, &chatv1.AppEventReleaseRequest{
+		AppId: string(appID), Surface: surface, Owner: owner, Sequence: sequence, RetryReason: release.Reason,
+		RetryAtUnixNano: release.RetryAt.UTC().UnixNano(), InternalFailure: release.Internal, DeliveredEventIds: release.Delivered,
+	})
 	if err != nil {
 		return err
 	}
@@ -8417,8 +8422,8 @@ func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
 		IncomingWebhookChannel:     string(value.IncomingWebhookChannel),
 		IncomingWebhookChannelName: value.IncomingWebhookChannelName,
 		IncomingWebhookId:          string(value.IncomingWebhookID),
-		IncomingWebhookUrl:         value.IncomingWebhookURL,
-		IncomingWebhookConfigUrl:   value.IncomingWebhookConfigURL,
+		IncomingWebhookUrl:         value.IncomingWebhookPath,
+		IncomingWebhookConfigUrl:   value.IncomingWebhookConfigPath,
 	}
 	if !value.ExpiresAt.IsZero() {
 		token.ExpiresAtUnixNano = value.ExpiresAt.UTC().UnixNano()
@@ -9956,13 +9961,16 @@ func (s *Server) ListEventsAfter(ctx context.Context, input *chatv1.EventsReques
 }
 
 func (s *Server) ClaimAppEvent(ctx context.Context, input *chatv1.AppEventClaimRequest) (*chatv1.AppEventLease, error) {
-	record, attempt, reason, found, err := s.implementation.ClaimAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), time.Duration(input.GetLeaseNanos()))
+	claim, found, err := s.implementation.ClaimAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), time.Duration(input.GetLeaseNanos()))
 	if err != nil {
 		return nil, mapError(err)
 	}
-	result := &chatv1.AppEventLease{Attempt: int32(attempt), RetryReason: reason, Found: found}
+	result := &chatv1.AppEventLease{Found: found}
 	if found {
-		result.Record = encodeProtoEventRecord(record)
+		result.Record = encodeProtoEventRecord(claim.Record)
+		result.Attempt = int32(claim.Attempt)
+		result.RetryReason = claim.RetryReason
+		result.DeliveredEventIds = claim.Delivered
 	}
 	return result, nil
 }
@@ -9975,7 +9983,14 @@ func (s *Server) AckAppEvent(ctx context.Context, input *chatv1.AppEventAckReque
 }
 
 func (s *Server) ReleaseAppEvent(ctx context.Context, input *chatv1.AppEventReleaseRequest) (*chatv1.AppEventMutationResponse, error) {
-	if err := s.implementation.ReleaseAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), input.GetSequence(), input.GetRetryReason(), time.Unix(0, input.GetRetryAtUnixNano()).UTC()); err != nil {
+	release := events.AppEventRelease{
+		Reason: input.GetRetryReason(), RetryAt: time.Unix(0, input.GetRetryAtUnixNano()).UTC(),
+		Internal: input.GetInternalFailure(), Delivered: input.GetDeliveredEventIds(),
+	}
+	if input.GetRetryAtUnixNano() == 0 {
+		release.RetryAt = time.Time{}
+	}
+	if err := s.implementation.ReleaseAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), input.GetSequence(), release); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.AppEventMutationResponse{Ok: true}, nil

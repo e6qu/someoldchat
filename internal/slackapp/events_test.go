@@ -116,11 +116,13 @@ func TestEventProcessorUsesInstalledManifestSubscriptionsSigningAndSlackRetryHea
 	}
 	now := time.Unix(1700000100, 0).UTC()
 	processor := EventProcessor{Store: repository, AppCredentialKey: key, Owner: "worker-1", Lease: time.Minute, Client: receiver.Client(), Now: func() time.Time { return now }}
-	if count, err := processor.RunOnce(ctx); err == nil || count != 0 {
-		t.Fatalf("first delivery count=%d err=%v, want a released retry", count, err)
+	// Slack's first retry is immediate, so the failed delivery and its retry
+	// both happen in one cycle; the failure is still reported.
+	if count, err := processor.RunOnce(ctx); err == nil || count != 1 {
+		t.Fatalf("delivery count=%d err=%v, want one record delivered on its retry and the failure reported", count, err)
 	}
-	if count, err := processor.RunOnce(ctx); err != nil || count != 1 {
-		t.Fatalf("retried delivery count=%d err=%v", count, err)
+	if count, err := processor.RunOnce(ctx); err != nil || count != 0 {
+		t.Fatalf("a settled record was delivered again: count=%d err=%v", count, err)
 	}
 	mutex.Lock()
 	defer mutex.Unlock()

@@ -617,11 +617,16 @@ type OAuthToken struct {
 	// webhook and the oauth.v2.access response hands its coordinates back, the
 	// one time the app ever sees the URL. IncomingWebhookChannel travels from the
 	// consumed code; the rest are the freshly created hook.
+	//
+	// The two paths are relative to the deployment's public base URL, which only
+	// the HTTP boundary knows; it makes them absolute for the response. Minting
+	// an absolute URL here used to hard-code Slack's own host, so an app posted
+	// its webhook to hooks.slack.com instead of this deployment.
 	IncomingWebhookChannel     ConversationID
 	IncomingWebhookChannelName string
 	IncomingWebhookID          IncomingWebhookID
-	IncomingWebhookURL         string
-	IncomingWebhookConfigURL   string
+	IncomingWebhookPath        string
+	IncomingWebhookConfigPath  string
 }
 
 // OAuthRefreshGrant is the durable, one-time capability behind a rotating
@@ -1179,6 +1184,22 @@ func (t ConversationType) OrPublic() ConversationType {
 // forms a channel.
 func (c Conversation) IsDirectOrGroup() bool {
 	return c.Kind == ConversationTypeIM || c.Kind == ConversationTypeMPIM
+}
+
+// SlackChannelType is the channel_type the Events API puts on a message
+// event: Slack's legacy vocabulary, where a private channel is a "group" and a
+// multi-person direct message is an "mpim". Apps route on it — Bolt's
+// Assistant middleware only handles message events whose channel_type is "im".
+func (c Conversation) SlackChannelType() string {
+	switch c.Kind.OrPublic() {
+	case ConversationTypeIM:
+		return "im"
+	case ConversationTypeMPIM:
+		return "mpim"
+	case ConversationTypePrivate:
+		return "group"
+	}
+	return "channel"
 }
 
 // PrivateFlag reports the value the stored is_private column carries for this
@@ -2714,9 +2735,14 @@ type AppAuthorization struct {
 	Scopes      []string
 }
 
-// AppEventCursor is the durable delivery position for one app transport. It is
-// intentionally payload-free: administration can explain queue progress and
-// retry state without exposing event bodies from installed workspaces.
+// AppEventCursor summarises the durable delivery state of one app transport.
+// It is intentionally payload-free: administration can explain queue progress
+// and retry state without exposing event bodies from installed workspaces.
+//
+// Delivery state is kept per record, so this is a summary: every record at or
+// below AcknowledgedSequence is settled; InFlight* names the earliest record a
+// worker holds a lease on; Retry* describes the earliest record waiting for a
+// retry; Pending counts the records claimed but not yet settled.
 type AppEventCursor struct {
 	AppID                AppID
 	Surface              string
@@ -2726,6 +2752,7 @@ type AppEventCursor struct {
 	RetryAt              time.Time
 	RetryCount           int
 	RetryReason          string
+	Pending              int
 }
 
 // AppDeliveryHealth is the developer-facing projection of an app's configured
@@ -3749,8 +3776,16 @@ func NoStructuredContent(value string) bool {
 	return value == "" || value == "[]"
 }
 
+// NormalizeBlocks validates and compacts a message's blocks and fills in the
+// block_id and action_id values Slack generates when an app leaves them out
+// (see AssignBlockIdentifiers). Every message write path calls it, so a stored
+// message is always addressable by interactions.
 func NormalizeBlocks(raw []byte) (string, error) {
-	return normalizeJSONArrayObjects(raw, "blocks")
+	normalized, err := normalizeJSONArrayObjects(raw, "blocks")
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	return assignMessageBlockIdentifiers(normalized)
 }
 
 func NormalizeAttachments(raw []byte) (string, error) {

@@ -120,6 +120,12 @@ CREATE TABLE IF NOT EXISTS app_event_cursors (
  retry_at INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, retry_reason TEXT NOT NULL DEFAULT '',
  PRIMARY KEY (app_id, surface)
 );
+CREATE TABLE IF NOT EXISTS app_event_deliveries (
+ app_id TEXT NOT NULL, surface TEXT NOT NULL, sequence INTEGER NOT NULL,
+ lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, retry_at INTEGER NOT NULL DEFAULT 0,
+ attempt INTEGER NOT NULL DEFAULT 0, retry_reason TEXT NOT NULL DEFAULT '', delivered TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY (app_id, surface, sequence)
+);
 CREATE TABLE IF NOT EXISTS app_delivery_attempts (
  id INTEGER PRIMARY KEY AUTOINCREMENT, app_id TEXT NOT NULL, surface TEXT NOT NULL, sequence INTEGER NOT NULL,
  attempt INTEGER NOT NULL, delivered INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '', attempted_at INTEGER NOT NULL
@@ -568,7 +574,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 178
+const schemaVersion = 179
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3399,6 +3405,29 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 179 {
+		// App event delivery state is per record. app_event_cursors kept one
+		// lease and one retry schedule per (app, surface), so a single callback
+		// the app failed parked every later event for that app until its
+		// retries ran out. app_event_cursors.sequence keeps its meaning — the
+		// journal position already handed to delivery — and each claimed,
+		// unsettled record now has a row here with its own lease, attempt count,
+		// Slack retry reason, and the fanned-out callbacks already accepted.
+		//
+		// The cursor's leased_sequence, lease_owner, lease_until, retry_at,
+		// retry_count and retry_reason columns are no longer read. A record that
+		// was leased or waiting for a retry at upgrade has not been acknowledged,
+		// so the cursor is still below it and it is claimed again from the
+		// journal; only its attempt count restarts.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_event_deliveries (
+			app_id TEXT NOT NULL, surface TEXT NOT NULL, sequence INTEGER NOT NULL,
+			lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, retry_at INTEGER NOT NULL DEFAULT 0,
+			attempt INTEGER NOT NULL DEFAULT 0, retry_reason TEXT NOT NULL DEFAULT '', delivered TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (app_id, surface, sequence)
+		)`); err != nil {
+			return fmt.Errorf("migrate app event deliveries: %w", err)
 		}
 	}
 	if version < 178 {
@@ -20272,15 +20301,14 @@ func validAppEventSurface(surface string) bool {
 	return surface == "http" || surface == "socket"
 }
 
-func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.AppEventClaim, bool, error) {
 	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || lease <= 0 {
-		return events.Record{}, 0, "", false, store.InvalidArgument("app event claim fields are invalid")
+		return events.AppEventClaim{}, false, store.InvalidArgument("app event claim fields are invalid")
 	}
-	var claimed events.Record
-	var retryCount int
-	var retryReason string
+	var claimed events.AppEventClaim
 	var found bool
 	err := underContention(ctx, func() error {
+		claimed, found = events.AppEventClaim{}, false
 		tx, err := s.beginWrite(ctx)
 		if err != nil {
 			return err
@@ -20290,56 +20318,136 @@ func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, 
 		if err != nil {
 			return classify(err)
 		}
-		var sequence, leasedSequence uint64
-		var leaseOwner string
-		var leaseUntil, retryAt int64
-		err = tx.QueryRowContext(ctx, `SELECT sequence, leased_sequence, lease_owner, lease_until, retry_at, retry_count, retry_reason FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).
-			Scan(&sequence, &leasedSequence, &leaseOwner, &leaseUntil, &retryAt, &retryCount, &retryReason)
-		if err != nil {
+		var position uint64
+		if err := tx.QueryRowContext(ctx, `SELECT sequence FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).Scan(&position); err != nil {
 			return translateNotFound(err)
 		}
 		now := time.Now().UTC()
-		if (leasedSequence != 0 && leaseUntil > now.UnixNano()) || retryAt > now.UnixNano() {
+		leaseUntil := now.Add(lease).UnixNano()
+		predicate, excluded := internalTopicPredicate("o.topic")
+		// A released record whose retry is due comes first, lowest sequence
+		// first, so a retried record is not starved by a busy journal. A record
+		// whose worker died is due once its lease lapses.
+		for {
+			var delivery struct {
+				sequence  uint64
+				attempt   int
+				reason    string
+				delivered string
+			}
+			err := tx.QueryRowContext(ctx, `SELECT sequence, attempt, retry_reason, delivered FROM app_event_deliveries
+				WHERE app_id = ? AND surface = ? AND lease_until <= ? AND retry_at <= ? ORDER BY sequence LIMIT 1`,
+				appID, surface, now.UnixNano(), now.UnixNano()).Scan(&delivery.sequence, &delivery.attempt, &delivery.reason, &delivery.delivered)
+			if errors.Is(err, sql.ErrNoRows) {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			args := append([]any{appID, delivery.sequence}, excluded...)
+			record, err := scanAppEventRecord(tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at
+				FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND (i.enabled = 1 OR o.topic = 'app.uninstalled')
+				WHERE o.sequence = ? AND o.undeliverable = 0`+predicate, args...))
+			if errors.Is(err, sql.ErrNoRows) {
+				// The record left the app's reach while it waited — the
+				// workspace uninstalled the app, or the record was quarantined —
+				// so there is nothing left to retry.
+				if _, err := tx.ExecContext(ctx, `DELETE FROM app_event_deliveries WHERE app_id = ? AND surface = ? AND sequence = ?`, appID, surface, delivery.sequence); err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			delivered, err := decodeDeliveredCallbacks(delivery.delivered)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE app_event_deliveries SET lease_owner = ?, lease_until = ? WHERE app_id = ? AND surface = ? AND sequence = ?`,
+				owner, leaseUntil, appID, surface, delivery.sequence); err != nil {
+				return err
+			}
+			claimed = events.AppEventClaim{Record: record, Attempt: delivery.attempt, RetryReason: delivery.reason, Delivered: delivered}
+			found = true
 			return tx.Commit()
 		}
-		predicate, excluded := internalTopicPredicate("o.topic")
-		args := append([]any{appID, sequence}, excluded...)
-		var created string
-		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at
+		args := append([]any{appID, position}, excluded...)
+		record, err := scanAppEventRecord(tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at
 			FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND (i.enabled = 1 OR o.topic = 'app.uninstalled')
-			WHERE o.sequence > ? AND o.undeliverable = 0`+predicate+` ORDER BY o.sequence LIMIT 1`, args...).
-			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &claimed.Event.PrivatePayload, &created)
+			WHERE o.sequence > ? AND o.undeliverable = 0`+predicate+` ORDER BY o.sequence LIMIT 1`, args...))
 		if errors.Is(err, sql.ErrNoRows) {
 			return tx.Commit()
 		}
 		if err != nil {
 			return err
 		}
-		claimed.Event.CreatedAt, err = domain.ParseStoredTime(created)
+		// The position is fenced on the value read above, so two workers that
+		// raced to the same record cannot both take it.
+		update, err := tx.ExecContext(ctx, `UPDATE app_event_cursors SET sequence = ? WHERE app_id = ? AND surface = ? AND sequence = ?`,
+			record.Sequence, appID, surface, position)
 		if err != nil {
 			return err
 		}
-		update, err := tx.ExecContext(ctx, `UPDATE app_event_cursors SET leased_sequence = ?, lease_owner = ?, lease_until = ? WHERE app_id = ? AND surface = ? AND sequence = ? AND (leased_sequence = 0 OR lease_until <= ?) AND retry_at <= ?`,
-			claimed.Sequence, owner, now.Add(lease).UnixNano(), appID, surface, sequence, now.UnixNano(), now.UnixNano())
-		if err != nil {
-			return err
+		if changed, err := update.RowsAffected(); err != nil || changed != 1 {
+			if err != nil {
+				return err
+			}
+			return tx.Commit()
 		}
-		changed, err := update.RowsAffected()
-		if err != nil {
-			return err
+		if _, err := tx.ExecContext(ctx, `INSERT INTO app_event_deliveries(app_id, surface, sequence, lease_owner, lease_until) VALUES (?, ?, ?, ?, ?)`,
+			appID, surface, record.Sequence, owner, leaseUntil); err != nil {
+			return classify(err)
 		}
-		found = changed == 1
+		claimed = events.AppEventClaim{Record: record}
+		found = true
 		return tx.Commit()
 	})
 	if err != nil {
-		return events.Record{}, 0, "", false, err
+		return events.AppEventClaim{}, false, err
 	}
-	return claimed, retryCount, retryReason, found, nil
+	return claimed, found, nil
+}
+
+func scanAppEventRecord(row *sql.Row) (events.Record, error) {
+	var record events.Record
+	var created string
+	if err := row.Scan(&record.Sequence, &record.Event.ID, &record.Event.WorkspaceID, &record.Event.ActorID, &record.Event.Topic, &record.Event.Payload, &record.Event.PrivatePayload, &created); err != nil {
+		return events.Record{}, err
+	}
+	createdAt, err := domain.ParseStoredTime(created)
+	if err != nil {
+		return events.Record{}, err
+	}
+	record.Event.CreatedAt = createdAt
+	return record, nil
+}
+
+// decodeDeliveredCallbacks reads app_event_deliveries.delivered, a JSON array
+// of the event_ids the app already accepted.
+func decodeDeliveredCallbacks(value string) ([]string, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	var delivered []string
+	if err := json.Unmarshal([]byte(value), &delivered); err != nil {
+		return nil, fmt.Errorf("app event delivered callbacks are corrupt: %w", err)
+	}
+	return delivered, nil
+}
+
+func encodeDeliveredCallbacks(values []string) (string, error) {
+	values = events.NormalizeDelivered(values)
+	if len(values) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(values)
+	return string(encoded), err
 }
 
 // recordAppDeliveryAttempt appends one delivery outcome and prunes that (app,
 // surface) history back to the newest store.AppDeliveryAttemptRetention rows, inside
-// the caller's transaction so the record and the cursor move as one.
+// the caller's transaction so the record and the delivery state move as one.
 func recordAppDeliveryAttempt(ctx context.Context, tx txRunner, appID domain.AppID, surface string, sequence uint64, attempt int, delivered bool, reason string, at int64) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO app_delivery_attempts(app_id, surface, sequence, attempt, delivered, reason, attempted_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		appID, surface, sequence, attempt, boolInt(delivered), reason, at); err != nil {
@@ -20351,90 +20459,80 @@ func recordAppDeliveryAttempt(ctx context.Context, tx txRunner, appID domain.App
 	return err
 }
 
+// leasedAppEventAttempt reads the attempt count of a record owner holds a live
+// lease on, inside tx. It fails with ErrLeaseConflict otherwise.
+func leasedAppEventAttempt(ctx context.Context, tx txRunner, appID domain.AppID, surface, owner string, sequence uint64, now int64) (int, error) {
+	var attempt int
+	err := tx.QueryRowContext(ctx, `SELECT attempt FROM app_event_deliveries WHERE app_id = ? AND surface = ? AND sequence = ? AND lease_owner = ? AND lease_until > ?`,
+		appID, surface, sequence, owner, now).Scan(&attempt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, store.ErrLeaseConflict
+	}
+	return attempt, err
+}
+
 func (s *Store) AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
 	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 {
 		return store.InvalidArgument("app event acknowledgement fields are invalid")
 	}
-	acknowledged := false
-	if err := underContention(ctx, func() error {
+	return underContention(ctx, func() error {
 		tx, err := s.beginWrite(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 		now := time.Now().UTC().UnixNano()
-		// Read the try count before the ack resets it, so the recorded attempt is
-		// numbered by how many tries the event actually took.
-		var retryCount int
-		if err := tx.QueryRowContext(ctx, `SELECT retry_count FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).Scan(&retryCount); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE app_event_cursors SET sequence = ?, leased_sequence = 0, lease_owner = '', lease_until = 0, retry_at = 0, retry_count = 0, retry_reason = '' WHERE app_id = ? AND surface = ? AND leased_sequence = ? AND lease_owner = ? AND lease_until > ?`, sequence, appID, surface, sequence, owner, now)
+		attempt, err := leasedAppEventAttempt(ctx, tx, appID, surface, owner, sequence, now)
 		if err != nil {
 			return err
 		}
-		changed, err := result.RowsAffected()
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM app_event_deliveries WHERE app_id = ? AND surface = ? AND sequence = ?`, appID, surface, sequence); err != nil {
 			return err
 		}
-		if changed != 1 {
-			return nil
-		}
-		acknowledged = true
-		if err := recordAppDeliveryAttempt(ctx, tx, appID, surface, sequence, retryCount+1, true, "", now); err != nil {
+		if err := recordAppDeliveryAttempt(ctx, tx, appID, surface, sequence, attempt+1, true, "", now); err != nil {
 			return err
 		}
 		return tx.Commit()
-	}); err != nil {
-		return err
-	}
-	if acknowledged {
-		return nil
-	}
-	return s.appEventLeaseError(ctx, appID, surface, owner, sequence, time.Now().UTC().UnixNano())
+	})
 }
 
-func (s *Store) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
-	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || strings.TrimSpace(reason) == "" || retryAt.IsZero() {
+func (s *Store) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, release events.AppEventRelease) error {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || !release.Valid() {
 		return store.InvalidArgument("app event release fields are invalid")
 	}
-	reason = strings.TrimSpace(reason)
-	released := false
-	if err := underContention(ctx, func() error {
+	reason := strings.TrimSpace(release.Reason)
+	delivered, err := encodeDeliveredCallbacks(release.Delivered)
+	if err != nil {
+		return err
+	}
+	return underContention(ctx, func() error {
 		tx, err := s.beginWrite(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 		now := time.Now().UTC().UnixNano()
-		// The retry count before the increment numbers the attempt that just failed.
-		var retryCount int
-		if err := tx.QueryRowContext(ctx, `SELECT retry_count FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).Scan(&retryCount); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE app_event_cursors SET leased_sequence = 0, lease_owner = '', lease_until = 0, retry_at = ?, retry_count = retry_count + 1, retry_reason = ? WHERE app_id = ? AND surface = ? AND leased_sequence = ? AND lease_owner = ? AND lease_until > ?`, retryAt.UTC().UnixNano(), reason, appID, surface, sequence, owner, now)
+		attempt, err := leasedAppEventAttempt(ctx, tx, appID, surface, owner, sequence, now)
 		if err != nil {
 			return err
 		}
-		changed, err := result.RowsAffected()
+		// Only a delivery the app failed counts as an attempt and carries a
+		// Slack retry reason; an internal failure keeps both as they were.
+		if release.Internal {
+			_, err = tx.ExecContext(ctx, `UPDATE app_event_deliveries SET lease_owner = '', lease_until = 0, retry_at = ?, delivered = ? WHERE app_id = ? AND surface = ? AND sequence = ?`,
+				release.RetryAt.UTC().UnixNano(), delivered, appID, surface, sequence)
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE app_event_deliveries SET lease_owner = '', lease_until = 0, retry_at = ?, attempt = attempt + 1, retry_reason = ?, delivered = ? WHERE app_id = ? AND surface = ? AND sequence = ?`,
+				release.RetryAt.UTC().UnixNano(), reason, delivered, appID, surface, sequence)
+		}
 		if err != nil {
 			return err
 		}
-		if changed != 1 {
-			return nil
-		}
-		released = true
-		if err := recordAppDeliveryAttempt(ctx, tx, appID, surface, sequence, retryCount+1, false, reason, now); err != nil {
+		if err := recordAppDeliveryAttempt(ctx, tx, appID, surface, sequence, attempt+1, false, reason, now); err != nil {
 			return err
 		}
 		return tx.Commit()
-	}); err != nil {
-		return err
-	}
-	if released {
-		return nil
-	}
-	return s.appEventLeaseError(ctx, appID, surface, owner, sequence, time.Now().UTC().UnixNano())
+	})
 }
 
 func (s *Store) ListAppDeliveryAttempts(ctx context.Context, appID domain.AppID, surface string, limit int) ([]domain.AppDeliveryAttempt, error) {
@@ -20464,38 +20562,45 @@ func (s *Store) ListAppDeliveryAttempts(ctx context.Context, appID domain.AppID,
 	return attempts, rows.Err()
 }
 
+// GetAppEventCursor summarises an app transport's delivery state: the
+// position below which every record is settled, the earliest record in
+// flight, and the earliest record waiting for a retry.
 func (s *Store) GetAppEventCursor(ctx context.Context, appID domain.AppID, surface string) (domain.AppEventCursor, error) {
 	if appID == "" || !validAppEventSurface(surface) {
 		return domain.AppEventCursor{}, store.InvalidArgument("app ID and event surface are required")
 	}
 	value := domain.AppEventCursor{AppID: appID, Surface: surface}
-	var inFlightUntil, retryAt int64
-	err := s.db.QueryRowContext(ctx, `SELECT sequence, leased_sequence, lease_until, retry_at, retry_count, retry_reason FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).
-		Scan(&value.AcknowledgedSequence, &value.InFlightSequence, &inFlightUntil, &retryAt, &value.RetryCount, &value.RetryReason)
+	err := s.db.QueryRowContext(ctx, `SELECT sequence FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).Scan(&value.AcknowledgedSequence)
 	if err := translateNotFound(err); err != nil {
+		return domain.AppEventCursor{}, err
+	}
+	now := time.Now().UTC().UnixNano()
+	var lowest sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MIN(sequence), COUNT(*) FROM app_event_deliveries WHERE app_id = ? AND surface = ?`, appID, surface).Scan(&lowest, &value.Pending); err != nil {
+		return domain.AppEventCursor{}, err
+	}
+	if lowest.Valid && uint64(lowest.Int64) <= value.AcknowledgedSequence {
+		value.AcknowledgedSequence = uint64(lowest.Int64) - 1
+	}
+	var inFlightUntil int64
+	err = s.db.QueryRowContext(ctx, `SELECT sequence, lease_until FROM app_event_deliveries WHERE app_id = ? AND surface = ? AND lease_until > ? ORDER BY sequence LIMIT 1`, appID, surface, now).
+		Scan(&value.InFlightSequence, &inFlightUntil)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return domain.AppEventCursor{}, err
 	}
 	if inFlightUntil > 0 {
 		value.InFlightUntil = time.Unix(0, inFlightUntil).UTC()
 	}
+	var retryAt int64
+	err = s.db.QueryRowContext(ctx, `SELECT retry_at, attempt, retry_reason FROM app_event_deliveries WHERE app_id = ? AND surface = ? AND lease_until <= ? ORDER BY sequence LIMIT 1`, appID, surface, now).
+		Scan(&retryAt, &value.RetryCount, &value.RetryReason)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.AppEventCursor{}, err
+	}
 	if retryAt > 0 {
 		value.RetryAt = time.Unix(0, retryAt).UTC()
 	}
 	return value, nil
-}
-
-func (s *Store) appEventLeaseError(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, now int64) error {
-	var leasedSequence uint64
-	var leaseOwner string
-	var leaseUntil int64
-	err := s.db.QueryRowContext(ctx, `SELECT leased_sequence, lease_owner, lease_until FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).Scan(&leasedSequence, &leaseOwner, &leaseUntil)
-	if err := translateNotFound(err); err != nil {
-		return err
-	}
-	if leasedSequence == sequence && leaseOwner == owner && leaseUntil <= now {
-		return store.ErrLeaseConflict
-	}
-	return store.ErrLeaseConflict
 }
 
 // ListMessages pages one conversation in either direction; see the port for why

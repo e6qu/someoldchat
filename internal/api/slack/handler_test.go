@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -534,20 +535,53 @@ func TestOAuthV2ResponseIncludesIncomingWebhook(t *testing.T) {
 		AccessToken: "xoxb-1", AppID: "A1", WorkspaceID: "T1", UserID: "Ubot", InstallerID: "U1",
 		TokenType: domain.TokenBot, Scopes: []string{"incoming-webhook"},
 		IncomingWebhookChannel: "C1", IncomingWebhookChannelName: "general", IncomingWebhookID: "WH1",
-		IncomingWebhookURL:       "https://hooks.slack.com/services/T1/A1/whsec_abc",
-		IncomingWebhookConfigURL: "https://hooks.slack.com/services/T1/A1",
+		IncomingWebhookPath:       "/services/T1/A1/whsec_abc",
+		IncomingWebhookConfigPath: "/app/apps/A1",
 	}
-	hook, ok := oauthV2TokenResponse(token, false)["incoming_webhook"].(map[string]any)
+	// The coordinates are this deployment's: an app configured with only a
+	// base URL must never be handed Slack's own hooks host.
+	hook, ok := oauthV2TokenResponse("https://chat.example/base", token, false)["incoming_webhook"].(map[string]any)
 	if !ok {
 		t.Fatal("bot install with a webhook carried no incoming_webhook")
 	}
 	if hook["channel"] != "#general" || hook["channel_id"] != domain.ConversationID("C1") ||
-		hook["url"] != "https://hooks.slack.com/services/T1/A1/whsec_abc" ||
-		hook["configuration_url"] != "https://hooks.slack.com/services/T1/A1" {
+		hook["url"] != "https://chat.example/base/services/T1/A1/whsec_abc" ||
+		hook["configuration_url"] != "https://chat.example/base/app/apps/A1" {
 		t.Fatalf("incoming_webhook = %+v", hook)
 	}
-	if _, present := oauthV2TokenResponse(domain.OAuthToken{TokenType: domain.TokenBot}, false)["incoming_webhook"]; present {
+	if _, present := oauthV2TokenResponse("https://chat.example", domain.OAuthToken{TokenType: domain.TokenBot}, false)["incoming_webhook"]; present {
 		t.Fatal("a token with no webhook still carried an incoming_webhook")
+	}
+}
+
+// The configured public URL wins over the request's Host header, which a
+// proxy may rewrite and a client may forge, and an already-absolute value from
+// an older chat process passes through unchanged during a rolling deploy.
+func TestPublicBaseURLPrefersTheConfiguredURL(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/oauth.v2.access", nil)
+	request.Host = "internal:8080"
+	var handler Handler
+	if got := handler.origin(request); got != "http://internal:8080" {
+		t.Fatalf("unconfigured base URL=%q", got)
+	}
+	if err := handler.SetPublicURL("https://chat.example/"); err != nil {
+		t.Fatal(err)
+	}
+	if got := handler.origin(request); got != "https://chat.example" {
+		t.Fatalf("configured base URL=%q", got)
+	}
+	// An empty value is "not configured": it clears the URL back to the
+	// request's origin, which is how slack.Mount passes an unset flag.
+	if err := handler.SetPublicURL(""); err != nil || handler.origin(request) != "http://internal:8080" {
+		t.Fatalf("clearing the public URL: err=%v origin=%q", err, handler.origin(request))
+	}
+	for _, invalid := range []string{"chat.example", "ftp://chat.example", "https://chat.example/?q=1"} {
+		if err := (&Handler{}).SetPublicURL(invalid); err == nil {
+			t.Errorf("SetPublicURL(%q) accepted", invalid)
+		}
+	}
+	if got := originURL("https://chat.example", "https://legacy.example/services/T1/A1/s"); got != "https://legacy.example/services/T1/A1/s" {
+		t.Fatalf("absolute value rewritten to %q", got)
 	}
 }
 
@@ -629,7 +663,14 @@ func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	eventContext, err := events.EventContext("A1", events.Record{Sequence: 1, Event: event})
+	record := events.Record{Sequence: 1, Event: event}
+	eventContext, err := events.EventContext("A1", record, event.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A record that fans out gives each callback its own event_id, and the
+	// event_context each one carries must resolve to the same record.
+	fannedOutContext, err := events.EventContext("A1", record, events.SlackEventID(record, 1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,6 +681,7 @@ func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.
 	}{
 		{"/api/auth.test", "xoxb-test", []string{`"user_id":"Ubot"`, `"bot_id":"B1"`, `"is_enterprise_install":false`}},
 		{"/api/apps.event.authorizations.list?event_context=" + url.QueryEscape(eventContext), "xapp-test", []string{`"user_id":"Ubot"`, `"is_bot":true`, `"user_id":"U1"`, `"is_bot":false`}},
+		{"/api/apps.event.authorizations.list?event_context=" + url.QueryEscape(fannedOutContext), "xapp-test", []string{`"user_id":"Ubot"`, `"is_bot":true`}},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		request.Header.Set("Authorization", "Bearer "+test.token)
@@ -5012,7 +5054,8 @@ func TestScheduleMessageFormAcceptsBlocksWithoutFallbackText(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+	// The divider comes back with the block_id Slack assigns an unnamed block.
+	if res.Code != http.StatusOK || !regexp.MustCompile(`"blocks":\[\{"block_id":"[A-Z2-7]{5,}","type":"divider"\}\]`).MatchString(res.Body.String()) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -5154,7 +5197,7 @@ func TestPostEphemeralAcceptsBlocksWithoutFallbackText(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+	if res.Code != http.StatusOK || !regexp.MustCompile(`"blocks":\[\{"block_id":"[A-Z2-7]{5,}","type":"divider"\}\]`).MatchString(res.Body.String()) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -5183,7 +5226,7 @@ func TestPostMessageJSONAcceptsStructuredArrays(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
-	for _, want := range []string{`"blocks":[{"type":"section"`, `"attachments":[{"text":"from attachments"}]`} {
+	for _, want := range []string{`"blocks":[{"block_id":`, `"text":{"text":"from blocks","type":"plain_text"},"type":"section"}]`, `"attachments":[{"text":"from attachments"}]`} {
 		if !strings.Contains(res.Body.String(), want) {
 			t.Fatalf("response does not contain %q: %s", want, res.Body)
 		}

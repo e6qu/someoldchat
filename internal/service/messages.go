@@ -349,24 +349,40 @@ func (m Messages) ListUserEventsAfter(ctx context.Context, workspaceID domain.Wo
 	return page, nil
 }
 
-func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+// internalAppEventRetry is how long a record waits after a failure on this
+// side of the delivery. It is not an attempt, so it has no Slack schedule.
+const internalAppEventRetry = 5 * time.Second
+
+// deferAppEvent returns a claimed record after a failure on this side of the
+// delivery: the attempt count is untouched and the reason is never sent to the
+// app. The release is best effort — if it fails the lease lapses and the
+// record is claimed again — and the caller reports the original failure.
+func (m Messages) deferAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string) {
+	_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, sequence, events.AppEventRelease{
+		Reason: reason, RetryAt: time.Now().UTC().Add(internalAppEventRetry), Internal: true,
+	})
+}
+
+func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.AppEventClaim, bool, error) {
 	for {
-		record, attempt, reason, found, err := m.Store.ClaimAppEvent(ctx, appID, surface, owner, lease)
+		claim, found, err := m.Store.ClaimAppEvent(ctx, appID, surface, owner, lease)
 		if err != nil || !found || surface != "socket" {
-			return record, attempt, reason, found, err
+			return claim, found, err
 		}
+		record := claim.Record
 		prepared, visible, err := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, appID, record)
 		if err != nil {
-			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "event_projection_failed", time.Now().UTC())
-			return events.Record{}, 0, "", false, err
+			m.deferAppEvent(ctx, appID, surface, owner, record.Sequence, "event_projection_failed")
+			return events.AppEventClaim{}, false, err
 		}
 		if !visible {
 			if err := m.Store.AckAppEvent(ctx, appID, surface, owner, record.Sequence); err != nil {
-				return events.Record{}, 0, "", false, err
+				return events.AppEventClaim{}, false, err
 			}
 			continue
 		}
 		record = prepared
+		claim.Record = record
 		// The uninstall announcement needs no manifest: it is automatic (no
 		// subscription can be consulted — the installation is gone) and
 		// SlackEventBodies already applies its target routing. Consulting
@@ -376,38 +392,38 @@ func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface
 			bodies, err := events.SlackEventBodies(record, string(appID))
 			if err != nil || len(bodies) == 0 {
 				if err := m.Store.AckAppEvent(ctx, appID, surface, owner, record.Sequence); err != nil {
-					return events.Record{}, 0, "", false, err
+					return events.AppEventClaim{}, false, err
 				}
 				continue
 			}
-			return record, attempt, reason, true, nil
+			return claim, true, nil
 		}
 		snapshot, parsed, err := m.installedApp(ctx, record.Event.WorkspaceID, appID)
 		if err != nil {
-			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "app_configuration_unavailable", time.Now().UTC())
-			return events.Record{}, 0, "", false, err
+			m.deferAppEvent(ctx, appID, surface, owner, record.Sequence, "app_configuration_unavailable")
+			return events.AppEventClaim{}, false, err
 		}
 		bodies, err := events.SlackEventBodies(record, string(snapshot.App.ID))
 		if err != nil {
 			// The Socket Mode handler owns the established malformed-record
 			// policy and its operator diagnostics.
-			return record, attempt, reason, true, nil
+			return claim, true, nil
 		}
 		filtered, err := events.FilterSubscribedSlackEventBodies(ctx, bodies, parsed.BotEvents, parsed.UserEvents, m.Store.GetConversation)
 		if err != nil {
-			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "subscription_filter_failed", time.Now().UTC())
-			return events.Record{}, 0, "", false, err
+			m.deferAppEvent(ctx, appID, surface, owner, record.Sequence, "subscription_filter_failed")
+			return events.AppEventClaim{}, false, err
 		}
 		if len(filtered) != 0 {
-			record.Event.Authorizations, err = events.SlackEventBodyAuthorizations(filtered[0])
+			claim.Record.Event.Authorizations, err = events.SlackEventBodyAuthorizations(filtered[0])
 			if err != nil {
-				_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "authorization_filter_failed", time.Now().UTC())
-				return events.Record{}, 0, "", false, err
+				m.deferAppEvent(ctx, appID, surface, owner, record.Sequence, "authorization_filter_failed")
+				return events.AppEventClaim{}, false, err
 			}
-			return record, attempt, reason, true, nil
+			return claim, true, nil
 		}
 		if err := m.Store.AckAppEvent(ctx, appID, surface, owner, record.Sequence); err != nil {
-			return events.Record{}, 0, "", false, err
+			return events.AppEventClaim{}, false, err
 		}
 	}
 }
@@ -416,8 +432,8 @@ func (m Messages) AckAppEvent(ctx context.Context, appID domain.AppID, surface, 
 	return m.Store.AckAppEvent(ctx, appID, surface, owner, sequence)
 }
 
-func (m Messages) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
-	return m.Store.ReleaseAppEvent(ctx, appID, surface, owner, sequence, reason, retryAt)
+func (m Messages) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, release events.AppEventRelease) error {
+	return m.Store.ReleaseAppEvent(ctx, appID, surface, owner, sequence, release)
 }
 
 func (m Messages) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
@@ -2526,8 +2542,10 @@ func viewPayload(payload string) (string, string, error) {
 			if !ok {
 				return "", "", ErrInvalidView
 			}
-			actionID := strings.TrimSpace(stringValue(element["action_id"]))
-			if actionID == "" || utf8.RuneCountInString(actionID) > 255 {
+			// action_id is optional, as in Slack: normalizeViewPayload assigns
+			// one to an element that has none.
+			actionID, actionIDOK := element["action_id"].(string)
+			if (!actionIDOK && element["action_id"] != nil) || utf8.RuneCountInString(actionID) > 255 {
 				return "", "", ErrInvalidView
 			}
 		}
@@ -2579,6 +2597,10 @@ func normalizeViewPayload(id domain.ViewID, payload string) (string, error) {
 		}
 		seen[blockID] = struct{}{}
 	}
+	// Block IDs above keep the view-scoped shape views have always had; the
+	// shared assignment fills in the action_id Slack generates for every
+	// interactive element an app left unnamed, as message blocks get too.
+	domain.AssignBlockIdentifiers(blocks)
 	encoded, err := json.Marshal(fields)
 	if err != nil {
 		return "", ErrInvalidView
@@ -8888,11 +8910,20 @@ func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID do
 	return value, secret, nil
 }
 
-// incomingWebhookURL is the address an app posts to trigger its webhook. It
-// matches the shape admin incoming-webhook creation returns, so an app sees one
-// URL scheme however the hook was minted.
-func incomingWebhookURL(workspaceID domain.WorkspaceID, appID domain.AppID, secret string) string {
-	return "https://hooks.slack.com/services/" + string(workspaceID) + "/" + string(appID) + "/" + secret
+// IncomingWebhookPath is the path, under the deployment's public base URL, an
+// app posts to trigger its webhook: the route the Slack API handler serves at
+// POST /services/{workspace}/{app}/{secret}. Install and admin creation both
+// use it, so an app sees one URL shape however the hook was minted. It is a
+// path because the host is the deployment's, never Slack's.
+func IncomingWebhookPath(workspaceID domain.WorkspaceID, appID domain.AppID, secret string) string {
+	return "/services/" + url.PathEscape(string(workspaceID)) + "/" + url.PathEscape(string(appID)) + "/" + url.PathEscape(secret)
+}
+
+// IncomingWebhookConfigurationPath is the page where a workspace member
+// manages the app that owns a webhook, which is what Slack's
+// configuration_url links to.
+func IncomingWebhookConfigurationPath(appID domain.AppID) string {
+	return "/app/apps/" + url.PathEscape(string(appID))
 }
 
 // createInstallIncomingWebhook mints the incoming webhook an install asked for,
@@ -8945,8 +8976,8 @@ func (m Messages) createInstallIncomingWebhook(ctx context.Context, token domain
 	}
 	token.IncomingWebhookID = id
 	token.IncomingWebhookChannelName = conversation.Name
-	token.IncomingWebhookURL = incomingWebhookURL(token.WorkspaceID, token.AppID, secret)
-	token.IncomingWebhookConfigURL = "https://hooks.slack.com/services/" + string(token.WorkspaceID) + "/" + string(token.AppID)
+	token.IncomingWebhookPath = IncomingWebhookPath(token.WorkspaceID, token.AppID, secret)
+	token.IncomingWebhookConfigPath = IncomingWebhookConfigurationPath(token.AppID)
 	return token
 }
 

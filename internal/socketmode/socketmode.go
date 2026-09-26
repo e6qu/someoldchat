@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,9 +89,9 @@ type ConnectionStore interface {
 }
 
 type EventQueue interface {
-	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
+	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.AppEventClaim, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
-	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, events.AppEventRelease) error
 }
 
 type InteractionQueue interface {
@@ -428,6 +429,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			envelopes, err := encodeEvent(record, connection.AppID)
+			if err == nil {
+				envelopes = delivery.undelivered(envelopes)
+			}
 			if err != nil || len(envelopes) == 0 {
 				if !skippable(logger, record, err) {
 					disconnectWith("warning", websocket.CloseInternalServerErr, "event payload is invalid")
@@ -755,9 +759,9 @@ func (d *leasedInteractionDelivery) settle(ctx context.Context, envelopeID strin
 }
 
 // leasedDelivery holds the one durable event record this connection has
-// leased. The store keeps one delivery position per app, so an app's events
-// are delivered in order, one record at a time across all of its
-// connections.
+// leased. The store keeps delivery state per record — its lease, attempt
+// count, retry reason and the envelopes the app already acknowledged — so a
+// record waiting for its retry does not hold back the records after it.
 type leasedDelivery struct {
 	queue   EventQueue
 	appID   domain.AppID
@@ -772,6 +776,11 @@ type leasedDelivery struct {
 	reason  string
 	// remaining are the record's envelopes not yet acknowledged.
 	remaining map[string]struct{}
+	// delivered are the record's envelopes the app acknowledged, on this or
+	// an earlier attempt. A retry resends only the others: a record that fans
+	// out into several envelopes is not redelivered to the listeners that
+	// already accepted theirs.
+	delivered []string
 	sentAt    time.Time
 }
 
@@ -790,15 +799,34 @@ func (d *leasedDelivery) next(ctx context.Context) (events.Record, bool, error) 
 	if d.sequence != 0 {
 		return events.Record{}, false, errors.New("Socket Mode delivery already owns an event")
 	}
-	record, attempt, reason, found, err := d.queue.ClaimAppEvent(ctx, d.appID, "socket", d.owner, d.timeout+writeTimeout)
+	claim, found, err := d.queue.ClaimAppEvent(ctx, d.appID, "socket", d.owner, d.timeout+writeTimeout)
 	if errors.Is(err, store.ErrNotFound) {
 		return events.Record{}, false, nil
 	}
 	if err != nil || !found {
 		return events.Record{}, false, err
 	}
-	d.sequence, d.attempt, d.reason = record.Sequence, attempt, reason
-	return record, true, nil
+	// The attempt count and the last failure's reason are the record's own:
+	// delivery state is kept per record, so a record waiting on its retry
+	// never holds back the records after it.
+	d.sequence, d.attempt, d.reason = claim.Record.Sequence, claim.Attempt, claim.RetryReason
+	d.delivered = claim.Delivered
+	return claim.Record, true, nil
+}
+
+// undelivered drops the envelopes the app already acknowledged on an earlier
+// attempt of the leased record.
+func (d *leasedDelivery) undelivered(envelopes []events.SocketModeEnvelope) []events.SocketModeEnvelope {
+	if len(d.delivered) == 0 {
+		return envelopes
+	}
+	result := make([]events.SocketModeEnvelope, 0, len(envelopes))
+	for _, envelope := range envelopes {
+		if !slices.Contains(d.delivered, envelope.ID) {
+			result = append(result, envelope)
+		}
+	}
+	return result
 }
 
 func (d *leasedDelivery) sent(ids []string, at time.Time) {
@@ -816,6 +844,7 @@ func (d *leasedDelivery) acknowledge(ctx context.Context, envelopeID string) err
 		return store.ErrLeaseConflict
 	}
 	delete(d.remaining, envelopeID)
+	d.delivered = append(d.delivered, envelopeID)
 	if len(d.remaining) != 0 {
 		return nil
 	}
@@ -837,7 +866,7 @@ func (d *leasedDelivery) consume(ctx context.Context) error {
 }
 
 func (d *leasedDelivery) clear() {
-	d.sequence, d.attempt, d.reason, d.remaining, d.sentAt = 0, 0, "", nil, time.Time{}
+	d.sequence, d.attempt, d.reason, d.remaining, d.delivered, d.sentAt = 0, 0, "", nil, nil, time.Time{}
 }
 
 // settle gives the leased record up: back to the queue with backoff, or,
@@ -847,7 +876,7 @@ func (d *leasedDelivery) settle(ctx context.Context, reason string, now time.Tim
 	if d.sequence == 0 {
 		return nil
 	}
-	sequence, attempt := d.sequence, d.attempt
+	sequence, attempt, delivered := d.sequence, d.attempt, events.NormalizeDelivered(d.delivered)
 	var err error
 	if attempt >= maxDeliveryRetries {
 		d.logger.Error("Socket Mode dropped an event that was never acknowledged", "sequence", sequence, "attempts", attempt+1)
@@ -857,7 +886,11 @@ func (d *leasedDelivery) settle(ctx context.Context, reason string, now time.Tim
 			d.logger.Warn("Socket Mode envelope was not acknowledged", "sequence", sequence, "timeout", d.timeout, "retries", attempt)
 		}
 		d.clear()
-		err = d.queue.ReleaseAppEvent(ctx, d.appID, "socket", d.owner, sequence, reason, retryAt(now, attempt+1))
+		err = d.queue.ReleaseAppEvent(ctx, d.appID, "socket", d.owner, sequence, events.AppEventRelease{
+			// An unacknowledged envelope or a closed connection is the app's
+			// side of the delivery, so it counts as an attempt.
+			Reason: reason, RetryAt: retryAt(now, attempt+1), Delivered: delivered,
+		})
 	}
 	if leaseLost(err) {
 		return nil

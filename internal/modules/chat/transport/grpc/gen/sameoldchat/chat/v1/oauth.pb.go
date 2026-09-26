@@ -133,11 +133,14 @@ type OAuthToken struct {
 	IncomingWebhookChannel      string                 `protobuf:"bytes,16,opt,name=incoming_webhook_channel,json=incomingWebhookChannel,proto3" json:"incoming_webhook_channel,omitempty"`
 	IncomingWebhookChannelName  string                 `protobuf:"bytes,17,opt,name=incoming_webhook_channel_name,json=incomingWebhookChannelName,proto3" json:"incoming_webhook_channel_name,omitempty"`
 	IncomingWebhookId           string                 `protobuf:"bytes,18,opt,name=incoming_webhook_id,json=incomingWebhookId,proto3" json:"incoming_webhook_id,omitempty"`
-	IncomingWebhookUrl          string                 `protobuf:"bytes,19,opt,name=incoming_webhook_url,json=incomingWebhookUrl,proto3" json:"incoming_webhook_url,omitempty"`
-	IncomingWebhookConfigUrl    string                 `protobuf:"bytes,20,opt,name=incoming_webhook_config_url,json=incomingWebhookConfigUrl,proto3" json:"incoming_webhook_config_url,omitempty"`
-	WorkspaceName               string                 `protobuf:"bytes,21,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	// Despite the historical field names, both carry paths relative to the
+	// deployment's public base URL; the HTTP boundary makes them absolute. An
+	// older chat process may still send an absolute URL, which passes through.
+	IncomingWebhookUrl       string `protobuf:"bytes,19,opt,name=incoming_webhook_url,json=incomingWebhookUrl,proto3" json:"incoming_webhook_url,omitempty"`
+	IncomingWebhookConfigUrl string `protobuf:"bytes,20,opt,name=incoming_webhook_config_url,json=incomingWebhookConfigUrl,proto3" json:"incoming_webhook_config_url,omitempty"`
+	WorkspaceName            string `protobuf:"bytes,21,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *OAuthToken) Reset() {

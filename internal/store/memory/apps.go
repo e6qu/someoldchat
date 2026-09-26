@@ -295,8 +295,14 @@ func (s *Store) UseAppResponseURL(_ context.Context, tokenHash string) (domain.A
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, exists := s.appResponseURLs[tokenHash]
-	if !exists || !value.ExpiresAt.After(now) || value.UsesRemaining <= 0 {
+	if !exists {
 		return domain.AppResponseURL{}, store.ErrNotFound
+	}
+	if !value.ExpiresAt.After(now) {
+		return domain.AppResponseURL{}, store.ErrCapabilityExpired
+	}
+	if value.UsesRemaining <= 0 {
+		return domain.AppResponseURL{}, store.ErrCapabilityExhausted
 	}
 	value.UsesRemaining--
 	s.appResponseURLs[tokenHash] = value

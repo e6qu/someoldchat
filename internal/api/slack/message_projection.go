@@ -3,22 +3,15 @@ package slack
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
 // absoluteURL resolves a server-relative path against the origin origin.go
-// chooses. A value that is already absolute is returned as it is.
+// chooses.
 func (h Handler) absoluteURL(r *http.Request, path string) string {
-	if path == "" || strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return h.origin(r) + path
+	return originURL(h.origin(r), path)
 }
 
 // permalink is Slack's message link on this server's origin.

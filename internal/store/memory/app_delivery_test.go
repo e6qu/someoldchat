@@ -40,11 +40,12 @@ func TestMemoryAppDeliveryAttemptsAreNewestFirstAndBounded(t *testing.T) {
 	}
 	total := store.AppDeliveryAttemptRetention + 5
 	for i := 0; i < total; i++ {
-		claimed, _, _, found, err := repository.ClaimAppEvent(ctx, "A1", "socket", "worker", time.Minute)
+		claimedClaim, found, err := repository.ClaimAppEvent(ctx, "A1", "socket", "worker", time.Minute)
+		claimed := claimedClaim.Record
 		if err != nil || !found {
 			t.Fatalf("claim %d found=%v err=%v", i, found, err)
 		}
-		if err := repository.ReleaseAppEvent(ctx, "A1", "socket", "worker", claimed.Sequence, "connection_closed", now.Add(-time.Second)); err != nil {
+		if err := repository.ReleaseAppEvent(ctx, "A1", "socket", "worker", claimed.Sequence, events.AppEventRelease{Reason: "connection_closed", RetryAt: now.Add(-time.Second)}); err != nil {
 			t.Fatalf("release %d: %v", i, err)
 		}
 	}

@@ -411,14 +411,20 @@ func (x *AppEventClaimRequest) GetLeaseNanos() int64 {
 	return 0
 }
 
+// AppEventLease is one claimed record with its own delivery state. attempt and
+// retry_reason describe this record's earlier deliveries only; they are not an
+// app-wide position.
 type AppEventLease struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Record        *EventRecord           `protobuf:"bytes,1,opt,name=record,proto3" json:"record,omitempty"`
-	Attempt       int32                  `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
-	RetryReason   string                 `protobuf:"bytes,3,opt,name=retry_reason,json=retryReason,proto3" json:"retry_reason,omitempty"`
-	Found         bool                   `protobuf:"varint,4,opt,name=found,proto3" json:"found,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Record      *EventRecord           `protobuf:"bytes,1,opt,name=record,proto3" json:"record,omitempty"`
+	Attempt     int32                  `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	RetryReason string                 `protobuf:"bytes,3,opt,name=retry_reason,json=retryReason,proto3" json:"retry_reason,omitempty"`
+	Found       bool                   `protobuf:"varint,4,opt,name=found,proto3" json:"found,omitempty"`
+	// The event_ids of this record's fanned-out callbacks the app already
+	// accepted; a retry re-posts only the others.
+	DeliveredEventIds []string `protobuf:"bytes,5,rep,name=delivered_event_ids,json=deliveredEventIds,proto3" json:"delivered_event_ids,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *AppEventLease) Reset() {
@@ -477,6 +483,13 @@ func (x *AppEventLease) GetFound() bool {
 		return x.Found
 	}
 	return false
+}
+
+func (x *AppEventLease) GetDeliveredEventIds() []string {
+	if x != nil {
+		return x.DeliveredEventIds
+	}
+	return nil
 }
 
 type AppEventAckRequest struct {
@@ -555,8 +568,14 @@ type AppEventReleaseRequest struct {
 	Sequence        uint64                 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	RetryReason     string                 `protobuf:"bytes,5,opt,name=retry_reason,json=retryReason,proto3" json:"retry_reason,omitempty"`
 	RetryAtUnixNano int64                  `protobuf:"varint,6,opt,name=retry_at_unix_nano,json=retryAtUnixNano,proto3" json:"retry_at_unix_nano,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// A failure on this side of the delivery, which does not count as an
+	// attempt. False, the value an older peer sends, is a delivery the app
+	// failed — the only kind of release that peer could make.
+	InternalFailure bool `protobuf:"varint,7,opt,name=internal_failure,json=internalFailure,proto3" json:"internal_failure,omitempty"`
+	// Replaces the record's set of accepted callbacks.
+	DeliveredEventIds []string `protobuf:"bytes,8,rep,name=delivered_event_ids,json=deliveredEventIds,proto3" json:"delivered_event_ids,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *AppEventReleaseRequest) Reset() {
@@ -629,6 +648,20 @@ func (x *AppEventReleaseRequest) GetRetryAtUnixNano() int64 {
 		return x.RetryAtUnixNano
 	}
 	return 0
+}
+
+func (x *AppEventReleaseRequest) GetInternalFailure() bool {
+	if x != nil {
+		return x.InternalFailure
+	}
+	return false
+}
+
+func (x *AppEventReleaseRequest) GetDeliveredEventIds() []string {
+	if x != nil {
+		return x.DeliveredEventIds
+	}
+	return nil
 }
 
 type AppEventMutationResponse struct {
@@ -710,24 +743,27 @@ const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
 	"\asurface\x18\x02 \x01(\tR\asurface\x12\x14\n" +
 	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1f\n" +
 	"\vlease_nanos\x18\x04 \x01(\x03R\n" +
-	"leaseNanos\"\x9c\x01\n" +
+	"leaseNanos\"\xcc\x01\n" +
 	"\rAppEventLease\x128\n" +
 	"\x06record\x18\x01 \x01(\v2 .sameoldchat.chat.v1.EventRecordR\x06record\x12\x18\n" +
 	"\aattempt\x18\x02 \x01(\x05R\aattempt\x12!\n" +
 	"\fretry_reason\x18\x03 \x01(\tR\vretryReason\x12\x14\n" +
-	"\x05found\x18\x04 \x01(\bR\x05found\"w\n" +
+	"\x05found\x18\x04 \x01(\bR\x05found\x12.\n" +
+	"\x13delivered_event_ids\x18\x05 \x03(\tR\x11deliveredEventIds\"w\n" +
 	"\x12AppEventAckRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x18\n" +
 	"\asurface\x18\x02 \x01(\tR\asurface\x12\x14\n" +
 	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1a\n" +
-	"\bsequence\x18\x04 \x01(\x04R\bsequence\"\xcb\x01\n" +
+	"\bsequence\x18\x04 \x01(\x04R\bsequence\"\xa6\x02\n" +
 	"\x16AppEventReleaseRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x18\n" +
 	"\asurface\x18\x02 \x01(\tR\asurface\x12\x14\n" +
 	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1a\n" +
 	"\bsequence\x18\x04 \x01(\x04R\bsequence\x12!\n" +
 	"\fretry_reason\x18\x05 \x01(\tR\vretryReason\x12+\n" +
-	"\x12retry_at_unix_nano\x18\x06 \x01(\x03R\x0fretryAtUnixNano\"*\n" +
+	"\x12retry_at_unix_nano\x18\x06 \x01(\x03R\x0fretryAtUnixNano\x12)\n" +
+	"\x10internal_failure\x18\a \x01(\bR\x0finternalFailure\x12.\n" +
+	"\x13delivered_event_ids\x18\b \x03(\tR\x11deliveredEventIds\"*\n" +
 	"\x18AppEventMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok2\xa1\x03\n" +
 	"\rEventsService\x12Z\n" +
