@@ -215,6 +215,17 @@ type User struct {
 	UltraRestricted bool
 }
 
+// SlackDomain is the workspace's subdomain as Slack reports it. A workspace
+// created through admin.teams.create names one; a workspace seeded or migrated
+// without one is addressed by its lower-cased identifier, which is unique where
+// a name is not. team.info reported an empty domain for every such workspace.
+func (w Workspace) SlackDomain() string {
+	if value := strings.TrimSpace(w.Domain); value != "" {
+		return value
+	}
+	return strings.ToLower(string(w.ID))
+}
+
 // IsBot reports whether the account is an app's bot user rather than a person.
 func (u User) IsBot() bool {
 	return u.BotID != ""

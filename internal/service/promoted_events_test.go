@@ -125,7 +125,7 @@ func TestPromotedProducerPayloadsTranslateEndToEnd(t *testing.T) {
 
 	// User groups: creation snapshots the subteam object, membership changes
 	// speak in deltas.
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "oncall", "", "Handles incidents")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "oncall", "", "Handles incidents", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

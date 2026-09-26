@@ -758,9 +758,12 @@ assert.deepEqual(removeAttachments.message.attachments ?? [], []);
 assert.equal(removeAttachments.message.text, "rich update fallback");
 assert.equal((await client.chat.delete({ channel: "C1", ts: richForUpdate.ts })).ok, true);
 
-const conversation = await client.conversations.info({ channel: "C1" });
+const conversation = await client.conversations.info({ channel: "C1", include_num_members: true });
 assert.equal(conversation.ok, true);
 assert.equal(conversation.channel.id, "C1");
+assert.equal(conversation.channel.is_member, true);
+assert.equal(conversation.channel.is_general, true);
+assert.equal(typeof conversation.channel.num_members, "number");
 const channelCanvas = await client.apiCall("conversations.canvases.create", {
 	channel_id: "C1",
 	title: "Channel canvas qualification",
@@ -788,8 +791,12 @@ const forceInvited = await client.conversations.invite({
 	force: true,
 });
 assert.equal(forceInvited.ok, true);
-const kicked = await client.conversations.kick({ channel: "C1", user: "U2" });
-assert.equal(kicked.ok, true);
+// C1 is the workspace's required channel (set above), which nobody can be
+// removed from, exactly as Slack refuses a kick from #general.
+await assert.rejects(
+	() => client.conversations.kick({ channel: "C1", user: "U2" }),
+	(error) => String(error).includes("cant_kick_from_general"),
+);
 const privateInvitationChannel = await client.conversations.create({
 	name: "sdk-private-invitation",
 	is_private: true,
@@ -800,6 +807,8 @@ const privateInvited = await client.conversations.invite({
 	users: "U2",
 });
 assert.equal(privateInvited.ok, true);
+const kicked = await client.conversations.kick({ channel: privateInvitationChannel.channel.id, user: "U2" });
+assert.equal(kicked.ok, true);
 const left = await client.conversations.leave({ channel: "C2" });
 assert.equal(left.ok, true);
 assert.equal((await client.admin.conversations.convertToPrivate({ channel_id: "C2" })).ok, true);
@@ -1117,8 +1126,10 @@ assert.equal((await client.admin.usergroups.removeChannels({ usergroup_id: userg
 const updatedUsergroup = await client.usergroups.update({
 	usergroup: usergroupId,
 	name: "Updated qualification group",
+	channels: "C1",
 });
 assert.equal(updatedUsergroup.ok, true);
+assert.deepEqual(updatedUsergroup.usergroup.prefs.channels, ["C1"]);
 const updatedUsergroupUsers = await client.usergroups.users.update({ usergroup: usergroupId, users: "U1" });
 assert.equal(updatedUsergroupUsers.ok, true);
 const usergroupUsers = await client.usergroups.users.list({ usergroup: usergroupId });
@@ -1135,6 +1146,8 @@ assert.equal(enabledUsergroup.ok, true);
 const user = await client.users.info({ user: "U1" });
 assert.equal(user.ok, true);
 assert.equal(user.user.id, "U1");
+assert.equal(typeof user.user.is_bot, "boolean");
+assert.ok(user.user.profile.image_48.startsWith("http://127.0.0.1:18080/"));
 const profile = await client.users.profile.get({ user: "U1" });
 assert.equal(profile.ok, true);
 assert.equal(profile.profile.display_name, "alice");
@@ -1232,6 +1245,9 @@ assert.equal(lifecycleInfo.ok, true);
 assert.equal(lifecycleInfo.channel.name, "qualification-renamed");
 assert.equal(lifecycleInfo.channel.topic.value, "qualification topic");
 assert.equal(lifecycleInfo.channel.purpose.value, "qualification purpose");
+assert.equal(lifecycleInfo.channel.creator, "U1");
+assert.equal(lifecycleInfo.channel.topic.creator, "U1");
+assert.ok(lifecycleInfo.channel.created > 0 && lifecycleInfo.channel.topic.last_set > 0);
 
 const meMessage = await client.chat.meMessage({ channel: "C1", text: "qualification me message" });
 assert.equal(meMessage.ok, true);
@@ -1253,6 +1269,8 @@ assert.equal(userReactions.ok, true);
 const team = await client.team.info();
 assert.equal(team.ok, true);
 assert.equal(team.team.id, "T1");
+assert.notEqual(team.team.domain, "");
+assert.ok(team.team.icon.image_34.startsWith("http"));
 const teamProfile = await client.team.profile.get();
 assert.equal(teamProfile.ok, true);
 assert.deepEqual(teamProfile.profile.fields, []);
@@ -1268,6 +1286,7 @@ assert.equal(byEmail.ok, true);
 assert.equal(byEmail.user.id, "U1");
 const presence = await client.users.getPresence({ user: "U1" });
 assert.equal(presence.ok, true);
+assert.equal(typeof presence.manual_away, "boolean");
 const setPresence = await client.users.setPresence({ presence: "away" });
 assert.equal(setPresence.ok, true);
 const profileSet = await client.users.profile.set({ profile: { status_text: "qualification", status_emoji: ":wave:", status_expiration: 4102444800 } });
@@ -1288,6 +1307,10 @@ assert.equal(alreadyClosed.already_closed, true);
 const reopenedDirect = await client.conversations.open({ users: "U2" });
 assert.equal(reopenedDirect.ok, true);
 assert.equal(reopenedDirect.channel.id, direct.channel.id);
+assert.ok(direct.channel.id.startsWith("D"));
+const alreadyOpenDirect = await client.conversations.open({ users: "U2", return_im: true });
+assert.equal(alreadyOpenDirect.already_open, true);
+assert.equal(alreadyOpenDirect.channel.user, "U2");
 const groupDirect = await client.conversations.open({ users: "U2,U3" });
 assert.equal(groupDirect.ok, true);
 const canonicalGroupDirect = await client.conversations.open({ users: "U3,U2" });

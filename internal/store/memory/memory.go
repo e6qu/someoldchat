@@ -10056,8 +10056,23 @@ func (s *Store) CreateUserGroup(_ context.Context, value domain.UserGroup, event
 	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
 		return store.ErrAlreadyExists
 	}
+	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
+		return err
+	}
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+// userGroupChannelsBelongLocked is the check the SQL repositories make before
+// writing a group's default channels: each is a conversation of the workspace.
+func (s *Store) userGroupChannelsBelongLocked(workspace domain.WorkspaceID, channels []domain.ConversationID) error {
+	for _, channel := range channels {
+		conversation, exists := s.conversations[channel]
+		if !exists || conversation.WorkspaceID != workspace {
+			return store.ErrNotFound
+		}
+	}
 	return nil
 }
 
@@ -10119,8 +10134,10 @@ func (s *Store) UpdateUserGroup(_ context.Context, value domain.UserGroup, event
 	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
 		return store.ErrAlreadyExists
 	}
+	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
+		return err
+	}
 	value.Users = append([]domain.UserID(nil), current.Users...)
-	value.Channels = append([]domain.ConversationID(nil), current.Channels...)
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -10168,11 +10185,8 @@ func (s *Store) SetUserGroupChannels(_ context.Context, workspace domain.Workspa
 	if !ok || value.WorkspaceID != workspace {
 		return store.ErrNotFound
 	}
-	for _, channel := range channels {
-		conversation, exists := s.conversations[channel]
-		if !exists || conversation.WorkspaceID != workspace {
-			return store.ErrNotFound
-		}
+	if err := s.userGroupChannelsBelongLocked(workspace, channels); err != nil {
+		return err
 	}
 	value.Channels = append([]domain.ConversationID(nil), channels...)
 	value.UpdatedBy = actor

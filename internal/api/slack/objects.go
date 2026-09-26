@@ -197,27 +197,71 @@ func userColor(user domain.UserID) string {
 // names the member only to pick the color, and discloses nothing userColor
 // does not already put in every user object.
 func (h Handler) defaultAvatar(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("workspace") == "" || r.PathValue("user") == "" {
+		http.NotFound(w, r)
+		return
+	}
+	writeGeneratedSquare(w, r, defaultAvatarSizes, userColor(domain.UserID(r.PathValue("user"))))
+}
+
+// teamIconSizes are the sizes Slack's icon object names an image for.
+var teamIconSizes = map[int]bool{34: true, 44: true, 68: true, 88: true, 102: true, 132: true, 230: true}
+
+// defaultTeamIcon is defaultAvatar for a workspace without an icon.
+func (h Handler) defaultTeamIcon(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("workspace") == "" {
+		http.NotFound(w, r)
+		return
+	}
+	writeGeneratedSquare(w, r, teamIconSizes, userColor(domain.UserID(r.PathValue("workspace"))))
+}
+
+// writeGeneratedSquare answers {size}.png, for one of the given sizes, with a
+// square of the given color.
+func writeGeneratedSquare(w http.ResponseWriter, r *http.Request, sizes map[int]bool, hexColor string) {
 	name, found := strings.CutSuffix(r.PathValue("file"), ".png")
 	size, err := strconv.Atoi(name)
-	if !found || err != nil || !defaultAvatarSizes[size] || r.PathValue("workspace") == "" || r.PathValue("user") == "" {
+	rgb, colorErr := hex.DecodeString(hexColor)
+	if !found || err != nil || !sizes[size] || colorErr != nil || len(rgb) != 3 {
 		http.NotFound(w, r)
 		return
 	}
-	rgb, err := hex.DecodeString(userColor(domain.UserID(r.PathValue("user"))))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	canvas := image.NewUniform(color.RGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 0xff})
 	var encoded bytes.Buffer
-	if err := png.Encode(&encoded, &boundedImage{Uniform: canvas, bounds: image.Rect(0, 0, size, size)}); err != nil {
-		http.Error(w, "avatar unavailable", http.StatusInternalServerError)
+	square := &boundedImage{Uniform: image.NewUniform(color.RGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 0xff}), bounds: image.Rect(0, 0, size, size)}
+	if err := png.Encode(&encoded, square); err != nil {
+		// Encoding a uniform image into memory has no failure mode a caller
+		// could act on; this is an unexpected fault, not a handled refusal.
+		http.Error(w, "image unavailable", http.StatusInternalServerError)
 		return
 	}
-	capabilityHeaders(w)
-	blobHeaders(w, "image/png", "avatar")
+	blobHeaders(w, "image/png", "image")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(encoded.Bytes())
+}
+
+// teamResponse renders Slack's team object. The pinned objs_team requires id,
+// name, domain, email_domain and icon; team.info reported the first three, with
+// an empty domain for every workspace that was not created through
+// admin.teams.create.
+func teamResponse(team domain.Workspace, origin string) map[string]any {
+	icon := map[string]any{"image_default": team.IconURL == ""}
+	for size := range teamIconSizes {
+		value := team.IconURL
+		switch {
+		case value == "":
+			value = origin + "/team-icons/" + url.PathEscape(string(team.ID)) + "/" + strconv.Itoa(size) + ".png"
+		case strings.HasPrefix(value, "/"):
+			value = origin + value
+		}
+		icon["image_"+strconv.Itoa(size)] = value
+	}
+	return map[string]any{
+		"id": team.ID, "name": team.Name, "domain": team.SlackDomain(),
+		// Nothing here restricts sign-up to an email domain, which is what
+		// Slack reports as an empty email_domain.
+		"email_domain": "", "icon": icon, "url": origin + "/",
+		"avatar_base_url": origin + "/avatars/", "is_verified": false,
+	}
 }
 
 // boundedImage is a uniform color with finite bounds, which is what png.Encode

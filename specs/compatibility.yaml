@@ -145,6 +145,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAuthTestIncludesContractIdentityFields
+      - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
   - method: chat.postMessage
     status: schema-compatible
     provenance: slack-api-specs-openapi
@@ -326,6 +327,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestTeamInfo
+      - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
   - method: team.profile.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -522,7 +524,8 @@ operations:
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Automatic presence follows Slack's ten-minute inactivity rule against the member's last observed activity; websocket connectivity does not feed it.
-      - The optional presence detail fields and current rate-limit behavior have not been qualified against Slack.
+      - The caller's own presence carries online, auto_away, manual_away, connection_count and last_activity. Client connections are not tracked, so online and connection_count (0 or 1) follow observed activity rather than open connections.
+      - Current rate-limit behavior has not been qualified against Slack.
     audit:
       downgraded_from: behavior-compatible
       reason: The previous claim proved response decoding but treated automatic mode as effective active presence without live activity evidence.
@@ -1259,11 +1262,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.disable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.enable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1274,11 +1279,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupListBooleansAcceptEveryDocumentedForm
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi

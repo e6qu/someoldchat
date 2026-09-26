@@ -1276,6 +1276,38 @@ func userRecordsReportWhenTheyChangedAndWhoseBotTheyAre(t *testing.T, open opene
 	}
 }
 
+// userGroupDefaultChannelsPersistWithTheGroup covers the default channels a
+// group is created and updated with. The SQL repositories dropped them on
+// create and kept the old list on update while the in-memory one stored them.
+func userGroupDefaultChannelsPersistWithTheGroup(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1700000700, 0).UTC()
+	group := domain.UserGroup{WorkspaceID: f.workspaceID, ID: domain.UserGroupID("S-" + f.suffix), Name: "defaults", Handle: "defaults-" + f.suffix,
+		Creator: f.userID, UpdatedBy: f.userID, CreatedAt: now, UpdatedAt: now, Enabled: true, Channels: []domain.ConversationID{f.channelID}}
+	if err := f.repository.CreateUserGroup(ctx, group, f.event("group-created", "usergroup.created", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	read, err := f.repository.GetUserGroup(ctx, f.workspaceID, group.ID)
+	if err != nil || len(read.Channels) != 1 || read.Channels[0] != f.channelID {
+		t.Fatalf("created group=%+v err=%v", read, err)
+	}
+	group.Channels = nil
+	if err := f.repository.UpdateUserGroup(ctx, group, f.event("group-updated", "usergroup.updated", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	read, err = f.repository.GetUserGroup(ctx, f.workspaceID, group.ID)
+	if err != nil || len(read.Channels) != 0 {
+		t.Fatalf("updated group=%+v err=%v, want the channels the update named: none", read, err)
+	}
+	group.Channels = []domain.ConversationID{"C-missing-" + domain.ConversationID(f.suffix)}
+	if err := f.repository.UpdateUserGroup(ctx, group, f.event("group-bad-channel", "usergroup.updated", string(group.ID))); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a default channel that does not exist err=%v, want not found", err)
+	}
+}
+
 func profileChangesCommitWithEveryEventTheyCarry(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

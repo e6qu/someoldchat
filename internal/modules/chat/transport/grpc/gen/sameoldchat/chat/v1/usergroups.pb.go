@@ -298,12 +298,14 @@ func (x *UserGroupsRequest) GetCursor() string {
 }
 
 type CreateUserGroupRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Handle        string                 `protobuf:"bytes,4,opt,name=handle,proto3" json:"handle,omitempty"`
-	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Name        string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Handle      string                 `protobuf:"bytes,4,opt,name=handle,proto3" json:"handle,omitempty"`
+	Description string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	// The group's default channels.
+	Channels      []string `protobuf:"bytes,6,rep,name=channels,proto3" json:"channels,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -373,14 +375,23 @@ func (x *CreateUserGroupRequest) GetDescription() string {
 	return ""
 }
 
+func (x *CreateUserGroupRequest) GetChannels() []string {
+	if x != nil {
+		return x.Channels
+	}
+	return nil
+}
+
 type UpdateUserGroupRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	UserGroupId   string                 `protobuf:"bytes,3,opt,name=user_group_id,json=userGroupId,proto3" json:"user_group_id,omitempty"`
-	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	Handle        string                 `protobuf:"bytes,5,opt,name=handle,proto3" json:"handle,omitempty"`
-	Description   string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserGroupId string                 `protobuf:"bytes,3,opt,name=user_group_id,json=userGroupId,proto3" json:"user_group_id,omitempty"`
+	Name        string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Handle      string                 `protobuf:"bytes,5,opt,name=handle,proto3" json:"handle,omitempty"`
+	Description string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
+	// Replaces the group's default channels; empty leaves them unchanged.
+	Channels      []string `protobuf:"bytes,7,rep,name=channels,proto3" json:"channels,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -455,6 +466,13 @@ func (x *UpdateUserGroupRequest) GetDescription() string {
 		return x.Description
 	}
 	return ""
+}
+
+func (x *UpdateUserGroupRequest) GetChannels() []string {
+	if x != nil {
+		return x.Channels
+	}
+	return nil
 }
 
 type UserGroupUsersRequest struct {
@@ -843,20 +861,22 @@ const file_sameoldchat_chat_v1_usergroups_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12)\n" +
 	"\x10include_disabled\x18\x03 \x01(\bR\x0fincludeDisabled\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\xa2\x01\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\xbe\x01\n" +
 	"\x16CreateUserGroupRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
 	"\x06handle\x18\x04 \x01(\tR\x06handle\x12 \n" +
-	"\vdescription\x18\x05 \x01(\tR\vdescription\"\xc6\x01\n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12\x1a\n" +
+	"\bchannels\x18\x06 \x03(\tR\bchannels\"\xe2\x01\n" +
 	"\x16UpdateUserGroupRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
 	"\ruser_group_id\x18\x03 \x01(\tR\vuserGroupId\x12\x12\n" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12\x16\n" +
 	"\x06handle\x18\x05 \x01(\tR\x06handle\x12 \n" +
-	"\vdescription\x18\x06 \x01(\tR\vdescription\"\x8d\x01\n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\x12\x1a\n" +
+	"\bchannels\x18\a \x03(\tR\bchannels\"\x8d\x01\n" +
 	"\x15UserGroupUsersRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +

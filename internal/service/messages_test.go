@@ -957,7 +957,7 @@ func TestConversationAccessGroupsNormalizeAndPersist(t *testing.T) {
 	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	messages := Messages{Store: s}
-	group, err := messages.CreateUserGroup(context.Background(), "T1", "U1", "Engineering", "engineering", "")
+	group, err := messages.CreateUserGroup(context.Background(), "T1", "U1", "Engineering", "engineering", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1188,7 +1188,7 @@ func TestUserGroupChannelMembershipLifecycle(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	messages := Messages{Store: s}
 	ctx := context.Background()
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Engineering", "engineering", "")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Engineering", "engineering", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

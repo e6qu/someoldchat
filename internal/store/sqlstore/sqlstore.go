@@ -18302,6 +18302,9 @@ func (s *Store) CreateUserGroup(ctx context.Context, value domain.UserGroup, eve
 	if err != nil {
 		return classify(err)
 	}
+	if err := replaceUserGroupChannels(ctx, tx, value.WorkspaceID, value.ID, value.Channels); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
@@ -18429,6 +18432,23 @@ func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.Works
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM user_groups WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&exists); err != nil {
 		return translateNotFound(err)
 	}
+	if err := replaceUserGroupChannels(ctx, tx, workspace, id, channels); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE user_groups SET updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, actor, time.Now().UTC().Unix(), id, workspace); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// replaceUserGroupChannels makes channels a group's whole default channel list,
+// refusing a conversation that is not the workspace's. Creating, updating, and
+// setting a group's channels all write the list this one way.
+func replaceUserGroupChannels(ctx context.Context, tx txRunner, workspace domain.WorkspaceID, id domain.UserGroupID, channels []domain.ConversationID) error {
+	var exists int
 	for _, channel := range channels {
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id = ? AND workspace_id = ?`, channel, workspace).Scan(&exists); err != nil {
 			return translateNotFound(err)
@@ -18442,13 +18462,7 @@ func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.Works
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE user_groups SET updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, actor, time.Now().UTC().Unix(), id, workspace); err != nil {
-		return err
-	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, event events.Event) error {
@@ -18467,6 +18481,9 @@ func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, eve
 	}
 	if changed != 1 {
 		return store.ErrNotFound
+	}
+	if err := replaceUserGroupChannels(ctx, tx, value.WorkspaceID, value.ID, value.Channels); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err

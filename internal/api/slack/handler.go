@@ -515,6 +515,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
 	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
 	mux.HandleFunc("GET /avatars/{workspace}/{user}/{file}", h.defaultAvatar)
+	mux.HandleFunc("GET /team-icons/{workspace}/{file}", h.defaultTeamIcon)
 	mux.HandleFunc("GET /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("POST /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("GET /api/openid.connect.userInfo", h.openIDConnectUserInfo)
@@ -1099,7 +1100,7 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 	if teamName == "" {
 		teamName = string(workspace.ID)
 	}
-	response := map[string]any{"ok": true, "url": "http://localhost/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID}
+	response := map[string]any{"ok": true, "url": requestOrigin(r) + "/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID}
 	if principal.TokenType.IsBot() {
 		response["bot_id"] = principal.BotID
 		response["is_enterprise_install"] = false
@@ -2694,8 +2695,7 @@ func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	domainName := team.Domain
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": domainName}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": teamResponse(team, requestOrigin(r))})
 }
 
 // teamPreferencesList exposes the workspace policies SameOldChat actually
@@ -2829,7 +2829,7 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 		scheme = "wss"
 	}
 	streamURL := url.URL{Scheme: scheme, Host: r.Host, Path: "/rtm", RawQuery: url.Values{"session_id": []string{connection.ID}}.Encode()}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL.String(), "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.Domain}, "self": map[string]any{"id": user.ID, "name": user.Name}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL.String(), "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.SlackDomain()}, "self": map[string]any{"id": user.ID, "name": user.Name}})
 }
 
 func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
@@ -6152,7 +6152,26 @@ func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "presence": user.Presence.CurrentAt(user.LastActiveAt, time.Now().UTC())})
+	now := time.Now().UTC()
+	presence := user.Presence.CurrentAt(user.LastActiveAt, now)
+	response := map[string]any{"ok": true, "presence": presence}
+	// Slack reports the detail only for the caller's own presence: why they
+	// are away, and when they were last active. Client connections are not
+	// tracked here, so online and connection_count follow observed activity,
+	// the same signal automatic presence resolves against.
+	if user.ID == principal.UserID {
+		online := presence == "active"
+		connections := 0
+		if online {
+			connections = 1
+		}
+		response["online"] = online
+		response["manual_away"] = user.Presence == domain.PresenceAway
+		response["auto_away"] = user.Presence != domain.PresenceAway && presence == "away"
+		response["connection_count"] = connections
+		response["last_activity"] = unixSeconds(user.LastActiveAt)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
@@ -10185,9 +10204,21 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 	for _, user := range value.Users {
 		users = append(users, string(user))
 	}
-	result := map[string]any{"id": value.ID, "team_id": value.WorkspaceID, "is_usergroup": true, "is_subteam": true, "name": value.Name, "description": value.Description, "handle": value.Handle, "is_external": false, "date_create": value.CreatedAt.Unix(), "date_update": value.UpdatedAt.Unix(), "date_delete": int64(0), "auto_provision": false, "enterprise_subteam_id": "", "created_by": value.Creator, "updated_by": value.UpdatedBy, "user_count": len(users)}
+	channels := make([]string, 0, len(value.Channels))
+	for _, channel := range value.Channels {
+		channels = append(channels, string(channel))
+	}
+	// The pinned objs_subteam requires prefs, auto_type and deleted_by, which
+	// were absent. Nothing here provisions a group automatically, so auto_type
+	// is null; a group's default channels are all reported under channels,
+	// because no conversation here has a legacy G-prefixed group identifier.
+	result := map[string]any{"id": value.ID, "team_id": value.WorkspaceID, "is_usergroup": true, "is_subteam": true, "name": value.Name, "description": value.Description, "handle": value.Handle, "is_external": false, "date_create": value.CreatedAt.Unix(), "date_update": value.UpdatedAt.Unix(), "date_delete": int64(0), "auto_provision": false, "enterprise_subteam_id": "", "created_by": value.Creator, "updated_by": value.UpdatedBy, "user_count": len(users),
+		"auto_type": nil, "deleted_by": nil, "channel_count": len(channels), "prefs": map[string]any{"channels": channels, "groups": []string{}}}
 	if !value.DeletedAt.IsZero() {
 		result["date_delete"] = value.DeletedAt.Unix()
+		// Disabling is the only change that sets date_delete, and it records
+		// who made it as the group's last updater.
+		result["deleted_by"] = value.UpdatedBy
 	}
 	if includeUsers {
 		result["users"] = users
@@ -10197,12 +10228,12 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 
 func (h Handler) createUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
-		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"])
+		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
 func (h Handler) updateUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
-		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"])
+		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
 func (h Handler) enableUserGroup(w http.ResponseWriter, r *http.Request) {

@@ -7991,7 +7991,26 @@ func normalizeUserGroupUsers(values []domain.UserID) ([]domain.UserID, error) {
 //
 // The reads below stay at member authority: a directory of groups and their
 // members is ordinary workspace information, and @-mentioning a group needs it.
-func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, name, handle, description string) (domain.UserGroup, error) {
+// userGroupDefaultChannels validates the default channels usergroups.create
+// and usergroups.update accept: each must be a conversation of this workspace.
+func (m Messages) userGroupDefaultChannels(ctx context.Context, workspaceID domain.WorkspaceID, channels []domain.ConversationID) ([]domain.ConversationID, error) {
+	normalized, err := normalizeUserGroupChannels(channels)
+	if err != nil {
+		return nil, err
+	}
+	for _, channelID := range normalized {
+		conversation, err := m.Store.GetConversation(ctx, channelID)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return nil, store.ErrNotFound
+		}
+	}
+	return normalized, nil
+}
+
+// CreateUserGroup creates a group with the given default channels. The
+// channels argument used to be accepted by the Web API and dropped here, so a
+// group created with defaults reported none.
+func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, name, handle, description string, channels []domain.ConversationID) (domain.UserGroup, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
@@ -8007,12 +8026,16 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	if handle == "" || len(name) > 255 || len(handle) > 255 || len(description) > 2000 {
 		return domain.UserGroup{}, ErrInvalidUserGroup
 	}
+	defaults, err := m.userGroupDefaultChannels(ctx, workspaceID, channels)
+	if err != nil {
+		return domain.UserGroup{}, err
+	}
 	id, err := domain.NewUserGroupID()
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
 	now := time.Now().UTC()
-	value := domain.UserGroup{WorkspaceID: workspaceID, ID: id, Name: name, Handle: handle, Description: description, Creator: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now, Enabled: true}
+	value := domain.UserGroup{WorkspaceID: workspaceID, ID: id, Name: name, Handle: handle, Description: description, Creator: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now, Enabled: true, Channels: defaults}
 	payload, err := userGroupEventPayload("usergroup.created", value)
 	if err != nil {
 		return domain.UserGroup{}, err
@@ -8027,7 +8050,9 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	return value, nil
 }
 
-func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, name, handle, description string) (domain.UserGroup, error) {
+// UpdateUserGroup changes a group's name, handle, description, and — when
+// channels names any — its default channels, which it replaces.
+func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, name, handle, description string, channels []domain.ConversationID) (domain.UserGroup, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
@@ -8043,6 +8068,11 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	}
 	if description != "" {
 		value.Description = strings.TrimSpace(description)
+	}
+	if len(channels) > 0 {
+		if value.Channels, err = m.userGroupDefaultChannels(ctx, workspaceID, channels); err != nil {
+			return domain.UserGroup{}, err
+		}
 	}
 	if value.Name == "" || value.Handle == "" || len(value.Name) > 255 || len(value.Handle) > 255 || len(value.Description) > 2000 {
 		return domain.UserGroup{}, ErrInvalidUserGroup
