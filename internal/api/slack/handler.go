@@ -5414,7 +5414,7 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	users := parseCallUsers(usersField)
+	users := parseIDList[domain.UserID](usersField)
 	conversation, err := h.Messages.AdminInviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -10704,41 +10704,60 @@ func (h Handler) adminTeamsRoleList(w http.ResponseWriter, r *http.Request, role
 	writeJSON(w, http.StatusOK, response)
 }
 
-func parseCallUsers(raw string) []domain.UserID {
-	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+// parseCallUsers reads a calls-API `users` argument: Slack documents a JSON
+// array of objects, each naming a member by `slack_id` or an external
+// participant by `external_id` with `display_name` and `avatar_url`. A plain
+// comma-separated list of member IDs is also accepted. An external_id used to
+// be taken for a member ID, so every external participant was dropped.
+func parseCallUsers(raw string) ([]domain.CallParticipant, error) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "[") {
 		var participants []struct {
-			SlackID    string `json:"slack_id"`
-			ExternalID string `json:"external_id"`
+			SlackID     string `json:"slack_id"`
+			ExternalID  string `json:"external_id"`
+			DisplayName string `json:"display_name"`
+			AvatarURL   string `json:"avatar_url"`
 		}
 		if err := json.Unmarshal([]byte(raw), &participants); err != nil {
-			return nil
+			return nil, err
 		}
-		result := make([]domain.UserID, 0, len(participants))
+		result := make([]domain.CallParticipant, 0, len(participants))
 		for _, participant := range participants {
-			id := strings.TrimSpace(participant.SlackID)
-			if id == "" {
-				id = strings.TrimSpace(participant.ExternalID)
-			}
-			if id != "" {
-				result = append(result, domain.UserID(id))
-			}
+			result = append(result, domain.CallParticipant{
+				SlackID:  domain.UserID(strings.TrimSpace(participant.SlackID)),
+				External: domain.ExternalCallParticipant{ExternalID: participant.ExternalID, DisplayName: participant.DisplayName, AvatarURL: participant.AvatarURL},
+			})
 		}
-		return result
+		return result, nil
 	}
 	parts := strings.Split(raw, ",")
-	result := make([]domain.UserID, 0, len(parts))
+	result := make([]domain.CallParticipant, 0, len(parts))
 	for _, part := range parts {
 		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.UserID(value))
+			result = append(result, domain.CallParticipant{SlackID: domain.UserID(value)})
 		}
 	}
-	return result
+	return result, nil
 }
 
+// callResponse renders a call as Slack's Call object. `users` is a list of
+// participant objects — {"slack_id"} for a member, {"external_id",
+// "display_name", "avatar_url"} for anyone else — which the official SDKs
+// model (Java's CallParticipant); a list of bare IDs failed to decode.
 func callResponse(value domain.Call) map[string]any {
-	users := make([]string, 0, len(value.Participants))
+	users := make([]map[string]any, 0, len(value.Participants)+len(value.ExternalParticipants))
 	for _, user := range value.Participants {
-		users = append(users, string(user))
+		users = append(users, map[string]any{"slack_id": string(user)})
+	}
+	for _, external := range value.ExternalParticipants {
+		participant := map[string]any{"external_id": external.ExternalID}
+		if external.DisplayName != "" {
+			participant["display_name"] = external.DisplayName
+		}
+		if external.AvatarURL != "" {
+			participant["avatar_url"] = external.AvatarURL
+		}
+		users = append(users, participant)
 	}
 	result := map[string]any{"id": value.ID, "external_unique_id": value.ExternalUniqueID, "external_display_id": value.ExternalDisplayID, "join_url": value.JoinURL, "desktop_app_join_url": value.DesktopAppJoinURL, "title": value.Title, "created_by": value.CreatedBy, "date_start": value.StartedAt.Unix(), "users": users}
 	if !value.EndedAt.IsZero() {
@@ -10768,7 +10787,12 @@ func (h Handler) addCall(w http.ResponseWriter, r *http.Request) {
 		}
 		started = time.Unix(seconds, 0).UTC()
 	}
-	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, parseCallUsers(fields["users"]))
+	participants, err := parseCallUsers(fields["users"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, participants)
 	if err != nil {
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
@@ -10869,7 +10893,11 @@ func (h Handler) changeCallParticipantsHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	id := domain.CallID(strings.TrimSpace(fields["id"]))
-	users := parseCallUsers(fields["users"])
+	users, err := parseCallUsers(fields["users"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
 	if add {
 		err = h.Messages.AddCallParticipants(r.Context(), principal.WorkspaceID, principal.UserID, id, users)
 	} else {

@@ -6260,7 +6260,7 @@ func (h Handler) resolveCallBlocks(ctx context.Context, principal auth.Principal
 					view = &callBlockView{
 						Title:        call.Title,
 						JoinURL:      call.JoinURL,
-						Participants: h.callParticipantNames(ctx, principal, call.Participants),
+						Participants: h.callParticipantNames(ctx, principal, call),
 						Active:       call.Active(),
 					}
 				}
@@ -6271,14 +6271,24 @@ func (h Handler) resolveCallBlocks(ctx context.Context, principal auth.Principal
 	}
 }
 
-func (h Handler) callParticipantNames(ctx context.Context, principal auth.Principal, participants []domain.UserID) []string {
-	if len(participants) == 0 {
+// callParticipantNames names everyone in a call: members by their profile
+// name, and the call provider's external participants by the display name it
+// registered (or their external ID when it registered none).
+func (h Handler) callParticipantNames(ctx context.Context, principal auth.Principal, call domain.Call) []string {
+	if len(call.Participants) == 0 && len(call.ExternalParticipants) == 0 {
 		return nil
 	}
 	names := h.newUserNames(ctx, principal)
-	values := make([]string, 0, len(participants))
-	for _, participant := range participants {
+	values := make([]string, 0, len(call.Participants)+len(call.ExternalParticipants))
+	for _, participant := range call.Participants {
 		values = append(values, names.name(participant))
+	}
+	for _, external := range call.ExternalParticipants {
+		if external.DisplayName != "" {
+			values = append(values, external.DisplayName)
+		} else {
+			values = append(values, external.ExternalID)
+		}
 	}
 	return values
 }

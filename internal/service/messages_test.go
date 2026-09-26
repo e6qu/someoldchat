@@ -1342,18 +1342,28 @@ func TestCallLifecycleNormalizesParticipants(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
 	messages := Messages{Store: s}
-	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{}, []domain.UserID{"U2", "U1", "U2"})
+	guest := domain.ExternalCallParticipant{ExternalID: "guest-1", DisplayName: "Guest", AvatarURL: "https://call.example/guest.png"}
+	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{},
+		[]domain.CallParticipant{{SlackID: "U2"}, {SlackID: "U1"}, {SlackID: "U2"}, {External: guest}, {External: guest}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(value.Participants) != 2 || value.Participants[0] != "U1" || value.Participants[1] != "U2" {
-		t.Fatalf("participants=%v", value.Participants)
+	if len(value.Participants) != 2 || value.Participants[0] != "U1" || value.Participants[1] != "U2" ||
+		len(value.ExternalParticipants) != 1 || value.ExternalParticipants[0] != guest {
+		t.Fatalf("participants=%v external=%v", value.Participants, value.ExternalParticipants)
 	}
-	if err := messages.RemoveCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.UserID{"U2"}); err != nil {
+	// An entry that names both a member and an external participant, or
+	// neither, is not a participant.
+	for _, invalid := range []domain.CallParticipant{{}, {SlackID: "U1", External: guest}} {
+		if err := messages.AddCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{invalid}); !errors.Is(err, ErrInvalidCall) {
+			t.Fatalf("AddCallParticipants(%+v) error=%v", invalid, err)
+		}
+	}
+	if err := messages.RemoveCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{{SlackID: "U2"}, {External: domain.ExternalCallParticipant{ExternalID: "guest-1"}}}); err != nil {
 		t.Fatal(err)
 	}
 	value, err = messages.GetCall(context.Background(), "T1", "U1", value.ID)
-	if err != nil || len(value.Participants) != 1 || value.Participants[0] != "U1" {
+	if err != nil || len(value.Participants) != 1 || value.Participants[0] != "U1" || len(value.ExternalParticipants) != 0 {
 		t.Fatalf("call=%+v err=%v", value, err)
 	}
 	if err := messages.EndCall(context.Background(), "T1", "U1", value.ID, 42); err != nil {

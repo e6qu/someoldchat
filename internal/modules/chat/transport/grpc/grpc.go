@@ -323,16 +323,47 @@ func (r Remote) ActiveHuddle(ctx context.Context, workspaceID domain.WorkspaceID
 	return r.huddle(ctx, r.calls.GetActiveHuddle, workspaceID, userID, conversationID, "")
 }
 
-func (r Remote) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.UserID) (domain.Call, error) {
-	users := make([]string, 0, len(participants))
-	for _, value := range participants {
-		users = append(users, string(value))
-	}
-	out, err := r.calls.AddCall(ctx, &chatv1.AddCallRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ExternalUniqueId: externalUniqueID, ExternalDisplayId: externalDisplayID, JoinUrl: joinURL, DesktopAppJoinUrl: desktopAppJoinURL, Title: title, StartedAt: startedAt.Unix(), Participants: users})
+func (r Remote) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.CallParticipant) (domain.Call, error) {
+	users, externals := encodeCallParticipants(participants)
+	out, err := r.calls.AddCall(ctx, &chatv1.AddCallRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ExternalUniqueId: externalUniqueID, ExternalDisplayId: externalDisplayID, JoinUrl: joinURL, DesktopAppJoinUrl: desktopAppJoinURL, Title: title, StartedAt: startedAt.Unix(), Participants: users, ExternalParticipants: externals})
 	if err != nil {
 		return domain.Call{}, err
 	}
 	return decodeProtoCall(out)
+}
+
+// encodeCallParticipants splits a calls-API participant list into the member
+// IDs and the external records the wire carries separately.
+func encodeCallParticipants(participants []domain.CallParticipant) ([]string, []*chatv1.ExternalCallParticipant) {
+	users := make([]string, 0, len(participants))
+	externals := make([]*chatv1.ExternalCallParticipant, 0)
+	for _, value := range participants {
+		if value.External.ExternalID != "" {
+			externals = append(externals, encodeExternalCallParticipant(value.External))
+			continue
+		}
+		users = append(users, string(value.SlackID))
+	}
+	return users, externals
+}
+
+func decodeCallParticipants(users []string, externals []*chatv1.ExternalCallParticipant) []domain.CallParticipant {
+	result := make([]domain.CallParticipant, 0, len(users)+len(externals))
+	for _, value := range users {
+		result = append(result, domain.CallParticipant{SlackID: domain.UserID(value)})
+	}
+	for _, value := range externals {
+		result = append(result, domain.CallParticipant{External: decodeExternalCallParticipant(value)})
+	}
+	return result
+}
+
+func encodeExternalCallParticipant(value domain.ExternalCallParticipant) *chatv1.ExternalCallParticipant {
+	return &chatv1.ExternalCallParticipant{ExternalId: value.ExternalID, DisplayName: value.DisplayName, AvatarUrl: value.AvatarURL}
+}
+
+func decodeExternalCallParticipant(value *chatv1.ExternalCallParticipant) domain.ExternalCallParticipant {
+	return domain.ExternalCallParticipant{ExternalID: value.GetExternalId(), DisplayName: value.GetDisplayName(), AvatarURL: value.GetAvatarUrl()}
 }
 func (r Remote) GetCall(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CallID) (domain.Call, error) {
 	out, err := r.calls.CallInfo(ctx, &chatv1.CallRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CallId: string(id)})
@@ -358,18 +389,15 @@ func (r Remote) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, use
 	}
 	return nil
 }
-func (r Remote) AddCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CallID, participants []domain.UserID) error {
+func (r Remote) AddCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CallID, participants []domain.CallParticipant) error {
 	return r.callParticipants(ctx, true, workspaceID, userID, id, participants)
 }
-func (r Remote) RemoveCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CallID, participants []domain.UserID) error {
+func (r Remote) RemoveCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CallID, participants []domain.CallParticipant) error {
 	return r.callParticipants(ctx, false, workspaceID, userID, id, participants)
 }
-func (r Remote) callParticipants(ctx context.Context, add bool, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CallID, participants []domain.UserID) error {
-	users := make([]string, 0, len(participants))
-	for _, value := range participants {
-		users = append(users, string(value))
-	}
-	in := &chatv1.CallParticipantsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CallId: string(id), Participants: users}
+func (r Remote) callParticipants(ctx context.Context, add bool, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CallID, participants []domain.CallParticipant) error {
+	users, externals := encodeCallParticipants(participants)
+	in := &chatv1.CallParticipantsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CallId: string(id), Participants: users, ExternalParticipants: externals}
 	var out *chatv1.MutationResponse
 	var err error
 	if add {
@@ -6392,10 +6420,7 @@ func huddleResponse(value domain.Call, err error) (*chatv1.Call, error) {
 }
 
 func (s *Server) AddCall(ctx context.Context, input *chatv1.AddCallRequest) (*chatv1.Call, error) {
-	participants := make([]domain.UserID, 0, len(input.GetParticipants()))
-	for _, value := range input.GetParticipants() {
-		participants = append(participants, domain.UserID(value))
-	}
+	participants := decodeCallParticipants(input.GetParticipants(), input.GetExternalParticipants())
 	startedAt := time.Time{}
 	if input.GetStartedAt() != 0 {
 		startedAt = time.Unix(input.GetStartedAt(), 0).UTC()
@@ -6434,10 +6459,7 @@ func (s *Server) RemoveCallParticipants(ctx context.Context, input *chatv1.CallP
 	return s.callParticipants(ctx, input, false)
 }
 func (s *Server) callParticipants(ctx context.Context, input *chatv1.CallParticipantsRequest, add bool) (*chatv1.MutationResponse, error) {
-	users := make([]domain.UserID, 0, len(input.GetParticipants()))
-	for _, value := range input.GetParticipants() {
-		users = append(users, domain.UserID(value))
-	}
+	users := decodeCallParticipants(input.GetParticipants(), input.GetExternalParticipants())
 	var err error
 	if add {
 		err = s.implementation.AddCallParticipants(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CallID(input.GetCallId()), users)
@@ -12800,7 +12822,11 @@ func encodeProtoCall(value domain.Call) *chatv1.Call {
 	for _, user := range value.Participants {
 		participants = append(participants, string(user))
 	}
-	result := &chatv1.Call{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ExternalUniqueId: value.ExternalUniqueID, ExternalDisplayId: value.ExternalDisplayID, JoinUrl: value.JoinURL, DesktopAppJoinUrl: value.DesktopAppJoinURL, Title: value.Title, CreatedBy: string(value.CreatedBy), Participants: participants, StartedAt: value.StartedAt.Unix(), DurationSeconds: value.DurationSeconds, Kind: string(value.Kind), ConversationId: string(value.ConversationID)}
+	externals := make([]*chatv1.ExternalCallParticipant, 0, len(value.ExternalParticipants))
+	for _, external := range value.ExternalParticipants {
+		externals = append(externals, encodeExternalCallParticipant(external))
+	}
+	result := &chatv1.Call{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ExternalUniqueId: value.ExternalUniqueID, ExternalDisplayId: value.ExternalDisplayID, JoinUrl: value.JoinURL, DesktopAppJoinUrl: value.DesktopAppJoinURL, Title: value.Title, CreatedBy: string(value.CreatedBy), Participants: participants, ExternalParticipants: externals, StartedAt: value.StartedAt.Unix(), DurationSeconds: value.DurationSeconds, Kind: string(value.Kind), ConversationId: string(value.ConversationID)}
 	if !value.EndedAt.IsZero() {
 		result.EndedAt = value.EndedAt.Unix()
 	}
@@ -12839,7 +12865,14 @@ func decodeProtoCall(value *chatv1.Call) (domain.Call, error) {
 		}
 		participants = append(participants, domain.UserID(user))
 	}
-	result := domain.Call{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.CallID(value.GetId()), ExternalUniqueID: value.GetExternalUniqueId(), ExternalDisplayID: value.GetExternalDisplayId(), JoinURL: value.GetJoinUrl(), DesktopAppJoinURL: value.GetDesktopAppJoinUrl(), Title: value.GetTitle(), CreatedBy: domain.UserID(value.GetCreatedBy()), Participants: participants, StartedAt: time.Unix(value.GetStartedAt(), 0).UTC(), DurationSeconds: value.GetDurationSeconds(), Kind: kind, ConversationID: domain.ConversationID(value.GetConversationId())}
+	var externals []domain.ExternalCallParticipant
+	for _, external := range value.GetExternalParticipants() {
+		if external.GetExternalId() == "" {
+			return domain.Call{}, errors.New("typed external call participant has no external_id")
+		}
+		externals = append(externals, decodeExternalCallParticipant(external))
+	}
+	result := domain.Call{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.CallID(value.GetId()), ExternalUniqueID: value.GetExternalUniqueId(), ExternalDisplayID: value.GetExternalDisplayId(), JoinURL: value.GetJoinUrl(), DesktopAppJoinURL: value.GetDesktopAppJoinUrl(), Title: value.GetTitle(), CreatedBy: domain.UserID(value.GetCreatedBy()), Participants: participants, ExternalParticipants: externals, StartedAt: time.Unix(value.GetStartedAt(), 0).UTC(), DurationSeconds: value.GetDurationSeconds(), Kind: kind, ConversationID: domain.ConversationID(value.GetConversationId())}
 	if value.GetEndedAt() != 0 {
 		result.EndedAt = time.Unix(value.GetEndedAt(), 0).UTC()
 	}

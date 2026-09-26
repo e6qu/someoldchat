@@ -1086,7 +1086,9 @@ type Store interface {
 	GetCall(context.Context, domain.WorkspaceID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.Call, events.Event) error
 	EndCall(context.Context, domain.WorkspaceID, domain.CallID, int64, events.Event) error
-	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, events.Event) error
+	// SetCallParticipants replaces an app-registered call's member and
+	// external participants together.
+	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, []domain.ExternalCallParticipant, events.Event) error
 	// StartHuddle returns the conversation's active huddle, creating it only if
 	// there is none, and adds the caller to it either way. It is one atomic
 	// upsert because two people pressing start at the same moment must end up

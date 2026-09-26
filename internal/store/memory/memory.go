@@ -10160,6 +10160,7 @@ func (s *Store) SetUserGroupChannels(_ context.Context, workspace domain.Workspa
 
 func cloneCall(value domain.Call) domain.Call {
 	value.Participants = append([]domain.UserID(nil), value.Participants...)
+	value.ExternalParticipants = append([]domain.ExternalCallParticipant(nil), value.ExternalParticipants...)
 	return value
 }
 
@@ -10310,7 +10311,7 @@ func (s *Store) EndCall(_ context.Context, workspace domain.WorkspaceID, id doma
 	return nil
 }
 
-func (s *Store) SetCallParticipants(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) error {
+func (s *Store) SetCallParticipants(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, externals []domain.ExternalCallParticipant, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.calls[id]
@@ -10318,6 +10319,7 @@ func (s *Store) SetCallParticipants(_ context.Context, workspace domain.Workspac
 		return store.ErrNotFound
 	}
 	value.Participants = append([]domain.UserID(nil), users...)
+	value.ExternalParticipants = append([]domain.ExternalCallParticipant(nil), externals...)
 	s.calls[id] = value
 	s.outbox = append(s.outbox, event)
 	return nil

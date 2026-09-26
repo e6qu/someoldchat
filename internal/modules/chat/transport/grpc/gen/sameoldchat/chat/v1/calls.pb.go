@@ -22,23 +22,24 @@ const (
 )
 
 type Call struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Id                string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	ExternalUniqueId  string                 `protobuf:"bytes,3,opt,name=external_unique_id,json=externalUniqueId,proto3" json:"external_unique_id,omitempty"`
-	ExternalDisplayId string                 `protobuf:"bytes,4,opt,name=external_display_id,json=externalDisplayId,proto3" json:"external_display_id,omitempty"`
-	JoinUrl           string                 `protobuf:"bytes,5,opt,name=join_url,json=joinUrl,proto3" json:"join_url,omitempty"`
-	DesktopAppJoinUrl string                 `protobuf:"bytes,6,opt,name=desktop_app_join_url,json=desktopAppJoinUrl,proto3" json:"desktop_app_join_url,omitempty"`
-	Title             string                 `protobuf:"bytes,7,opt,name=title,proto3" json:"title,omitempty"`
-	CreatedBy         string                 `protobuf:"bytes,8,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
-	Participants      []string               `protobuf:"bytes,9,rep,name=participants,proto3" json:"participants,omitempty"`
-	StartedAt         int64                  `protobuf:"varint,10,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	EndedAt           int64                  `protobuf:"varint,11,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
-	DurationSeconds   int64                  `protobuf:"varint,12,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"`
-	Kind              string                 `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
-	ConversationId    string                 `protobuf:"bytes,14,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                protoimpl.MessageState     `protogen:"open.v1"`
+	WorkspaceId          string                     `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Id                   string                     `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	ExternalUniqueId     string                     `protobuf:"bytes,3,opt,name=external_unique_id,json=externalUniqueId,proto3" json:"external_unique_id,omitempty"`
+	ExternalDisplayId    string                     `protobuf:"bytes,4,opt,name=external_display_id,json=externalDisplayId,proto3" json:"external_display_id,omitempty"`
+	JoinUrl              string                     `protobuf:"bytes,5,opt,name=join_url,json=joinUrl,proto3" json:"join_url,omitempty"`
+	DesktopAppJoinUrl    string                     `protobuf:"bytes,6,opt,name=desktop_app_join_url,json=desktopAppJoinUrl,proto3" json:"desktop_app_join_url,omitempty"`
+	Title                string                     `protobuf:"bytes,7,opt,name=title,proto3" json:"title,omitempty"`
+	CreatedBy            string                     `protobuf:"bytes,8,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	Participants         []string                   `protobuf:"bytes,9,rep,name=participants,proto3" json:"participants,omitempty"`
+	StartedAt            int64                      `protobuf:"varint,10,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	EndedAt              int64                      `protobuf:"varint,11,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	DurationSeconds      int64                      `protobuf:"varint,12,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"`
+	Kind                 string                     `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
+	ConversationId       string                     `protobuf:"bytes,14,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	ExternalParticipants []*ExternalCallParticipant `protobuf:"bytes,15,rep,name=external_participants,json=externalParticipants,proto3" json:"external_participants,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Call) Reset() {
@@ -169,6 +170,77 @@ func (x *Call) GetConversationId() string {
 	return ""
 }
 
+func (x *Call) GetExternalParticipants() []*ExternalCallParticipant {
+	if x != nil {
+		return x.ExternalParticipants
+	}
+	return nil
+}
+
+// ExternalCallParticipant is a calls-API participant the provider names by
+// external_id; it has no member ID. Member participants keep travelling as
+// the plain `participants` IDs so a peer on either side of a rollout reads
+// them.
+type ExternalCallParticipant struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ExternalId    string                 `protobuf:"bytes,1,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	AvatarUrl     string                 `protobuf:"bytes,3,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExternalCallParticipant) Reset() {
+	*x = ExternalCallParticipant{}
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalCallParticipant) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalCallParticipant) ProtoMessage() {}
+
+func (x *ExternalCallParticipant) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalCallParticipant.ProtoReflect.Descriptor instead.
+func (*ExternalCallParticipant) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ExternalCallParticipant) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ExternalCallParticipant) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *ExternalCallParticipant) GetAvatarUrl() string {
+	if x != nil {
+		return x.AvatarUrl
+	}
+	return ""
+}
+
 type HuddleRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -181,7 +253,7 @@ type HuddleRequest struct {
 
 func (x *HuddleRequest) Reset() {
 	*x = HuddleRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -193,7 +265,7 @@ func (x *HuddleRequest) String() string {
 func (*HuddleRequest) ProtoMessage() {}
 
 func (x *HuddleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -206,7 +278,7 @@ func (x *HuddleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HuddleRequest.ProtoReflect.Descriptor instead.
 func (*HuddleRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{1}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *HuddleRequest) GetWorkspaceId() string {
@@ -238,23 +310,24 @@ func (x *HuddleRequest) GetTitle() string {
 }
 
 type AddCallRequest struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ExternalUniqueId  string                 `protobuf:"bytes,3,opt,name=external_unique_id,json=externalUniqueId,proto3" json:"external_unique_id,omitempty"`
-	ExternalDisplayId string                 `protobuf:"bytes,4,opt,name=external_display_id,json=externalDisplayId,proto3" json:"external_display_id,omitempty"`
-	JoinUrl           string                 `protobuf:"bytes,5,opt,name=join_url,json=joinUrl,proto3" json:"join_url,omitempty"`
-	DesktopAppJoinUrl string                 `protobuf:"bytes,6,opt,name=desktop_app_join_url,json=desktopAppJoinUrl,proto3" json:"desktop_app_join_url,omitempty"`
-	Title             string                 `protobuf:"bytes,7,opt,name=title,proto3" json:"title,omitempty"`
-	StartedAt         int64                  `protobuf:"varint,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	Participants      []string               `protobuf:"bytes,9,rep,name=participants,proto3" json:"participants,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                protoimpl.MessageState     `protogen:"open.v1"`
+	WorkspaceId          string                     `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId               string                     `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ExternalUniqueId     string                     `protobuf:"bytes,3,opt,name=external_unique_id,json=externalUniqueId,proto3" json:"external_unique_id,omitempty"`
+	ExternalDisplayId    string                     `protobuf:"bytes,4,opt,name=external_display_id,json=externalDisplayId,proto3" json:"external_display_id,omitempty"`
+	JoinUrl              string                     `protobuf:"bytes,5,opt,name=join_url,json=joinUrl,proto3" json:"join_url,omitempty"`
+	DesktopAppJoinUrl    string                     `protobuf:"bytes,6,opt,name=desktop_app_join_url,json=desktopAppJoinUrl,proto3" json:"desktop_app_join_url,omitempty"`
+	Title                string                     `protobuf:"bytes,7,opt,name=title,proto3" json:"title,omitempty"`
+	StartedAt            int64                      `protobuf:"varint,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	Participants         []string                   `protobuf:"bytes,9,rep,name=participants,proto3" json:"participants,omitempty"`
+	ExternalParticipants []*ExternalCallParticipant `protobuf:"bytes,10,rep,name=external_participants,json=externalParticipants,proto3" json:"external_participants,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *AddCallRequest) Reset() {
 	*x = AddCallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -266,7 +339,7 @@ func (x *AddCallRequest) String() string {
 func (*AddCallRequest) ProtoMessage() {}
 
 func (x *AddCallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -279,7 +352,7 @@ func (x *AddCallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddCallRequest.ProtoReflect.Descriptor instead.
 func (*AddCallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{2}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AddCallRequest) GetWorkspaceId() string {
@@ -345,6 +418,13 @@ func (x *AddCallRequest) GetParticipants() []string {
 	return nil
 }
 
+func (x *AddCallRequest) GetExternalParticipants() []*ExternalCallParticipant {
+	if x != nil {
+		return x.ExternalParticipants
+	}
+	return nil
+}
+
 type CallRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -356,7 +436,7 @@ type CallRequest struct {
 
 func (x *CallRequest) Reset() {
 	*x = CallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -368,7 +448,7 @@ func (x *CallRequest) String() string {
 func (*CallRequest) ProtoMessage() {}
 
 func (x *CallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -381,7 +461,7 @@ func (x *CallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallRequest.ProtoReflect.Descriptor instead.
 func (*CallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{3}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CallRequest) GetWorkspaceId() string {
@@ -417,7 +497,7 @@ type EndCallRequest struct {
 
 func (x *EndCallRequest) Reset() {
 	*x = EndCallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -429,7 +509,7 @@ func (x *EndCallRequest) String() string {
 func (*EndCallRequest) ProtoMessage() {}
 
 func (x *EndCallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -442,7 +522,7 @@ func (x *EndCallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndCallRequest.ProtoReflect.Descriptor instead.
 func (*EndCallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *EndCallRequest) GetWorkspaceId() string {
@@ -487,7 +567,7 @@ type UpdateCallRequest struct {
 
 func (x *UpdateCallRequest) Reset() {
 	*x = UpdateCallRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -499,7 +579,7 @@ func (x *UpdateCallRequest) String() string {
 func (*UpdateCallRequest) ProtoMessage() {}
 
 func (x *UpdateCallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -512,7 +592,7 @@ func (x *UpdateCallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCallRequest.ProtoReflect.Descriptor instead.
 func (*UpdateCallRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *UpdateCallRequest) GetWorkspaceId() string {
@@ -558,18 +638,19 @@ func (x *UpdateCallRequest) GetDesktopAppJoinUrl() string {
 }
 
 type CallParticipantsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	CallId        string                 `protobuf:"bytes,3,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
-	Participants  []string               `protobuf:"bytes,4,rep,name=participants,proto3" json:"participants,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState     `protogen:"open.v1"`
+	WorkspaceId          string                     `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId               string                     `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CallId               string                     `protobuf:"bytes,3,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	Participants         []string                   `protobuf:"bytes,4,rep,name=participants,proto3" json:"participants,omitempty"`
+	ExternalParticipants []*ExternalCallParticipant `protobuf:"bytes,5,rep,name=external_participants,json=externalParticipants,proto3" json:"external_participants,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *CallParticipantsRequest) Reset() {
 	*x = CallParticipantsRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +662,7 @@ func (x *CallParticipantsRequest) String() string {
 func (*CallParticipantsRequest) ProtoMessage() {}
 
 func (x *CallParticipantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +675,7 @@ func (x *CallParticipantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallParticipantsRequest.ProtoReflect.Descriptor instead.
 func (*CallParticipantsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CallParticipantsRequest) GetWorkspaceId() string {
@@ -625,6 +706,13 @@ func (x *CallParticipantsRequest) GetParticipants() []string {
 	return nil
 }
 
+func (x *CallParticipantsRequest) GetExternalParticipants() []*ExternalCallParticipant {
+	if x != nil {
+		return x.ExternalParticipants
+	}
+	return nil
+}
+
 type HuddleInviteRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -637,7 +725,7 @@ type HuddleInviteRequest struct {
 
 func (x *HuddleInviteRequest) Reset() {
 	*x = HuddleInviteRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -649,7 +737,7 @@ func (x *HuddleInviteRequest) String() string {
 func (*HuddleInviteRequest) ProtoMessage() {}
 
 func (x *HuddleInviteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -662,7 +750,7 @@ func (x *HuddleInviteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HuddleInviteRequest.ProtoReflect.Descriptor instead.
 func (*HuddleInviteRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HuddleInviteRequest) GetWorkspaceId() string {
@@ -707,7 +795,7 @@ type CallSignalRequest struct {
 
 func (x *CallSignalRequest) Reset() {
 	*x = CallSignalRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -719,7 +807,7 @@ func (x *CallSignalRequest) String() string {
 func (*CallSignalRequest) ProtoMessage() {}
 
 func (x *CallSignalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -732,7 +820,7 @@ func (x *CallSignalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallSignalRequest.ProtoReflect.Descriptor instead.
 func (*CallSignalRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CallSignalRequest) GetWorkspaceId() string {
@@ -789,7 +877,7 @@ type HuddleReactionRequest struct {
 
 func (x *HuddleReactionRequest) Reset() {
 	*x = HuddleReactionRequest{}
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -801,7 +889,7 @@ func (x *HuddleReactionRequest) String() string {
 func (*HuddleReactionRequest) ProtoMessage() {}
 
 func (x *HuddleReactionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_calls_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -814,7 +902,7 @@ func (x *HuddleReactionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HuddleReactionRequest.ProtoReflect.Descriptor instead.
 func (*HuddleReactionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_calls_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HuddleReactionRequest) GetWorkspaceId() string {
@@ -849,7 +937,7 @@ var File_sameoldchat_chat_v1_calls_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/calls.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xde\x03\n" +
+	"\x1fsameoldchat/chat/v1/calls.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xc1\x04\n" +
 	"\x04Call\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12,\n" +
@@ -867,12 +955,19 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\bended_at\x18\v \x01(\x03R\aendedAt\x12)\n" +
 	"\x10duration_seconds\x18\f \x01(\x03R\x0fdurationSeconds\x12\x12\n" +
 	"\x04kind\x18\r \x01(\tR\x04kind\x12'\n" +
-	"\x0fconversation_id\x18\x0e \x01(\tR\x0econversationId\"\x8a\x01\n" +
+	"\x0fconversation_id\x18\x0e \x01(\tR\x0econversationId\x12a\n" +
+	"\x15external_participants\x18\x0f \x03(\v2,.sameoldchat.chat.v1.ExternalCallParticipantR\x14externalParticipants\"|\n" +
+	"\x17ExternalCallParticipant\x12\x1f\n" +
+	"\vexternal_id\x18\x01 \x01(\tR\n" +
+	"externalId\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x1d\n" +
+	"\n" +
+	"avatar_url\x18\x03 \x01(\tR\tavatarUrl\"\x8a\x01\n" +
 	"\rHuddleRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x14\n" +
-	"\x05title\x18\x04 \x01(\tR\x05title\"\xcf\x02\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"\xb2\x03\n" +
 	"\x0eAddCallRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12,\n" +
@@ -883,7 +978,9 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\x05title\x18\a \x01(\tR\x05title\x12\x1d\n" +
 	"\n" +
 	"started_at\x18\b \x01(\x03R\tstartedAt\x12\"\n" +
-	"\fparticipants\x18\t \x03(\tR\fparticipants\"b\n" +
+	"\fparticipants\x18\t \x03(\tR\fparticipants\x12a\n" +
+	"\x15external_participants\x18\n" +
+	" \x03(\v2,.sameoldchat.chat.v1.ExternalCallParticipantR\x14externalParticipants\"b\n" +
 	"\vCallRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
@@ -899,12 +996,13 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\acall_id\x18\x03 \x01(\tR\x06callId\x12\x14\n" +
 	"\x05title\x18\x04 \x01(\tR\x05title\x12\x19\n" +
 	"\bjoin_url\x18\x05 \x01(\tR\ajoinUrl\x12/\n" +
-	"\x14desktop_app_join_url\x18\x06 \x01(\tR\x11desktopAppJoinUrl\"\x92\x01\n" +
+	"\x14desktop_app_join_url\x18\x06 \x01(\tR\x11desktopAppJoinUrl\"\xf5\x01\n" +
 	"\x17CallParticipantsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
 	"\acall_id\x18\x03 \x01(\tR\x06callId\x12\"\n" +
-	"\fparticipants\x18\x04 \x03(\tR\fparticipants\"\x99\x01\n" +
+	"\fparticipants\x18\x04 \x03(\tR\fparticipants\x12a\n" +
+	"\x15external_participants\x18\x05 \x03(\v2,.sameoldchat.chat.v1.ExternalCallParticipantR\x14externalParticipants\"\x99\x01\n" +
 	"\x13HuddleInviteRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -953,54 +1051,58 @@ func file_sameoldchat_chat_v1_calls_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_calls_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_sameoldchat_chat_v1_calls_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_sameoldchat_chat_v1_calls_proto_goTypes = []any{
 	(*Call)(nil),                    // 0: sameoldchat.chat.v1.Call
-	(*HuddleRequest)(nil),           // 1: sameoldchat.chat.v1.HuddleRequest
-	(*AddCallRequest)(nil),          // 2: sameoldchat.chat.v1.AddCallRequest
-	(*CallRequest)(nil),             // 3: sameoldchat.chat.v1.CallRequest
-	(*EndCallRequest)(nil),          // 4: sameoldchat.chat.v1.EndCallRequest
-	(*UpdateCallRequest)(nil),       // 5: sameoldchat.chat.v1.UpdateCallRequest
-	(*CallParticipantsRequest)(nil), // 6: sameoldchat.chat.v1.CallParticipantsRequest
-	(*HuddleInviteRequest)(nil),     // 7: sameoldchat.chat.v1.HuddleInviteRequest
-	(*CallSignalRequest)(nil),       // 8: sameoldchat.chat.v1.CallSignalRequest
-	(*HuddleReactionRequest)(nil),   // 9: sameoldchat.chat.v1.HuddleReactionRequest
-	(*MutationResponse)(nil),        // 10: sameoldchat.chat.v1.MutationResponse
+	(*ExternalCallParticipant)(nil), // 1: sameoldchat.chat.v1.ExternalCallParticipant
+	(*HuddleRequest)(nil),           // 2: sameoldchat.chat.v1.HuddleRequest
+	(*AddCallRequest)(nil),          // 3: sameoldchat.chat.v1.AddCallRequest
+	(*CallRequest)(nil),             // 4: sameoldchat.chat.v1.CallRequest
+	(*EndCallRequest)(nil),          // 5: sameoldchat.chat.v1.EndCallRequest
+	(*UpdateCallRequest)(nil),       // 6: sameoldchat.chat.v1.UpdateCallRequest
+	(*CallParticipantsRequest)(nil), // 7: sameoldchat.chat.v1.CallParticipantsRequest
+	(*HuddleInviteRequest)(nil),     // 8: sameoldchat.chat.v1.HuddleInviteRequest
+	(*CallSignalRequest)(nil),       // 9: sameoldchat.chat.v1.CallSignalRequest
+	(*HuddleReactionRequest)(nil),   // 10: sameoldchat.chat.v1.HuddleReactionRequest
+	(*MutationResponse)(nil),        // 11: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_calls_proto_depIdxs = []int32{
-	8,  // 0: sameoldchat.chat.v1.CallsService.SendCallSignal:input_type -> sameoldchat.chat.v1.CallSignalRequest
-	9,  // 1: sameoldchat.chat.v1.CallsService.SendHuddleReaction:input_type -> sameoldchat.chat.v1.HuddleReactionRequest
-	7,  // 2: sameoldchat.chat.v1.CallsService.InviteToHuddle:input_type -> sameoldchat.chat.v1.HuddleInviteRequest
-	2,  // 3: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
-	1,  // 4: sameoldchat.chat.v1.CallsService.StartHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 5: sameoldchat.chat.v1.CallsService.JoinHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 6: sameoldchat.chat.v1.CallsService.LeaveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 7: sameoldchat.chat.v1.CallsService.EndHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	1,  // 8: sameoldchat.chat.v1.CallsService.GetActiveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
-	4,  // 9: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
-	3,  // 10: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
-	5,  // 11: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
-	6,  // 12: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	6,  // 13: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
-	10, // 14: sameoldchat.chat.v1.CallsService.SendCallSignal:output_type -> sameoldchat.chat.v1.MutationResponse
-	10, // 15: sameoldchat.chat.v1.CallsService.SendHuddleReaction:output_type -> sameoldchat.chat.v1.MutationResponse
-	10, // 16: sameoldchat.chat.v1.CallsService.InviteToHuddle:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 17: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
-	0,  // 18: sameoldchat.chat.v1.CallsService.StartHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 19: sameoldchat.chat.v1.CallsService.JoinHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 20: sameoldchat.chat.v1.CallsService.LeaveHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 21: sameoldchat.chat.v1.CallsService.EndHuddle:output_type -> sameoldchat.chat.v1.Call
-	0,  // 22: sameoldchat.chat.v1.CallsService.GetActiveHuddle:output_type -> sameoldchat.chat.v1.Call
-	10, // 23: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 24: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
-	0,  // 25: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
-	10, // 26: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	10, // 27: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
-	14, // [14:28] is the sub-list for method output_type
-	0,  // [0:14] is the sub-list for method input_type
-	0,  // [0:0] is the sub-list for extension type_name
-	0,  // [0:0] is the sub-list for extension extendee
-	0,  // [0:0] is the sub-list for field type_name
+	1,  // 0: sameoldchat.chat.v1.Call.external_participants:type_name -> sameoldchat.chat.v1.ExternalCallParticipant
+	1,  // 1: sameoldchat.chat.v1.AddCallRequest.external_participants:type_name -> sameoldchat.chat.v1.ExternalCallParticipant
+	1,  // 2: sameoldchat.chat.v1.CallParticipantsRequest.external_participants:type_name -> sameoldchat.chat.v1.ExternalCallParticipant
+	9,  // 3: sameoldchat.chat.v1.CallsService.SendCallSignal:input_type -> sameoldchat.chat.v1.CallSignalRequest
+	10, // 4: sameoldchat.chat.v1.CallsService.SendHuddleReaction:input_type -> sameoldchat.chat.v1.HuddleReactionRequest
+	8,  // 5: sameoldchat.chat.v1.CallsService.InviteToHuddle:input_type -> sameoldchat.chat.v1.HuddleInviteRequest
+	3,  // 6: sameoldchat.chat.v1.CallsService.AddCall:input_type -> sameoldchat.chat.v1.AddCallRequest
+	2,  // 7: sameoldchat.chat.v1.CallsService.StartHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	2,  // 8: sameoldchat.chat.v1.CallsService.JoinHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	2,  // 9: sameoldchat.chat.v1.CallsService.LeaveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	2,  // 10: sameoldchat.chat.v1.CallsService.EndHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	2,  // 11: sameoldchat.chat.v1.CallsService.GetActiveHuddle:input_type -> sameoldchat.chat.v1.HuddleRequest
+	5,  // 12: sameoldchat.chat.v1.CallsService.EndCall:input_type -> sameoldchat.chat.v1.EndCallRequest
+	4,  // 13: sameoldchat.chat.v1.CallsService.CallInfo:input_type -> sameoldchat.chat.v1.CallRequest
+	6,  // 14: sameoldchat.chat.v1.CallsService.UpdateCall:input_type -> sameoldchat.chat.v1.UpdateCallRequest
+	7,  // 15: sameoldchat.chat.v1.CallsService.AddCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	7,  // 16: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:input_type -> sameoldchat.chat.v1.CallParticipantsRequest
+	11, // 17: sameoldchat.chat.v1.CallsService.SendCallSignal:output_type -> sameoldchat.chat.v1.MutationResponse
+	11, // 18: sameoldchat.chat.v1.CallsService.SendHuddleReaction:output_type -> sameoldchat.chat.v1.MutationResponse
+	11, // 19: sameoldchat.chat.v1.CallsService.InviteToHuddle:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 20: sameoldchat.chat.v1.CallsService.AddCall:output_type -> sameoldchat.chat.v1.Call
+	0,  // 21: sameoldchat.chat.v1.CallsService.StartHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 22: sameoldchat.chat.v1.CallsService.JoinHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 23: sameoldchat.chat.v1.CallsService.LeaveHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 24: sameoldchat.chat.v1.CallsService.EndHuddle:output_type -> sameoldchat.chat.v1.Call
+	0,  // 25: sameoldchat.chat.v1.CallsService.GetActiveHuddle:output_type -> sameoldchat.chat.v1.Call
+	11, // 26: sameoldchat.chat.v1.CallsService.EndCall:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 27: sameoldchat.chat.v1.CallsService.CallInfo:output_type -> sameoldchat.chat.v1.Call
+	0,  // 28: sameoldchat.chat.v1.CallsService.UpdateCall:output_type -> sameoldchat.chat.v1.Call
+	11, // 29: sameoldchat.chat.v1.CallsService.AddCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	11, // 30: sameoldchat.chat.v1.CallsService.RemoveCallParticipants:output_type -> sameoldchat.chat.v1.MutationResponse
+	17, // [17:31] is the sub-list for method output_type
+	3,  // [3:17] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_calls_proto_init() }
@@ -1015,7 +1117,7 @@ func file_sameoldchat_chat_v1_calls_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_calls_proto_rawDesc), len(file_sameoldchat_chat_v1_calls_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

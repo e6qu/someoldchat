@@ -322,10 +322,29 @@ type Call struct {
 	// Participants are the people currently in the call, not everyone who ever
 	// was. Someone who leaves is removed; the record of their having been there
 	// is the huddle.joined and huddle.left pair in the durable journal.
-	Participants    []UserID
-	StartedAt       time.Time
-	EndedAt         time.Time
-	DurationSeconds int64
+	Participants []UserID
+	// ExternalParticipants are the people in an app-registered call who have
+	// no account here: Slack's calls API names them by the provider's
+	// external_id with a display name and avatar. A huddle never has any.
+	ExternalParticipants []ExternalCallParticipant
+	StartedAt            time.Time
+	EndedAt              time.Time
+	DurationSeconds      int64
+}
+
+// ExternalCallParticipant is a calls-API participant identified by the call
+// provider rather than by a member ID.
+type ExternalCallParticipant struct {
+	ExternalID  string
+	DisplayName string
+	AvatarURL   string
+}
+
+// CallParticipant is one entry of a calls-API `users` list: either a member
+// (SlackID) or an external participant, never both.
+type CallParticipant struct {
+	SlackID  UserID
+	External ExternalCallParticipant
 }
 
 // Active reports whether the call is still running.

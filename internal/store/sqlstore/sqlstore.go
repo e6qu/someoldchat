@@ -504,6 +504,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id
 CREATE TABLE IF NOT EXISTS call_participants (
  call_id TEXT NOT NULL REFERENCES calls(id), user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY (call_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS call_external_participants (
+ call_id TEXT NOT NULL REFERENCES calls(id), external_id TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY (call_id, external_id)
+);
 CREATE TABLE IF NOT EXISTS custom_emoji (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', alias_for TEXT NOT NULL DEFAULT '',
  created_at INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL DEFAULT '',
@@ -565,7 +569,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 176
+const schemaVersion = 177
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3337,6 +3341,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 177 {
+		// An app-registered call's participants who have no account here. The
+		// calls API names them by the provider's external_id with a display
+		// name and avatar; call_participants can only hold member IDs, so these
+		// were previously stored as if their external_id were a user ID and
+		// then silently dropped by the users join.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS call_external_participants (
+			call_id TEXT NOT NULL REFERENCES calls(id), external_id TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (call_id, external_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate call external participants: %w", err)
 		}
 	}
 	if version < 176 {
@@ -7578,6 +7595,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		// belonging to this conversation are removed, never an app-registered call
 		// that names no conversation.
 		`DELETE FROM call_participants WHERE call_id IN (SELECT id FROM calls WHERE conversation_id = ?)`,
+		`DELETE FROM call_external_participants WHERE call_id IN (SELECT id FROM calls WHERE conversation_id = ?)`,
 		`DELETE FROM calls WHERE conversation_id = ?`,
 		`DELETE FROM closed_direct_conversations WHERE conversation_id = ?`,
 		`DELETE FROM scheduled_messages WHERE channel_id = ?`,
@@ -18565,6 +18583,9 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 			return err
 		}
 	}
+	if err := insertExternalCallParticipants(ctx, tx, value.ID, value.ExternalParticipants); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
@@ -18585,6 +18606,38 @@ func scanCall(row rowScanner) (domain.Call, error) {
 		value.EndedAt = time.Unix(ended, 0).UTC()
 	}
 	return value, nil
+}
+
+func insertExternalCallParticipants(ctx context.Context, tx txRunner, id domain.CallID, values []domain.ExternalCallParticipant) error {
+	for _, value := range values {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO call_external_participants(call_id, external_id, display_name, avatar_url) VALUES (?, ?, ?, ?)`, id, value.ExternalID, value.DisplayName, value.AvatarURL); err != nil {
+			return classify(err)
+		}
+	}
+	return nil
+}
+
+// fillCallParticipants reads both participant sets of a call.
+func fillCallParticipants(ctx context.Context, query rowQuerier, value *domain.Call) error {
+	participants, err := callParticipants(ctx, query, value.ID)
+	if err != nil {
+		return err
+	}
+	value.Participants = participants
+	rows, err := query.QueryContext(ctx, `SELECT external_id, display_name, avatar_url FROM call_external_participants WHERE call_id = ? ORDER BY external_id`, value.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	value.ExternalParticipants = nil
+	for rows.Next() {
+		var external domain.ExternalCallParticipant
+		if err := rows.Scan(&external.ExternalID, &external.DisplayName, &external.AvatarURL); err != nil {
+			return err
+		}
+		value.ExternalParticipants = append(value.ExternalParticipants, external)
+	}
+	return rows.Err()
 }
 
 func callParticipants(ctx context.Context, query rowQuerier, id domain.CallID) ([]domain.UserID, error) {
@@ -18632,7 +18685,7 @@ func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joi
 				return domain.Call{}, false, err
 			}
 		}
-		existing.Participants, err = callParticipants(ctx, tx, existing.ID)
+		err = fillCallParticipants(ctx, tx, &existing)
 		if err != nil {
 			return domain.Call{}, false, err
 		}
@@ -18677,7 +18730,7 @@ func (s *Store) ActiveHuddle(ctx context.Context, workspace domain.WorkspaceID, 
 	if err != nil {
 		return domain.Call{}, translateNotFound(err)
 	}
-	value.Participants, err = callParticipants(ctx, s.db, value.ID)
+	err = fillCallParticipants(ctx, s.db, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -18706,7 +18759,7 @@ func (s *Store) JoinCall(ctx context.Context, workspace domain.WorkspaceID, id d
 			return domain.Call{}, err
 		}
 	}
-	value.Participants, err = callParticipants(ctx, tx, id)
+	err = fillCallParticipants(ctx, tx, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -18738,7 +18791,7 @@ func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id 
 		return domain.Call{}, err
 	}
 	if removed == 0 {
-		value.Participants, err = callParticipants(ctx, tx, id)
+		err = fillCallParticipants(ctx, tx, &value)
 		if err != nil {
 			return domain.Call{}, err
 		}
@@ -18747,7 +18800,7 @@ func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id 
 	if err := insertOutbox(ctx, tx, left); err != nil {
 		return domain.Call{}, err
 	}
-	value.Participants, err = callParticipants(ctx, tx, id)
+	err = fillCallParticipants(ctx, tx, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -18779,7 +18832,7 @@ func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	if err != nil {
 		return domain.Call{}, err
 	}
-	value.Participants, err = callParticipants(ctx, s.db, id)
+	err = fillCallParticipants(ctx, s.db, &value)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -18845,7 +18898,7 @@ func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	return tx.Commit()
 }
 
-func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) error {
+func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, externals []domain.ExternalCallParticipant, event events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
@@ -18865,6 +18918,12 @@ func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.Worksp
 		if _, err := tx.ExecContext(ctx, `INSERT INTO call_participants(call_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0`, id, userID, workspace); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM call_external_participants WHERE call_id = ?`, id); err != nil {
+		return err
+	}
+	if err := insertExternalCallParticipants(ctx, tx, id, externals); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err

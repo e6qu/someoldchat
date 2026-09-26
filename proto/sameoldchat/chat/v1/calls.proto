@@ -21,6 +21,17 @@ message Call {
   int64 duration_seconds = 12;
   string kind = 13;
   string conversation_id = 14;
+  repeated ExternalCallParticipant external_participants = 15;
+}
+
+// ExternalCallParticipant is a calls-API participant the provider names by
+// external_id; it has no member ID. Member participants keep travelling as
+// the plain `participants` IDs so a peer on either side of a rollout reads
+// them.
+message ExternalCallParticipant {
+  string external_id = 1;
+  string display_name = 2;
+  string avatar_url = 3;
 }
 
 message HuddleRequest {
@@ -40,6 +51,7 @@ message AddCallRequest {
   string title = 7;
   int64 started_at = 8;
   repeated string participants = 9;
+  repeated ExternalCallParticipant external_participants = 10;
 }
 
 message CallRequest {
@@ -69,6 +81,7 @@ message CallParticipantsRequest {
   string user_id = 2;
   string call_id = 3;
   repeated string participants = 4;
+  repeated ExternalCallParticipant external_participants = 5;
 }
 
 message HuddleInviteRequest {

@@ -432,13 +432,24 @@ public final class Qualification {
                             .desktopAppJoinUrl("https://example.com/call-desktop")
                             .title("Qualification call")
                             .dateStart((int) (System.currentTimeMillis() / 1000))
+                            .users(java.util.List.of(
+                                    com.slack.api.model.CallParticipant.builder().slackId("U1").build(),
+                                    com.slack.api.model.CallParticipant.builder().externalId("qualification-guest")
+                                            .displayName("Qualification Guest").avatarUrl("https://example.com/guest.png").build()))
                             .build());
             require(addedCall.isOk() && addedCall.getCall() != null && addedCall.getCall().getId() != null,
                     "calls.add failed: " + addedCall.getError());
             String callId = addedCall.getCall().getId();
             com.slack.api.methods.response.calls.CallsInfoResponse callInfo = methods.callsInfo(
                     com.slack.api.methods.request.calls.CallsInfoRequest.builder().id(callId).build());
-            require(callInfo.isOk(), "calls.info failed: " + callInfo.getError());
+            // The Call model's users are CallParticipant objects; an external
+            // participant keeps the name and avatar the provider registered.
+            require(callInfo.isOk() && callInfo.getCall() != null && callInfo.getCall().getUsers() != null
+                            && callInfo.getCall().getUsers().stream().anyMatch(user -> "U1".equals(user.getSlackId()))
+                            && callInfo.getCall().getUsers().stream().anyMatch(user -> "qualification-guest".equals(user.getExternalId())
+                                    && "Qualification Guest".equals(user.getDisplayName())
+                                    && "https://example.com/guest.png".equals(user.getAvatarUrl())),
+                    "calls.info failed: " + callInfo);
             com.slack.api.methods.response.calls.CallsUpdateResponse updatedCall = methods.callsUpdate(
                     com.slack.api.methods.request.calls.CallsUpdateRequest.builder()
                             .id(callId).title("Updated qualification call").build());

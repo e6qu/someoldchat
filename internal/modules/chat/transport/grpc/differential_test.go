@@ -3742,18 +3742,21 @@ func parityCases() []parityCase {
 				started := time.Now().UTC().Truncate(time.Second)
 				call, err := chat.AddCall(ctx, "T1", "U1", "ext-call-1", "EXT-1",
 					"https://example.com/join", "https://example.com/desktop", "Design review", started,
-					[]domain.UserID{"U1", "U2"})
+					[]domain.CallParticipant{{SlackID: "U1"}, {SlackID: "U2"},
+						{External: domain.ExternalCallParticipant{ExternalID: "ext-9", DisplayName: "Guest", AvatarURL: "https://example.com/g.png"}}})
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.AddCallParticipants(ctx, "T1", "U1", call.ID, []domain.UserID{"UA"}); err != nil {
+				if err := chat.AddCallParticipants(ctx, "T1", "U1", call.ID, []domain.CallParticipant{{SlackID: "UA"},
+					{External: domain.ExternalCallParticipant{ExternalID: "ext-10", DisplayName: "Second guest"}}}); err != nil {
 					return nil, err
 				}
 				added, err := chat.GetCall(ctx, "T1", "U1", call.ID)
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.RemoveCallParticipants(ctx, "T1", "U1", call.ID, []domain.UserID{"U2"}); err != nil {
+				if err := chat.RemoveCallParticipants(ctx, "T1", "U1", call.ID, []domain.CallParticipant{{SlackID: "U2"},
+					{External: domain.ExternalCallParticipant{ExternalID: "ext-9"}}}); err != nil {
 					return nil, err
 				}
 				removed, err := chat.GetCall(ctx, "T1", "U1", call.ID)
@@ -3776,6 +3779,9 @@ func parityCases() []parityCase {
 					names := make([]string, 0, len(call.Participants))
 					for _, participant := range call.Participants {
 						names = append(names, string(participant))
+					}
+					for _, external := range call.ExternalParticipants {
+						names = append(names, "external:"+external.ExternalID+"/"+external.DisplayName+"/"+external.AvatarURL)
 					}
 					sort.Strings(names)
 					return names

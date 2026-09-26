@@ -1315,7 +1315,8 @@ func TestCallsLifecycle(t *testing.T) {
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"title":"Updated call"`) {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
 	}
-	participantsAdd := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users=U2"))
+	externalUsers := url.QueryEscape(`[{"slack_id":"U2"},{"external_id":"guest-1","display_name":"Guest","avatar_url":"https://call.example/guest.png"}]`)
+	participantsAdd := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users="+externalUsers))
 	participantsAdd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	participantsAdd.Header.Set("Authorization", "Bearer token")
 	participantsAdded := httptest.NewRecorder()
@@ -1329,6 +1330,27 @@ func TestCallsLifecycle(t *testing.T) {
 	handler.ServeHTTP(got, info)
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), response.Call.ID) {
 		t.Fatalf("info status=%d body=%s", got.Code, got.Body)
+	}
+	// Slack's Call object lists participants as objects, not bare IDs; an
+	// external participant keeps its provider-given name and avatar.
+	var infoBody struct {
+		Call struct {
+			Users []map[string]string `json:"users"`
+		} `json:"call"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &infoBody); err != nil || len(infoBody.Call.Users) != 2 ||
+		infoBody.Call.Users[0]["slack_id"] != "U2" ||
+		infoBody.Call.Users[1]["external_id"] != "guest-1" || infoBody.Call.Users[1]["display_name"] != "Guest" ||
+		infoBody.Call.Users[1]["avatar_url"] != "https://call.example/guest.png" {
+		t.Fatalf("info users=%s err=%v", got.Body, err)
+	}
+	malformed := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users=%5B%7B"))
+	malformed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	malformed.Header.Set("Authorization", "Bearer token")
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, malformed)
+	if rejected.Code != http.StatusOK || !strings.Contains(rejected.Body.String(), `"error":"invalid_arguments"`) {
+		t.Fatalf("malformed users status=%d body=%s", rejected.Code, rejected.Body)
 	}
 	participants := httptest.NewRequest(http.MethodPost, "/api/calls.participants.remove", strings.NewReader("id="+response.Call.ID+"&users=U2"))
 	participants.Header.Set("Content-Type", "application/x-www-form-urlencoded")

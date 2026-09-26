@@ -1607,8 +1607,14 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 		if err := repository.UpdateCall(ctx, call, event("call-update", "call.updated", string(call.ID))); err != nil {
 			t.Fatal(err)
 		}
-		if err := repository.SetCallParticipants(ctx, workspaceID, call.ID, []domain.UserID{userID}, event("call-participants", "call.participants_changed", string(call.ID))); err != nil {
+		guest := domain.ExternalCallParticipant{ExternalID: "guest-" + suffix, DisplayName: "Guest", AvatarURL: "https://example.test/guest.png"}
+		if err := repository.SetCallParticipants(ctx, workspaceID, call.ID, []domain.UserID{userID}, []domain.ExternalCallParticipant{guest}, event("call-participants", "call.participants_changed", string(call.ID))); err != nil {
 			t.Fatal(err)
+		}
+		// An external participant keeps the name and avatar the provider gave.
+		loaded, err = repository.GetCall(ctx, workspaceID, call.ID)
+		if err != nil || len(loaded.ExternalParticipants) != 1 || loaded.ExternalParticipants[0] != guest || len(loaded.Participants) != 1 {
+			t.Fatalf("call with an external participant=%+v err=%v", loaded, err)
 		}
 		if err := repository.EndCall(ctx, workspaceID, call.ID, 90, event("call-end", "call.ended", string(call.ID))); err != nil {
 			t.Fatal(err)

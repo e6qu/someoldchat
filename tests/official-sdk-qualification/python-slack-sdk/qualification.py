@@ -450,11 +450,21 @@ added_call = client.calls_add(
     desktop_app_join_url="https://example.com/call-desktop",
     title="Qualification call",
     date_start=int(time.time()),
+    users=[
+        {"slack_id": "U1"},
+        {"external_id": "qualification-guest", "display_name": "Qualification Guest", "avatar_url": "https://example.com/guest.png"},
+    ],
 )
 assert added_call["ok"] is True
 call_id = added_call["call"]["id"]
 call_info = client.calls_info(id=call_id)
 assert call_info["ok"] is True
+assert {"slack_id": "U1"} in call_info["call"]["users"], call_info
+assert {
+    "external_id": "qualification-guest",
+    "display_name": "Qualification Guest",
+    "avatar_url": "https://example.com/guest.png",
+} in call_info["call"]["users"], call_info
 updated_call = client.calls_update(id=call_id, title="Updated qualification call")
 assert updated_call["ok"] is True
 added_call_participant = client.calls_participants_add(id=call_id, users=[{"slack_id": "U2"}])

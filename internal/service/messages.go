@@ -8112,6 +8112,45 @@ func normalizeCallUsers(values []domain.UserID) ([]domain.UserID, error) {
 	return result, nil
 }
 
+// splitCallParticipants separates a calls-API `users` list into the members
+// it names and the external participants it names, each deduplicated and in
+// a stable order. An entry naming neither, or both, is invalid, as is an
+// external participant whose fields exceed what the calls API documents.
+func splitCallParticipants(values []domain.CallParticipant) ([]domain.UserID, []domain.ExternalCallParticipant, error) {
+	users := make([]domain.UserID, 0, len(values))
+	externals := make([]domain.ExternalCallParticipant, 0)
+	seen := make(map[string]struct{})
+	for _, value := range values {
+		slackID := domain.UserID(strings.TrimSpace(string(value.SlackID)))
+		external := domain.ExternalCallParticipant{
+			ExternalID:  strings.TrimSpace(value.External.ExternalID),
+			DisplayName: strings.TrimSpace(value.External.DisplayName),
+			AvatarURL:   strings.TrimSpace(value.External.AvatarURL),
+		}
+		switch {
+		case slackID != "" && external.ExternalID == "":
+			users = append(users, slackID)
+		case slackID == "" && external.ExternalID != "":
+			if len(external.ExternalID) > 255 || len(external.DisplayName) > 255 || len(external.AvatarURL) > 2048 {
+				return nil, nil, ErrInvalidCall
+			}
+			if _, duplicate := seen[external.ExternalID]; duplicate {
+				continue
+			}
+			seen[external.ExternalID] = struct{}{}
+			externals = append(externals, external)
+		default:
+			return nil, nil, ErrInvalidCall
+		}
+	}
+	normalized, err := normalizeCallUsers(users)
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(externals, func(left, right int) bool { return externals[left].ExternalID < externals[right].ExternalID })
+	return normalized, externals, nil
+}
+
 func (m Messages) validateCallUsers(ctx context.Context, workspaceID domain.WorkspaceID, users []domain.UserID) error {
 	for _, userID := range users {
 		user, err := m.Store.GetUser(ctx, userID)
@@ -8403,7 +8442,7 @@ func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic stri
 	), at)
 }
 
-func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, users []domain.UserID) (domain.Call, error) {
+func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.CallParticipant) (domain.Call, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
 	}
@@ -8416,7 +8455,7 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	} else {
 		startedAt = startedAt.UTC()
 	}
-	normalized, err := normalizeCallUsers(users)
+	normalized, externals, err := splitCallParticipants(participants)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8436,7 +8475,7 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if err != nil {
 		return domain.Call{}, err
 	}
-	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, StartedAt: startedAt}
+	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, ExternalParticipants: externals, StartedAt: startedAt}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("call.created", events.String("call_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err
@@ -8490,7 +8529,7 @@ func (m Messages) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	return m.Store.EndCall(ctx, workspaceID, id, duration, event)
 }
 
-func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID, add bool) error {
+func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant, add bool) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
@@ -8498,7 +8537,7 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 	if err != nil {
 		return err
 	}
-	changed, err := normalizeCallUsers(users)
+	changed, changedExternals, err := splitCallParticipants(participants)
 	if err != nil {
 		return err
 	}
@@ -8519,19 +8558,27 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 		}
 	}
 	set := make(map[domain.UserID]struct{}, len(value.Participants)+len(changed))
-	if add {
-		for _, userID := range value.Participants {
+	for _, userID := range value.Participants {
+		set[userID] = struct{}{}
+	}
+	externals := make(map[string]domain.ExternalCallParticipant, len(value.ExternalParticipants)+len(changedExternals))
+	for _, external := range value.ExternalParticipants {
+		externals[external.ExternalID] = external
+	}
+	for _, userID := range changed {
+		if add {
 			set[userID] = struct{}{}
-		}
-		for _, userID := range changed {
-			set[userID] = struct{}{}
-		}
-	} else {
-		for _, userID := range value.Participants {
-			set[userID] = struct{}{}
-		}
-		for _, userID := range changed {
+		} else {
 			delete(set, userID)
+		}
+	}
+	for _, external := range changedExternals {
+		if add {
+			// Adding an external participant again refreshes the name and
+			// avatar the provider reports for them.
+			externals[external.ExternalID] = external
+		} else {
+			delete(externals, external.ExternalID)
 		}
 	}
 	result := make([]domain.UserID, 0, len(set))
@@ -8542,18 +8589,26 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 	if err != nil && len(result) != 0 {
 		return err
 	}
-	event, err := newEvent(workspaceID, actor, events.NewPayload("call.participants_changed", events.String("call_id", string(id)), events.Strings("user_ids", userIDStrings(result))), time.Now().UTC())
+	externalResult := make([]domain.ExternalCallParticipant, 0, len(externals))
+	externalIDs := make([]string, 0, len(externals))
+	for _, external := range externals {
+		externalResult = append(externalResult, external)
+		externalIDs = append(externalIDs, external.ExternalID)
+	}
+	sort.Slice(externalResult, func(left, right int) bool { return externalResult[left].ExternalID < externalResult[right].ExternalID })
+	sort.Strings(externalIDs)
+	event, err := newEvent(workspaceID, actor, events.NewPayload("call.participants_changed", events.String("call_id", string(id)), events.Strings("user_ids", userIDStrings(result)), events.Strings("external_ids", externalIDs)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetCallParticipants(ctx, workspaceID, id, result, event)
+	return m.Store.SetCallParticipants(ctx, workspaceID, id, result, externalResult, event)
 }
 
-func (m Messages) AddCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID) error {
-	return m.changeCallParticipants(ctx, workspaceID, actor, id, users, true)
+func (m Messages) AddCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant) error {
+	return m.changeCallParticipants(ctx, workspaceID, actor, id, participants, true)
 }
-func (m Messages) RemoveCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID) error {
-	return m.changeCallParticipants(ctx, workspaceID, actor, id, users, false)
+func (m Messages) RemoveCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant) error {
+	return m.changeCallParticipants(ctx, workspaceID, actor, id, participants, false)
 }
 
 func (m Messages) messageForTimestamp(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Message, error) {

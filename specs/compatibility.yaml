@@ -902,6 +902,9 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestCallLifecycleNormalizesParticipants
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - method: calls.end
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -912,11 +915,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestCallLifecycleNormalizesParticipants
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - method: calls.participants.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestCallLifecycleNormalizesParticipants
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - method: calls.participants.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi

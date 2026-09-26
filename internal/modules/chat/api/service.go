@@ -456,7 +456,7 @@ type Service interface {
 	ListUserGroups(context.Context, domain.WorkspaceID, domain.UserID, bool, domain.PageRequest) (domain.UserGroupPage, error)
 	UserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.UserID, error)
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroup, error)
-	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.UserID) (domain.Call, error)
+	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.CallParticipant) (domain.Call, error)
 	// The huddle family takes a conversation rather than a call identifier: a
 	// conversation has at most one running huddle, and naming the conversation
 	// is what lets two concurrent starts converge on one.
@@ -468,8 +468,8 @@ type Service interface {
 	GetCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, string, string, string) (domain.Call, error)
 	EndCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, int64) error
-	AddCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.UserID) error
-	RemoveCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.UserID) error
+	AddCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.CallParticipant) error
+	RemoveCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.CallParticipant) error
 	Search(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageSearchRequest) (domain.MessagePage, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearchRequest) (domain.FilePage, error)
