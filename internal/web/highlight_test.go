@@ -67,6 +67,9 @@ func TestMarkingMapsMatchesBackThroughFoldingThatChangesLength(t *testing.T) {
 		// the shrink, where a folded offset lands one byte into the character.
 		{"Ⱥé İ", []string{"é"}, "Ⱥ<mark>é</mark> İ"},
 		{"Ⱥé İ", []string{"ⱥ", "i"}, "<mark>Ⱥ</mark>é <mark>İ</mark>"},
+		// U+212A (Kelvin) shrinks from three bytes to one and two U+023A grow
+		// by one each, so the lengths cancel and the old offsets marked "Ⱥa".
+		{"ȺȺab\u212a", []string{"ab"}, "ȺȺ<mark>ab</mark>\u212a"},
 	} {
 		marked := markTerms(tc.text, tc.terms)
 		if marked != tc.want {
@@ -111,7 +114,7 @@ func TestATermSplitByFormattingIsLeftUnmarked(t *testing.T) {
 // Whatever the text and terms, marking only adds <mark> elements: removing them
 // and unescaping gives back the original text, byte for byte.
 func FuzzMarkingPreservesTheText(f *testing.F) {
-	for _, seed := range [][2]string{{"Ⱥé İ", "é"}, {"İstanbul", "stanbul"}, {"Ωmega K", "k"}, {"a & <b>", "&"}, {"ǅungla", "ǆ"}} {
+	for _, seed := range [][2]string{{"Ⱥé İ", "é"}, {"İstanbul", "stanbul"}, {"\u2126mega \u212a", "k"}, {"a & <b>", "&"}, {"ǅungla", "ǆ"}} {
 		f.Add(seed[0], seed[1])
 	}
 	f.Fuzz(func(t *testing.T, text, term string) {
