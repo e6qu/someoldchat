@@ -1390,15 +1390,16 @@ func TestABrowserSignInIsRecordedInTheAccessLogOnce(t *testing.T) {
 		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
 	}
 
-	logs, _, err := store.ListAccessLogs(context.Background(), "T1", time.Time{}, 10, 1)
+	page, err := store.ListAccessLogs(context.Background(), "T1", time.Time{}, 10, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	logs := page.Logins
 	if len(logs) != 1 {
 		t.Fatalf("access log entries=%d, want exactly one for one sign-in: %+v", len(logs), logs)
 	}
 	entry := logs[0]
-	if entry.UserID != "U1" || entry.IP != "198.51.100.9:52122" || entry.UserAgent != "Mozilla/5.0 (browser qualification)" {
+	if entry.UserID != "U1" || entry.IP != "198.51.100.9" || entry.UserAgent != "Mozilla/5.0 (browser qualification)" {
 		t.Fatalf("entry=%+v", entry)
 	}
 }

@@ -206,7 +206,7 @@ func (m Messages) SearchLists(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return domain.ListPage{}, ErrInvalidSearch
 	}
-	parsed, err := parseSearchQuery(request.Query)
+	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
 		return domain.ListPage{}, ErrInvalidSearch
 	}

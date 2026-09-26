@@ -194,6 +194,12 @@ message Emoji {
   string name = 1;
   string url = 2;
   string alias_for = 3;
+  int64 created_at_unix_nano = 4;
+  string created_by = 5;
+}
+
+message EmojiRevisionResponse {
+  int64 changed_at_unix_nano = 1;
 }
 
 message EmojiListRequest {
@@ -659,6 +665,7 @@ service DirectoryService {
   rpc UserSessions(ResetUserSessionsRequest) returns (UserSessionsResponse);
   rpc ResetUserSessionsBulk(ResetUserSessionsBulkRequest) returns (MutationResponse);
   rpc Emojis(EmojiListRequest) returns (EmojiListResponse);
+  rpc EmojiRevision(EmojiListRequest) returns (EmojiRevisionResponse);
   rpc AddEmoji(EmojiMutationRequest) returns (MutationResponse);
   rpc AddEmojiAlias(EmojiMutationRequest) returns (MutationResponse);
   rpc RemoveEmoji(EmojiMutationRequest) returns (MutationResponse);

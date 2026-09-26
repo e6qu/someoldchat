@@ -11,6 +11,10 @@ message AccessLog {
   int64 created_at = 4;
   string ip = 5;
   string user_agent = 6;
+  // created_at is date_last; date_first and count aggregate every access by
+  // this member from this address with this user agent.
+  int64 date_first = 7;
+  int64 count = 8;
 }
 
 message RecordAccessRequest {
@@ -33,6 +37,7 @@ message AccessLogsRequest {
 message AccessLogsResponse {
   repeated AccessLog logs = 1;
   bool has_more = 2;
+  int64 total = 3;
 }
 
 message AccessMutationResponse {

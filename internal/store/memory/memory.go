@@ -112,6 +112,7 @@ type Store struct {
 	remoteFileShares              map[domain.FileID][]domain.ConversationID
 	dnd                           map[domain.UserID]domain.DoNotDisturb
 	stars                         map[domain.UserID]map[domain.MessageID]domain.Star
+	channelStars                  map[domain.UserID]map[domain.ConversationID]domain.Star
 	savedItems                    map[domain.SavedItemID]domain.SavedItem
 	bookmarks                     map[domain.BookmarkID]domain.Bookmark
 	reminders                     map[domain.ReminderID]domain.Reminder
@@ -127,6 +128,7 @@ type Store struct {
 	userGroups                    map[domain.UserGroupID]domain.UserGroup
 	calls                         map[domain.CallID]domain.Call
 	emojis                        map[string]domain.CustomEmoji
+	emojiRevisions                map[domain.WorkspaceID]time.Time
 	canvases                      map[domain.CanvasID]domain.Canvas
 	canvasAccess                  map[string]domain.CanvasAccess
 	canvasRevisions               map[domain.CanvasID][]domain.CanvasRevision
@@ -196,41 +198,65 @@ func (s *Store) InviteToHuddle(_ context.Context, event events.Event) error {
 func (s *Store) RecordAccess(_ context.Context, value domain.AccessLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	value.FirstAt, value.CreatedAt = value.FirstAt.Truncate(time.Second).UTC(), value.CreatedAt.Truncate(time.Second).UTC()
+	if value.FirstAt.IsZero() {
+		value.FirstAt = value.CreatedAt
+	}
+	if value.Count <= 0 {
+		value.Count = 1
+	}
+	for index, existing := range s.accessLogs {
+		if existing.WorkspaceID == value.WorkspaceID && existing.UserID == value.UserID && existing.IP == value.IP && existing.UserAgent == value.UserAgent {
+			existing.Count += value.Count
+			existing.Username = value.Username
+			if value.CreatedAt.After(existing.CreatedAt) {
+				existing.CreatedAt = value.CreatedAt
+			}
+			s.accessLogs[index] = existing
+			return nil
+		}
+	}
 	s.accessLogs = append(s.accessLogs, value)
 	return nil
 }
-func (s *Store) ListAccessLogs(_ context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
+
+func (s *Store) ListAccessLogs(_ context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
 	if limit <= 0 || limit > 1000 || page <= 0 {
-		return nil, false, store.InvalidArgument("access log page parameters are invalid")
+		return domain.AccessLogPage{}, store.InvalidArgument("access log page parameters are invalid")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]domain.AccessLog, 0, limit+1)
+	matched := make([]domain.AccessLog, 0)
+	for _, value := range s.accessLogs {
+		if value.WorkspaceID != workspace || (!before.IsZero() && value.FirstAt.After(before)) {
+			continue
+		}
+		matched = append(matched, value)
+	}
+	// The SQL store's order: most recently seen first, then most recently
+	// first seen, then by member, address and user agent.
+	sort.Slice(matched, func(left, right int) bool {
+		a, b := matched[left], matched[right]
+		switch {
+		case !a.CreatedAt.Equal(b.CreatedAt):
+			return a.CreatedAt.After(b.CreatedAt)
+		case !a.FirstAt.Equal(b.FirstAt):
+			return a.FirstAt.After(b.FirstAt)
+		case a.UserID != b.UserID:
+			return a.UserID < b.UserID
+		case a.IP != b.IP:
+			return a.IP < b.IP
+		default:
+			return a.UserAgent < b.UserAgent
+		}
+	})
+	result := domain.AccessLogPage{Logins: []domain.AccessLog{}, Total: len(matched)}
 	start := (page - 1) * limit
-	matched := 0
-	for index := len(s.accessLogs) - 1; index >= 0; index-- {
-		value := s.accessLogs[index]
-		if value.WorkspaceID != workspace || (!before.IsZero() && value.CreatedAt.After(before)) {
-			continue
-		}
-		if matched < start {
-			matched++
-			continue
-		}
-		if len(values) == limit+1 {
-			break
-		}
-		values = append(values, value)
-		matched++
+	for position := start; position < len(matched) && position < start+limit; position++ {
+		result.Logins = append(result.Logins, matched[position])
 	}
-	if len(values) == 0 {
-		return []domain.AccessLog{}, false, nil
-	}
-	hasMore := len(values) > limit
-	if hasMore {
-		values = values[:limit]
-	}
-	return values, hasMore, nil
+	result.HasMore = start+limit < len(matched)
+	return result, nil
 }
 
 type memoryLease struct {
@@ -352,6 +378,7 @@ func New() *Store {
 		remoteFileShares:              make(map[domain.FileID][]domain.ConversationID),
 		dnd:                           make(map[domain.UserID]domain.DoNotDisturb),
 		stars:                         make(map[domain.UserID]map[domain.MessageID]domain.Star),
+		channelStars:                  make(map[domain.UserID]map[domain.ConversationID]domain.Star),
 		savedItems:                    make(map[domain.SavedItemID]domain.SavedItem),
 		reminders:                     make(map[domain.ReminderID]domain.Reminder),
 		reminderDelivery:              make(map[domain.ReminderID]time.Time),
@@ -366,6 +393,7 @@ func New() *Store {
 		userGroups:                    make(map[domain.UserGroupID]domain.UserGroup),
 		calls:                         make(map[domain.CallID]domain.Call),
 		emojis:                        make(map[string]domain.CustomEmoji),
+		emojiRevisions:                make(map[domain.WorkspaceID]time.Time),
 		bookmarks:                     make(map[domain.BookmarkID]domain.Bookmark),
 		canvases:                      make(map[domain.CanvasID]domain.Canvas),
 		canvasAccess:                  make(map[string]domain.CanvasAccess),
@@ -1125,9 +1153,31 @@ func (s *Store) AddEmoji(_ context.Context, value domain.CustomEmoji, event even
 	if _, exists := s.emojis[key]; exists {
 		return store.ErrAlreadyExists
 	}
+	if !value.CreatedAt.IsZero() {
+		value.CreatedAt = time.Unix(value.CreatedAt.Unix(), 0).UTC()
+	}
 	s.emojis[key] = value
+	s.touchEmojiRevisionLocked(value.WorkspaceID, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+// touchEmojiRevisionLocked mirrors the SQL store's custom_emoji_revisions:
+// microsecond precision, and never moving backwards.
+func (s *Store) touchEmojiRevisionLocked(workspace domain.WorkspaceID, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	at = time.UnixMicro(at.UnixMicro()).UTC()
+	if at.After(s.emojiRevisions[workspace]) {
+		s.emojiRevisions[workspace] = at
+	}
+}
+
+func (s *Store) EmojiRevision(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.emojiRevisions[workspace], nil
 }
 
 func (s *Store) ListEmojis(_ context.Context, workspace domain.WorkspaceID) ([]domain.CustomEmoji, error) {
@@ -1143,6 +1193,8 @@ func (s *Store) ListEmojis(_ context.Context, workspace domain.WorkspaceID) ([]d
 	return result, nil
 }
 
+// RemoveEmoji removes a custom emoji together with every alias that points at
+// it, as the SQL store does.
 func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1151,10 +1203,18 @@ func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, nam
 		return store.ErrNotFound
 	}
 	delete(s.emojis, key)
+	for aliasKey, value := range s.emojis {
+		if value.WorkspaceID == workspace && value.AliasFor == name {
+			delete(s.emojis, aliasKey)
+		}
+	}
+	s.touchEmojiRevisionLocked(workspace, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
 
+// RenameEmoji renames a custom emoji and retargets the aliases that pointed at
+// the old name, as the SQL store does.
 func (s *Store) RenameEmoji(_ context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1169,6 +1229,13 @@ func (s *Store) RenameEmoji(_ context.Context, workspace domain.WorkspaceID, old
 	value.Name = newName
 	s.emojis[newKey] = value
 	delete(s.emojis, oldKey)
+	for aliasKey, alias := range s.emojis {
+		if alias.WorkspaceID == workspace && alias.AliasFor == oldName {
+			alias.AliasFor = newName
+			s.emojis[aliasKey] = alias
+		}
+	}
+	s.touchEmojiRevisionLocked(workspace, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -3817,6 +3884,9 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	}
 	if value.IsDirectOrGroup() {
 		return store.ErrInvalidConversationType
+	}
+	for _, stars := range s.channelStars {
+		delete(stars, conversation)
 	}
 	for _, message := range s.messages[conversation] {
 		delete(s.reactions, message.ID)
@@ -8867,13 +8937,36 @@ func (s *Store) ListPins(_ context.Context, conversation domain.ConversationID, 
 // starKey is an ordering key AND a keyset cursor. See userReactionKey: the
 // variable-width encoding reordered stars.list and made the next page skip
 // every row whose fraction was a strict extension of the cursor's.
+// starKey orders stars the way the SQL store does: by when they were made,
+// then by message ID, or "channel:" and the channel for a channel star.
 func starKey(value domain.Star) string {
-	return string(domain.NewStoredTime(value.CreatedAt)) + "\x00" + string(value.Message.ID)
+	return string(domain.NewStoredTime(value.CreatedAt)) + "\x00" + starItemKey(value)
+}
+
+func starItemKey(value domain.Star) string {
+	if value.IsChannel() {
+		return "channel:" + string(value.Conversation)
+	}
+	return string(value.Message.ID)
 }
 
 func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if star.IsChannel() {
+		if _, ok := s.conversations[star.Conversation]; !ok {
+			return store.ErrNotFound
+		}
+		if s.channelStars[star.UserID] == nil {
+			s.channelStars[star.UserID] = make(map[domain.ConversationID]domain.Star)
+		}
+		if _, exists := s.channelStars[star.UserID][star.Conversation]; exists {
+			return store.ErrAlreadyExists
+		}
+		s.channelStars[star.UserID][star.Conversation] = star
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
 	message, err := s.messageLocked(star.Message.ID)
 	if err != nil {
 		return err
@@ -8893,6 +8986,14 @@ func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event)
 func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if star.IsChannel() {
+		if _, exists := s.channelStars[star.UserID][star.Conversation]; !exists {
+			return store.ErrNotFound
+		}
+		delete(s.channelStars[star.UserID], star.Conversation)
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
 	if _, err := s.messageLocked(star.Message.ID); err != nil {
 		return err
 	}
@@ -8904,17 +9005,18 @@ func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Eve
 	return nil
 }
 
-func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]domain.Star, 0, request.Limit+1)
+	page := domain.StarPage{Stars: make([]domain.Star, 0, request.Limit+1)}
+	less := func(left, right domain.Star) bool { return starKey(left) < starKey(right) }
 	for _, star := range s.stars[user] {
 		// The star holds the message as it was when starred; the SQL
 		// repositories join the message as it is now, so an edit or a deletion
@@ -8924,27 +9026,36 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 			continue
 		}
 		star.Message = current
-		if star.Message.WorkspaceID != workspace || star.Message.Deleted || (after != "" && starKey(star) <= after) {
+		if star.Message.WorkspaceID != workspace || star.Message.Deleted || !s.memberMayReadLocked(star.Message.Conversation, user) {
 			continue
 		}
-		if !s.memberMayReadLocked(star.Message.Conversation, user) {
+		page.Total++
+		if after != "" && starKey(star) <= after {
 			continue
 		}
 		star.Message = s.cloneMessage(star.Message)
-		values = appendSorted(values, star, request.Limit+1, func(left, right domain.Star) bool { return starKey(left) < starKey(right) })
+		page.Stars = appendSorted(page.Stars, star, request.Limit+1, less)
 	}
-	hasMore := len(values) > request.Limit
-	if hasMore {
-		values = values[:request.Limit]
+	for conversationID, star := range s.channelStars[user] {
+		conversation, ok := s.conversations[conversationID]
+		if !ok || conversation.WorkspaceID != workspace || !s.memberMayReadLocked(conversationID, user) {
+			continue
+		}
+		page.Total++
+		if after != "" && starKey(star) <= after {
+			continue
+		}
+		page.Stars = appendSorted(page.Stars, star, request.Limit+1, less)
 	}
-	var next domain.Cursor
-	if hasMore {
-		next, err = domain.NewListCursor(starKey(values[len(values)-1]))
+	page.HasMore = len(page.Stars) > request.Limit
+	if page.HasMore {
+		page.Stars = page.Stars[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(starKey(page.Stars[len(page.Stars)-1]))
 		if err != nil {
-			return nil, "", false, err
+			return domain.StarPage{}, err
 		}
 	}
-	return values, next, hasMore, nil
+	return page, nil
 }
 
 func savedItemKey(value domain.SavedItem) string {
@@ -9179,6 +9290,11 @@ func (s *Store) CreateReminder(_ context.Context, reminder domain.Reminder, even
 	if _, exists := s.reminders[reminder.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	// The SQL column defaults to UTC; a reminder written without a zone reads
+	// back the same on both profiles.
+	if reminder.TimeZone == "" {
+		reminder.TimeZone = "UTC"
+	}
 	s.reminders[reminder.ID] = reminder
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -9216,7 +9332,7 @@ func (s *Store) ListReminders(_ context.Context, workspace domain.WorkspaceID, u
 	defer s.mu.RUnlock()
 	values := make([]domain.Reminder, 0, request.Limit+1)
 	for _, reminder := range s.reminders {
-		if reminder.WorkspaceID != workspace || reminder.User != user || string(reminder.ID) <= after {
+		if reminder.WorkspaceID != workspace || (reminder.User != user && reminder.Creator != user) || string(reminder.ID) <= after {
 			continue
 		}
 		values = appendSorted(values, reminder, request.Limit+1, func(left, right domain.Reminder) bool { return left.ID < right.ID })
@@ -9283,17 +9399,24 @@ func (s *Store) DueReminders(_ context.Context, workspace domain.WorkspaceID, no
 	return values, nil
 }
 
-func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
+func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt, next time.Time, event events.Event) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Losing the claim and never having existed are the same answer here: the
 	// worker only claims what it has just read as due, and either way it must
 	// not deliver. Telling them apart would cost a read no caller wants.
 	reminder, exists := s.reminders[id]
-	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() {
+	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() || reminder.Time.After(deliveredAt) {
 		return false, nil
 	}
-	s.reminderDelivery[id] = deliveredAt.UTC()
+	if next.IsZero() {
+		s.reminderDelivery[id] = deliveredAt.UTC()
+	} else {
+		// A recurring reminder moves to its next occurrence; the claim is the
+		// move, as the SQL store's is.
+		reminder.Time = next.UTC().Truncate(time.Second)
+		s.reminders[id] = reminder
+	}
 	// The notice and the Activity row are written with the claim, so a member
 	// cannot be marked reminded without being shown the reminder.
 	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, reminder.User)
@@ -10319,6 +10442,7 @@ func (s *Store) SetUserGroupChannels(_ context.Context, workspace domain.Workspa
 
 func cloneCall(value domain.Call) domain.Call {
 	value.Participants = append([]domain.UserID(nil), value.Participants...)
+	value.ExternalParticipants = append([]domain.ExternalCallParticipant(nil), value.ExternalParticipants...)
 	return value
 }
 
@@ -10469,7 +10593,7 @@ func (s *Store) EndCall(_ context.Context, workspace domain.WorkspaceID, id doma
 	return nil
 }
 
-func (s *Store) SetCallParticipants(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) error {
+func (s *Store) SetCallParticipants(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, externals []domain.ExternalCallParticipant, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.calls[id]
@@ -10477,6 +10601,7 @@ func (s *Store) SetCallParticipants(_ context.Context, workspace domain.Workspac
 		return store.ErrNotFound
 	}
 	value.Participants = append([]domain.UserID(nil), users...)
+	value.ExternalParticipants = append([]domain.ExternalCallParticipant(nil), externals...)
 	s.calls[id] = value
 	s.outbox = append(s.outbox, event)
 	return nil

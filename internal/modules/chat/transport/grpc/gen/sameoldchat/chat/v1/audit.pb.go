@@ -22,13 +22,17 @@ const (
 )
 
 type AccessLog struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Username      string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Ip            string                 `protobuf:"bytes,5,opt,name=ip,proto3" json:"ip,omitempty"`
-	UserAgent     string                 `protobuf:"bytes,6,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Username    string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
+	CreatedAt   int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Ip          string                 `protobuf:"bytes,5,opt,name=ip,proto3" json:"ip,omitempty"`
+	UserAgent   string                 `protobuf:"bytes,6,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	// created_at is date_last; date_first and count aggregate every access by
+	// this member from this address with this user agent.
+	DateFirst     int64 `protobuf:"varint,7,opt,name=date_first,json=dateFirst,proto3" json:"date_first,omitempty"`
+	Count         int64 `protobuf:"varint,8,opt,name=count,proto3" json:"count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -103,6 +107,20 @@ func (x *AccessLog) GetUserAgent() string {
 		return x.UserAgent
 	}
 	return ""
+}
+
+func (x *AccessLog) GetDateFirst() int64 {
+	if x != nil {
+		return x.DateFirst
+	}
+	return 0
+}
+
+func (x *AccessLog) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
 }
 
 type RecordAccessRequest struct {
@@ -255,6 +273,7 @@ type AccessLogsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Logs          []*AccessLog           `protobuf:"bytes,1,rep,name=logs,proto3" json:"logs,omitempty"`
 	HasMore       bool                   `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	Total         int64                  `protobuf:"varint,3,opt,name=total,proto3" json:"total,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -301,6 +320,13 @@ func (x *AccessLogsResponse) GetHasMore() bool {
 		return x.HasMore
 	}
 	return false
+}
+
+func (x *AccessLogsResponse) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
 }
 
 type AccessMutationResponse struct {
@@ -897,7 +923,7 @@ var File_sameoldchat_chat_v1_audit_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_audit_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/audit.proto\x12\x13sameoldchat.chat.v1\"\xb1\x01\n" +
+	"\x1fsameoldchat/chat/v1/audit.proto\x12\x13sameoldchat.chat.v1\"\xe6\x01\n" +
 	"\tAccessLog\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1a\n" +
@@ -906,7 +932,10 @@ const file_sameoldchat_chat_v1_audit_proto_rawDesc = "" +
 	"created_at\x18\x04 \x01(\x03R\tcreatedAt\x12\x0e\n" +
 	"\x02ip\x18\x05 \x01(\tR\x02ip\x12\x1d\n" +
 	"\n" +
-	"user_agent\x18\x06 \x01(\tR\tuserAgent\"\x80\x01\n" +
+	"user_agent\x18\x06 \x01(\tR\tuserAgent\x12\x1d\n" +
+	"\n" +
+	"date_first\x18\a \x01(\x03R\tdateFirst\x12\x14\n" +
+	"\x05count\x18\b \x01(\x03R\x05count\"\x80\x01\n" +
 	"\x13RecordAccessRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x0e\n" +
@@ -919,10 +948,11 @@ const file_sameoldchat_chat_v1_audit_proto_rawDesc = "" +
 	"\x06before\x18\x03 \x01(\x03H\x00R\x06before\x88\x01\x01\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x12\n" +
 	"\x04page\x18\x05 \x01(\x05R\x04pageB\t\n" +
-	"\a_before\"c\n" +
+	"\a_before\"y\n" +
 	"\x12AccessLogsResponse\x122\n" +
 	"\x04logs\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.AccessLogR\x04logs\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"(\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\x12\x14\n" +
+	"\x05total\x18\x03 \x01(\x03R\x05total\"(\n" +
 	"\x16AccessMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\"|\n" +
 	"\x19WorkspaceAnalyticsRequest\x12!\n" +

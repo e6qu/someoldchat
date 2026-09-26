@@ -308,9 +308,15 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/05-search-and-activity.md
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestSearchHighlightUsesSlacksMarkers
+      - go-test:internal/service:TestSearchDatesResolveRelativeDaysInTheSearchersZone
+      - go-test:internal/service:TestSearchTrailingWildcardIsAPrefix
     deviations:
       - Relevance scoring is deterministic but has not been compared with Slack's ranking model.
-      - Highlight markers, every reaction-specific modifier, and live indexing-delay behavior remain unqualified.
+      - Highlight markers wrap case-insensitive occurrences of each free-text term in message text only; attachment and block text are not marked.
+      - Relative dates resolve in the zone of the searcher's notification schedule, the only member time zone this product records, and in UTC when there is none.
+      - Every reaction-specific modifier and live indexing-delay behavior remain unqualified.
     audit:
       downgraded_from: behavior-compatible
       reason: The previous claim covered substring matching and response decoding, not Slack's current modifier, token-type, sorting, ranking, and highlighting behavior.
@@ -371,6 +377,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestTeamProfileGet
       - go-test:internal/api/slack:TestCustomProfileFieldsThroughTeamAndUserProfile
+      - go-test:internal/api/slack:TestTeamProfileGetFiltersByVisibility
   - method: emoji.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -389,11 +396,14 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersIdentity
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestUsersIdentityFollowsItsScopes
   - method: users.deletePhoto
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersDeletePhoto
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
   - method: conversations.create
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -795,6 +805,8 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminEmojiListAcceptsAReadOnlyAdminToken
+      - go-test:internal/api/slack:TestAdminEmojiLifecycle
+      - go-test:internal/service:TestCustomEmojiLifecycleNormalizesAndPersists
   - method: admin.emoji.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1000,6 +1012,9 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestCallLifecycleNormalizesParticipants
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - method: calls.end
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1010,11 +1025,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestCallLifecycleNormalizesParticipants
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - method: calls.participants.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestCallLifecycleNormalizesParticipants
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - method: calls.participants.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1030,7 +1051,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.deleteScheduledMessage/
     evidence:
-      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheSchedulingIdentity
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
       - go-test:internal/service:TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation
       - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
@@ -1040,7 +1061,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
-      - schedules created before schema 102 lack reconstructable token identity and cannot be deleted through an exact-token request
+      - schedules created before schema 102 recorded no app or bot, so schema 186 assigns them to their author with no app; an app's token cannot see or delete them, the author's first-party session can
   - method: chat.postEphemeral
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1052,7 +1073,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.scheduleMessage/
     evidence:
-      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheSchedulingIdentity
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
       - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
       - go-test:internal/scheduler:TestWorkerExecutesEveryWorkspaceAndPreservesThreadAndAppAttribution
@@ -1066,13 +1087,13 @@ operations:
     deviations:
       - markdown_text, metadata, reply_broadcast, parse, link_names, and unfurl controls are not implemented (as_user is read and ignored, as chat.postMessage does; a user token posts as its user, a bot token as its bot)
       - Web API rate limiting now answers 429 with Retry-After and ratelimited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
-      - schedules created before schema 102 lack reconstructable app and token attribution
+      - schedules created before schema 102 lack reconstructable app attribution
   - method: chat.scheduledMessages.list
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.scheduledMessages.list/
     evidence:
-      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheSchedulingIdentity
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
       - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
       - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
@@ -1083,12 +1104,15 @@ operations:
     deviations:
       - org-level team_id selection is not implemented
       - Web API rate limiting now answers 429 with Retry-After and ratelimited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
-      - schedules created before schema 102 lack reconstructable token identity and are excluded from exact-token results
+      - schedules created before schema 102 recorded no app or bot, so schema 186 assigns them to their author with no app; they list for the author's first-party session, not for an app's token
   - method: chat.unfurl
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestChatUnfurlPersistsMetadata
+      - go-test:internal/service:TestUnfurlPersistsNormalizedMetadata
+    deviations:
+      - No link_shared event is emitted yet, so the unfurl_id form is only reachable with an ID built by domain.NewUnfurlID; source=composer is answered cannot_unfurl_url because no composer preview exists.
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1099,26 +1123,33 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestDoNotDisturbEndClearsEnabledState
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
   - method: dnd.endSnooze
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestDoNotDisturbLifecycle
+      - go-test:internal/api/slack:TestDoNotDisturbSnoozeContracts
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
   - method: dnd.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestDoNotDisturbLifecycle
+      - go-test:internal/api/slack:TestDoNotDisturbSnoozeContracts
   - method: dnd.setSnooze
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestDoNotDisturbLifecycle
+      - go-test:internal/api/slack:TestDoNotDisturbSnoozeContracts
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
   - method: dnd.teamInfo
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestDndTeamInfoNamesEveryMemberOfALargeWorkspace
+      - go-test:internal/api/slack:TestDoNotDisturbSnoozeContracts
   - method: files.comments.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1234,8 +1265,10 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/scheduler:TestRecurringReminderMovesToItsNextOccurrence
+      - go-test:internal/api/slack:TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse
     deviations:
-      - Natural-language time descriptions and the recurrence object are not implemented.
+      - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse, and the recurrence object in responses is only the recurring flag.
       - Delivery shows the reminder in the member's Activity at the due instant; Slack posts it as a Slackbot direct message.
       - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
     audit:
@@ -1253,9 +1286,10 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/service:TestCompleteReminderDistinguishesOthersAndRecurring
     audit:
       downgraded_from: behavior-compatible
-      reason: The recurring and ownership error contract is implemented — cannot_complete_recurring for a recurring reminder and cannot_complete_others for another member's — and covered by service, Slack-handler, and differential-seam tests, but no official SDK exercises reminders.complete's error paths, so the method stays sdk-compatible rather than behavior-compatible.
+      reason: The recurring and ownership error contract is implemented — cannot_complete_recurring for a recurring reminder, cannot_complete_others for one the caller set for another member, and not_found for one the caller neither set nor receives — and covered by service, Slack-handler, and differential-seam tests, but no official SDK exercises reminders.complete's error paths, so the method stays sdk-compatible rather than behavior-compatible.
       evidence:
         - journey:specs/journeys/06-later-and-reminders.md
         - source:internal/service/messages.go
@@ -1286,7 +1320,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
-      - Recurring reminders and current retirement behavior are not represented.
+      - Current retirement behavior is not represented.
     audit:
       downgraded_from: behavior-compatible
       reason: The response is SDK-decodable but the only locally creatable reminder shape is non-recurring and has not been compared with Slack.
@@ -1301,6 +1335,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/service:TestCompleteReminderDistinguishesOthersAndRecurring
     deviations:
       - Recurring reminder projection, retirement behavior, and live list inclusion rules have not been differentially qualified.
     audit:
@@ -1321,21 +1356,30 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestStarsMessageLifecycle
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestStarsChannelItemsErrorsAndPaging
   - method: stars.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestStarsListEmitsTheCursorThatReachesPageTwo
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestStarsChannelItemsErrorsAndPaging
   - method: stars.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestStarsMessageLifecycle
+      - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestStarsChannelItemsErrorsAndPaging
   - method: team.accessLogs
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAccessLogsRequireAdminAndExposeRecordedAccess
+      - go-test:internal/store/sqlstore:TestSchema185FoldsPerRequestAccessLogs
+    deviations:
+      - country, region and isp are null because no geolocation database is bundled.
   - method: team.billableInfo
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1351,18 +1395,21 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
       - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.disable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
       - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.enable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
   - method: usergroups.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1374,6 +1421,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
       - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.users.list
     status: behavior-compatible
@@ -1385,6 +1433,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupUsersUpdateRequiresItsMandatoryArguments
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
   - method: users.setActive
     status: behavior-compatible
     provenance: slack-api-specs-openapi

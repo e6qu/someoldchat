@@ -675,12 +675,12 @@ func conversionCases() map[string]conversionCase {
 		}},
 		"StarPage": {sample: &starPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*starPage)
-			wire := encodeProtoStarPage(value.Stars, value.NextCursor, value.HasMore)
+			wire := encodeProtoStarPage(domain.StarPage{Stars: value.Stars, NextCursor: value.NextCursor, HasMore: value.HasMore, Total: value.Total})
 			decoded, err := decodeProtoStarPage(wire)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			return &starPage{Stars: decoded.Stars, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire, nil
+			return &starPage{Stars: decoded.Stars, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore, Total: decoded.Total}, wire, nil
 		}},
 		"ReactionPage": {sample: &reactionPage{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*reactionPage)
@@ -729,6 +729,7 @@ type starPage struct {
 	Stars      []domain.Star
 	NextCursor domain.Cursor
 	HasMore    bool
+	Total      int
 }
 
 type reactionPage struct {

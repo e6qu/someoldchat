@@ -1136,7 +1136,8 @@ test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls rend
     ],
   });
   const linkText = `runbook link ${stamp}`;
-  const linked = await postThroughTheAPI(request, linkText);
+  // chat.unfurl only attaches a preview to a URL the message contains.
+  const linked = await postThroughTheAPI(request, `${linkText} https://example.com/runbook`);
   const unfurl = await request.post('/api/chat.unfurl', {
     headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
     data: {

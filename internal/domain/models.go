@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"strings"
@@ -255,6 +256,10 @@ type CustomEmoji struct {
 	Name        string
 	URL         string
 	AliasFor    string
+	// CreatedAt and CreatedBy are admin.emoji.list's date_created and
+	// uploaded_by. Rows written before they were recorded carry zero values.
+	CreatedAt time.Time
+	CreatedBy UserID
 }
 
 type Presence string
@@ -360,10 +365,29 @@ type Call struct {
 	// Participants are the people currently in the call, not everyone who ever
 	// was. Someone who leaves is removed; the record of their having been there
 	// is the huddle.joined and huddle.left pair in the durable journal.
-	Participants    []UserID
-	StartedAt       time.Time
-	EndedAt         time.Time
-	DurationSeconds int64
+	Participants []UserID
+	// ExternalParticipants are the people in an app-registered call who have
+	// no account here: Slack's calls API names them by the provider's
+	// external_id with a display name and avatar. A huddle never has any.
+	ExternalParticipants []ExternalCallParticipant
+	StartedAt            time.Time
+	EndedAt              time.Time
+	DurationSeconds      int64
+}
+
+// ExternalCallParticipant is a calls-API participant identified by the call
+// provider rather than by a member ID.
+type ExternalCallParticipant struct {
+	ExternalID  string
+	DisplayName string
+	AvatarURL   string
+}
+
+// CallParticipant is one entry of a calls-API `users` list: either a member
+// (SlackID) or an external participant, never both.
+type CallParticipant struct {
+	SlackID  UserID
+	External ExternalCallParticipant
 }
 
 // Active reports whether the call is still running.
@@ -845,6 +869,20 @@ type WorkspaceSession struct {
 	UserID    UserID
 	CreatedAt time.Time
 	ExpiresAt time.Time
+}
+
+// ScheduledMessageOwner is the identity a scheduled message belongs to for
+// chat.scheduledMessages.list and chat.deleteScheduledMessage: the app's bot
+// for a bot token, and the member together with the app for a user token (a
+// first-party session is a user with no app). Slack scopes those methods to
+// who scheduled the message, not to the bytes of one token, so a rotated or
+// reissued token of the same bot or user keeps its schedules. It used to be the
+// hash of the exact bearer token, which lost every schedule on rotation.
+func ScheduledMessageOwner(workspace WorkspaceID, user UserID, app AppID, bot BotID) string {
+	if bot != "" {
+		return HashToken("scheduled-owner\x00bot\x00" + string(workspace) + "\x00" + string(app) + "\x00" + string(bot))
+	}
+	return HashToken("scheduled-owner\x00user\x00" + string(workspace) + "\x00" + string(user) + "\x00" + string(app))
 }
 
 func HashToken(token string) string {
@@ -2017,11 +2055,24 @@ type Pin struct {
 	Item Message
 }
 
+// Star is a legacy stars.* item: a starred message, or - when Message is the
+// zero value - a starred channel.
 type Star struct {
 	Message      Message
 	Conversation ConversationID
 	UserID       UserID
 	CreatedAt    time.Time
+}
+
+// IsChannel reports whether the star is on a channel rather than a message.
+func (s Star) IsChannel() bool { return s.Message.ID == "" }
+
+// StarPage is one page of a member's stars and how many they have in all.
+type StarPage struct {
+	Stars      []Star
+	NextCursor Cursor
+	HasMore    bool
+	Total      int
 }
 
 type SavedItemState string
@@ -2509,9 +2560,25 @@ type Reminder struct {
 	Creator     UserID
 	User        UserID
 	Text        string
-	Time        time.Time
-	CompleteAt  time.Time
-	Recurring   bool
+	// Time is when the reminder next comes due; a recurring reminder's Time
+	// moves to its next occurrence each time it is delivered.
+	Time       time.Time
+	CompleteAt time.Time
+	// Recurring is Slack's flag; Recurrence, TimeZone and RecurrenceAnchor
+	// say how a recurring reminder recurs ("every Thursday" in the member's
+	// zone, positioned by its first occurrence).
+	Recurring        bool
+	Recurrence       ReminderRecurrence
+	TimeZone         string
+	RecurrenceAnchor time.Time
+}
+
+// ReminderSchedule is when a reminders.add reminder comes due and whether,
+// and in which zone, it recurs.
+type ReminderSchedule struct {
+	Due        time.Time
+	Recurrence ReminderRecurrence
+	TimeZone   string
 }
 
 type ReminderPage struct {
@@ -3965,6 +4032,24 @@ func normalizeJSONArrayObjects(raw []byte, name string) (string, error) {
 	return compact.String(), nil
 }
 
+// NewUnfurlID names the posted message whose links a link_shared event asks
+// an app to unfurl. chat.unfurl accepts it, with source=conversations_history,
+// in place of channel and ts. Slack treats the value as opaque; this one is the
+// conversation and the message timestamp joined by a dot, which neither part's
+// leading segment can contain.
+func NewUnfurlID(conversation ConversationID, timestamp MessageTimestamp) string {
+	return string(conversation) + "." + string(timestamp)
+}
+
+// ParseUnfurlID reverses NewUnfurlID.
+func ParseUnfurlID(value string) (ConversationID, MessageTimestamp, bool) {
+	conversation, timestamp, found := strings.Cut(strings.TrimSpace(value), ".")
+	if !found || conversation == "" || timestamp == "" {
+		return "", "", false
+	}
+	return ConversationID(conversation), MessageTimestamp(timestamp), true
+}
+
 func NormalizeUnfurls(values map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(values))
 	for key, raw := range values {
@@ -4079,13 +4164,39 @@ type ChannelActivity struct {
 	Messages       int
 }
 
+// AccessLog is one row of team.accessLogs: every access by one member from
+// one IP address with one user agent, aggregated. Slack reports each such
+// combination once with how many times it was seen and when first and last;
+// recording a row per request answered the same login thousands of times.
 type AccessLog struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	Username    string
-	CreatedAt   time.Time
-	IP          string
-	UserAgent   string
+	// FirstAt and CreatedAt are date_first and date_last.
+	FirstAt   time.Time
+	CreatedAt time.Time
+	Count     int64
+	IP        string
+	UserAgent string
+}
+
+// AccessLogPage is one page of the aggregated access log and the size of the
+// whole log it pages through.
+type AccessLogPage struct {
+	Logins  []AccessLog
+	Total   int
+	HasMore bool
+}
+
+// AccessLogIP is the address an access is attributed to: the host part of a
+// remote address, without the ephemeral source port that made every request
+// from one machine look like a different address.
+func AccessLogIP(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 type IntegrationLog struct {
