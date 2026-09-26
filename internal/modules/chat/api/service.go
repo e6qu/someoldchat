@@ -36,6 +36,7 @@ type Service interface {
 	DeleteAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) error
 	AppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
 	OpenAppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
+	OpenAppMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.Conversation, error)
 	GetDeveloperApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.App, string, error)
 	GetDeveloperAppDeliveryHealth(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.AppDeliveryHealth, error)
 	IssueDeveloperAppToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, []string) (domain.AppTokenCredentials, error)

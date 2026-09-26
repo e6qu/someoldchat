@@ -3893,6 +3893,10 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				messagesTab, err := chat.OpenAppMessages(ctx, "T1", "U1", "A1")
+				if err != nil {
+					return nil, err
+				}
 				dialogErr := chat.OpenDialog(ctx, "T1", "UBOT", "A1", "trigger_dialog",
 					`{"callback_id":"ticket","title":"File a ticket","elements":[{"type":"text","name":"summary","label":"Summary"}]}`)
 				// A dialog that is not a dialog is refused rather than stored,
@@ -3905,10 +3909,11 @@ func parityCases() []parityCase {
 					pushed.Type, pushed.RootViewID == opened.ID, pushed.PreviousViewID == opened.ID,
 					staleErr != nil, errors.Is(staleErr, storepkg.ErrConflict),
 					updated.ID == pushed.ID, updated.Hash != pushed.Hash, normalizeViewPayload(updated.Payload),
-					replayErr != nil, errors.Is(replayErr, service.ErrInvalidTrigger),
+					replayErr != nil, errors.Is(replayErr, service.ErrTriggerExchanged),
 					published.Type, published.UserID, normalizeViewPayload(published.Payload),
 					installed.ID, installed.Name, installed.HomeTabEnabled, normalizeViewPayload(home.Payload),
 					openedApp.ID, openedHome.Payload == home.Payload,
+					messagesTab.Kind, messagesTab.ID != "",
 					dialogErr == nil, invalidDialogErr != nil,
 					errors.Is(invalidDialogErr, service.ErrInvalidDialog),
 				}, nil

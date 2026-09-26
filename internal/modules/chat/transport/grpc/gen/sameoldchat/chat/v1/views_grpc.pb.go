@@ -26,6 +26,7 @@ const (
 	ViewsService_CurrentModalView_FullMethodName = "/sameoldchat.chat.v1.ViewsService/CurrentModalView"
 	ViewsService_AppHome_FullMethodName          = "/sameoldchat.chat.v1.ViewsService/AppHome"
 	ViewsService_OpenAppHome_FullMethodName      = "/sameoldchat.chat.v1.ViewsService/OpenAppHome"
+	ViewsService_OpenAppMessages_FullMethodName  = "/sameoldchat.chat.v1.ViewsService/OpenAppMessages"
 	ViewsService_SubmitView_FullMethodName       = "/sameoldchat.chat.v1.ViewsService/SubmitView"
 	ViewsService_CloseView_FullMethodName        = "/sameoldchat.chat.v1.ViewsService/CloseView"
 )
@@ -41,6 +42,9 @@ type ViewsServiceClient interface {
 	CurrentModalView(ctx context.Context, in *CurrentModalViewRequest, opts ...grpc.CallOption) (*View, error)
 	AppHome(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*AppHomeResponse, error)
 	OpenAppHome(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*AppHomeResponse, error)
+	// OpenAppMessages opens the app bot DM from the app's Messages tab and
+	// records app_home_opened with tab "messages".
+	OpenAppMessages(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*Conversation, error)
 	SubmitView(ctx context.Context, in *ViewSubmissionRequest, opts ...grpc.CallOption) (*ViewInteractionResult, error)
 	CloseView(ctx context.Context, in *CloseViewRequest, opts ...grpc.CallOption) (*ViewMutationResponse, error)
 }
@@ -123,6 +127,16 @@ func (c *viewsServiceClient) OpenAppHome(ctx context.Context, in *AppHomeRequest
 	return out, nil
 }
 
+func (c *viewsServiceClient) OpenAppMessages(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, ViewsService_OpenAppMessages_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *viewsServiceClient) SubmitView(ctx context.Context, in *ViewSubmissionRequest, opts ...grpc.CallOption) (*ViewInteractionResult, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ViewInteractionResult)
@@ -154,6 +168,9 @@ type ViewsServiceServer interface {
 	CurrentModalView(context.Context, *CurrentModalViewRequest) (*View, error)
 	AppHome(context.Context, *AppHomeRequest) (*AppHomeResponse, error)
 	OpenAppHome(context.Context, *AppHomeRequest) (*AppHomeResponse, error)
+	// OpenAppMessages opens the app bot DM from the app's Messages tab and
+	// records app_home_opened with tab "messages".
+	OpenAppMessages(context.Context, *AppHomeRequest) (*Conversation, error)
 	SubmitView(context.Context, *ViewSubmissionRequest) (*ViewInteractionResult, error)
 	CloseView(context.Context, *CloseViewRequest) (*ViewMutationResponse, error)
 }
@@ -185,6 +202,9 @@ func (UnimplementedViewsServiceServer) AppHome(context.Context, *AppHomeRequest)
 }
 func (UnimplementedViewsServiceServer) OpenAppHome(context.Context, *AppHomeRequest) (*AppHomeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenAppHome not implemented")
+}
+func (UnimplementedViewsServiceServer) OpenAppMessages(context.Context, *AppHomeRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenAppMessages not implemented")
 }
 func (UnimplementedViewsServiceServer) SubmitView(context.Context, *ViewSubmissionRequest) (*ViewInteractionResult, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubmitView not implemented")
@@ -338,6 +358,24 @@ func _ViewsService_OpenAppHome_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ViewsService_OpenAppMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppHomeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewsServiceServer).OpenAppMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewsService_OpenAppMessages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewsServiceServer).OpenAppMessages(ctx, req.(*AppHomeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ViewsService_SubmitView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ViewSubmissionRequest)
 	if err := dec(in); err != nil {
@@ -408,6 +446,10 @@ var ViewsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OpenAppHome",
 			Handler:    _ViewsService_OpenAppHome_Handler,
+		},
+		{
+			MethodName: "OpenAppMessages",
+			Handler:    _ViewsService_OpenAppMessages_Handler,
 		},
 		{
 			MethodName: "SubmitView",

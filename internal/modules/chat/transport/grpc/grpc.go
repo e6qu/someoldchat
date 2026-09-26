@@ -3399,6 +3399,14 @@ func (r Remote) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceID,
 	return decodeProtoAppHome(out)
 }
 
+func (r Remote) OpenAppMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.Conversation, error) {
+	out, err := r.views.OpenAppMessages(ctx, &chatv1.AppHomeRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
 func decodeProtoAppHome(out *chatv1.AppHomeResponse) (domain.InstalledApp, domain.View, error) {
 	if out == nil {
 		return domain.InstalledApp{}, domain.View{}, errors.New("typed app home response is nil")
@@ -7653,6 +7661,14 @@ func (s *Server) OpenAppHome(ctx context.Context, input *chatv1.AppHomeRequest) 
 		return nil, mapError(err)
 	}
 	return encodeProtoAppHome(app, view), nil
+}
+
+func (s *Server) OpenAppMessages(ctx context.Context, input *chatv1.AppHomeRequest) (*chatv1.Conversation, error) {
+	conversation, err := s.implementation.OpenAppMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(conversation), nil
 }
 
 func encodeProtoAppHome(app domain.InstalledApp, view domain.View) *chatv1.AppHomeResponse {

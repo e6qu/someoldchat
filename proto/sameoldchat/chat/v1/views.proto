@@ -5,6 +5,7 @@ package sameoldchat.chat.v1;
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
 import "sameoldchat/chat/v1/apps.proto";
+import "sameoldchat/chat/v1/conversations.proto";
 
 message View {
   string id = 1;
@@ -110,6 +111,9 @@ service ViewsService {
   rpc CurrentModalView(CurrentModalViewRequest) returns (View);
   rpc AppHome(AppHomeRequest) returns (AppHomeResponse);
   rpc OpenAppHome(AppHomeRequest) returns (AppHomeResponse);
+  // OpenAppMessages opens the app bot DM from the app's Messages tab and
+  // records app_home_opened with tab "messages".
+  rpc OpenAppMessages(AppHomeRequest) returns (Conversation);
   rpc SubmitView(ViewSubmissionRequest) returns (ViewInteractionResult);
   rpc CloseView(CloseViewRequest) returns (ViewMutationResponse);
 }
