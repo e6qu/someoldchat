@@ -1177,6 +1177,22 @@ func (c Conversation) IsDirectOrGroup() bool {
 	return c.Kind == ConversationTypeIM || c.Kind == ConversationTypeMPIM
 }
 
+// SlackChannelType is the channel_type the Events API puts on a message
+// event: Slack's legacy vocabulary, where a private channel is a "group" and a
+// multi-person direct message is an "mpim". Apps route on it — Bolt's
+// Assistant middleware only handles message events whose channel_type is "im".
+func (c Conversation) SlackChannelType() string {
+	switch c.Kind.OrPublic() {
+	case ConversationTypeIM:
+		return "im"
+	case ConversationTypeMPIM:
+		return "mpim"
+	case ConversationTypePrivate:
+		return "group"
+	}
+	return "channel"
+}
+
 // PrivateFlag reports the value the stored is_private column carries for this
 // kind. A one-to-one and a group are private as well as a private channel, so
 // every reader of the old boolean keeps its exact meaning.

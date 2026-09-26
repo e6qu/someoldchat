@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -237,13 +238,17 @@ func TestMessageEventSnapshotsPreserveEveryMutationVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Every outer message event names the conversation's Slack channel_type
+	// (Bolt's Assistant routes on it), and the outer ts of a change or a
+	// deletion is that mutation's own timestamp, not the original message's.
 	for name, test := range map[string]struct {
 		event     events.Event
 		fragments []string
+		outer     map[string]string
 	}{
-		"created": {createdEvent, []string{`"text":"version one"`}},
-		"changed": {changeEvent, []string{`"subtype":"message_changed"`, `"text":"version two"`, `"text":"version one"`, `"previous_message"`}},
-		"deleted": {deleteEvent, []string{`"subtype":"message_deleted"`, `"text":"version two"`, `"deleted_ts":"1700001000.123456"`}},
+		"created": {createdEvent, []string{`"text":"version one"`}, map[string]string{"channel_type": "group", "ts": "1700001000.123456"}},
+		"changed": {changeEvent, []string{`"subtype":"message_changed"`, `"text":"version two"`, `"text":"version one"`, `"previous_message"`}, map[string]string{"channel_type": "group", "ts": "1700001060.123456", "event_ts": "1700001060.123456"}},
+		"deleted": {deleteEvent, []string{`"subtype":"message_deleted"`, `"text":"version two"`, `"deleted_ts":"1700001000.123456"`}, map[string]string{"channel_type": "group", "ts": "1700001120.123456", "event_ts": "1700001120.123456", "deleted_ts": "1700001000.123456"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 1, Event: test.event})
@@ -258,6 +263,17 @@ func TestMessageEventSnapshotsPreserveEveryMutationVersion(t *testing.T) {
 			for _, fragment := range test.fragments {
 				if !strings.Contains(body, fragment) {
 					t.Fatalf("callback missing %s: %s", fragment, body)
+				}
+			}
+			var envelope struct {
+				Event map[string]any `json:"event"`
+			}
+			if err := json.Unmarshal(bodies[0], &envelope); err != nil {
+				t.Fatal(err)
+			}
+			for field, want := range test.outer {
+				if got, _ := envelope.Event[field].(string); got != want {
+					t.Fatalf("outer %s=%q, want %q: %s", field, got, want, body)
 				}
 			}
 		})

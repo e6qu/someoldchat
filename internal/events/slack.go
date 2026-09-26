@@ -1082,7 +1082,11 @@ func projectedMessage(delivered Delivered, surface Surface) ([]Inner, error) {
 	if mentioned && surface != SurfaceRTM && inner.Type() == "message" {
 		mention := make(map[string]json.RawMessage, len(inner.fields))
 		for name, value := range inner.fields {
-			mention[name] = value
+			// channel_type belongs to the message event; Slack's app_mention
+			// does not carry it.
+			if name != "channel_type" {
+				mention[name] = value
+			}
 		}
 		mention[payloadTypeField] = mustEncodeString("app_mention")
 		inners = append(inners, Inner{fields: mention})
