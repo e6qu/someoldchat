@@ -2354,13 +2354,16 @@ func TestSQLiteOutboxLeaseAndAck(t *testing.T) {
 	if renewed, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute); err != nil || len(renewed) != 0 {
 		t.Fatalf("renewed event was reclaimed=%v err=%v", renewed, err)
 	}
-	if err := s.ReleaseEvents(ctx, "worker-1", []uint64{claimed[0].Sequence}, time.Now().UTC().Add(5*time.Millisecond)); err != nil {
+	// The retry delay is generous so a loaded machine cannot pass it between
+	// the release and the claim that must still see the event withheld.
+	retryAt := time.Now().UTC().Add(500 * time.Millisecond)
+	if err := s.ReleaseEvents(ctx, "worker-1", []uint64{claimed[0].Sequence}, retryAt); err != nil {
 		t.Fatal(err)
 	}
 	if remaining, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute); err != nil || len(remaining) != 0 {
 		t.Fatalf("remaining=%v err=%v", remaining, err)
 	}
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(time.Until(retryAt) + 10*time.Millisecond)
 	reclaimed, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute)
 	if err != nil || len(reclaimed) != 1 {
 		t.Fatalf("reclaimed=%v err=%v", reclaimed, err)
