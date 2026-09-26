@@ -570,7 +570,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 178
+const schemaVersion = 179
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -709,6 +709,42 @@ func (s *Store) RecordAccess(ctx context.Context, value domain.AccessLog) error 
 	}
 	_, err := s.db.ExecContext(ctx, upsertAccessLoginStatement, value.WorkspaceID, value.UserID, value.IP, value.UserAgent, value.Username, count, first.UTC().Unix(), last.UTC().Unix())
 	return err
+}
+
+func rekeyScheduledMessageOwners(ctx context.Context, db queryExecutor) error {
+	type owner struct {
+		workspace domain.WorkspaceID
+		author    domain.UserID
+		app       domain.AppID
+		bot       domain.BotID
+	}
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT workspace_id, author_id, app_id, bot_id FROM scheduled_messages`)
+	if err != nil {
+		return fmt.Errorf("read scheduled message owners: %w", err)
+	}
+	owners := make([]owner, 0)
+	for rows.Next() {
+		var value owner
+		if err := rows.Scan(&value.workspace, &value.author, &value.app, &value.bot); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("read scheduled message owner: %w", err)
+		}
+		owners = append(owners, value)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("read scheduled message owners: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, value := range owners {
+		key := domain.ScheduledMessageOwner(value.workspace, value.author, value.app, value.bot)
+		if _, err := db.ExecContext(ctx, `UPDATE scheduled_messages SET credential_hash = ? WHERE workspace_id = ? AND author_id = ? AND app_id = ? AND bot_id = ?`, key, value.workspace, value.author, value.app, value.bot); err != nil {
+			return fmt.Errorf("rekey scheduled message owner: %w", err)
+		}
+	}
+	return nil
 }
 
 // migrateAccessLogins folds the per-request access_logs rows into
@@ -3430,6 +3466,18 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 179 {
+		// A scheduled message belongs to the bot, or the member and app, that
+		// scheduled it rather than to the exact bearer token, so a rotated
+		// token keeps its schedules. Every row already carries its author, app
+		// and bot, so each is rekeyed from them - including rows from before
+		// schema 102, which had no token identity at all and so were invisible
+		// to every list and delete; they now belong to their author with no
+		// app, as a first-party schedule does.
+		if err := rekeyScheduledMessageOwners(ctx, db); err != nil {
+			return err
 		}
 	}
 	if version < 178 {

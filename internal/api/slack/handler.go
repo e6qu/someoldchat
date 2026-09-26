@@ -10160,7 +10160,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		Metadata: fields["metadata"], StreamState: streamState,
 		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		PostAt:          time.Unix(postAt, 0).UTC(), AppID: principal.AppID, BotID: principal.BotID,
-		CredentialHash: principal.CredentialHash,
+		CredentialHash: scheduledMessageOwner(principal),
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrScheduledTimeInPast) {
@@ -10227,7 +10227,7 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := h.Messages.ScheduledMessagesForCredential(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledMessageQuery{
-		CredentialHash: principal.CredentialHash,
+		CredentialHash: scheduledMessageOwner(principal),
 		Channel:        domain.ConversationID(strings.TrimSpace(fields["channel"])),
 		Oldest:         oldest,
 		Latest:         latest,
@@ -10242,6 +10242,17 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		items = append(items, scheduledMessageResponse(value))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scheduled_messages": items, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// scheduledMessageOwner is who a Web API caller schedules, lists and deletes
+// messages as: its bot, or its member and app. See
+// domain.ScheduledMessageOwner.
+func scheduledMessageOwner(principal auth.Principal) string {
+	bot := principal.BotID
+	if principal.TokenType == domain.TokenUser {
+		bot = ""
+	}
+	return domain.ScheduledMessageOwner(principal.WorkspaceID, principal.UserID, principal.AppID, bot)
 }
 
 func (h Handler) deleteScheduledMessage(w http.ResponseWriter, r *http.Request) {
@@ -10261,7 +10272,7 @@ func (h Handler) deleteScheduledMessage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "invalid_arguments")
 		return
 	}
-	if err := h.Messages.DeleteScheduledMessageForCredential(r.Context(), principal.WorkspaceID, principal.UserID, principal.CredentialHash, channel, id); err != nil {
+	if err := h.Messages.DeleteScheduledMessageForCredential(r.Context(), principal.WorkspaceID, principal.UserID, scheduledMessageOwner(principal), channel, id); err != nil {
 		writeError(w, mapServiceError(err, "invalid_scheduled_message_id"))
 		return
 	}

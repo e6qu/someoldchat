@@ -941,7 +941,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.deleteScheduledMessage/
     evidence:
-      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheSchedulingIdentity
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
       - go-test:internal/service:TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation
       - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
@@ -951,7 +951,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
-      - schedules created before schema 102 lack reconstructable token identity and cannot be deleted through an exact-token request
+      - schedules created before schema 102 recorded no app or bot, so schema 179 assigns them to their author with no app; an app's token cannot see or delete them, the author's first-party session can
   - method: chat.postEphemeral
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -962,7 +962,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.scheduleMessage/
     evidence:
-      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheSchedulingIdentity
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
       - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
       - go-test:internal/scheduler:TestWorkerExecutesEveryWorkspaceAndPreservesThreadAndAppAttribution
@@ -975,13 +975,13 @@ operations:
     deviations:
       - markdown_text, metadata, as_user, reply_broadcast, parse, link_names, and unfurl controls are not implemented
       - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
-      - schedules created before schema 102 lack reconstructable app and token attribution
+      - schedules created before schema 102 lack reconstructable app attribution
   - method: chat.scheduledMessages.list
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.scheduledMessages.list/
     evidence:
-      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheSchedulingIdentity
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
       - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
       - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
@@ -992,7 +992,7 @@ operations:
     deviations:
       - org-level team_id selection is not implemented
       - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
-      - schedules created before schema 102 lack reconstructable token identity and are excluded from exact-token results
+      - schedules created before schema 102 recorded no app or bot, so schema 179 assigns them to their author with no app; they list for the author's first-party session, not for an app's token
   - method: chat.unfurl
     status: behavior-compatible
     provenance: slack-api-specs-openapi

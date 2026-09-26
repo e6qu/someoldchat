@@ -1502,6 +1502,72 @@ func TestSQLiteProfileFieldsAreDurable(t *testing.T) {
 	}
 }
 
+// Schema 179 rekeys each scheduled message from the token hash it was stored
+// under to the identity that scheduled it, including one from before schema
+// 102 that recorded no credential at all.
+func TestSchema179RekeysScheduledMessagesToTheirOwner(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "scheduled-owner.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	postAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	ids := map[string]domain.ScheduledMessageID{}
+	for _, row := range []struct{ name, credential, app, bot string }{
+		{"bot", "hash-of-a-bot-token", "A1", "B1"},
+		{"user", "hash-of-a-user-token", "A1", ""},
+		{"legacy", "", "", ""},
+	} {
+		id, err := domain.NewScheduledMessageID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[row.name] = id
+		value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", AppID: domain.AppID(row.app), BotID: domain.BotID(row.bot),
+			CredentialHash: "placeholder", Text: row.name, PostAt: postAt, CreatedAt: postAt.Add(-time.Hour)}
+		if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: domain.EventID("scheduled-" + row.name), WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET credential_hash = ? WHERE id = ?`, row.credential, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 179`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (178, '')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for name, owner := range map[string]string{
+		"bot":    domain.ScheduledMessageOwner("T1", "U1", "A1", "B1"),
+		"user":   domain.ScheduledMessageOwner("T1", "U1", "A1", ""),
+		"legacy": domain.ScheduledMessageOwner("T1", "U1", "", ""),
+	} {
+		page, err := s.ListScheduledMessagesForCredential(ctx, "T1", domain.ScheduledMessageQuery{CredentialHash: owner, Page: domain.PageRequest{Limit: 10}})
+		if err != nil || len(page.Items) != 1 || page.Items[0].ID != ids[name] {
+			t.Fatalf("%s owner page=%+v err=%v", name, page, err)
+		}
+	}
+}
+
 func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, memoryDSN(t))

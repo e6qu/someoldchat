@@ -12622,7 +12622,7 @@ func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.Schedule
 }
 
 func grpcScheduledCredential(workspaceID domain.WorkspaceID, userID domain.UserID) string {
-	return domain.HashToken("internal-scheduled\x00" + string(workspaceID) + "\x00" + string(userID))
+	return domain.ScheduledMessageOwner(workspaceID, userID, "", "")
 }
 
 func unixOrZero(value time.Time) int64 {

@@ -9663,8 +9663,10 @@ func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, w
 // first-party client. Keeping this coordinate in one place lets the web client
 // preserve thread context through ScheduleMessageAs without duplicating the
 // ownership contract used by list and delete.
+// InternalScheduledCredential is the owner of a message a member schedules
+// through the first-party client: the member, with no app.
 func InternalScheduledCredential(workspaceID domain.WorkspaceID, userID domain.UserID) string {
-	return domain.HashToken("internal-scheduled\x00" + string(workspaceID) + "\x00" + string(userID))
+	return domain.ScheduledMessageOwner(workspaceID, userID, "", "")
 }
 
 func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ScheduledMessageRequest) (domain.ScheduledMessage, error) {

@@ -5212,7 +5212,7 @@ func TestScheduleMessagePreservesCurrentSlackMessageOptionsUntilDelivery(t *test
 	if scheduled["ok"] != true || id == "" {
 		t.Fatalf("schedule response=%v", scheduled)
 	}
-	item, err := backing.ClaimScheduledMessageForCredential(context.Background(), "T1", domain.HashToken("token"), domain.ScheduledMessageID(id), "delivery", time.Minute)
+	item, err := backing.ClaimScheduledMessageForCredential(context.Background(), "T1", domain.ScheduledMessageOwner("T1", "U1", "A1", "B1"), domain.ScheduledMessageID(id), "delivery", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5251,11 +5251,21 @@ func TestScheduleMessageRejectsMarkdownConflictsAndInvalidBooleans(t *testing.T)
 	}
 }
 
-func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
+func TestScheduledMessageAPIIsScopedToTheSchedulingIdentity(t *testing.T) {
 	handler, store := testHandlerWithStoredTokenAuth(auth.ScopeChatWrite)
-	store.SeedToken(context.Background(), "other-token", domain.TokenRecord{
+	// A rotated token of the same bot, a different app's bot, and a user
+	// token of the same member and app.
+	store.SeedToken(context.Background(), "rotated-token", domain.TokenRecord{
 		WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1",
 		TokenType: "bot", Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	store.SeedToken(context.Background(), "foreign-bot-token", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A9", BotID: "B9",
+		TokenType: "bot", Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	store.SeedToken(context.Background(), "user-token", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1",
+		TokenType: "user", Scopes: []string{string(auth.ScopeChatWrite)},
 	})
 	call := func(token, path, body string) map[string]any {
 		t.Helper()
@@ -5275,7 +5285,7 @@ func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
 	}
 	postAt := time.Now().UTC().Add(time.Hour).Unix()
 	scheduled := call("token", "/api/chat.scheduleMessage", url.Values{
-		"channel": {"C1"}, "text": {"token-owned"}, "post_at": {strconv.FormatInt(postAt, 10)},
+		"channel": {"C1"}, "text": {"bot-owned"}, "post_at": {strconv.FormatInt(postAt, 10)},
 	}.Encode())
 	id, _ := scheduled["scheduled_message_id"].(string)
 	if scheduled["ok"] != true || id == "" {
@@ -5285,21 +5295,36 @@ func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
 	if scheduled["post_at"] != strconv.FormatInt(postAt, 10) || message["bot_id"] != "B1" || message["type"] != "delayed_message" || message["subtype"] != "bot_message" {
 		t.Fatalf("schedule response lost Slack post_at or bot attribution: %v", scheduled)
 	}
-	otherPage := call("other-token", "/api/chat.scheduledMessages.list", "")
-	if items, _ := otherPage["scheduled_messages"].([]any); otherPage["ok"] != true || len(items) != 0 {
-		t.Fatalf("another token saw scheduled messages: %v", otherPage)
-	}
-	otherDelete := call("other-token", "/api/chat.deleteScheduledMessage", url.Values{
-		"channel": {"C1"}, "scheduled_message_id": {id},
-	}.Encode())
-	if otherDelete["error"] != "invalid_scheduled_message_id" {
-		t.Fatalf("another token deleted the schedule: %v", otherDelete)
+	// Neither another app's bot nor a user token sees or deletes the bot's
+	// schedule.
+	for _, token := range []string{"foreign-bot-token", "user-token"} {
+		page := call(token, "/api/chat.scheduledMessages.list", "")
+		if items, _ := page["scheduled_messages"].([]any); page["ok"] != true || len(items) != 0 {
+			t.Fatalf("%s saw the bot's scheduled messages: %v", token, page)
+		}
+		deleted := call(token, "/api/chat.deleteScheduledMessage", url.Values{
+			"channel": {"C1"}, "scheduled_message_id": {id},
+		}.Encode())
+		if deleted["error"] != "invalid_scheduled_message_id" {
+			t.Fatalf("%s deleted the bot's schedule: %v", token, deleted)
+		}
 	}
 	ownerPage := call("token", "/api/chat.scheduledMessages.list", url.Values{
 		"oldest": {strconv.FormatInt(postAt-1, 10)}, "latest": {strconv.FormatInt(postAt+1, 10)},
 	}.Encode())
 	if items, _ := ownerPage["scheduled_messages"].([]any); ownerPage["ok"] != true || len(items) != 1 {
 		t.Fatalf("creating token could not list its schedule: %v", ownerPage)
+	}
+	// A rotated token of the same bot still owns the schedule: Slack scopes
+	// it to the bot, and a token hash lost it on every rotation.
+	rotatedPage := call("rotated-token", "/api/chat.scheduledMessages.list", "")
+	if items, _ := rotatedPage["scheduled_messages"].([]any); rotatedPage["ok"] != true || len(items) != 1 {
+		t.Fatalf("a rotated token lost the bot's schedule: %v", rotatedPage)
+	}
+	if deleted := call("rotated-token", "/api/chat.deleteScheduledMessage", url.Values{
+		"channel": {"C1"}, "scheduled_message_id": {id},
+	}.Encode()); deleted["ok"] != true {
+		t.Fatalf("a rotated token could not delete the bot's schedule: %v", deleted)
 	}
 }
 

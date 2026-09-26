@@ -214,9 +214,13 @@ idempotency key. The request includes `X-Slack-Request-Timestamp`,
 The same process executes due scheduled messages and first-party Later/channel
 reminders in both delivery formats. `record` is explicitly workspace-scoped;
 `slack-events` claims due schedules and reminders across every workspace.
-Scheduled records retain the creating credential's
-one-way hash, app/bot attribution, thread parent, and terminal delivered or
-failed state. Permanent posting failures are recorded once rather than retried
+Scheduled records retain their owner, app/bot attribution, thread parent, and
+terminal delivered or failed state. The owner is the identity that scheduled
+the message — the app's bot for a bot token, the member and app for a user
+token, the member alone for the first-party client — not the bytes of one
+token, so `chat.scheduledMessages.list` and `chat.deleteScheduledMessage`
+keep working after a token is rotated or reissued, while another app's token
+still sees nothing. Permanent posting failures are recorded once rather than retried
 forever; transient failures retain their fenced lease and retry path.
 
 When workers are stopped as part of a lifecycle profile, configure both
@@ -226,11 +230,11 @@ worker publishes the fenced minimum of scheduled-message and reminder due
 times. Supplying only one coordinate is a configuration error. The ECS module
 keeps its worker always on, so it does not require this optional publication.
 
-Schema 102 cannot reconstruct the exact bearer credential or app identity for
-schedules created by an older release, because the old schema never stored
-either value. Those records remain pending and execute under their original
-author, but they are intentionally absent from exact-token list/delete results.
-New records are fully token-isolated and attributed.
+Schedules created before schema 102 never recorded an app or bot. Schema 179
+rekeys every schedule to its owner from the author, app, and bot it carries,
+so those older records belong to their author with no app: they execute under
+their original author and list and cancel through the author's first-party
+session, but not through an app's token.
 
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
 [Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/),

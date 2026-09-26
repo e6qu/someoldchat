@@ -821,6 +821,20 @@ type WorkspaceSession struct {
 	ExpiresAt time.Time
 }
 
+// ScheduledMessageOwner is the identity a scheduled message belongs to for
+// chat.scheduledMessages.list and chat.deleteScheduledMessage: the app's bot
+// for a bot token, and the member together with the app for a user token (a
+// first-party session is a user with no app). Slack scopes those methods to
+// who scheduled the message, not to the bytes of one token, so a rotated or
+// reissued token of the same bot or user keeps its schedules. It used to be the
+// hash of the exact bearer token, which lost every schedule on rotation.
+func ScheduledMessageOwner(workspace WorkspaceID, user UserID, app AppID, bot BotID) string {
+	if bot != "" {
+		return HashToken("scheduled-owner\x00bot\x00" + string(workspace) + "\x00" + string(app) + "\x00" + string(bot))
+	}
+	return HashToken("scheduled-owner\x00user\x00" + string(workspace) + "\x00" + string(user) + "\x00" + string(app))
+}
+
 func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
