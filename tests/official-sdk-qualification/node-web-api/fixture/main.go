@@ -359,7 +359,7 @@ func main() {
 			http.Error(w, "qualification event is unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		value, err := events.EventContext("A1", records[0])
+		value, err := events.EventContext("A1", records[0], records[0].Event.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
