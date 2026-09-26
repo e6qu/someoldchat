@@ -254,6 +254,35 @@ func TestLegacyDialogRendersSubmitsAndCancels(t *testing.T) {
 	requireMissing(t, "cancelled dialog", get(t, mux, "/app?channel=Cdev").Body.String(), "Feedback")
 }
 
+// A rich_text_input in a message renders as a text area (not an empty
+// select) and dispatches its value as a rich_text object.
+func TestMessageRichTextInputDispatchesRichText(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	now := time.Now().UTC()
+	message := domain.Message{ID: "Mrt", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", AppID: "A1", Text: "form", CreatedAt: now,
+		Blocks: `[{"type":"input","block_id":"b","dispatch_action":true,"label":{"type":"plain_text","text":"Note"},"element":{"type":"rich_text_input","action_id":"a"}},{"type":"input","block_id":"f","label":{"type":"plain_text","text":"Attach"},"element":{"type":"file_input","action_id":"fa"}}]`}
+	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "E-Mrt", WorkspaceID: "T1", Topic: "message.created", Payload: "Mrt", CreatedAt: now}, ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "rich text input", body, `<textarea class="block-action" name="value"`, "cannot attach files to app forms")
+	response := postForm(t, mux, "/app/interaction", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "message_id": {"Mrt"}, "app_id": {"A1"}, "block_id": {"b"}, "action_id": {"a"},
+		"action_type": {"rich_text_input"}, "channel": {"Cdev"}, "value": {"hello"},
+	}.Encode(), false)
+	if response.Code >= 400 {
+		t.Fatalf("dispatch status=%d body=%s", response.Code, response.Body)
+	}
+	payload := claimInteraction(t, s)
+	actions, _ := payload["actions"].([]any)
+	action, _ := actions[0].(map[string]any)
+	rich, _ := json.Marshal(action["rich_text_value"])
+	if !strings.Contains(string(rich), `"text":"hello"`) {
+		t.Fatalf("rich_text_value = %s (payload %v)", rich, payload)
+	}
+}
+
 // The input script is served under the workspace policy, and the live stream
 // does not reload the page for a record that only saved what the viewer
 // entered (a reload would discard focus and newer typing).
