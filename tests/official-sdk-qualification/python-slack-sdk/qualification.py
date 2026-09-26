@@ -14,6 +14,18 @@ from slack_sdk.oauth import AuthorizeUrlGenerator
 from slack_sdk.oauth.installation_store import FileInstallationStore, Installation
 from slack_sdk.oauth.state_store import FileOAuthStateStore
 
+# The fixture enforces Slack's rate-limiting contract, as production does, so
+# these clients retry a 429 after its Retry-After the way a real app is
+# configured to. Without the handler the pinned client surfaces the first 429.
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
+from slack_sdk.http_retry import default_retry_handlers
+
+
+class WebClient(WebClient):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("retry_handlers", default_retry_handlers() + [RateLimitErrorRetryHandler(max_retry_count=10)])
+        super().__init__(*args, **kwargs)
+
 
 client = WebClient(
     token=os.environ.get("SAMEOLDCHAT_API_TOKEN", "xoxb-test"),
