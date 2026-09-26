@@ -40,6 +40,11 @@ message EventsRequest {
 
 message EventsResponse {
   repeated EventRecord records = 1;
+  // The last journal sequence a user-scoped read examined, visible or not, so
+  // a live stream resumes past records its reader may not see instead of
+  // re-reading them on every poll. Zero from a server that predates the field;
+  // the client then falls back to the last record it was given.
+  uint64 scanned_through = 2;
 }
 
 message AppEventClaimRequest {

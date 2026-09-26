@@ -235,6 +235,15 @@ Browsers reconnect with `Last-Event-ID`, and a replica reads missed events from
 the journal before subscribing to best-effort live notification. Replica-local
 fan-out is an optimization only.
 
+Both live streams — SSE and RTM — read the journal only through the per-user
+projection (`ListUserEventsAfter`): records about conversations the reader is
+not a member of are withheld, and content-bearing records are hydrated only
+after membership is proven. `realtime.NewHandler` and `NewRTMHandler` accept
+nothing else, so a stream cannot be wired to the raw workspace journal. Each
+projected page reports the last sequence it examined, visible or not, and a
+stream resumes after that sequence, so withheld records are read once rather
+than on every poll.
+
 Journal records written before the typed payload contract cannot be delivered
 and cannot be repaired. The upgrade quarantines them once — marked
 `undeliverable`, excluded from every consumer read, each recorded in

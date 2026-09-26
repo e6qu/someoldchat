@@ -50,7 +50,7 @@ type Service interface {
 	PostIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
-	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) ([]events.Record, error)
+	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) (events.UserEventPage, error)
 	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
 	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error

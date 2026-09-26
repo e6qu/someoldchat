@@ -3837,7 +3837,7 @@ func parityCases() []parityCase {
 				}
 				return []any{
 					topics(whole), ascending, topics(rest), len(whole) == len(rest)+1,
-					topics(limited), topics(userScoped), topics(appScoped),
+					topics(limited), topics(userScoped.Records), userScoped.Through, topics(appScoped),
 				}, nil
 			},
 		},

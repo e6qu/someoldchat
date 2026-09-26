@@ -295,41 +295,44 @@ func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, af
 	return result, nil
 }
 
-func (m Messages) ListUserEventsAfter(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, after uint64, limit int) ([]events.Record, error) {
+// ListUserEventsAfter is the journal as one member may see it: records about
+// conversations the reader is not in are withheld, and content-bearing records
+// are hydrated only after membership is proven. It is the only journal read a
+// per-user live stream (SSE, RTM) may be wired to.
+//
+// The page's Through is the last sequence examined, so a reader that was shown
+// nothing still moves past the records it may not see.
+func (m Messages) ListUserEventsAfter(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, after uint64, limit int) (events.UserEventPage, error) {
 	if limit <= 0 {
-		return nil, store.InvalidArgument("event limit must be positive")
+		return events.UserEventPage{}, store.InvalidArgument("event limit must be positive")
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
-		return nil, err
+		return events.UserEventPage{}, err
 	}
-	result := make([]events.Record, 0, limit)
-	cursor := after
-	for len(result) < limit {
-		records, err := m.Store.ListEventsAfter(ctx, workspaceID, cursor, limit)
+	page := events.UserEventPage{Records: make([]events.Record, 0, limit), Through: after}
+	for len(page.Records) < limit {
+		records, err := m.Store.ListEventsAfter(ctx, workspaceID, page.Through, limit)
 		if err != nil {
-			return nil, err
-		}
-		if len(records) == 0 {
-			return result, nil
+			return events.UserEventPage{}, err
 		}
 		for _, record := range records {
-			cursor = record.Sequence
 			prepared, visible, prepareErr := PrepareUserEvent(ctx, m.Store, workspaceID, userID, record)
 			if prepareErr != nil {
-				return nil, prepareErr
+				return events.UserEventPage{}, prepareErr
 			}
+			page.Through = record.Sequence
 			if visible {
-				result = append(result, prepared)
-				if len(result) == limit {
-					return result, nil
+				page.Records = append(page.Records, prepared)
+				if len(page.Records) == limit {
+					return page, nil
 				}
 			}
 		}
 		if len(records) < limit {
-			return result, nil
+			return page, nil
 		}
 	}
-	return result, nil
+	return page, nil
 }
 
 func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {

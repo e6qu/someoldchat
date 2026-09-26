@@ -5659,13 +5659,25 @@ func (r Remote) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	return decodeProtoEvents(out)
 }
 
-func (r Remote) ListUserEventsAfter(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, after uint64, limit int) ([]events.Record, error) {
+func (r Remote) ListUserEventsAfter(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, after uint64, limit int) (events.UserEventPage, error) {
 	in := &chatv1.EventsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), After: after, Limit: int32(limit)}
 	out, err := r.events.ListEventsAfter(ctx, in)
 	if err != nil {
-		return nil, err
+		return events.UserEventPage{}, err
 	}
-	return decodeProtoEvents(out)
+	records, err := decodeProtoEvents(out)
+	if err != nil {
+		return events.UserEventPage{}, err
+	}
+	// A server from before scanned_through answers zero, and during a rollout
+	// the chat replicas run mixed versions. The last record returned is then
+	// the furthest this reader is known to have passed — the previous
+	// behaviour, never a skip.
+	page := events.UserEventPage{Records: records, Through: max(after, out.GetScannedThrough())}
+	if len(records) > 0 {
+		page.Through = max(page.Through, records[len(records)-1].Sequence)
+	}
+	return page, nil
 }
 
 func (r Remote) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
@@ -10923,11 +10935,18 @@ func (s *Server) deleteScheduledMessageProto(ctx context.Context, input *chatv1.
 }
 
 func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsRequest) (*chatv1.EventsResponse, error) {
+	if input.GetUserId() != "" {
+		page, err := s.implementation.ListUserEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetAfter(), seamPage(int(input.GetLimit())))
+		if err != nil {
+			return nil, mapError(err)
+		}
+		out := encodeProtoEvents(page.Records)
+		out.ScannedThrough = page.Through
+		return out, nil
+	}
 	var records []events.Record
 	var err error
-	if input.GetUserId() != "" {
-		records, err = s.implementation.ListUserEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetAfter(), seamPage(int(input.GetLimit())))
-	} else if input.GetAppId() != "" {
+	if input.GetAppId() != "" {
 		records, err = s.implementation.ListAppEventsAfter(ctx, domain.AppID(input.GetAppId()), input.GetAfter(), seamPage(int(input.GetLimit())))
 	} else {
 		records, err = s.implementation.ListEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetAfter(), seamPage(int(input.GetLimit())))
