@@ -80,7 +80,7 @@ func committedStateSurvivesARestart(t *testing.T, open restartOpener) {
 
 	f.reopen(t, ctx)
 
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].ID != posted.ID {
 		t.Fatalf("messages=%+v err=%v, want the committed message to have survived", page.Messages, err)
 	}

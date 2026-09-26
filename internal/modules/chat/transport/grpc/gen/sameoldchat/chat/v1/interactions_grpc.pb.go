@@ -30,6 +30,7 @@ const (
 	InteractionsService_TypingSignals_FullMethodName                = "/sameoldchat.chat.v1.InteractionsService/TypingSignals"
 	InteractionsService_GetReadCursor_FullMethodName                = "/sameoldchat.chat.v1.InteractionsService/GetReadCursor"
 	InteractionsService_ThreadSummaries_FullMethodName              = "/sameoldchat.chat.v1.InteractionsService/ThreadSummaries"
+	InteractionsService_MessageAnnotations_FullMethodName           = "/sameoldchat.chat.v1.InteractionsService/MessageAnnotations"
 	InteractionsService_MessageAt_FullMethodName                    = "/sameoldchat.chat.v1.InteractionsService/MessageAt"
 	InteractionsService_DispatchSlashCommand_FullMethodName         = "/sameoldchat.chat.v1.InteractionsService/DispatchSlashCommand"
 	InteractionsService_DispatchBlockAction_FullMethodName          = "/sameoldchat.chat.v1.InteractionsService/DispatchBlockAction"
@@ -61,6 +62,7 @@ type InteractionsServiceClient interface {
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(ctx context.Context, in *ReadCursorRequest, opts ...grpc.CallOption) (*ReadCursor, error)
 	ThreadSummaries(ctx context.Context, in *ThreadSummariesRequest, opts ...grpc.CallOption) (*ThreadSummariesResponse, error)
+	MessageAnnotations(ctx context.Context, in *MessageAnnotationsRequest, opts ...grpc.CallOption) (*MessageAnnotationsResponse, error)
 	MessageAt(ctx context.Context, in *MessageAtRequest, opts ...grpc.CallOption) (*Message, error)
 	DispatchSlashCommand(ctx context.Context, in *SlashCommandRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
 	DispatchBlockAction(ctx context.Context, in *BlockActionRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
@@ -187,6 +189,16 @@ func (c *interactionsServiceClient) ThreadSummaries(ctx context.Context, in *Thr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ThreadSummariesResponse)
 	err := c.cc.Invoke(ctx, InteractionsService_ThreadSummaries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) MessageAnnotations(ctx context.Context, in *MessageAnnotationsRequest, opts ...grpc.CallOption) (*MessageAnnotationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MessageAnnotationsResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_MessageAnnotations_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -330,6 +342,7 @@ type InteractionsServiceServer interface {
 	// ReadCursor message type for every later return in this service.
 	GetReadCursor(context.Context, *ReadCursorRequest) (*ReadCursor, error)
 	ThreadSummaries(context.Context, *ThreadSummariesRequest) (*ThreadSummariesResponse, error)
+	MessageAnnotations(context.Context, *MessageAnnotationsRequest) (*MessageAnnotationsResponse, error)
 	MessageAt(context.Context, *MessageAtRequest) (*Message, error)
 	DispatchSlashCommand(context.Context, *SlashCommandRequest) (*InteractionMutationResponse, error)
 	DispatchBlockAction(context.Context, *BlockActionRequest) (*InteractionMutationResponse, error)
@@ -383,6 +396,9 @@ func (UnimplementedInteractionsServiceServer) GetReadCursor(context.Context, *Re
 }
 func (UnimplementedInteractionsServiceServer) ThreadSummaries(context.Context, *ThreadSummariesRequest) (*ThreadSummariesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ThreadSummaries not implemented")
+}
+func (UnimplementedInteractionsServiceServer) MessageAnnotations(context.Context, *MessageAnnotationsRequest) (*MessageAnnotationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MessageAnnotations not implemented")
 }
 func (UnimplementedInteractionsServiceServer) MessageAt(context.Context, *MessageAtRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method MessageAt not implemented")
@@ -634,6 +650,24 @@ func _InteractionsService_ThreadSummaries_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(InteractionsServiceServer).ThreadSummaries(ctx, req.(*ThreadSummariesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_MessageAnnotations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MessageAnnotationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).MessageAnnotations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_MessageAnnotations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).MessageAnnotations(ctx, req.(*MessageAnnotationsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -904,6 +938,10 @@ var InteractionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ThreadSummaries",
 			Handler:    _InteractionsService_ThreadSummaries_Handler,
+		},
+		{
+			MethodName: "MessageAnnotations",
+			Handler:    _InteractionsService_MessageAnnotations_Handler,
 		},
 		{
 			MethodName: "MessageAt",

@@ -118,7 +118,7 @@ func TestMixedBuiltInStepsAllRun(t *testing.T) {
 	if run.Status != domain.WorkflowRunCompleted {
 		t.Fatalf("run status = %q, want completed after three built-in steps", run.Status)
 	}
-	messagesPage, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	messagesPage, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestDelayStepParksTheRunUntilItIsDue(t *testing.T) {
 	if err != nil || resumed != 0 {
 		t.Fatalf("resumed = %d err = %v, want nothing due yet", resumed, err)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestDelayStepParksTheRunUntilItIsDue(t *testing.T) {
 	if after.Status != domain.WorkflowRunCompleted {
 		t.Fatalf("run status = %q, want completed once the wait finished", after.Status)
 	}
-	page, err = repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err = repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestDueDelayResumesExactlyOnce(t *testing.T) {
 	if resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", due, 10); err != nil || resumed != 0 {
 		t.Fatalf("second sweep resumed = %d err = %v, want the wait already spent", resumed, err)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestWaitUntilStepParksUntilTheNamedInstant(t *testing.T) {
 	if resumed, err := messages.ResumeWorkflowDelays(ctx, "T1", at, 10); err != nil || resumed != 1 {
 		t.Fatalf("resumed = %d err = %v, want the wait due at the instant it names", resumed, err)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}

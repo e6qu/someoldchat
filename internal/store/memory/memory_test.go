@@ -567,7 +567,7 @@ func TestExternalUploadBatchPreflightsEveryMessageBeforeMutation(t *testing.T) {
 			t.Fatalf("file %s leaked after rollback: %v", completion.ID, err)
 		}
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 0 {
 		t.Fatalf("first message leaked=%+v err=%v", history, err)
 	}

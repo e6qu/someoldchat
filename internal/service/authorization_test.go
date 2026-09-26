@@ -238,7 +238,7 @@ func TestOperationsThatDeclareNotInChannelRequireMembership(t *testing.T) {
 
 	// Reading a public channel still does not require membership, and joining
 	// makes every one of the operations above available.
-	if _, err := messages.History(ctx, "T1", "U2", "C1", domain.PageRequest{Limit: 10}); err != nil {
+	if _, err := messages.History(ctx, "T1", "U2", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}}); err != nil {
 		t.Fatalf("reading a public channel now requires membership: %v", err)
 	}
 	if err := s.SeedConversationMember("C1", "U2"); err != nil {

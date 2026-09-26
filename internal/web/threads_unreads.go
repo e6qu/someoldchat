@@ -196,7 +196,7 @@ func (h Handler) unreadMessages(r *http.Request, principal auth.Principal, conve
 		limit = unreadMessageWindow
 	}
 	history, err := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID,
-		domain.PageRequest{Limit: limit, Descending: true})
+		domain.HistoryRequest{Page: domain.PageRequest{Limit: limit, Descending: true}})
 	if err != nil {
 		return nil, false
 	}

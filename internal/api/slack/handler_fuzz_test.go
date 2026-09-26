@@ -41,8 +41,9 @@ func FuzzNormalizeJSONListFieldNeverPanics(f *testing.F) {
 }
 
 // The history window, the reminder time parser and the ID list parser all read
-// untrusted request values. None may panic, and parseSlackTimestamp must agree
-// with itself for anything it accepts.
+// untrusted request values. None may panic; the bound reader never yields an
+// instant before the epoch, and wherever the identifier reader accepts a value
+// the bound reader accepts it too and names the same instant.
 func FuzzParseSlackTimestampNeverPanics(f *testing.F) {
 	f.Add("1700000000.000000")
 	f.Add("1700000000")
@@ -53,9 +54,13 @@ func FuzzParseSlackTimestampNeverPanics(f *testing.F) {
 	// tipped the microsecond scaling past MaxInt64 into a negative instant.
 	f.Add("9223372036854.8")
 	f.Fuzz(func(t *testing.T, value string) {
-		micros, ok := parseSlackTimestamp(value)
-		if ok && micros < 0 {
-			t.Fatalf("parseSlackTimestamp(%q) accepted a negative instant %d", value, micros)
+		bound, err := domain.ParseTimestampBound(value)
+		if err == nil && bound.Before(time.Unix(0, 0)) {
+			t.Fatalf("ParseTimestampBound(%q) accepted a negative instant %s", value, bound)
+		}
+		identifier, identifierErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(value))
+		if identifierErr == nil && (err != nil || !identifier.Equal(bound)) {
+			t.Fatalf("the readers disagree on %q: identifier %s, bound %s (%v)", value, identifier, bound, err)
 		}
 	})
 }

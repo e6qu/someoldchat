@@ -5098,7 +5098,7 @@ func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := h.newUserNames(r.Context(), principal)
-	permalink := "/archives/" + url.PathEscape(string(channel)) + "/p" + strings.ReplaceAll(string(timestamp), ".", "")
+	permalink := domain.MessagePermalinkPath(channel, timestamp, original.ThreadTimestamp)
 	quoted := map[string]any{
 		"author_name": names.name(original.AuthorID),
 		"text":        original.Text,
@@ -5588,7 +5588,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			h.writePageError(w, http.StatusBadRequest, "That thread link is not valid", "The link you followed does not identify a message in this conversation.")
 			return
 		}
-		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.PageRequest{Limit: timelineWindow})
+		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.ThreadRequest{Page: domain.PageRequest{Limit: timelineWindow}})
 		if repliesErr != nil {
 			h.writeStoreError(w, repliesErr, "The thread is temporarily unavailable.")
 			return
@@ -5967,7 +5967,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "that thread link is not valid", http.StatusBadRequest)
 			return
 		}
-		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.PageRequest{Limit: timelineWindow})
+		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.ThreadRequest{Page: domain.PageRequest{Limit: timelineWindow}})
 		if repliesErr != nil {
 			h.writeFragmentError(w, repliesErr, "the thread is temporarily unavailable")
 			return
@@ -6019,11 +6019,11 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 	if start != "" {
 		return h.historyWindowForward(ctx, principal, channel, start)
 	}
-	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{
+	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.HistoryRequest{Page: domain.PageRequest{
 		Limit:      timelineWindow,
 		Cursor:     end,
 		Descending: true,
-	})
+	}, RootsOnly: true})
 	if err != nil {
 		return historyView{}, err
 	}
@@ -6061,11 +6061,11 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 // ascending, for the "show newer messages" pager. Reaching the end makes the
 // window the latest one, so it goes live again.
 func (h Handler) historyWindowForward(ctx context.Context, principal auth.Principal, channel domain.ConversationID, start domain.Cursor) (historyView, error) {
-	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{
+	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.HistoryRequest{Page: domain.PageRequest{
 		Limit:      timelineWindow,
 		Cursor:     start,
 		Descending: false,
-	})
+	}, RootsOnly: true})
 	if err != nil {
 		return historyView{}, err
 	}
@@ -6144,21 +6144,6 @@ func (h Handler) timelineChrome(ctx context.Context, principal auth.Principal, c
 		return summaries, ""
 	}
 	return summaries, cursor.LastRead
-}
-
-// decodeMessageBroadcast reports whether a threaded reply was also sent to
-// the channel. The flag lives in the durable stream state, which the API
-// projects as subtype thread_broadcast; MSG-01 requires the two to be
-// distinguishable in the client too.
-func decodeMessageBroadcast(streamState string) bool {
-	if strings.TrimSpace(streamState) == "" {
-		return false
-	}
-	var state domain.MessageStreamState
-	if json.Unmarshal([]byte(streamState), &state) != nil {
-		return false
-	}
-	return state.ReplyBroadcast
 }
 
 // threadReplySummary is the sentence under a parent message: how many replies
@@ -6444,7 +6429,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			Ephemeral:   ephemeral,
 			Subtype:     string(message.Subtype),
 			System:      message.Subtype.System(),
-			Broadcast:   decodeMessageBroadcast(message.StreamState),
+			Broadcast:   message.ReplyBroadcast,
 		}
 		// A human posting as themselves carries their current status beside their
 		// name; an app message or one wearing a custom username is not a person.
@@ -6461,7 +6446,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 		if !ephemeral {
 			// Slack's permalink, and the two actions that need one.
-			view.Permalink = "/archives/" + url.PathEscape(channel) + "/p" + strings.ReplaceAll(timestamp, ".", "")
+			view.Permalink = domain.MessagePermalinkPath(message.Conversation, domain.MessageTimestamp(timestamp), message.ThreadTimestamp)
 			view.CopyLinkURL = view.Permalink
 			view.ForwardURL = mutationURL("/app/message/forward", channel, timestamp, threadTimestamp, before)
 			if request.Member {
@@ -10502,7 +10487,7 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		item := conversationView{ID: string(conversation.ID), Name: name, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.Kind == domain.ConversationTypeMPIM, OpenUsers: strings.Join(ids, ",")}
-		if history, historyErr := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 1, Descending: true}); historyErr == nil && len(history.Messages) == 1 {
+		if history, historyErr := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 1, Descending: true}}); historyErr == nil && len(history.Messages) == 1 {
 			item.RecentAt = history.Messages[0].CreatedAt
 		}
 		recent = append(recent, item)

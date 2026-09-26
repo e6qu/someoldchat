@@ -10,7 +10,8 @@ import (
 // This file is the one place the Slack transport decides which absolute origin
 // the URLs it emits are built on: file downloads (url_private,
 // url_private_download, permalink, permalink_public), the files.* v2 upload
-// URL, and the OAuth authorize URL a manifest create returns. Official SDKs
+// URL, the OAuth authorize URL a manifest create returns, message permalinks
+// (chat.getPermalink, pins, reactions, search) and auth.test's url. Official SDKs
 // fetch those URLs verbatim — @slack/web-api's files.uploadV2 POSTs to
 // upload_url, and every client downloads url_private with its bearer token —
 // so a relative path, or an origin a request header could forge into an

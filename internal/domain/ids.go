@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -76,20 +78,77 @@ func MessageInstant(value time.Time) time.Time {
 // broken database. ErrInvalidCursor is the precedent.
 var ErrInvalidMessageTimestamp = errors.New("invalid message timestamp")
 
+// ParseMessageTimestamp reads a message identifier: whole seconds, a dot and
+// exactly six digits of microseconds, which is the only shape a `ts` this
+// system mints can have.
+//
+// It and ParseTimestampBound share one reader. The Web API used to carry its
+// own lenient parser beside this strict one, and the two disagreed about the
+// same argument: reactions.add accepted `timestamp=1700000000` at the wire,
+// and the service then refused it as a malformed identifier, so the caller was
+// told `invalid_arg_name` instead of the `bad_timestamp` its enum declares.
 func ParseMessageTimestamp(value MessageTimestamp) (time.Time, error) {
-	parts := strings.Split(string(value), ".")
-	if len(parts) != 2 || len(parts[1]) != 6 {
-		return time.Time{}, fmt.Errorf("%w %q", ErrInvalidMessageTimestamp, string(value))
+	return parseSlackTimestamp(string(value), true)
+}
+
+// MessagePermalinkPath is Slack's message link path,
+// /archives/<channel>/p<ts without the dot>, with the thread coordinates Slack
+// appends for a reply. It is a path: the origin belongs to whichever transport
+// served the request, and every caller that hands a link out resolves it
+// against that origin. The shape used to be spelled out at four sites.
+func MessagePermalinkPath(conversation ConversationID, timestamp, threadTimestamp MessageTimestamp) string {
+	path := "/archives/" + url.PathEscape(string(conversation)) + "/p" + strings.ReplaceAll(string(timestamp), ".", "")
+	if threadTimestamp != "" && threadTimestamp != timestamp {
+		path += "?" + url.Values{"cid": {string(conversation)}, "thread_ts": {string(threadTimestamp)}}.Encode()
 	}
-	seconds, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("%w %q: %w", ErrInvalidMessageTimestamp, string(value), err)
+	return path
+}
+
+// ParseTimestampBound reads a Slack timestamp used as a bound rather than as an
+// identifier — conversations.history's `oldest`/`latest`, a file filter's
+// `ts_from`. Slack accepts whole seconds there, and up to six fractional
+// digits.
+func ParseTimestampBound(raw string) (time.Time, error) {
+	return parseSlackTimestamp(strings.TrimSpace(raw), false)
+}
+
+// maxTimestampSeconds is the largest `ts` whose microsecond scaling fits in
+// int64 WITH its fractional microseconds added. Bounding seconds*1e6 alone was
+// not enough: `9223372036854.8` overflowed to a negative instant.
+const maxTimestampSeconds = (math.MaxInt64 - 999999) / 1000000
+
+func parseSlackTimestamp(raw string, identifier bool) (time.Time, error) {
+	whole, fraction, dotted := strings.Cut(raw, ".")
+	if !asciiDigits(whole) || len(fraction) > 6 || (fraction != "" && !asciiDigits(fraction)) ||
+		(identifier && (!dotted || len(fraction) != 6)) {
+		return time.Time{}, fmt.Errorf("%w %q", ErrInvalidMessageTimestamp, raw)
 	}
-	micros, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || micros < 0 || micros > 999999 {
-		return time.Time{}, fmt.Errorf("%w %q", ErrInvalidMessageTimestamp, string(value))
+	seconds, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil || seconds > maxTimestampSeconds {
+		return time.Time{}, fmt.Errorf("%w %q", ErrInvalidMessageTimestamp, raw)
+	}
+	micros := int64(0)
+	for index := 0; index < 6; index++ {
+		micros *= 10
+		if index < len(fraction) {
+			micros += int64(fraction[index] - '0')
+		}
 	}
 	return time.Unix(seconds, micros*1000).UTC(), nil
+}
+
+// asciiDigits reports whether value is one or more ASCII digits. ParseInt alone
+// also accepts a sign, which is how `-1.000000` used to parse as an identifier.
+func asciiDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < '0' || value[index] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // PublicID is deliberately opaque. The prefix is part of the wire contract;

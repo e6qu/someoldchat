@@ -45,8 +45,10 @@ func newFileFixture(t *testing.T, publicURL string, withBlob bool) fileFixture {
 		}
 		messages.Blob = objects
 	}
+	// groups:write is the scope conversations.leave requires for a private
+	// channel; the shares test leaves one.
 	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{
-		auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeChatWrite: {}, auth.ScopeChannelsManage: {},
+		auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeChatWrite: {}, auth.ScopeChannelsManage: {}, auth.ScopeGroupsWrite: {},
 	}})
 	if err != nil {
 		t.Fatal(err)

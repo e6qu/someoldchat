@@ -151,7 +151,7 @@ func TestPostMessageRejectsArchivedConversation(t *testing.T) {
 	if _, err := (Messages{Store: s}).Post(context.Background(), "T1", "U1", "C1", "hello", "", ""); !errors.Is(err, ErrConversationAlreadyArchived) {
 		t.Fatalf("Post error = %v, want %v", err, ErrConversationAlreadyArchived)
 	}
-	messages, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 100})
+	messages, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 100}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1475,7 +1475,7 @@ func TestEphemeralMessageIsDurableAndRecipientScoped(t *testing.T) {
 	if err != nil || len(hidden) != 0 {
 		t.Fatalf("non-recipient ephemerals=%+v err=%v", hidden, err)
 	}
-	if _, err := (Messages{Store: s}).PostEphemeral(context.Background(), "T1", "U1", "C1", "U3", "secret"); err != store.ErrNotFound {
+	if _, err := (Messages{Store: s}).PostEphemeral(context.Background(), "T1", "U1", "C1", "U3", "secret"); !errors.Is(err, ErrRecipientNotInConversation) {
 		t.Fatalf("foreign recipient err=%v", err)
 	}
 	records, err := s.ListEventsAfter(context.Background(), "T1", 0, 10)
@@ -1497,7 +1497,7 @@ func TestPostMessagePersistsMessage(t *testing.T) {
 	if message.Text != "hello" || message.ID == "" {
 		t.Fatalf("unexpected message: %+v", message)
 	}
-	got, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 10})
+	got, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(got.Messages) != 1 {
 		t.Fatalf("messages = %+v, err = %v", got, err)
 	}
@@ -1583,7 +1583,7 @@ func TestReplyStoresSlackThreadTimestamp(t *testing.T) {
 	if reply.ThreadTimestamp != thread {
 		t.Fatalf("thread timestamp=%q, want %q", reply.ThreadTimestamp, thread)
 	}
-	page, err := messages.Replies(context.Background(), "T1", "U1", "C1", thread, domain.PageRequest{Limit: 10})
+	page, err := messages.Replies(context.Background(), "T1", "U1", "C1", thread, domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 2 || page.Messages[0].ID != root.ID || page.Messages[1].ID != reply.ID {
 		t.Fatalf("replies=%+v err=%v", page, err)
 	}
@@ -2203,7 +2203,7 @@ func TestScheduledComposerFilesSurviveTicketExpiryAndDeliverIdempotently(t *test
 	if err != nil || second.ID != first.ID {
 		t.Fatalf("retry delivery=%+v err=%v, want message %s", second, err, first.ID)
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != first.ID {
 		t.Fatalf("delivery duplicated message: history=%+v err=%v", history, err)
 	}
@@ -2261,7 +2261,7 @@ func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *test
 			t.Fatalf("closed DM remained in current navigation: %+v", page)
 		}
 	}
-	history, err := messages.History(ctx, "T1", "U1", direct.ID, domain.PageRequest{Limit: 10})
+	history, err := messages.History(ctx, "T1", "U1", direct.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != posted.ID {
 		t.Fatalf("closed history=%+v err=%v", history, err)
 	}
@@ -2328,11 +2328,11 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil || len(targetMembers.Users) != 3 {
 		t.Fatalf("target members = %+v err=%v", targetMembers, err)
 	}
-	sourceHistory, err := messages.History(ctx, "T1", "U1", source.ID, domain.PageRequest{Limit: 10})
+	sourceHistory, err := messages.History(ctx, "T1", "U1", source.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(sourceHistory.Messages) != 2 {
 		t.Fatalf("source history = %+v err=%v", sourceHistory, err)
 	}
-	targetHistory, err := messages.History(ctx, "T1", "U1", expanded.ID, domain.PageRequest{Limit: 10})
+	targetHistory, err := messages.History(ctx, "T1", "U1", expanded.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(targetHistory.Messages) != 2 {
 		t.Fatalf("target history = %+v err=%v", targetHistory, err)
 	}
@@ -2347,7 +2347,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if converted.ID != expanded.ID || converted.Kind != domain.ConversationTypePrivate || converted.Name != "project-room" {
 		t.Fatalf("converted conversation = %+v", converted)
 	}
-	convertedHistory, err := messages.History(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
+	convertedHistory, err := messages.History(ctx, "T1", "U1", converted.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(convertedHistory.Messages) != 3 {
 		t.Fatalf("converted history = %+v err=%v", convertedHistory, err)
 	}
@@ -2363,7 +2363,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil {
 		t.Fatal(err)
 	}
-	emptyHistory, err := messages.History(ctx, "T1", "U1", noHistory.ID, domain.PageRequest{Limit: 10})
+	emptyHistory, err := messages.History(ctx, "T1", "U1", noHistory.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(emptyHistory.Messages) != 1 || !strings.Contains(emptyHistory.Messages[0].Text, "added <@U4>") {
 		t.Fatalf("history-free expansion = %+v err=%v", emptyHistory, err)
 	}
@@ -2431,7 +2431,7 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	if err != nil || updated.Attachments != `[{"text":"updated"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "")
+	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "")
 	if err != nil || ephemeral.Attachments != `[{"text":"attachment"}]` {
 		t.Fatalf("ephemeral=%+v err=%v", ephemeral, err)
 	}
@@ -2551,7 +2551,7 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("schedule oversized body err=%v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", ""); !errors.Is(err, ErrInvalidEphemeral) {
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", ""); !errors.Is(err, ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
 	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
@@ -2602,7 +2602,7 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	if err != nil || len(metadata.SharedChannels) != 1 || metadata.SharedChannels[0] != "C1" {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
 	}
-	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" || len(page.Messages[0].Files) != 1 || page.Messages[0].Files[0].ID != file.ID {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
@@ -2659,7 +2659,7 @@ func TestDeletingTheSharingMessageEndsTheShareAndAnnouncesIt(t *testing.T) {
 	if _, err := messages.FileInfo(ctx, "T1", "U2", file.ID); err != nil {
 		t.Fatalf("a member of the channel it was shared into cannot read the file: %v", err)
 	}
-	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
@@ -2744,7 +2744,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if err != nil || len(files) != 2 || files[0].Title != "First" || files[1].Title != "Second" {
 		t.Fatalf("files=%+v err=%v", files, err)
 	}
-	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Blocks == "" || len(page.Messages[0].Files) != 2 || page.Messages[0].Files[0].ID != files[0].ID || page.Messages[0].Files[1].ID != files[1].ID {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
@@ -2755,7 +2755,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if _, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID}, {ID: second.ID}}, []domain.ConversationID{"C2"}, "wrong destination", "", ""); !errors.Is(err, ErrInvalidExternalUpload) {
 		t.Fatalf("completed tickets reused in another channel: %v", err)
 	}
-	page, err = messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err = messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("duplicate messages=%+v err=%v", page.Messages, err)
 	}
@@ -2791,7 +2791,7 @@ func TestDraftOwnedUploadRemainsCompletableAfterTicketWindow(t *testing.T) {
 	if err != nil || len(files) != 1 {
 		t.Fatalf("files=%+v err=%v", files, err)
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].Text != "finished" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}

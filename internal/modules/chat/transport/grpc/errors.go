@@ -249,6 +249,10 @@ var errorClasses = []errorClass{
 	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: service.ErrAppNotHosted},
 	{key: "service.function_not_running", code: codes.FailedPrecondition, sentinel: service.ErrFunctionNotRunning},
 	{key: "service.message_not_streaming", code: codes.FailedPrecondition, sentinel: service.ErrMessageNotStreaming},
+	// The recipient exists or does not, but either way cannot see the
+	// conversation; that is a precondition on the recipient, not an absence
+	// of the conversation the caller named.
+	{key: "service.recipient_not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrRecipientNotInConversation},
 	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: service.ErrMessageAlreadyDeleted, restoresCode: true},
 
 	// Absence. blob.ErrNotFound is distinct from store.ErrNotFound and reaches a
@@ -265,6 +269,7 @@ var errorClasses = []errorClass{
 	{key: "service.workflow_function_not_found", code: codes.NotFound, sentinel: service.ErrWorkflowFunctionNotFound},
 	{key: "service.webhook_trigger_secret", code: codes.NotFound, sentinel: service.ErrWebhookTriggerSecret},
 	{key: "service.slash_command_not_found", code: codes.NotFound, sentinel: service.ErrSlashCommandNotFound},
+	{key: "service.thread_not_found", code: codes.NotFound, sentinel: service.ErrThreadNotFound},
 	{key: "service.app_datastore_not_found", code: codes.NotFound, sentinel: service.ErrAppDatastoreNotFound},
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},
 

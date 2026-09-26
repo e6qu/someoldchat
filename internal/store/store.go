@@ -808,6 +808,9 @@ type Store interface {
 	// fifty parents at a time, so this is deliberately batched: the
 	// per-parent alternative is fifty queries per page.
 	ThreadSummaries(context.Context, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
+	// FollowedThreadRoots reports which of the named roots the member follows,
+	// in one read, for the `subscribed` flag a user token sees on a parent.
+	FollowedThreadRoots(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]bool, error)
 	GetReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
 	// SetReadCursors advances several read cursors in one transaction, with one
@@ -1004,10 +1007,22 @@ type Store interface {
 	// domain.PageRequest.PageAfter and both take NextCursor from the last row of
 	// the page. A cursor carries no direction, so one minted walking backwards
 	// resumes a forward walk from the same row.
-	ListMessages(context.Context, domain.ConversationID, domain.PageRequest) (domain.MessagePage, error)
+	//
+	// The request's window and RootsOnly are part of the same keyset read, so
+	// Limit, HasMore and NextCursor describe the rows the caller asked for: a
+	// window that holds one message answers that message with HasMore false,
+	// however many newer rows or thread replies lie outside it.
+	ListMessages(context.Context, domain.ConversationID, domain.HistoryRequest) (domain.MessagePage, error)
 	// ListThreadMessages has the same non-deleted history boundary as
-	// ListMessages, in chronological order.
-	ListThreadMessages(context.Context, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) (domain.MessagePage, error)
+	// ListMessages, in chronological order: the root first, then the replies
+	// inside the request's window.
+	ListThreadMessages(context.Context, domain.ConversationID, domain.MessageTimestamp, domain.ThreadRequest) (domain.MessagePage, error)
+	// MessageAnnotations reports, for each named message, its reactions grouped
+	// by emoji and whether it is pinned, in one read. A history page carries
+	// both on every message; asking per message was a query per row. An
+	// identifier that names no message of the conversation contributes
+	// nothing, so the read cannot disclose another channel's reactions.
+	MessageAnnotations(context.Context, domain.ConversationID, []domain.MessageID) (map[domain.MessageID]domain.MessageAnnotation, error)
 	ListAuthoredMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.MessagePage, error)
 	AddReaction(context.Context, domain.Reaction, events.Event) error
 	RemoveReaction(context.Context, domain.Reaction, events.Event) error

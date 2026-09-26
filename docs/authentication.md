@@ -70,9 +70,13 @@ credential is supplied, the workspace, lookup user, public HTTPS URL, and
 endpoint, which the server configures as `https://api.github.com/user/emails`.
 
 `-auth-public-url` is also the origin of every absolute URL the Slack Web API
-emits — file downloads, the v2 upload URL, the OAuth authorize URL — so a
-deployment behind a proxy should set it even without an identity provider;
-see [Files](files.md#absolute-urls).
+emits: file downloads (`url_private`, `permalink_public`), the v2 upload URL,
+the OAuth authorize URL, message permalinks (`chat.getPermalink` and the
+`permalink` of search matches, pins and reactions), and `auth.test`'s `url`.
+Official SDKs follow those URLs as given, so a deployment behind a proxy —
+where the request's `Host` is the upstream name — should set it to the address
+clients use, even without an identity provider. Without it the URLs are built
+on the origin of each request; see [Files](files.md#absolute-urls).
 
 For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,

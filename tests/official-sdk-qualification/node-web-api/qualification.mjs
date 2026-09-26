@@ -10,6 +10,7 @@ const clientOptions = {
 	...(process.env.SAMEOLDCHAT_SDK_DEBUG === "1" ? { logLevel: LogLevel.DEBUG } : {}),
 };
 const client = new WebClient(token, clientOptions);
+const apiOrigin = new URL(apiUrl).origin;
 const reminderClient = new WebClient("xoxp-reminder-qualification", clientOptions);
 const workflowClient = new WebClient("xoxb-workflow-qualification", clientOptions);
 // The invited organization's own credential; see the Slack Connect walk below.
@@ -1583,6 +1584,8 @@ const externalMessages = externalHistory.messages.filter((message) =>
 assert.equal(externalMessages.length, 1);
 assert.equal(externalMessages[0].text, "external upload");
 assert.equal(externalMessages[0].files[0].mode, "hosted");
+// A file URL is absolute on the origin the client was pointed at; a
+// server-relative path is not something the SDK can download.
 assert.equal(externalMessages[0].files[0].url_private, `${apiOrigin}/api/files/${externalUpload.file_id}`);
 
 // The upload is single-use: completing it again must not mint a second file.
@@ -1596,6 +1599,58 @@ const repeatedHistory = await client.conversations.history({ channel: "C1", limi
 assert.equal(repeatedHistory.messages.filter((message) =>
 	message.files?.some((file) => file.id === externalUpload.file_id)
 ).length, 1);
+
+// The message object as history, replies, pins and reactions return it,
+// read through the official client exactly as an app written against Slack
+// reads it.
+assert.equal(identity.url, `${apiOrigin}/`);
+const contractBlocks = [{ type: "section", text: { type: "plain_text", text: "node contract block" } }];
+const contractRoot = await client.chat.postMessage({ channel: "#general", text: "node contract root", blocks: contractBlocks });
+assert.equal(contractRoot.channel, "C1");
+assert.equal(contractRoot.message.bot_id, "B1");
+assert.equal(contractRoot.message.team, "T1");
+assert.equal(contractRoot.message.bot_profile.id, "B1");
+assert.equal(contractRoot.message.bot_profile.app_id, "A1");
+const contractQuiet = await client.chat.postMessage({ channel: "C1", text: "node quiet reply", thread_ts: contractRoot.ts });
+const contractLoud = await client.chat.postMessage({ channel: "C1", text: "node loud reply", thread_ts: contractRoot.ts, reply_broadcast: true });
+const contractNested = await client.chat.postMessage({ channel: "C1", text: "node reply to a reply", thread_ts: contractQuiet.ts });
+assert.equal(contractNested.message.thread_ts, contractRoot.ts);
+await client.reactions.add({ channel: "C1", timestamp: contractRoot.ts, name: "eyes" });
+await client.pins.add({ channel: "C1", timestamp: contractRoot.ts });
+const contractWindow = await client.conversations.history({ channel: "C1", latest: contractRoot.ts, inclusive: true, limit: 1 });
+assert.deepEqual(contractWindow.messages.map((message) => message.ts), [contractRoot.ts]);
+const contractParent = contractWindow.messages[0];
+assert.equal(contractParent.thread_ts, contractRoot.ts);
+assert.equal(contractParent.reply_count, 3);
+assert.deepEqual(contractParent.reply_users, ["U1"]);
+assert.equal(contractParent.reply_users_count, 1);
+assert.equal(contractParent.latest_reply, contractNested.ts);
+assert.deepEqual(contractParent.reactions, [{ name: "eyes", users: ["U1"], count: 1 }]);
+assert.deepEqual(contractParent.pinned_to, ["C1"]);
+const contractRecent = await client.conversations.history({ channel: "C1", oldest: contractRoot.ts });
+assert.deepEqual(contractRecent.messages.map((message) => message.text), ["node loud reply"]);
+assert.equal(contractRecent.messages[0].subtype, "thread_broadcast");
+const contractThread = await client.conversations.replies({ channel: "C1", ts: contractQuiet.ts });
+assert.deepEqual(contractThread.messages.map((message) => message.ts), [contractRoot.ts, contractQuiet.ts, contractLoud.ts, contractNested.ts]);
+const contractPins = (await client.pins.list({ channel: "C1" })).items.filter((item) => item.message?.ts === contractRoot.ts);
+assert.equal(contractPins.length, 1);
+assert.equal(contractPins[0].message.text, "node contract root");
+assert.equal(contractPins[0].message.permalink.startsWith(`${apiOrigin}/archives/C1/p`), true);
+const contractReactions = await client.reactions.get({ channel: "C1", timestamp: contractRoot.ts });
+assert.equal(contractReactions.type, "message");
+assert.equal(contractReactions.channel, "C1");
+assert.equal(contractReactions.message.text, "node contract root");
+const contractLink = await client.chat.getPermalink({ channel: "C1", message_ts: contractRoot.ts });
+assert.equal(contractLink.permalink.startsWith(`${apiOrigin}/archives/C1/p`), true);
+const contractEdited = await client.chat.update({ channel: "C1", ts: contractRoot.ts, text: "node contract root edited" });
+assert.equal(contractEdited.message.blocks[0].text.text, "node contract block");
+await assert.rejects(
+	client.chat.update({ channel: "C1", ts: contractQuiet.ts, text: "" }),
+	(error) => error?.data?.error === "no_text",
+);
+assert.equal((await client.users.list({ limit: 0 })).ok, true);
+assert.equal((await client.conversations.history({ channel: "C1", limit: 0 })).ok, true);
+await client.pins.remove({ channel: "C1", timestamp: contractRoot.ts });
 
 await assert.rejects(
 	client.api.test({ error: "synthetic" }),

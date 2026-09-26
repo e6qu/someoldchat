@@ -46,7 +46,7 @@ func TestShareUploadedFileSharesIntoChannels(t *testing.T) {
 	}
 	// Each channel got a message carrying the initial comment and the file.
 	for _, channel := range []domain.ConversationID{"C1", "C2"} {
-		page, listErr := s.ListMessages(ctx, channel, domain.PageRequest{Limit: 10})
+		page, listErr := s.ListMessages(ctx, channel, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 		if listErr != nil {
 			t.Fatal(listErr)
 		}
@@ -80,11 +80,11 @@ func TestShareUploadedFileSharesIntoChannels(t *testing.T) {
 
 	// Validate-all-first: a request naming a good channel and an archived one
 	// shares into neither, so nothing is left half-shared.
-	before, _ := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 50})
+	before, _ := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})
 	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C1", "C3"}, "", ""); !errors.Is(err, ErrConversationAlreadyArchived) {
 		t.Fatalf("mixed archived share = %v, want ErrConversationAlreadyArchived", err)
 	}
-	after, _ := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 50})
+	after, _ := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})
 	if len(after.Messages) != len(before.Messages) {
 		t.Fatalf("validate-all-first violated: C1 gained a share though C3 was archived (%d -> %d)", len(before.Messages), len(after.Messages))
 	}

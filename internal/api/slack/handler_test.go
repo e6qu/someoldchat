@@ -3044,15 +3044,15 @@ func TestGetPermalink(t *testing.T) {
 	if err := json.NewDecoder(posted.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	permalink := httptest.NewRequest(http.MethodGet, "/api/chat.getPermalink?channel=C1&message_ts="+response.TS, nil)
+	permalink := httptest.NewRequest(http.MethodGet, "https://chat.example.test/api/chat.getPermalink?channel=C1&message_ts="+response.TS, nil)
 	permalink.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, permalink)
-	// The permalink is Slack's shape on THIS deployment's origin. It used to
-	// name sameoldchat.local, a host that exists nowhere, so every permalink
-	// this product handed out was unfollowable; the path is now served by
+	// The permalink is Slack's shape, absolute on THIS deployment's origin.
+	// It used to name sameoldchat.local, a host that exists nowhere, and then
+	// a bare path, which no SDK can follow; the path is served by
 	// internal/web's /archives route.
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"permalink":"/archives/C1/p`) {
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"permalink":"https://chat.example.test/archives/C1/p`) {
 		t.Fatalf("permalink status=%d body=%s", result.Code, result.Body)
 	}
 	if strings.Contains(result.Body.String(), "sameoldchat.local") {

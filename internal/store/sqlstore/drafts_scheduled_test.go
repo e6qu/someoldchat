@@ -303,7 +303,7 @@ func TestSQLiteScheduledFileDeliveryRollsBackAndRetriesAsOneTransaction(t *testi
 		storepkg.PostedMessage{Message: message, Event: messageEvents[0]}); !errors.Is(err, storepkg.ErrIdempotencyConflict) {
 		t.Fatalf("store retry=%v, want idempotency conflict", err)
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 2 || history.Messages[1].ID != message.ID {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}

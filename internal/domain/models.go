@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1861,6 +1862,10 @@ type Pin struct {
 	Message   MessageID
 	UserID    UserID
 	CreatedAt time.Time
+	// Item is the pinned message as it reads now. pins.list returns the
+	// whole message object; carrying only the identifier made every caller
+	// either answer `{"id": ...}` or make a read per pin.
+	Item Message
 }
 
 type Star struct {
@@ -3489,7 +3494,12 @@ type Message struct {
 	Metadata        string
 	StreamState     string
 	ThreadTimestamp MessageTimestamp
-	CreatedAt       time.Time
+	// ReplyBroadcast marks a thread reply that was also sent to the channel.
+	// It is a column, not part of StreamState, because history pages on it:
+	// conversations.history lists roots and broadcast replies, and a flag
+	// buried in a JSON blob cannot be part of a keyset read.
+	ReplyBroadcast bool
+	CreatedAt      time.Time
 	// EditedAt and EditedBy record the last edit. Slack's message object
 	// carries an `edited` sub-object, and clients render "(edited)" from it.
 	// The edit instant used to live only on the outbox event, so the fact was
@@ -3556,6 +3566,57 @@ type ThreadSummary struct {
 	ReplyCount   int
 	Participants []UserID
 	LastReplyAt  time.Time
+	// Subscribed reports whether the reader follows the thread. It is the
+	// only per-reader fact in the summary, which is why the service, not the
+	// repository, fills it.
+	Subscribed bool
+}
+
+// ReactionSummary is one emoji's row of Slack's `reactions` array: who reacted
+// with it, in the order they did, and how many.
+type ReactionSummary struct {
+	Name  string
+	Users []UserID
+	Count int
+}
+
+// SummarizeReactions groups reaction rows into Slack's `reactions` array.
+// Emoji appear in the order each was first used and users in the order they
+// reacted, ties broken by name and user so the result is a function of the
+// rows alone. Every storage profile builds the array here, so they cannot
+// disagree about its order.
+func SummarizeReactions(reactions []Reaction) []ReactionSummary {
+	ordered := slices.Clone(reactions)
+	slices.SortStableFunc(ordered, func(left, right Reaction) int {
+		if compared := left.CreatedAt.Compare(right.CreatedAt); compared != 0 {
+			return compared
+		}
+		if compared := strings.Compare(left.Name, right.Name); compared != 0 {
+			return compared
+		}
+		return strings.Compare(string(left.UserID), string(right.UserID))
+	})
+	index := make(map[string]int, len(ordered))
+	result := make([]ReactionSummary, 0, len(ordered))
+	for _, reaction := range ordered {
+		position, seen := index[reaction.Name]
+		if !seen {
+			position = len(result)
+			index[reaction.Name] = position
+			result = append(result, ReactionSummary{Name: reaction.Name})
+		}
+		result[position].Users = append(result[position].Users, reaction.UserID)
+		result[position].Count++
+	}
+	return result
+}
+
+// MessageAnnotation is what a message carries beside its content in every
+// Slack read that returns it: its reactions, grouped by emoji in the order each
+// emoji first appeared, and whether it is pinned to its conversation.
+type MessageAnnotation struct {
+	Reactions []ReactionSummary
+	Pinned    bool
 }
 
 // FollowedThread is one row of Slack's Threads view: a thread the member
@@ -3620,12 +3681,15 @@ type MessageStreamState struct {
 	ChunkBlocks     []json.RawMessage `json:"chunk_blocks,omitempty"`
 	Warnings        []string          `json:"warnings,omitempty"`
 	MarkdownText    bool              `json:"markdown_text,omitempty"`
-	ReplyBroadcast  bool              `json:"reply_broadcast,omitempty"`
-	Parse           string            `json:"parse,omitempty"`
-	MrkdwnDisabled  bool              `json:"mrkdwn_disabled,omitempty"`
-	LinkNames       bool              `json:"link_names,omitempty"`
-	UnfurlLinks     *bool             `json:"unfurl_links,omitempty"`
-	UnfurlMedia     *bool             `json:"unfurl_media,omitempty"`
+	// ReplyBroadcast carries the flag on a scheduled message until it is
+	// delivered. A delivered message records it in Message.ReplyBroadcast;
+	// rows written before that column existed were migrated from here.
+	ReplyBroadcast bool   `json:"reply_broadcast,omitempty"`
+	Parse          string `json:"parse,omitempty"`
+	MrkdwnDisabled bool   `json:"mrkdwn_disabled,omitempty"`
+	LinkNames      bool   `json:"link_names,omitempty"`
+	UnfurlLinks    *bool  `json:"unfurl_links,omitempty"`
+	UnfurlMedia    *bool  `json:"unfurl_media,omitempty"`
 }
 
 // MessagePostRequest is the complete current chat.postMessage payload after
@@ -3655,6 +3719,13 @@ type MessagePostRequest struct {
 	// lifecycle mutations set their own. A caller cannot choose an arbitrary
 	// value — postMessageAs refuses one the vocabulary does not define.
 	Subtype MessageSubtype
+	// BotID is the posting token's bot identity. A bot token's message
+	// carries it as `bot_id`, and readers resolve `bot_profile` from it.
+	BotID BotID
+	// WritePublic is the chat:write.public grant: a bot holding it may post
+	// to a public channel without joining it. It never reaches a private
+	// channel or a direct conversation.
+	WritePublic bool
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a
@@ -3666,6 +3737,16 @@ type MessagePatch struct {
 	Text        *string
 	Blocks      *string
 	Attachments *string
+}
+
+// NoStructuredContent reports whether a normalized blocks or attachments value
+// carries nothing: absent, or the empty array. Both storage profiles persist an
+// absent attachment list as "[]", so a message read back never compares equal
+// to "" — which is how chat.update with text="" used to blank a message whose
+// only content was its text instead of answering no_text.
+func NoStructuredContent(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || value == "[]"
 }
 
 func NormalizeBlocks(raw []byte) (string, error) {
@@ -3732,7 +3813,10 @@ type EphemeralMessage struct {
 	Blocks       string
 	Attachments  string
 	Timestamp    MessageTimestamp
-	CreatedAt    time.Time
+	// ThreadTimestamp places the ephemeral message in a thread, as
+	// chat.postEphemeral's thread_ts does; empty is the channel.
+	ThreadTimestamp MessageTimestamp
+	CreatedAt       time.Time
 }
 
 // WorkspaceAnalytics is the shape of the administration dashboard: counts a

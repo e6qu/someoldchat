@@ -128,7 +128,7 @@ func TestAnOversizedResponseIsNotRestoredAsADomainSentinel(t *testing.T) {
 			t.Fatalf("post %d: %v", index, err)
 		}
 	}
-	_, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 200})
+	_, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 200}})
 	if err == nil {
 		t.Fatal("a page larger than the receive bound was accepted")
 	}
@@ -886,8 +886,8 @@ func (c *pageRecordingChat) ListEventsAfter(_ context.Context, _ domain.Workspac
 	return nil, nil
 }
 
-func (c *pageRecordingChat) History(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, _ domain.ConversationID, page domain.PageRequest) (domain.MessagePage, error) {
-	c.record(page.Limit)
+func (c *pageRecordingChat) History(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, _ domain.ConversationID, history domain.HistoryRequest) (domain.MessagePage, error) {
+	c.record(history.Page.Limit)
 	return domain.MessagePage{}, nil
 }
 
@@ -910,7 +910,7 @@ func TestAPageLimitIsBoundedByATransportResourceLimit(t *testing.T) {
 	if _, err := remote.ListEventsAfter(ctx, "T1", 0, math.MaxInt32); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: math.MaxInt32}); err != nil {
+	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: math.MaxInt32}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, observed := range recorder.observed() {
@@ -921,7 +921,7 @@ func TestAPageLimitIsBoundedByATransportResourceLimit(t *testing.T) {
 	// A page a caller can really ask for crosses unchanged, so the clamp is not
 	// a second, invisible product limit.
 	before := len(recorder.observed())
-	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 201}); err != nil {
+	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 201}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := remote.ListEventsAfter(ctx, "T1", 0, 1000); err != nil {

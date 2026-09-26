@@ -1578,7 +1578,7 @@ func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppRes
 		_, err := m.PostWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, response.Text, blocks, attachments, capability.ThreadTimestamp, idempotencyKey, capability.AppID)
 		return err
 	}
-	_, err = m.postEphemeralWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, capability.UserID, response.Text, blocks, attachments, capability.AppID, idempotencyKey)
+	_, err = m.postEphemeralWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, capability.UserID, response.Text, blocks, attachments, capability.AppID, idempotencyKey, "")
 	return err
 }
 

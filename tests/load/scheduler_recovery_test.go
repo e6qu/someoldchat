@@ -54,7 +54,7 @@ func TestScheduledReplacementWorkerRecoversAfterCrash(t *testing.T) {
 	if err := repository.MarkScheduledMessageDelivered(ctx, "crashed-worker", item.ID); !errors.Is(err, store.ErrLeaseConflict) {
 		t.Fatalf("crashed owner mark error=%v, want lease conflict", err)
 	}
-	page, err := repository.ListMessages(ctx, item.Channel, domain.PageRequest{Limit: 10})
+	page, err := repository.ListMessages(ctx, item.Channel, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != item.Text {
 		t.Fatalf("scheduled messages=%+v err=%v", page.Messages, err)
 	}

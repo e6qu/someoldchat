@@ -54,6 +54,51 @@ func (r PageRequest) PageAfter(createdAt time.Time, id MessageID, cursorAt time.
 	return createdAt.After(cursorAt) || (createdAt.Equal(cursorAt) && string(id) > string(cursorID))
 }
 
+// MessageWindow is the `oldest`/`latest`/`inclusive` window Slack declares on
+// conversations.history and conversations.replies. A zero bound is unbounded.
+//
+// It is part of the store read rather than a filter applied to a fetched page.
+// Filtering after the fact answered `latest=<ts>&inclusive=true&limit=1` with an
+// empty page, because the one row fetched was the newest message rather than
+// the one the window named, and `has_more` then described the unfiltered scan.
+type MessageWindow struct {
+	Oldest    time.Time
+	Latest    time.Time
+	Inclusive bool
+}
+
+// Contains reports whether an instant falls inside the window. Every profile
+// decides membership here or with the equivalent SQL predicate.
+func (w MessageWindow) Contains(at time.Time) bool {
+	if !w.Oldest.IsZero() && (at.Before(w.Oldest) || (at.Equal(w.Oldest) && !w.Inclusive)) {
+		return false
+	}
+	if !w.Latest.IsZero() && (at.After(w.Latest) || (at.Equal(w.Latest) && !w.Inclusive)) {
+		return false
+	}
+	return true
+}
+
+// HistoryRequest is one page of a conversation's history.
+//
+// RootsOnly is Slack's conversations.history contract: a thread reply is not
+// channel history unless it was also broadcast to the channel. The first-party
+// timeline and the Web API both read with it; a caller that needs every row —
+// retention, direct-history copies — leaves it false.
+type HistoryRequest struct {
+	Page      PageRequest
+	Window    MessageWindow
+	RootsOnly bool
+}
+
+// ThreadRequest is one page of a thread. The window narrows the replies; the
+// root is always the first row of the first page, which is what
+// conversations.replies answers whatever window the caller supplies.
+type ThreadRequest struct {
+	Page   PageRequest
+	Window MessageWindow
+}
+
 type ConversationType string
 
 const (
