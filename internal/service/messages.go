@@ -25,6 +25,7 @@ import (
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -221,6 +222,11 @@ type Messages struct {
 	Blob             blob.Store
 	AppCredentialKey []byte
 	AppHTTPClient    *http.Client
+	// PublicURL is the deployment's public URL (-auth-public-url), the one
+	// origin every URL a service-built event carries is resolved against —
+	// the same coordinate the Web API and the web client build on. Empty
+	// leaves those URLs origin-relative; see docs/operations.md.
+	PublicURL string
 }
 
 type conversationInviteFailureReason string
@@ -309,7 +315,7 @@ func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, af
 		}
 		for _, record := range records {
 			cursor = record.Sequence
-			prepared, visible, prepareErr := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, appID, record)
+			prepared, visible, prepareErr := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, slackobject.Origin(m.PublicURL), appID, record)
 			if prepareErr != nil {
 				return nil, prepareErr
 			}
@@ -348,7 +354,7 @@ func (m Messages) ListUserEventsAfter(ctx context.Context, workspaceID domain.Wo
 			return events.UserEventPage{}, err
 		}
 		for _, record := range records {
-			prepared, visible, prepareErr := PrepareUserEvent(ctx, m.Store, workspaceID, userID, record)
+			prepared, visible, prepareErr := PrepareUserEvent(ctx, m.Store, slackobject.Origin(m.PublicURL), workspaceID, userID, record)
 			if prepareErr != nil {
 				return events.UserEventPage{}, prepareErr
 			}
@@ -388,7 +394,7 @@ func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface
 			return claim, found, err
 		}
 		record := claim.Record
-		prepared, visible, err := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, appID, record)
+		prepared, visible, err := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, slackobject.Origin(m.PublicURL), appID, record)
 		if err != nil {
 			m.deferAppEvent(ctx, appID, surface, owner, record.Sequence, "event_projection_failed")
 			return events.AppEventClaim{}, false, err

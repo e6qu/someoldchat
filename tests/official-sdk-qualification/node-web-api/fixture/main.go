@@ -264,7 +264,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	messages := service.Messages{Store: store, Blob: blobs, AppCredentialKey: appCredentialKey}
+	// The fixture is reached on one address, which is its public URL: the Web
+	// API and every event payload build their absolute URLs on it, as a
+	// deployment's -auth-public-url makes them.
+	messages := service.Messages{Store: store, Blob: blobs, AppCredentialKey: appCredentialKey, PublicURL: fixturePublicURL}
 	qualificationWorkflow := domain.WorkflowDefinition{
 		ID: "WfQualification", WorkspaceID: "T1", AppID: "A3", OwnerID: "U1", CallbackID: "qualification-workflow",
 		Title: "Qualification workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage"}]`,
@@ -370,7 +373,7 @@ func main() {
 	// upload URL among them — answering 404 by default.
 	if err := slack.Mount(mux, slack.Surface{
 		Messages: messages, Authenticator: authenticator, AppAuthenticator: appAuthenticator, Responses: responses,
-		Limiter: slack.NewRateLimiter(),
+		Limiter: slack.NewRateLimiter(), PublicURL: fixturePublicURL,
 	}); err != nil {
 		panic(err)
 	}
@@ -568,7 +571,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	server := &http.Server{Addr: "127.0.0.1:18080", Handler: serverHandler}
+	server := &http.Server{Addr: strings.TrimPrefix(fixturePublicURL, "http://"), Handler: serverHandler}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
@@ -645,3 +648,7 @@ func (s *qualificationResponseSink) get(envelopeID string) (string, bool) {
 	payload, ok := s.values[envelopeID]
 	return payload, ok
 }
+
+// fixturePublicURL is the one address every qualification suite reaches the
+// fixture on.
+const fixturePublicURL = "http://127.0.0.1:18080"

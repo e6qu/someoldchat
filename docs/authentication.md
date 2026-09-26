@@ -76,7 +76,10 @@ the OAuth authorize URL, message permalinks (`chat.getPermalink` and the
 Official SDKs follow those URLs as given, so a deployment behind a proxy —
 where the request's `Host` is the upstream name — should set it to the address
 clients use, even without an identity provider. Without it the URLs are built
-on the origin of each request; see [Files](files.md#absolute-urls).
+on the origin of each request; see [Files](files.md#absolute-urls). The same
+value is the origin of the URLs in event payloads, which `sameoldchat-chatd`
+and the `slack-events` worker also take; see
+[Public URL](operations.md#public-url).
 
 For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,

@@ -18,14 +18,17 @@ type manifest struct {
 }
 
 type module struct {
-	Name                 string   `json:"name"`
-	APIImport            string   `json:"api_import"`
-	ImplementationImport string   `json:"implementation_import"`
-	TransportImport      string   `json:"transport_import"`
-	BlobImport           string   `json:"blob_import"`
-	ImplementationType   string   `json:"implementation_type"`
-	AppCredentialKey     bool     `json:"app_credential_key"`
-	Dependencies         []string `json:"dependencies"`
+	Name                 string `json:"name"`
+	APIImport            string `json:"api_import"`
+	ImplementationImport string `json:"implementation_import"`
+	TransportImport      string `json:"transport_import"`
+	BlobImport           string `json:"blob_import"`
+	ImplementationType   string `json:"implementation_type"`
+	AppCredentialKey     bool   `json:"app_credential_key"`
+	// PublicURL gives the implementation the deployment's public URL, the
+	// origin of every absolute URL it builds.
+	PublicURL    bool     `json:"public_url"`
+	Dependencies []string `json:"dependencies"`
 }
 
 type target struct {
@@ -108,19 +111,24 @@ func generate(manifestPath, outPath string, check bool) error {
 	for _, item := range value.Modules {
 		name := exported(item.Name)
 		transport := transportAlias(item.Name)
+		// The local provider's parameters and the implementation's fields are
+		// assembled from what the module declares, rather than spelled out for
+		// every combination of them.
+		parameters := []string{"dependencies store.Store"}
+		fields := []string{"Store: dependencies"}
 		if item.BlobImport != "" {
-			if item.AppCredentialKey {
-				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store, blobs blob.Store, appCredentialKey []byte) %s.Service {\n\treturn %s.%s{Store: dependencies, Blob: blobs, AppCredentialKey: appCredentialKey}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
-			} else {
-				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store, blobs blob.Store) %s.Service {\n\treturn %s.%s{Store: dependencies, Blob: blobs}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
-			}
-		} else {
-			if item.AppCredentialKey {
-				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store, appCredentialKey []byte) %s.Service {\n\treturn %s.%s{Store: dependencies, AppCredentialKey: appCredentialKey}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
-			} else {
-				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store) %s.Service {\n\treturn %s.%s{Store: dependencies}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
-			}
+			parameters = append(parameters, "blobs blob.Store")
+			fields = append(fields, "Blob: blobs")
 		}
+		if item.AppCredentialKey {
+			parameters = append(parameters, "appCredentialKey []byte")
+			fields = append(fields, "AppCredentialKey: appCredentialKey")
+		}
+		if item.PublicURL {
+			parameters = append(parameters, "publicURL string")
+			fields = append(fields, "PublicURL: publicURL")
+		}
+		output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(%s) %s.Service {\n\treturn %s.%s{%s}\n}\n\n", name, strings.Join(parameters, ", "), packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType, strings.Join(fields, ", ")))
 		output.WriteString(fmt.Sprintf("func Provide%sServiceRemote(connection grpc.ClientConnInterface) (%s.Service, auth.TokenStore, auth.SessionStore, auth.SessionRevoker, error) {\n\tremote, err := %s.NewRemote(connection)\n\tif err != nil {\n\t\treturn nil, nil, nil, nil, err\n\t}\n\treturn remote, remote, remote, remote, nil\n}\n\n", name, packageName(item.APIImport), transport))
 		output.WriteString(fmt.Sprintf("func Register%sServiceServer(registrar grpc.ServiceRegistrar, implementation %s.Service, tokens auth.TokenStore, sessions auth.SessionStore, revoker auth.SessionRevoker) error {\n\treturn %s.RegisterServer(registrar, implementation, tokens, sessions, revoker)\n}\n\n", name, packageName(item.APIImport), transport))
 	}

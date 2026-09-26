@@ -2441,8 +2441,8 @@ decisions:
       Event compatibility is topic-specific. A real service-created
       message.created record is hydrated into a Slack message only after
       installed-bot or connected-user conversation visibility is proved, and
-      current Node, Python, and Java Socket Mode plus Node RTM clients parse that
-      result. Message mutation and file create/share callbacks use immutable
+      current Node, Python, and Java Socket Mode plus Node and Python RTM clients
+      parse that result. Message mutation and file create/share callbacks use immutable
       outbox snapshots; HTTP and Socket Mode select bot/user authorization
       perspectives by granted scope, membership, and manifest subscription.
       The formerly withheld topic-table rows are translated now:
@@ -2453,7 +2453,10 @@ decisions:
       its current-catalog user_profile_changed and user_status_changed
       companions, dnd_updated, presence_change (RTM only), team_rename and
       file_public, each from a producer-snapshotted payload pinned by builder
-      and producer-seam tests. user_typing is delivered on RTM and on the
+      and producer-seam tests. The user object team_join and user_change carry
+      is users.info's own (internal/slackobject), and every URL an event
+      carries — a file's url_private, a user's image_* — is built on
+      -auth-public-url at delivery, origin-relative when none is configured. user_typing is delivered on RTM and on the
       first-party SSE stream and is deliberately outside this translation
       table: it is the one Slack event produced without a journal record, read
       as expiring state rather than translated from the outbox, so it is never

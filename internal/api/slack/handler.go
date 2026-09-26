@@ -18,6 +18,7 @@ import (
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"io"
@@ -6276,7 +6277,7 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
@@ -6318,7 +6319,7 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": slackobject.User(h.origin(r), user, true)})
 }
 
 func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
@@ -6350,7 +6351,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
+		members = append(members, slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -6402,7 +6403,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	profile := profileResponse(h.origin(r), user)
+	profile := slackobject.Profile(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
@@ -6762,7 +6763,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	responseProfile := profileResponse(h.origin(r), user)
+	responseProfile := slackobject.Profile(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
@@ -6852,7 +6853,7 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(h.origin(r), user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": slackobject.Profile(h.origin(r), user)})
 }
 
 // users.setActive is deprecated and non-functional in Slack. Preserve that
@@ -6871,7 +6872,7 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 func adminUserResponse(origin string, value domain.AdminUser) map[string]any {
 	user := value.User
 	user.Role, user.Restricted, user.UltraRestricted = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted
-	result := userResponse(origin, user, true)
+	result := slackobject.User(origin, user, true)
 	result["is_active"] = value.Membership.Active
 	return result
 }
@@ -8647,7 +8648,7 @@ func (h Handler) searchMessageEnvelope(ctx context.Context, origin string, princ
 func searchFileEnvelope(origin string, arguments searchArguments, page domain.FilePage) map[string]any {
 	matches := make([]map[string]any, 0, len(page.Files))
 	for _, file := range page.Files {
-		matches = append(matches, fileResponse(origin, file))
+		matches = append(matches, slackobject.File(origin, file))
 	}
 	pageCount := 0
 	if page.Total > 0 {
@@ -8869,7 +8870,7 @@ func (h Handler) fileInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	response := fileResponse(h.origin(r), file)
+	response := slackobject.File(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	// The pinned 200 schema requires comments. Slack retired file comments
 	// and no route here creates one, so the page is always empty and final.
@@ -8944,7 +8945,7 @@ func (h Handler) shareFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file), "permalink_public": fileURLs{origin: h.origin(r)}.public(file.PublicToken)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": slackobject.File(h.origin(r), file), "permalink_public": slackobject.FileURLs{Origin: h.origin(r)}.Public(file.PublicToken)})
 }
 
 func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
@@ -8968,7 +8969,7 @@ func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": slackobject.File(h.origin(r), file)})
 }
 
 func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
@@ -9020,7 +9021,7 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 	}
 	files := make([]map[string]any, 0, len(window.files))
 	for _, file := range window.files {
-		files = append(files, fileResponse(h.origin(r), file))
+		files = append(files, slackobject.File(h.origin(r), file))
 	}
 	pages := (window.total + filter.count - 1) / filter.count
 	if pages == 0 {
@@ -9379,7 +9380,7 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		file.SharedChannels = shared
 	}
-	response := fileResponse(h.origin(r), file)
+	response := slackobject.File(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
 }
@@ -9757,66 +9758,6 @@ func copyUploadPart(destination *os.File, source io.Reader) error {
 		return err
 	}
 	return nil
-}
-
-func fileResponse(origin string, file domain.File) map[string]any {
-	// A deleted file survives only as a tombstone: Slack keeps its id in the
-	// messages that shared it and says nothing else about it, so neither its
-	// name nor a download URL outlives the deletion.
-	if file.Deleted {
-		return map[string]any{"id": file.ID, "mode": file.Mode()}
-	}
-	fileType, prettyType := file.FileTypes()
-	urls := fileURLs{origin: origin}
-	result := map[string]any{
-		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
-		"size": file.Size, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
-		"user": file.Uploader, "is_public": file.PublicToken != "", "team_id": file.WorkspaceID,
-		"filetype": fileType, "pretty_type": prettyType, "mode": file.Mode(),
-		"is_external": false, "external_type": "", "public_url_shared": file.PublicToken != "",
-		"editable": file.IsSnippet(), "display_as_bot": false,
-		// Every URL is absolute: SDKs and apps fetch them verbatim.
-		"url_private":          urls.private(string(file.ID)),
-		"url_private_download": urls.private(string(file.ID)),
-		"permalink":            urls.permalink(string(file.ID)),
-	}
-	if file.PublicToken != "" {
-		result["permalink_public"] = urls.public(file.PublicToken)
-	}
-	if len(file.SharedChannels) > 0 {
-		result["channels"] = file.SharedChannels
-	}
-	if shares := fileSharesResponse(file); shares != nil {
-		result["shares"] = shares
-	}
-	return result
-}
-
-// fileSharesResponse is Slack's shares map: {public|private: {channel:
-// [share, ...]}}, one entry per message that carries the file.
-func fileSharesResponse(file domain.File) map[string]any {
-	if len(file.Shares) == 0 {
-		return nil
-	}
-	shares := map[string]any{}
-	for _, share := range file.Shares {
-		visibility := "public"
-		if share.Private {
-			visibility = "private"
-		}
-		byChannel, _ := shares[visibility].(map[string]any)
-		if byChannel == nil {
-			byChannel = map[string]any{}
-			shares[visibility] = byChannel
-		}
-		entry := map[string]any{"ts": share.Timestamp, "channel_name": share.ConversationName, "team_id": file.WorkspaceID, "share_user_id": share.SharedBy}
-		if share.ThreadTimestamp != "" {
-			entry["thread_ts"] = share.ThreadTimestamp
-		}
-		existing, _ := byChannel[string(share.Conversation)].([]map[string]any)
-		byChannel[string(share.Conversation)] = append(existing, entry)
-	}
-	return shares
 }
 
 // defaultSnippetFilename names a content= snippet the caller left unnamed. Slack
@@ -11462,7 +11403,7 @@ func messageResponse(origin string, message domain.Message) map[string]any {
 	if len(message.Files) > 0 {
 		files := make([]map[string]any, 0, len(message.Files))
 		for _, file := range message.Files {
-			files = append(files, fileResponse(origin, file))
+			files = append(files, slackobject.File(origin, file))
 		}
 		result["subtype"] = "file_share"
 		result["upload"] = true
@@ -13405,7 +13346,7 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": fileURLs{origin: h.origin(r)}.externalUpload(string(upload.ID)), "file_id": upload.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": slackobject.FileURLs{Origin: h.origin(r)}.ExternalUpload(string(upload.ID)), "file_id": upload.ID})
 }
 
 func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
@@ -13527,7 +13468,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	responses := make([]map[string]any, 0, len(files))
 	for _, file := range files {
-		responses = append(responses, fileResponse(h.origin(r), file))
+		responses = append(responses, slackobject.File(h.origin(r), file))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": responses})
 }
