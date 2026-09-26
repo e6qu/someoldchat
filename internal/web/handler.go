@@ -4711,12 +4711,18 @@ func (h Handler) Register(mux *http.ServeMux) {
 		// Deliberately reachable signed-out: the person it is for has no
 		// account yet. See internal/web/invite.go for why it carries no secret.
 		mux.HandleFunc("GET /app/invite/{inviteRequestID}", h.invitationPage)
-		mux.HandleFunc("GET /api/admin.auth.methods.list", h.authMethodsList)
-		mux.HandleFunc("POST /api/admin.auth.methods.set", h.authMethodSet)
-		mux.HandleFunc("POST /api/admin.auth.users.invite", h.authUserInvite)
-		mux.HandleFunc("POST /api/admin.auth.users.create", h.authUserCreate)
-		mux.HandleFunc("GET /api/admin.auth.users.list", h.authUsersList)
-		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
+		// The control plane's own endpoints live under the page they serve.
+		// They were registered as /api/admin.auth.*: first-party endpoints
+		// masquerading as Slack Web API methods, which shadowed the Web API's
+		// /api/ tree for those paths — one verb each, outside its rate limiter
+		// and without its OAuth scope headers — for methods no Slack client
+		// knows. Slack's own admin.auth.policy.* stay in the Web API.
+		mux.HandleFunc("GET /app/admin/auth/methods.list", h.authMethodsList)
+		mux.HandleFunc("POST /app/admin/auth/methods.set", h.authMethodSet)
+		mux.HandleFunc("POST /app/admin/auth/users.invite", h.authUserInvite)
+		mux.HandleFunc("POST /app/admin/auth/users.create", h.authUserCreate)
+		mux.HandleFunc("GET /app/admin/auth/users.list", h.authUsersList)
+		mux.HandleFunc("POST /app/admin/auth/users.set", h.authUserSet)
 	}
 	// Workspace administration is not identity-provider administration. These
 	// govern retention, discoverability, default channels, analytics, the audit

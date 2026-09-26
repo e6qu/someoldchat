@@ -228,15 +228,18 @@ the supplied verified email, creates durable workspace membership, and accepts
 only the `member` or `admin` role. It does not create a password or bypass the
 configured authorization source.
 
-The internal administration endpoints are:
+The internal administration endpoints are first-party routes of the web client,
+not Slack Web API methods, so they live under the page they serve rather than
+in the Web API's `/api/` namespace (which answers `unknown_method` for these
+names):
 
 ```text
-GET  /api/admin.auth.methods.list
-POST /api/admin.auth.methods.set
-GET  /api/admin.auth.users.list
-POST /api/admin.auth.users.invite
-POST /api/admin.auth.users.create
-POST /api/admin.auth.users.set
+GET  /app/admin/auth/methods.list
+POST /app/admin/auth/methods.set
+GET  /app/admin/auth/users.list
+POST /app/admin/auth/users.invite
+POST /app/admin/auth/users.create
+POST /app/admin/auth/users.set
 ```
 
 The user list accepts `limit` from 1 through 100 and an opaque `cursor`. It
