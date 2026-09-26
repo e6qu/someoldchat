@@ -199,17 +199,28 @@ func main() {
 	}
 	// A request the walk withdraws. Cancelling applies only to a request nobody
 	// has decided, so the walk needs one that is really open.
-	if err := store.SetAppApproval(context.Background(), "T1", "request:Rq-sdk", "Rq-sdk", domain.AppApprovalRequested, now, events.Event{
-		ID: "evt-app-request-sdk", WorkspaceID: "T1", ActorID: "U1", Topic: "app.requested", Payload: "Rq-sdk", CreatedAt: now,
-	}); err != nil {
+	// Both records are the ones the service writes for these facts, built
+	// through the typed constructor. They used to be hand-written with a bare
+	// identifier as the payload (and an invented topic for the credential),
+	// which every event stream then reported as an undeliverable malformed
+	// record on each qualification run.
+	requested, err := events.New("evt-app-request-sdk", "T1", "U1", events.NewPayload("app.requested", events.String("app_id", "request:Rq-sdk"), events.String("app_request_id", "Rq-sdk")), now)
+	if err != nil {
+		panic(err)
+	}
+	if err := store.SetAppApproval(context.Background(), "T1", "request:Rq-sdk", "Rq-sdk", domain.AppApprovalRequested, now, requested); err != nil {
 		panic(err)
 	}
 	// An external credential for the walk to read and revoke. The ciphertext is
 	// here so the walk can prove the secret does not come back out.
+	connected, err := events.New("evt-external-qualification", "T1", "U1", events.NewPayload("app.external_token_connected", events.String("app_id", "A1"), events.String("provider_name", "example")), now)
+	if err != nil {
+		panic(err)
+	}
 	if err := store.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
 		ID: "Et-qualification", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
 		Ciphertext: "sealed-qualification", ExpiresAt: now.Add(12 * time.Hour), CreatedAt: now,
-	}, events.Event{ID: "evt-external-qualification", WorkspaceID: "T1", Topic: "app.external_token_set", Payload: "Et-qualification", CreatedAt: now}); err != nil {
+	}, connected); err != nil {
 		panic(err)
 	}
 	for _, candidate := range []struct {

@@ -2475,7 +2475,10 @@ decisions:
       committed with the install's bot-token issuance, target-routed and
       automatic. Remaining recorded gaps: tokens_revoked (the revocation
       mutation reaches the token store directly across the auth seam, so the
-      event must be owned by the store mutation), app_uninstalled (the
+      event must be owned by the store mutation), app_requested (a
+      current-catalog event for admin apps whose app_request object the
+      durable payload does not carry; no product path requests an app yet, so
+      the mapping is withheld), app_uninstalled (the
       app_installations join that scopes app event reads would hide the
       app's own announcement), dnd_updated_user (delivery does not vary the
       event name per recipient), Bolt callback qualifications still submit
