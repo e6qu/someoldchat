@@ -449,7 +449,7 @@ func TestCreateListRefusesACopyAboveTheRecordCap(t *testing.T) {
 	// Nothing was written: the refusal happens before the list is created, so no
 	// half-built list is left behind — and there is no DeleteList to remove one —
 	// and list.created was never published for the copy.
-	records, err := messages.ListEventsAfter(ctx, "T1", 0, 10000)
+	records, err := messages.Store.ListEventsAfter(ctx, "T1", 0, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestConversationAccessGroupEventsRemainDeliverable(t *testing.T) {
 	if err := messages.AdminAddConversationAccessGroup(ctx, "T1", "U1", "CPRIV", group.ID); err != nil {
 		t.Fatal(err)
 	}
-	records, err := messages.ListEventsAfter(ctx, "T1", 0, 100)
+	records, err := messages.Store.ListEventsAfter(ctx, "T1", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

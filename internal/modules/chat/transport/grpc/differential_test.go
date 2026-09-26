@@ -3802,7 +3802,22 @@ func parityCases() []parityCase {
 					}
 					return names
 				}
-				whole, err := chat.ListEventsAfter(ctx, "T1", 0, 100)
+				// The unfiltered workspace journal is not on the boundary; the
+				// member's own view of it is the log both compositions page.
+				memberLog := func(after uint64, limit int) ([]events.Record, error) {
+					page, err := chat.ListUserEventsAfter(ctx, "T1", "U1", after, limit)
+					return page.Records, err
+				}
+				whole, err := memberLog(0, 100)
+				if err != nil {
+					return nil, err
+				}
+				head, err := chat.LatestEventSequence(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// A new stream opens at the head: nothing is after it.
+				afterHead, err := memberLog(head, 100)
 				if err != nil {
 					return nil, err
 				}
@@ -3816,12 +3831,12 @@ func parityCases() []parityCase {
 				// rest and not repeat it: "after" is exclusive.
 				var rest []events.Record
 				if len(whole) > 0 {
-					rest, err = chat.ListEventsAfter(ctx, "T1", whole[0].Sequence, 100)
+					rest, err = memberLog(whole[0].Sequence, 100)
 					if err != nil {
 						return nil, err
 					}
 				}
-				limited, err := chat.ListEventsAfter(ctx, "T1", 0, 1)
+				limited, err := memberLog(0, 1)
 				if err != nil {
 					return nil, err
 				}
@@ -3839,6 +3854,7 @@ func parityCases() []parityCase {
 				return []any{
 					topics(whole), ascending, topics(rest), len(whole) == len(rest)+1,
 					topics(limited), topics(userScoped.Records), userScoped.Through, topics(appScoped),
+					head > 0 && len(whole) > 0 && head >= whole[len(whole)-1].Sequence, len(afterHead),
 				}, nil
 			},
 		},
@@ -3996,10 +4012,11 @@ func parityCases() []parityCase {
 				// journal is therefore the only way to see whether the flag
 				// survived the seam, and a case that skipped it would pass with
 				// the flag dropped.
-				records, err := chat.ListEventsAfter(ctx, "T1", 0, 200)
+				page, err := chat.ListUserEventsAfter(ctx, "T1", "U1", 0, 200)
 				if err != nil {
 					return nil, err
 				}
+				records := page.Records
 				permissionEvents := make([]string, 0, 1)
 				for _, record := range records {
 					if record.Event.Topic != "conversation.external_invite_permissions_set" {

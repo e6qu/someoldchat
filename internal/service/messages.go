@@ -1477,8 +1477,14 @@ func (m Messages) resolveSearchUser(ctx context.Context, workspaceID domain.Work
 	return domain.UserID("__no_search_match__")
 }
 
-func (m Messages) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceID, after uint64, limit int) ([]events.Record, error) {
-	return m.Store.ListEventsAfter(ctx, workspace, after, limit)
+// LatestEventSequence is where a member's new live stream opens: the journal
+// head now, so the stream carries what happens next rather than replaying the
+// workspace's history. An RTM ticket takes the same position at rtm.connect.
+func (m Messages) LatestEventSequence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (uint64, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return 0, err
+	}
+	return m.Store.LatestEventSequence(ctx, workspaceID)
 }
 
 // IntegrationLogs answers team.integrationLogs, the administrative record of who

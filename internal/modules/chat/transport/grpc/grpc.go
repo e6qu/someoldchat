@@ -5666,13 +5666,19 @@ func (r Remote) SentMessages(ctx context.Context, workspaceID domain.WorkspaceID
 	return decodeProtoMessagePage(out)
 }
 
-func (r Remote) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceID, after uint64, limit int) ([]events.Record, error) {
-	in := &chatv1.EventsRequest{WorkspaceId: string(workspace), After: after, Limit: int32(limit)}
-	out, err := r.events.ListEventsAfter(ctx, in)
-	if err != nil {
-		return nil, err
+// LatestEventSequence asks the chat process for a member's stream head. A
+// chat process from before the RPC answers Unimplemented during a rolling
+// deploy; the stream then opens where it always did, at the start of the
+// member's filtered journal, rather than failing.
+func (r Remote) LatestEventSequence(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID) (uint64, error) {
+	out, err := r.events.LatestEventSequence(ctx, &chatv1.LatestEventSequenceRequest{WorkspaceId: string(workspace), UserId: string(userID)})
+	if status.Code(err) == codes.Unimplemented {
+		return 0, nil
 	}
-	return decodeProtoEvents(out)
+	if err != nil {
+		return 0, err
+	}
+	return out.GetSequence(), nil
 }
 
 func (r Remote) ListAppEventsAfter(ctx context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
@@ -9960,6 +9966,14 @@ func (s *Server) ListEventsAfter(ctx context.Context, input *chatv1.EventsReques
 	return s.listEventsAfterProto(ctx, input)
 }
 
+func (s *Server) LatestEventSequence(ctx context.Context, input *chatv1.LatestEventSequenceRequest) (*chatv1.LatestEventSequenceResponse, error) {
+	sequence, err := s.implementation.LatestEventSequence(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.LatestEventSequenceResponse{Sequence: sequence}, nil
+}
+
 func (s *Server) ClaimAppEvent(ctx context.Context, input *chatv1.AppEventClaimRequest) (*chatv1.AppEventLease, error) {
 	claim, found, err := s.implementation.ClaimAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), time.Duration(input.GetLeaseNanos()))
 	if err != nil {
@@ -11000,26 +11014,24 @@ func (s *Server) deleteScheduledMessageProto(ctx context.Context, input *chatv1.
 }
 
 func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsRequest) (*chatv1.EventsResponse, error) {
-	if input.GetUserId() != "" {
-		page, err := s.implementation.ListUserEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetAfter(), seamPage(int(input.GetLimit())))
+	if input.GetAppId() != "" {
+		records, err := s.implementation.ListAppEventsAfter(ctx, domain.AppID(input.GetAppId()), input.GetAfter(), seamPage(int(input.GetLimit())))
 		if err != nil {
 			return nil, mapError(err)
 		}
-		out := encodeProtoEvents(page.Records)
-		out.ScannedThrough = page.Through
-		return out, nil
+		return encodeProtoEvents(records), nil
 	}
-	var records []events.Record
-	var err error
-	if input.GetAppId() != "" {
-		records, err = s.implementation.ListAppEventsAfter(ctx, domain.AppID(input.GetAppId()), input.GetAfter(), seamPage(int(input.GetLimit())))
-	} else {
-		records, err = s.implementation.ListEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetAfter(), seamPage(int(input.GetLimit())))
-	}
+	// Every other read is a member's. A request naming no member used to be
+	// answered with the unfiltered workspace journal — every record about
+	// every private conversation. It is now the member read, which refuses a
+	// caller it cannot place in the workspace, exactly as in process.
+	page, err := s.implementation.ListUserEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetAfter(), seamPage(int(input.GetLimit())))
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return encodeProtoEvents(records), nil
+	out := encodeProtoEvents(page.Records)
+	out.ScannedThrough = page.Through
+	return out, nil
 }
 
 // unixNanoOrZero is the encoding a "no instant" time needs. UnixNano on a zero

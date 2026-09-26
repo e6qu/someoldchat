@@ -178,7 +178,6 @@ func authorityMatrix() map[string]authority {
 		"JoinConversation":   authorityNotGuest,
 
 		// Available to any active member, both guest tiers included.
-		"ListEventsAfter":                         authorityAnyMember,
 		"AcceptSharedInvite":                      authorityAnyMember,
 		"AcknowledgeEntityCommentAction":          authorityAnyMember,
 		"AcknowledgeLaterReminders":               authorityAnyMember,
@@ -355,6 +354,7 @@ func authorityMatrix() map[string]authority {
 		"ListItems":                               authorityAnyMember,
 		"ListSharedInvites":                       authorityAnyMember,
 		"ListUserEventsAfter":                     authorityAnyMember,
+		"LatestEventSequence":                     authorityAnyMember,
 		"ListUserGroups":                          authorityAnyMember,
 		"ListWorkflowTriggers":                    authorityAnyMember,
 		"ListWorkflows":                           authorityAnyMember,
