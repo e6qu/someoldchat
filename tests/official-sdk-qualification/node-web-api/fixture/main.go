@@ -150,6 +150,24 @@ func main() {
 	if err := store.CreateBot(context.Background(), domain.Bot{ID: "B2", WorkspaceID: "T1", AppID: "A2", UserID: "U1", Name: "interaction-bot", UpdatedAt: now}); err != nil {
 		panic(err)
 	}
+	// An app the OAuth walks install from nothing: no bot, no installation,
+	// one redirect URL, so an install may name it or leave it implied.
+	installSigningCiphertext, err := secretbox.Seal(appCredentialKey, "app:A4:signing-secret", "install-signing")
+	if err != nil {
+		panic(err)
+	}
+	installVerificationCiphertext, err := secretbox.Seal(appCredentialKey, "app:A4:verification-token", "install-verification")
+	if err != nil {
+		panic(err)
+	}
+	installManifest := `{"display_information":{"name":"Install Qualification"},"oauth_config":{"redirect_urls":["https://example.com/install"],"scopes":{"bot":["chat:write"],"user":["search:read"]}}}`
+	if err := store.CreateApp(context.Background(),
+		domain.App{ID: "A4", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Install Qualification", ClientID: "install-client", SigningSecretHash: domain.HashToken("install-signing"), SigningSecretCiphertext: installSigningCiphertext, VerificationTokenHash: domain.HashToken("install-verification"), VerificationTokenCiphertext: installVerificationCiphertext, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now},
+		domain.AppManifestRevision{AppID: "A4", Version: 1, Manifest: installManifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "install-client", SecretHash: domain.HashToken("install-secret"), AppID: "A4"},
+	); err != nil {
+		panic(err)
+	}
 	for _, code := range []string{"qualification-code", "qualification-v2-code", "qualification-v2-user-code", "qualification-token-code", "qualification-openid-code"} {
 		scopes := auth.AllScopes()
 		if code == "qualification-openid-code" {
@@ -352,6 +370,40 @@ func main() {
 	handler.Register(mux)
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// The consent stand-in for the OAuth walks. The browser consent page is
+	// qualified by the browser suite; this answers the authorize URL an SDK
+	// generates by approving it as U1 through the same service call the
+	// page's approval makes, and redirects the way the page does.
+	mux.HandleFunc("GET /qualification/authorize", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		split := func(value string) []string {
+			var scopes []string
+			for _, scope := range strings.Split(value, ",") {
+				if scope = strings.TrimSpace(scope); scope != "" {
+					scopes = append(scopes, scope)
+				}
+			}
+			return scopes
+		}
+		authorization, err := messages.AuthorizeOAuth(r.Context(), domain.OAuthAuthorizationRequest{
+			ClientID: query.Get("client_id"), WorkspaceID: "T1", UserID: "U1", RedirectURI: query.Get("redirect_uri"),
+			BotScopes: split(query.Get("scope")), UserScopes: split(query.Get("user_scope")), State: query.Get("state"),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		target, err := url.Parse(authorization.RedirectURI)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		values := target.Query()
+		values.Set("code", authorization.Code)
+		values.Set("state", authorization.State)
+		target.RawQuery = values.Encode()
+		http.Redirect(w, r, target.String(), http.StatusFound)
 	})
 	mux.HandleFunc("GET /qualification/event-context", func(w http.ResponseWriter, r *http.Request) {
 		records, err := messages.ListAppEventsAfter(r.Context(), "A1", 0, 1)

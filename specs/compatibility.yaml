@@ -488,6 +488,7 @@ operations:
       - go-test:internal/api/slack:TestFileURLsFollowTheRequestOriginAndRejectForgedSchemes
       - go-test:internal/api/slack:TestExternalUploadURLRefusesWithHTTPStatus
       - go-test:internal/api/slack:TestUploadsInferTheirMediaTypeFromTheName
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: files.completeUploadExternal
     status: behavior-compatible
     provenance: slack-reference
@@ -1117,6 +1118,8 @@ operations:
       - go-test:internal/api/slack:TestOAuthV2AccessRedeemsAUserScopeOnlyInstall
       - go-test:internal/api/slack:TestOAuthV2AccessNamesEachFailure
       - persistence:tests/persistence-qualification/files_oauth_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: oauth.v2.exchange
     status: sdk-compatible
     provenance: slack-reference
