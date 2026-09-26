@@ -7624,6 +7624,11 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		// to enforce it, so they orphaned silently instead.
 		`DELETE FROM saved_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM activity_items WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		// Activity about the conversation itself — an invitation to it, a huddle
+		// started in it, a shared-invite decision — names no message, so the
+		// statement above left it behind pointing at a channel that no longer
+		// exists. Memory already removes Activity by conversation.
+		`DELETE FROM activity_items WHERE conversation_id = ?`,
 		`DELETE FROM idempotency WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM thread_follows WHERE conversation_id = ?`,
 		`DELETE FROM message_files WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
@@ -13605,9 +13610,6 @@ func (s *Store) listGrants(ctx context.Context, scope accessScope, workspace dom
 	return grants, closeRows(rows)
 }
 
-// RecordSharedInviteDecision writes the news that a request this member made
-// has been decided. One row per invitation, so a decision that is later changed
-// replaces the news rather than stacking a contradictory second copy.
 // InviteToHuddle journals the invitation and lands its Activity item in one
 // transaction, the way conversation invitations do, so the event and the
 // Activity row are never half-written relative to each other.
@@ -13640,6 +13642,9 @@ func (s *Store) InviteToHuddle(ctx context.Context, event events.Event) error {
 	return tx.Commit()
 }
 
+// RecordSharedInviteDecision writes the news that a request this member made
+// has been decided. One row per invitation, so a decision that is later changed
+// replaces the news rather than stacking a contradictory second copy.
 func (s *Store) RecordSharedInviteDecision(ctx context.Context, invite domain.SharedInvite, actor domain.UserID, occurredAt time.Time) error {
 	if invite.ID == "" || invite.InvitedBy == "" {
 		return store.InvalidArgument("a shared invite decision requires an invitation and a requester")
