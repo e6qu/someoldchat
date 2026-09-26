@@ -11472,10 +11472,10 @@ func messageResponse(origin string, message domain.Message) map[string]any {
 		result["app_id"] = message.AppID
 	}
 	var stream domain.MessageStreamState
+	if bot := message.PostingBot(); bot != "" {
+		result["bot_id"] = bot
+	}
 	if json.Unmarshal([]byte(message.StreamState), &stream) == nil {
-		if stream.BotID != "" {
-			result["bot_id"] = stream.BotID
-		}
 		if stream.Username != "" {
 			result["username"] = stream.Username
 		}

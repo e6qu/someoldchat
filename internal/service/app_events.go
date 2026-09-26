@@ -473,10 +473,6 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 	return projectMessageEvent(ctx, state, record, message, appBotUserID(authorizations))
 }
 
-type messageEventProjectionStore interface {
-	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
-}
-
 func projectMessageEvent(ctx context.Context, state any, record events.Record, message domain.Message, botUserID domain.UserID) (events.Record, bool, error) {
 	return projectMessageSnapshot(ctx, state, record, messageEventSnapshot{Current: message}, botUserID)
 }
@@ -608,13 +604,9 @@ func appEventMessage(ctx context.Context, state any, message domain.Message) (ma
 	}
 	if message.AppID != "" {
 		body["app_id"] = message.AppID
-		if bots, ok := state.(messageEventProjectionStore); ok {
-			if bot, botErr := bots.GetBotByApp(ctx, message.WorkspaceID, message.AppID); botErr == nil {
-				body["bot_id"] = bot.ID
-			} else if !errors.Is(botErr, store.ErrNotFound) {
-				return nil, botErr
-			}
-		}
+	}
+	if bot := message.PostingBot(); bot != "" {
+		body["bot_id"] = bot
 	}
 	if message.Blocks != "" {
 		body["blocks"] = json.RawMessage(message.Blocks)

@@ -288,3 +288,64 @@ func mustDeliverable(t *testing.T, event events.Event) events.Delivered {
 	}
 	return delivered
 }
+
+// A message event names the bot a message was posted AS, never the bot of the
+// app a user token was issued to. python-slack-sdk's RTM client drops every
+// event whose bot_id equals its own, so the second shape used to hide a
+// person's post from the app that made it on their behalf.
+func TestMessageEventBotIDIsThePostingBotNotTheTokenApp(t *testing.T) {
+	ctx := context.Background()
+	state := memory.New()
+	state.SeedWorkspace(domain.Workspace{ID: "T1"})
+	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	state.SeedUser(domain.User{ID: "UB", WorkspaceID: "T1"})
+	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Kind: domain.ConversationTypePublic})
+	state.SeedConversationMember("C1", "U1")
+	state.SeedConversationMember("C1", "UB")
+	if err := state.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "UB", Name: "bot", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SeedToken(ctx, "xoxb-A1", domain.TokenRecord{WorkspaceID: "T1", UserID: "UB", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: []string{"channels:history"}}); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(1_700_000_000, 0).UTC()
+	for index, test := range []struct {
+		name    string
+		message domain.Message
+		botID   string
+	}{
+		{"user token issued to the app", domain.Message{ID: "M1", AuthorID: "U1", AppID: "A1", Text: "person"}, ""},
+		{"bot token", domain.Message{ID: "M2", AuthorID: "UB", AppID: "A1", Text: "bot", StreamState: `{"active":false,"bot_id":"B1"}`}, "B1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			message := test.message
+			message.WorkspaceID, message.Conversation = "T1", "C1"
+			message.CreatedAt = created.Add(time.Duration(index) * time.Second)
+			event, err := newEvent("T1", message.AuthorID, messagePayload("message.created", message), message.CreatedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := state.CreateMessage(ctx, message, event, ""); err != nil {
+				t.Fatal(err)
+			}
+			prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: uint64(index + 1), Event: event})
+			if err != nil || !visible {
+				t.Fatalf("visible=%v err=%v", visible, err)
+			}
+			bodies, err := events.SlackEventBodies(prepared, "A1")
+			if err != nil || len(bodies) != 1 {
+				t.Fatalf("bodies=%q err=%v", bodies, err)
+			}
+			var envelope struct {
+				Event map[string]any `json:"event"`
+			}
+			if err := json.Unmarshal(bodies[0], &envelope); err != nil {
+				t.Fatal(err)
+			}
+			body := envelope.Event
+			if got, _ := body["bot_id"].(string); got != test.botID || body["app_id"] != "A1" {
+				t.Fatalf("bot_id=%v app_id=%v, want bot_id %q: %s", body["bot_id"], body["app_id"], test.botID, bodies[0])
+			}
+		})
+	}
+}

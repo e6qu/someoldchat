@@ -10160,7 +10160,20 @@ func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, worksp
 	if err != nil {
 		return domain.Message{}, err
 	}
-	return m.PostWithBlocksAndAttachments(ctx, workspaceID, value.UserID, value.ConversationID, text, blocks, attachments, threadTimestamp, idempotencyKey, value.AppID)
+	// A hook posts as its app's bot (CreateIncomingWebhook proved the hook's
+	// user is that bot), so the message names the bot the way a bot-token
+	// post does: Slack's webhook messages carry bot_id, and every projection
+	// reads it from domain.Message.PostingBot.
+	request := domain.MessagePostRequest{
+		Conversation: value.ConversationID, Text: text, Blocks: blocks, Attachments: attachments,
+		ThreadTimestamp: threadTimestamp, IdempotencyKey: idempotencyKey, AppID: value.AppID,
+	}
+	if bot, botErr := m.Store.GetBotByApp(ctx, workspaceID, value.AppID); botErr == nil && bot.UserID == value.UserID {
+		request.BotID = bot.ID
+	} else if botErr != nil && !errors.Is(botErr, store.ErrNotFound) {
+		return domain.Message{}, botErr
+	}
+	return m.PostMessageAs(ctx, workspaceID, value.UserID, request)
 }
 
 func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
