@@ -430,16 +430,27 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFileMetadataEndpoints
+      - go-test:internal/api/slack:TestDeletedFileIsATombstoneAndIsAnnounced
+      - go-test:internal/events:TestPromotedTopicsTranslateFromTheirProducerPayloads
   - method: files.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFileMetadataEndpoints
+      - go-test:internal/api/slack:TestFileURLsAreAbsoluteOnTheConfiguredPublicURL
+      - go-test:internal/api/slack:TestFilesInfoCarriesTheRequiredCommentsArray
+    deviations:
+      - >-
+        The file object carries no thumb_* URLs (no token-authenticated
+        thumbnail route exists on the Web API surface) and no shares map;
+        channels lists the conversations the file is shared into.
   - method: files.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFilesListNamesAMissingUser
+      - go-test:internal/api/slack:TestFilesListIsNewestFirstAndPagesStably
+      - persistence:tests/persistence-qualification/files_oauth_test.go
   - method: files.upload
     status: schema-compatible
     provenance: slack-api-specs-openapi
@@ -474,12 +485,16 @@ operations:
     reference: https://docs.slack.dev/reference/methods/files.getUploadURLExternal/
     evidence:
       - go-test:internal/api/slack:TestExternalUploadHTTPBatchCompletion
+      - go-test:internal/api/slack:TestFileURLsFollowTheRequestOriginAndRejectForgedSchemes
+      - go-test:internal/api/slack:TestExternalUploadURLRefusesWithHTTPStatus
+      - go-test:internal/api/slack:TestUploadsInferTheirMediaTypeFromTheName
   - method: files.completeUploadExternal
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/files.completeUploadExternal/
     evidence:
       - go-test:internal/api/slack:TestExternalUploadHTTPBatchCompletion
+      - go-test:internal/api/slack:TestCompleteUploadExternalBeforeUploadIsFileNotFound
   - method: users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1076,6 +1091,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFileMetadataEndpoints
+      - go-test:internal/api/slack:TestFileURLsAreAbsoluteOnTheConfiguredPublicURL
   - method: migration.exchange
     status: behavior-compatible
     provenance: slack-api-specs-openapi

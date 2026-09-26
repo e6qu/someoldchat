@@ -28,7 +28,7 @@ type S3 struct {
 	maxSize int64
 }
 
-var errExactSize = errors.New("blob source size does not match the declared size")
+var errExactSize = ErrSizeMismatch
 
 var _ WalkStore = S3{}
 

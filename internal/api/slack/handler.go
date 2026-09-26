@@ -44,6 +44,11 @@ type Handler struct {
 	// unlimited, which is what the package's own request-shaped tests and the
 	// SDK qualification fixture rely on.
 	Limiter *RateLimiter
+	// PublicURL is the absolute origin clients reach this server on. Every
+	// URL the transport emits — file downloads, the v2 upload URL, the OAuth
+	// authorize URL — is built on it; see origin.go. Empty means the request's
+	// own origin.
+	PublicURL string
 }
 
 var errAccessLogging = errors.New("access logging failed")
@@ -957,7 +962,7 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	result := rangedMessages(page.Messages, request.Range)
+	result := rangedMessages(h.origin(r), page.Messages, request.Range)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
@@ -987,7 +992,7 @@ func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "thread_not_found"))
 		return
 	}
-	result := rangedMessages(page.Messages, request.Range)
+	result := rangedMessages(h.origin(r), page.Messages, request.Range)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
@@ -1072,13 +1077,13 @@ func normalizeHistoryRequest(fields map[string]string, invalidOldest, invalidLat
 	return historyRequest{Channel: domain.ConversationID(channel), Page: domain.PageRequest{Limit: limit, Cursor: cursor}, Range: window}, nil
 }
 
-func rangedMessages(messages []domain.Message, window historyRange) []map[string]any {
+func rangedMessages(origin string, messages []domain.Message, window historyRange) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
 	for _, message := range messages {
 		if !window.includes(slackTimestamp(message.CreatedAt)) {
 			continue
 		}
-		result = append(result, messageResponse(message))
+		result = append(result, messageResponse(origin, message))
 	}
 	return result
 }
@@ -2315,7 +2320,7 @@ func (h Handler) appsManifestCreate(w http.ResponseWriter, r *http.Request) {
 			"verification_token": credentials.VerificationToken,
 			"signing_secret":     credentials.SigningSecret,
 		},
-		"oauth_authorize_url": requestOrigin(r) + "/oauth/v2/authorize?" + query.Encode(),
+		"oauth_authorize_url": h.origin(r) + "/oauth/v2/authorize?" + query.Encode(),
 	})
 }
 
@@ -2474,17 +2479,6 @@ func writeAppManifestValidation(w http.ResponseWriter, problems []appmanifest.Er
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "invalid_manifest", "errors": problems})
-}
-
-func requestOrigin(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if forwarded := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])); forwarded == "http" || forwarded == "https" {
-		scheme = forwarded
-	}
-	return scheme + "://" + r.Host
 }
 
 func sameStringSet(left, right []string) bool {
@@ -7335,7 +7329,7 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]map[string]any, 0, len(page.Items))
 	for _, item := range page.Items {
-		message := messageResponse(item.Message)
+		message := messageResponse(h.origin(r), item.Message)
 		message["reactions"] = []map[string]any{{"name": item.Reaction.Name, "count": 1, "users": []string{string(item.Reaction.UserID)}}}
 		items = append(items, map[string]any{"type": "message", "channel": item.Conversation, "message": message})
 	}
@@ -7634,7 +7628,7 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 	}
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		result = append(result, map[string]any{"type": "message", "channel": item.Conversation, "date_create": item.CreatedAt.Unix(), "message": messageResponse(item.Message)})
+		result = append(result, map[string]any{"type": "message", "channel": item.Conversation, "date_create": item.CreatedAt.Unix(), "message": messageResponse(h.origin(r), item.Message)})
 	}
 	// The cursor the store returns is the only way to reach page two. It used to be
 	// discarded and replaced by an invented `spill` key, so a workspace with more
@@ -7992,7 +7986,7 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	response, err := h.searchMessageEnvelope(r.Context(), principal, arguments, page)
+	response, err := h.searchMessageEnvelope(r.Context(), h.origin(r), principal, arguments, page)
 	if err != nil {
 		writeError(w, "fatal_error")
 		return
@@ -8031,7 +8025,7 @@ func (h Handler) searchFiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": arguments.query, "files": searchFileEnvelope(arguments, page)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": arguments.query, "files": searchFileEnvelope(h.origin(r), arguments, page)})
 }
 
 func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
@@ -8059,7 +8053,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	messageEnvelope, err := h.searchMessageEnvelope(r.Context(), principal, arguments, messagePage)
+	messageEnvelope, err := h.searchMessageEnvelope(r.Context(), h.origin(r), principal, arguments, messagePage)
 	if err != nil {
 		writeError(w, "fatal_error")
 		return
@@ -8074,7 +8068,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "query": arguments.query,
-		"messages": messageEnvelope, "files": searchFileEnvelope(arguments, filePage),
+		"messages": messageEnvelope, "files": searchFileEnvelope(h.origin(r), arguments, filePage),
 	})
 }
 
@@ -8147,10 +8141,10 @@ func (h Handler) searchMessagePage(ctx context.Context, principal auth.Principal
 	return page, err
 }
 
-func (h Handler) searchMessageEnvelope(ctx context.Context, principal auth.Principal, arguments searchArguments, page domain.MessagePage) (map[string]any, error) {
+func (h Handler) searchMessageEnvelope(ctx context.Context, origin string, principal auth.Principal, arguments searchArguments, page domain.MessagePage) (map[string]any, error) {
 	matches := make([]map[string]any, 0, len(page.Messages))
 	for _, message := range page.Messages {
-		match := messageResponse(message)
+		match := messageResponse(origin, message)
 		conversation, infoErr := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation)
 		author, userErr := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, message.AuthorID)
 		permalink, linkErr := h.Messages.Permalink(ctx, principal.WorkspaceID, principal.UserID, message.Conversation, domain.NewMessageTimestamp(message.CreatedAt))
@@ -8177,10 +8171,10 @@ func (h Handler) searchMessageEnvelope(ctx context.Context, principal auth.Princ
 	return map[string]any{"matches": matches, "total": page.Total, "pagination": pagination, "paging": paging}, nil
 }
 
-func searchFileEnvelope(arguments searchArguments, page domain.FilePage) map[string]any {
+func searchFileEnvelope(origin string, arguments searchArguments, page domain.FilePage) map[string]any {
 	matches := make([]map[string]any, 0, len(page.Files))
 	for _, file := range page.Files {
-		matches = append(matches, fileResponse(file))
+		matches = append(matches, fileResponse(origin, file))
 	}
 	pageCount := 0
 	if page.Total > 0 {
@@ -8402,9 +8396,11 @@ func (h Handler) fileInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	response := fileResponse(file)
+	response := fileResponse(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
+	// The pinned 200 schema requires comments. Slack retired file comments
+	// and no route here creates one, so the page is always empty and final.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response, "comments": []any{}, "response_metadata": map[string]any{"next_cursor": ""}})
 }
 
 func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
@@ -8475,7 +8471,7 @@ func (h Handler) shareFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file), "permalink_public": "/files/public/" + file.PublicToken})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file), "permalink_public": fileURLs{origin: h.origin(r)}.public(file.PublicToken)})
 }
 
 func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
@@ -8499,7 +8495,7 @@ func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file)})
 }
 
 func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
@@ -8551,7 +8547,7 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 	}
 	files := make([]map[string]any, 0, len(window.files))
 	for _, file := range window.files {
-		files = append(files, fileResponse(file))
+		files = append(files, fileResponse(h.origin(r), file))
 	}
 	pages := (window.total + filter.count - 1) / filter.count
 	if pages == 0 {
@@ -8910,7 +8906,7 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		file.SharedChannels = shared
 	}
-	response := fileResponse(file)
+	response := fileResponse(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
 }
@@ -9246,7 +9242,7 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (uploadSpool, map[strin
 		mimeType = fieldMIME
 	}
 	if mimeType == "" && filename != "" {
-		mimeType = "application/octet-stream"
+		mimeType = domain.InferMIMEType(filename)
 	}
 	if mimeType == "" {
 		return cleanup(errors.New("mime type is required"))
@@ -9283,28 +9279,29 @@ func copyUploadPart(destination *os.File, source io.Reader) error {
 	return nil
 }
 
-func fileResponse(file domain.File) map[string]any {
-	// A snippet's file type is the syntax the member chose; a hosted file's is
-	// read from its name, the way Slack derives it. A snippet is editable and
-	// carries mode "snippet"; a hosted upload is neither.
-	fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Name)), ".")
-	if file.IsSnippet() {
-		fileType = file.FileType
+func fileResponse(origin string, file domain.File) map[string]any {
+	// A deleted file survives only as a tombstone: Slack keeps its id in the
+	// messages that shared it and says nothing else about it, so neither its
+	// name nor a download URL outlives the deletion.
+	if file.Deleted {
+		return map[string]any{"id": file.ID, "mode": file.Mode()}
 	}
+	fileType, prettyType := file.FileTypes()
+	urls := fileURLs{origin: origin}
 	result := map[string]any{
 		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
 		"size": file.Size, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
 		"user": file.Uploader, "is_public": file.PublicToken != "", "team_id": file.WorkspaceID,
-		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "mode": file.Mode(),
+		"filetype": fileType, "pretty_type": prettyType, "mode": file.Mode(),
 		"is_external": false, "external_type": "", "public_url_shared": file.PublicToken != "",
 		"editable": file.IsSnippet(), "display_as_bot": false,
-	}
-	if !file.Deleted {
-		result["url_private"] = "/api/files/" + url.PathEscape(string(file.ID))
-		result["url_private_download"] = "/api/files/" + url.PathEscape(string(file.ID))
+		// Every URL is absolute: SDKs and apps fetch them verbatim.
+		"url_private":          urls.private(string(file.ID)),
+		"url_private_download": urls.private(string(file.ID)),
+		"permalink":            urls.permalink(string(file.ID)),
 	}
 	if file.PublicToken != "" {
-		result["permalink_public"] = "/files/public/" + file.PublicToken
+		result["permalink_public"] = urls.public(file.PublicToken)
 	}
 	if len(file.SharedChannels) > 0 {
 		result["channels"] = file.SharedChannels
@@ -9468,7 +9465,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ts := slackTimestamp(message.CreatedAt)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "message": messageResponse(message)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "message": messageResponse(h.origin(r), message)})
 }
 
 func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
@@ -9507,7 +9504,7 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "cannot_unfurl_url"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": messageResponse(message)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": messageResponse(h.origin(r), message)})
 }
 
 func (h Handler) meMessage(w http.ResponseWriter, r *http.Request) {
@@ -9773,7 +9770,7 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ts := slackTimestamp(message.CreatedAt)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "text": message.Text, "message": messageResponse(message)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "text": message.Text, "message": messageResponse(h.origin(r), message)})
 }
 
 func (h Handler) startMessageStream(w http.ResponseWriter, r *http.Request) {
@@ -9799,7 +9796,7 @@ func (h Handler) startMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, messageStreamError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, messageStreamResponse(message, false))
+	writeJSON(w, http.StatusOK, messageStreamResponse(h.origin(r), message, false))
 }
 
 func (h Handler) appendMessageStream(w http.ResponseWriter, r *http.Request) {
@@ -9821,7 +9818,7 @@ func (h Handler) appendMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, messageStreamError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, messageStreamResponse(message, false))
+	writeJSON(w, http.StatusOK, messageStreamResponse(h.origin(r), message, false))
 }
 
 func (h Handler) stopMessageStream(w http.ResponseWriter, r *http.Request) {
@@ -9842,10 +9839,10 @@ func (h Handler) stopMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, messageStreamError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, messageStreamResponse(message, true))
+	writeJSON(w, http.StatusOK, messageStreamResponse(h.origin(r), message, true))
 }
 
-func messageStreamResponse(message domain.Message, includeMessage bool) map[string]any {
+func messageStreamResponse(origin string, message domain.Message, includeMessage bool) map[string]any {
 	response := map[string]any{"ok": true, "channel": message.Conversation, "ts": slackTimestamp(message.CreatedAt)}
 	var state domain.MessageStreamState
 	if json.Unmarshal([]byte(message.StreamState), &state) == nil && len(state.Warnings) != 0 {
@@ -9853,7 +9850,7 @@ func messageStreamResponse(message domain.Message, includeMessage bool) map[stri
 		response["response_metadata"] = map[string]any{"warnings": state.Warnings}
 	}
 	if includeMessage {
-		response["message"] = messageResponse(message)
+		response["message"] = messageResponse(origin, message)
 	}
 	return response
 }
@@ -10837,7 +10834,7 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel, "permalink": permalink})
 }
 
-func messageResponse(message domain.Message) map[string]any {
+func messageResponse(origin string, message domain.Message) map[string]any {
 	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt)}
 	// Slack's message object reports an edit through `edited`, and clients
 	// render "(edited)" from it. It was absent from every method that returns
@@ -10855,7 +10852,7 @@ func messageResponse(message domain.Message) map[string]any {
 	if len(message.Files) > 0 {
 		files := make([]map[string]any, 0, len(message.Files))
 		for _, file := range message.Files {
-			files = append(files, fileResponse(file))
+			files = append(files, fileResponse(origin, file))
 		}
 		result["subtype"] = "file_share"
 		result["upload"] = true
@@ -12703,22 +12700,24 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	// The v2 flow never states a media type unless the caller passes one;
+	// Slack infers it from the name, as the classic upload does.
 	mimeType := strings.TrimSpace(fields["mime_type"])
 	if mimeType == "" {
-		mimeType = "application/octet-stream"
+		mimeType = domain.InferMIMEType(name)
 	}
 	upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, size, 15*time.Minute)
 	if err != nil {
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": externalUploadURL(r, upload.ID), "file_id": upload.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": fileURLs{origin: h.origin(r)}.externalUpload(string(upload.ID)), "file_id": upload.ID})
 }
 
 func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 	id := domain.ExternalUploadID(strings.TrimSpace(r.PathValue("upload")))
 	if id == "" || r.ContentLength < 0 {
-		writeError(w, "invalid_arg_name")
+		writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 		return
 	}
 	source := io.Reader(r.Body)
@@ -12726,7 +12725,7 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mediaType == "multipart/form-data" {
 		reader, err := r.MultipartReader()
 		if err != nil {
-			writeError(w, "invalid_arg_name")
+			writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 			return
 		}
 		var bodyPart *multipart.Part
@@ -12736,7 +12735,7 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if partErr != nil {
-				writeError(w, "invalid_arg_name")
+				writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 				return
 			}
 			if part.FormName() == "body" {
@@ -12746,7 +12745,7 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 			_ = part.Close()
 		}
 		if bodyPart == nil {
-			writeError(w, "invalid_arg_name")
+			writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 			return
 		}
 		defer bodyPart.Close()
@@ -12756,10 +12755,29 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 		size = -1
 	}
 	if err := h.Messages.UploadExternalFile(r.Context(), id, size, source); err != nil {
-		writeError(w, mapServiceError(err, "file_not_found"))
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeUploadFailure(w, http.StatusNotFound, "file_not_found")
+		case errors.Is(err, service.ErrBlobUnavailable):
+			writeUploadFailure(w, http.StatusServiceUnavailable, "file_storage_unavailable")
+		case errors.Is(err, service.ErrInvalidExternalUpload):
+			writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
+		default:
+			writeUploadFailure(w, http.StatusInternalServerError, "fatal_error")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// writeUploadFailure answers the upload URL filesGetUploadURLExternal hands
+// out. That URL is not a Web API method: Slack's answers it with a plain HTTP
+// status, and the official SDKs judge the upload by that status alone —
+// @slack/web-api and python slack_sdk both treat any 200 as success and go on
+// to files.completeUploadExternal. A refusal written as 200 {"ok":false} was
+// therefore reported to the caller as a successful upload.
+func writeUploadFailure(w http.ResponseWriter, status int, reason string) {
+	writeJSON(w, status, map[string]any{"ok": false, "error": reason})
 }
 
 func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Request) {
@@ -12815,15 +12833,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	responses := make([]map[string]any, 0, len(files))
 	for _, file := range files {
-		responses = append(responses, fileResponse(file))
+		responses = append(responses, fileResponse(h.origin(r), file))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": responses})
-}
-
-func externalUploadURL(r *http.Request, id domain.ExternalUploadID) string {
-	scheme := strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-Proto"), ",", 2)[0])
-	if scheme == "" {
-		scheme = "http"
-	}
-	return scheme + "://" + r.Host + "/internal/files/external/" + url.PathEscape(string(id))
 }

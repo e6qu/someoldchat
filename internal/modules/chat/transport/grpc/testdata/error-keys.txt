@@ -1,4 +1,5 @@
 blob.not_found
+blob.size_mismatch
 blob.unavailable
 context.canceled
 context.deadline_exceeded

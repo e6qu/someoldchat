@@ -1114,7 +1114,7 @@ type Store interface {
 	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []UploadedFile, []domain.ConversationID, []events.Event, PostedMessage) error
 	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
-	DeleteFile(context.Context, domain.FileID, events.Event) error
+	DeleteFile(context.Context, domain.FileID, ...events.Event) error
 	// SetFileDescription records what an image is, in words, for a reader who
 	// cannot see it. The uploader is part of the write rather than checked
 	// before it, so the permission cannot be lost between the check and the
@@ -1125,6 +1125,8 @@ type Store interface {
 	RevokeFilePublic(context.Context, domain.WorkspaceID, domain.FileID, events.Event) error
 	GetPublicFile(context.Context, string) (domain.File, error)
 	ListFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.FilePage, error)
+	// ListVisibleFiles reads the files user may see newest first (created_at
+	// DESC, id DESC) with a FileCursor; see file_order.go.
 	ListVisibleFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
 	// SearchCanvases answers Slack's Canvases search tab. It applies exactly

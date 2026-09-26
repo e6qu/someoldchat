@@ -157,6 +157,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
+		{"visible files are newest first", visibleFilesAreNewestFirst},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

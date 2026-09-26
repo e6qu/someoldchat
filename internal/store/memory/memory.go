@@ -10354,7 +10354,7 @@ func (s *Store) SetFileDescription(_ context.Context, workspace domain.Workspace
 	return nil
 }
 
-func (s *Store) DeleteFile(_ context.Context, id domain.FileID, event events.Event) error {
+func (s *Store) DeleteFile(_ context.Context, id domain.FileID, emitted ...events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	file, ok := s.files[id]
@@ -10363,7 +10363,7 @@ func (s *Store) DeleteFile(_ context.Context, id domain.FileID, event events.Eve
 	}
 	file.Deleted = true
 	s.files[id] = file
-	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, emitted...)
 	return nil
 }
 
@@ -10440,21 +10440,21 @@ func (s *Store) ListFiles(_ context.Context, workspace domain.WorkspaceID, reque
 }
 
 func (s *Store) ListVisibleFiles(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+	if err := store.CheckPage(request); err != nil {
 		return domain.FilePage{}, err
 	}
-	after, err := domain.DecodeListCursor(request.Cursor)
+	after, err := store.DecodeFileCursor(request.Cursor)
 	if err != nil {
 		return domain.FilePage{}, err
 	}
 	s.mu.RLock()
 	values := make([]domain.File, 0, request.Limit+1)
 	for _, file := range s.files {
-		if file.WorkspaceID != workspace || file.Deleted || (after != "" && string(file.ID) <= after) || !s.fileVisibleToUser(file, user) {
+		if file.WorkspaceID != workspace || file.Deleted || !after.Precedes(file) || !s.fileVisibleToUser(file, user) {
 			continue
 		}
 		file.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[file.ID]...)
-		values = appendSorted(values, file, request.Limit+1, func(left, right domain.File) bool { return left.ID < right.ID })
+		values = appendSorted(values, file, request.Limit+1, store.NewerFileFirst)
 	}
 	s.mu.RUnlock()
 	hasMore := len(values) > request.Limit
@@ -10463,7 +10463,7 @@ func (s *Store) ListVisibleFiles(_ context.Context, workspace domain.WorkspaceID
 	}
 	page := domain.FilePage{Files: values, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		page.NextCursor, err = store.NewFileCursor(values[len(values)-1])
 	}
 	return page, err
 }

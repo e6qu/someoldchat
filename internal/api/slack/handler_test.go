@@ -3739,7 +3739,7 @@ func userSearchHandler(t *testing.T, repository *memory.Store) http.Handler {
 
 func TestFileMessageResponseMatchesSlackFileShareShape(t *testing.T) {
 	created := time.Unix(1_700_000_000, 0).UTC()
-	response := messageResponse(domain.Message{
+	response := messageResponse("http://chat.test", domain.Message{
 		ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created,
 		Files: []domain.File{{ID: "F1", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt", Title: "Report", MIMEType: "text/plain", Size: 12, CreatedAt: created, SharedChannels: []domain.ConversationID{"C1"}}},
 	})
@@ -3748,7 +3748,7 @@ func TestFileMessageResponseMatchesSlackFileShareShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(encoded)
-	for _, expected := range []string{`"subtype":"file_share"`, `"upload":true`, `"files":[`, `"id":"F1"`, `"mode":"hosted"`, `"url_private":"/api/files/F1"`, `"channels":["C1"]`} {
+	for _, expected := range []string{`"subtype":"file_share"`, `"upload":true`, `"files":[`, `"id":"F1"`, `"mode":"hosted"`, `"url_private":"http://chat.test/api/files/F1"`, `"permalink":"http://chat.test/app/files/F1"`, `"filetype":"text"`, `"pretty_type":"Plain Text"`, `"channels":["C1"]`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("file share response is missing %s: %s", expected, body)
 		}

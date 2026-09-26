@@ -734,14 +734,18 @@ func (m Messages) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil || file.WorkspaceID != workspaceID || file.Uploader != userID {
 		return store.ErrNotFound
 	}
-	event, err := newEvent(workspaceID, userID, events.BlobKey(events.FileBlobDeleteTopic, file.BlobKey), time.Now().UTC())
+	now := time.Now().UTC()
+	blobDelete, err := newEvent(workspaceID, userID, events.BlobKey(events.FileBlobDeleteTopic, file.BlobKey), now)
 	if err != nil {
 		return err
 	}
-	if err := m.Store.DeleteFile(ctx, fileID, event); err != nil {
+	// file_deleted commits with the deletion, so a subscriber can never see
+	// the announcement without the tombstone or the tombstone without it.
+	deleted, err := newEvent(workspaceID, userID, events.NewPayload("file.deleted", events.String("file_id", string(fileID))), now)
+	if err != nil {
 		return err
 	}
-	return nil
+	return m.Store.DeleteFile(ctx, fileID, blobDelete, deleted)
 }
 
 // FileDescriptionLimit bounds a description. It is generous enough for the
@@ -10024,8 +10028,11 @@ func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUplo
 	// is not exposed by net/http. The upload ticket remains authoritative and
 	// the blob store still reads exactly Size+1 bytes, so short and oversized
 	// parts fail closed just like raw bodies.
-	if m.Blob == nil || source == nil || size < -1 {
+	if source == nil || size < -1 {
 		return ErrInvalidExternalUpload
+	}
+	if m.Blob == nil {
+		return ErrBlobUnavailable
 	}
 	value, err := m.Store.GetExternalUpload(ctx, id)
 	if err != nil {
@@ -10034,12 +10041,21 @@ func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUplo
 	if size == -1 {
 		size = value.Size
 	}
-	if value.Status != domain.ExternalUploadPending || !value.ExpiresAt.After(time.Now().UTC()) || value.Size != size {
+	// A ticket that already received its bytes, or outlived its window, is
+	// spent: it no longer names an upload that can happen. A length that
+	// disagrees with the ticket is a bad request against a live one.
+	if value.Status != domain.ExternalUploadPending || !value.ExpiresAt.After(time.Now().UTC()) {
+		return store.ErrNotFound
+	}
+	if value.Size != size {
 		return ErrInvalidExternalUpload
 	}
 	if _, err := m.Blob.Put(ctx, value.BlobKey, value.Size, source); err != nil {
 		if errors.Is(err, blob.ErrUnavailable) {
 			return ErrBlobUnavailable
+		}
+		if errors.Is(err, blob.ErrSizeMismatch) {
+			return ErrInvalidExternalUpload
 		}
 		return err
 	}
@@ -10174,8 +10190,9 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 		return completed, nil
 	}
 	for _, value := range values {
+		// A ticket whose bytes never arrived names no file yet.
 		if value.Status != domain.ExternalUploadUploaded {
-			return nil, ErrInvalidExternalUpload
+			return nil, store.ErrNotFound
 		}
 	}
 	files := make([]domain.File, len(values))

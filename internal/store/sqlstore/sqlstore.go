@@ -18968,7 +18968,7 @@ func (s *Store) SetFileDescription(ctx context.Context, workspace domain.Workspa
 	return tx.Commit()
 }
 
-func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.Event) error {
+func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, emitted ...events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
@@ -18985,8 +18985,10 @@ func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.E
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -19107,21 +19109,21 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 }
 
 func (s *Store) ListVisibleFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+	if err := store.CheckPage(request); err != nil {
 		return domain.FilePage{}, err
 	}
-	after, err := domain.DecodeListCursor(request.Cursor)
+	after, err := store.DecodeFileCursor(request.Cursor)
 	if err != nil {
 		return domain.FilePage{}, err
 	}
 	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description, f.file_type
 		FROM files f WHERE f.workspace_id = ? AND f.deleted = 0 AND ` + visibleFilePredicate("f")
 	args := []any{workspace, user, user}
-	if after != "" {
-		query += ` AND f.id > ?`
-		args = append(args, after)
+	if !after.IsZero() {
+		query += ` AND (f.created_at < ? OR (f.created_at = ? AND f.id < ?))`
+		args = append(args, domain.NewStoredTime(after.CreatedAt), domain.NewStoredTime(after.CreatedAt), after.ID)
 	}
-	query += ` ORDER BY f.id LIMIT ?`
+	query += ` ORDER BY f.created_at DESC, f.id DESC LIMIT ?`
 	args = append(args, request.Limit+1)
 	values, err := s.readFiles(ctx, query, args...)
 	if err != nil {
@@ -19136,7 +19138,7 @@ func (s *Store) ListVisibleFiles(ctx context.Context, workspace domain.Workspace
 	}
 	page := domain.FilePage{Files: values, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		page.NextCursor, err = store.NewFileCursor(values[len(values)-1])
 	}
 	return page, err
 }

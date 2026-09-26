@@ -129,7 +129,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	monitoringToken := flags.String("monitoring-token", os.Getenv("SAMEOLDCHAT_MONITORING_TOKEN"), "deployment bearer token publishing /monitoring/observation; empty disables authenticated access")
 	authWorkspace := flags.String("auth-workspace", os.Getenv("SAMEOLDCHAT_AUTH_WORKSPACE"), "workspace for external authorization (required when enabled)")
 	authLookupUser := flags.String("auth-lookup-user", os.Getenv("SAMEOLDCHAT_AUTH_LOOKUP_USER"), "existing user used to authorize external identity lookup (required when enabled)")
-	authPublicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public HTTPS URL used for authorization callbacks")
+	authPublicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public URL clients reach this deployment on: authorization callbacks and every absolute URL the Slack Web API emits (HTTPS, or an explicit loopback URL for development)")
 	authCookieDomain := flags.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "optional parent DNS domain for SameOldChat session cookies")
 	authStateKeyHex := flags.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
 	appCredentialKeyHex := flags.String("app-credential-key-hex", os.Getenv("SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"), "AES-256 key used to encrypt application signing credentials")
@@ -366,6 +366,13 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// harnesses, which seed fixtures at superhuman request rates, turn it off.
 	if *apiRateLimit {
 		slackHandler.Limiter = slack.NewRateLimiter()
+	}
+	// The Web API emits absolute URLs — file downloads, the v2 upload URL —
+	// and the deployment's public URL is the only trustworthy origin for them
+	// behind a proxy. It is the same coordinate the web client builds on.
+	if publicErr := slackHandler.SetPublicURL(settings.authPublicURL); publicErr != nil {
+		logger.Error("configure Slack API public URL", "error", publicErr)
+		return exitConfiguration
 	}
 	slackHandler.Register(mux)
 	if socketModeStore != nil {

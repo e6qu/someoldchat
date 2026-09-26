@@ -1973,8 +1973,12 @@ func (f File) IsSnippet() bool {
 	return strings.TrimSpace(f.FileType) != ""
 }
 
-// Mode is the Slack file mode: a snippet the member typed, or a hosted upload.
+// Mode is the Slack file mode: a snippet the member typed, a hosted upload, or
+// the tombstone a deleted file leaves behind.
 func (f File) Mode() string {
+	if f.Deleted {
+		return "tombstone"
+	}
 	if f.IsSnippet() {
 		return "snippet"
 	}

@@ -157,6 +157,11 @@ var errorClasses = []errorClass{
 	// InvalidArgument: a peer that sent no detail still yields an
 	// invalid-argument classification (HTTP 400) rather than codes.Unavailable
 	// (HTTP 503, which asks a caller to retry a request that can never succeed).
+	// A body shorter or longer than its declared size is the uploader's
+	// mistake. UploadExternalFile names it ErrInvalidExternalUpload; the other
+	// blob writers return it unchanged, so it needs its own class to stay a
+	// client error in both compositions.
+	{key: "blob.size_mismatch", code: codes.InvalidArgument, sentinel: blob.ErrSizeMismatch},
 	{key: "store.invalid_argument", code: codes.InvalidArgument, sentinel: store.ErrInvalidArgument, restoresCode: true},
 
 	// Configuration tokens authenticate a developer rather than an installed
