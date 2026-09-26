@@ -5820,3 +5820,56 @@ func TestStarsChannelItemsErrorsAndPaging(t *testing.T) {
 		t.Fatalf("stars.remove message twice: %q", code)
 	}
 }
+
+// usergroups.* name a taken name or handle, an invalid handle, a member who is
+// not in the workspace, and a caller who may not manage groups.
+func TestUserGroupValidationAndPermissionCodes(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	var created struct {
+		Usergroup struct {
+			ID     string `json:"id"`
+			Handle string `json:"handle"`
+		} `json:"usergroup"`
+	}
+	if err := json.Unmarshal(postForm(handler, "/api/usergroups.create", "name=Front+End&handle=frontend").Body.Bytes(), &created); err != nil || created.Usergroup.ID == "" {
+		t.Fatalf("create: %v", err)
+	}
+	var derived struct {
+		Usergroup struct {
+			Handle string `json:"handle"`
+		} `json:"usergroup"`
+	}
+	if err := json.Unmarshal(postForm(handler, "/api/usergroups.create", "name=Site+Reliability!").Body.Bytes(), &derived); err != nil || derived.Usergroup.Handle != "site-reliability" {
+		t.Fatalf("derived handle=%+v err=%v", derived, err)
+	}
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/usergroups.create", "name=front+end&handle=other", "name_already_exists"},
+		{"/api/usergroups.create", "name=Other&handle=frontend", "handle_already_exists"},
+		{"/api/usergroups.create", "name=Other&handle=Front+End!", "invalid_arg_name"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&handle=site-reliability", "handle_already_exists"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&name=Site+Reliability!", "name_already_exists"},
+		{"/api/usergroups.users.update", "usergroup=" + created.Usergroup.ID + "&users=U1,UNOBODY", "invalid_users"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("%s %s: want %q, got %q", item.path, item.form, item.want, code)
+		}
+	}
+	// Renaming a group to its own name, in another case, is not a collision.
+	if code := errorCode(t, postForm(handler, "/api/usergroups.update", "usergroup="+created.Usergroup.ID+"&name=FRONT+END&handle=frontend")); code != "" {
+		t.Fatalf("self rename: %q", code)
+	}
+	if err := store.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/usergroups.create", "name=Another", "permission_denied"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&name=Renamed", "permission_denied"},
+		{"/api/usergroups.disable", "usergroup=" + created.Usergroup.ID, "permission_denied"},
+		{"/api/usergroups.enable", "usergroup=" + created.Usergroup.ID, "no_permission"},
+		{"/api/usergroups.users.update", "usergroup=" + created.Usergroup.ID + "&users=U1", "permission_denied"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("member %s: want %q, got %q", item.path, item.want, code)
+		}
+	}
+}

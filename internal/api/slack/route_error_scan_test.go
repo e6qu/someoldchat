@@ -537,6 +537,7 @@ func sentinelDrivenCodes() map[string]string {
 		"not_starred":                "service.ErrNotStarred, classified by sentinel: stars.remove of an item the caller never starred",
 		"name_already_exists":        "service.ErrUserGroupNameTaken, classified by sentinel",
 		"handle_already_exists":      "service.ErrUserGroupHandleTaken, classified by sentinel",
+		"invalid_users":              "service.ErrInvalidUserGroupUsers, classified by sentinel",
 		"cannot_unfurl_url":          "service.ErrCannotUnfurlURL, classified by sentinel: an unfurl for a URL the message does not contain",
 		"file_storage_unavailable":   "service.ErrBlobUnavailable, classified by sentinel",
 		"hash_conflict":              "store.ErrConflict, classified by sentinel",

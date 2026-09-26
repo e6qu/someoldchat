@@ -72,24 +72,25 @@ var (
 	// The sentinels below each carry one Slack error code their operation's
 	// contract declares, so the handler can name the failure exactly rather
 	// than folding it into a generic invalid or not-found answer.
-	ErrSnoozeNotActive      = errors.New("no snooze is active")                          // dnd.endSnooze: snooze_not_active
-	ErrSnoozeTooLong        = errors.New("a snooze may last at most 1440 minutes")       // dnd.setSnooze: too_long
-	ErrReminderUnparseable  = errors.New("reminder time could not be parsed")            // reminders.add: cannot_parse
-	ErrNotStarred           = errors.New("the item is not starred")                      // stars.remove: not_starred
-	ErrUserGroupNameTaken   = errors.New("a user group with this name already exists")   // name_already_exists
-	ErrUserGroupHandleTaken = errors.New("a user group with this handle already exists") // handle_already_exists
-	ErrCannotUnfurlURL      = errors.New("the URL does not appear in the message")       // chat.unfurl: cannot_unfurl_url
-	ErrScheduledTimeInPast  = errors.New("scheduled message time is in the past")
-	ErrScheduledTimeTooFar  = errors.New("scheduled message time is more than 120 days away")
-	ErrScheduledTooMany     = errors.New("too many messages are scheduled in the channel window")
-	ErrInvalidUserGroup     = errors.New("user group name, handle, and members are invalid")
-	ErrInvalidCall          = errors.New("call external id and join URL are required")
-	ErrInvalidEphemeral     = errors.New("ephemeral message recipient, conversation, and text are required")
-	ErrInvalidAccessLog     = errors.New("access log fields are invalid")
-	ErrInvalidEmoji         = errors.New("custom emoji name or URL is invalid")
-	ErrEmojiAlreadyExists   = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile    = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest = errors.New("invite request is invalid")
+	ErrSnoozeNotActive       = errors.New("no snooze is active")                          // dnd.endSnooze: snooze_not_active
+	ErrSnoozeTooLong         = errors.New("a snooze may last at most 1440 minutes")       // dnd.setSnooze: too_long
+	ErrReminderUnparseable   = errors.New("reminder time could not be parsed")            // reminders.add: cannot_parse
+	ErrNotStarred            = errors.New("the item is not starred")                      // stars.remove: not_starred
+	ErrUserGroupNameTaken    = errors.New("a user group with this name already exists")   // name_already_exists
+	ErrUserGroupHandleTaken  = errors.New("a user group with this handle already exists") // handle_already_exists
+	ErrInvalidUserGroupUsers = errors.New("a user group member is not in the workspace")  // usergroups.users.update: invalid_users
+	ErrCannotUnfurlURL       = errors.New("the URL does not appear in the message")       // chat.unfurl: cannot_unfurl_url
+	ErrScheduledTimeInPast   = errors.New("scheduled message time is in the past")
+	ErrScheduledTimeTooFar   = errors.New("scheduled message time is more than 120 days away")
+	ErrScheduledTooMany      = errors.New("too many messages are scheduled in the channel window")
+	ErrInvalidUserGroup      = errors.New("user group name, handle, and members are invalid")
+	ErrInvalidCall           = errors.New("call external id and join URL are required")
+	ErrInvalidEphemeral      = errors.New("ephemeral message recipient, conversation, and text are required")
+	ErrInvalidAccessLog      = errors.New("access log fields are invalid")
+	ErrInvalidEmoji          = errors.New("custom emoji name or URL is invalid")
+	ErrEmojiAlreadyExists    = errors.New("custom emoji already exists")
+	ErrInvalidRemoteFile     = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest  = errors.New("invite request is invalid")
 	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
 	// person reading it needs to know whether to ask for a new invitation or
 	// to check which address they signed in with.
@@ -8044,10 +8045,71 @@ func (m Messages) SentMessages(ctx context.Context, workspaceID domain.Workspace
 	return m.Store.ListAuthoredMessages(ctx, workspaceID, userID, request)
 }
 
-func normalizeUserGroupHandle(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.Join(strings.Fields(value), "-")
-	return value
+// userGroupHandle validates a handle a caller supplied. Slack handles are
+// lowercase letters, digits, hyphens, underscores and periods; a leading @ is
+// how the handle is written in a mention and is dropped, and letter case is
+// folded. Anything else is refused: the handle used to be silently rewritten
+// ("Front End!" became "front-end!"), so the group answered to a mention
+// nobody asked for.
+func userGroupHandle(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
+	if value == "" || len(value) > 255 {
+		return "", false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' && character != '_' && character != '.' {
+			return "", false
+		}
+	}
+	return value, true
+}
+
+// userGroupHandleFromName derives the handle a group created without one gets:
+// its name lower-cased, with runs of anything a handle cannot hold turned into
+// a single hyphen.
+func userGroupHandleFromName(name string) string {
+	var result strings.Builder
+	pendingHyphen := false
+	for _, character := range strings.ToLower(name) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_' || character == '.' {
+			if pendingHyphen && result.Len() > 0 {
+				result.WriteByte('-')
+			}
+			pendingHyphen = false
+			result.WriteRune(character)
+			continue
+		}
+		pendingHyphen = true
+	}
+	return result.String()
+}
+
+// requireUniqueUserGroup refuses a name or handle another group in the
+// workspace already uses. Names compare without regard to case, as Slack's
+// do; the SQL store's unique index backs the handle check against a race.
+func (m Messages) requireUniqueUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, self domain.UserGroupID, name, handle string) error {
+	request := domain.PageRequest{Limit: 200}
+	for {
+		page, err := m.Store.ListUserGroups(ctx, workspaceID, true, request)
+		if err != nil {
+			return err
+		}
+		for _, group := range page.Groups {
+			if group.ID == self {
+				continue
+			}
+			if strings.EqualFold(group.Name, name) {
+				return ErrUserGroupNameTaken
+			}
+			if group.Handle == handle {
+				return ErrUserGroupHandleTaken
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
+			return nil
+		}
+		request.Cursor = page.NextCursor
+	}
 }
 
 func normalizeUserGroupUsers(values []domain.UserID) ([]domain.UserID, error) {
@@ -8080,16 +8142,23 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		return domain.UserGroup{}, err
 	}
 	name = strings.TrimSpace(name)
-	handle = normalizeUserGroupHandle(handle)
 	description = strings.TrimSpace(description)
 	if name == "" {
 		return domain.UserGroup{}, ErrInvalidUserGroup
 	}
-	if handle == "" {
-		handle = normalizeUserGroupHandle(name)
+	if strings.TrimSpace(handle) == "" {
+		handle = userGroupHandleFromName(name)
+	} else {
+		valid := false
+		if handle, valid = userGroupHandle(handle); !valid {
+			return domain.UserGroup{}, ErrInvalidUserGroup
+		}
 	}
 	if handle == "" || len(name) > 255 || len(handle) > 255 || len(description) > 2000 {
 		return domain.UserGroup{}, ErrInvalidUserGroup
+	}
+	if err := m.requireUniqueUserGroup(ctx, workspaceID, "", name, handle); err != nil {
+		return domain.UserGroup{}, err
 	}
 	id, err := domain.NewUserGroupID()
 	if err != nil {
@@ -8106,6 +8175,9 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		return domain.UserGroup{}, err
 	}
 	if err := m.Store.CreateUserGroup(ctx, value, event); err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			return domain.UserGroup{}, ErrUserGroupHandleTaken
+		}
 		return domain.UserGroup{}, err
 	}
 	return value, nil
@@ -8123,13 +8195,19 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		value.Name = strings.TrimSpace(name)
 	}
 	if strings.TrimSpace(handle) != "" {
-		value.Handle = normalizeUserGroupHandle(handle)
+		valid := false
+		if value.Handle, valid = userGroupHandle(handle); !valid {
+			return domain.UserGroup{}, ErrInvalidUserGroup
+		}
 	}
 	if description != "" {
 		value.Description = strings.TrimSpace(description)
 	}
 	if value.Name == "" || value.Handle == "" || len(value.Name) > 255 || len(value.Handle) > 255 || len(value.Description) > 2000 {
 		return domain.UserGroup{}, ErrInvalidUserGroup
+	}
+	if err := m.requireUniqueUserGroup(ctx, workspaceID, id, value.Name, value.Handle); err != nil {
+		return domain.UserGroup{}, err
 	}
 	value.UpdatedBy = actor
 	value.UpdatedAt = time.Now().UTC()
@@ -8142,6 +8220,9 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		return domain.UserGroup{}, err
 	}
 	if err := m.Store.UpdateUserGroup(ctx, value, event); err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			return domain.UserGroup{}, ErrUserGroupHandleTaken
+		}
 		return domain.UserGroup{}, err
 	}
 	return value, nil
@@ -8198,18 +8279,20 @@ func (m Messages) SetUserGroupUsers(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	for _, userID := range normalized {
-		user, getErr := m.Store.GetUser(ctx, userID)
-		if getErr != nil || user.WorkspaceID != workspaceID || user.Deleted {
-			return domain.UserGroup{}, store.ErrNotFound
-		}
-		if _, getErr = m.Store.GetWorkspaceMembership(ctx, workspaceID, userID); getErr != nil {
-			return domain.UserGroup{}, store.ErrNotFound
-		}
-	}
 	previous, err := m.Store.GetUserGroup(ctx, workspaceID, id)
 	if err != nil {
 		return domain.UserGroup{}, err
+	}
+	// A member who is not in the workspace is Slack's invalid_users. It was
+	// reported as the group not being found, naming the wrong missing thing.
+	for _, userID := range normalized {
+		user, getErr := m.Store.GetUser(ctx, userID)
+		if getErr != nil || user.WorkspaceID != workspaceID || user.Deleted {
+			return domain.UserGroup{}, ErrInvalidUserGroupUsers
+		}
+		if _, getErr = m.Store.GetWorkspaceMembership(ctx, workspaceID, userID); getErr != nil {
+			return domain.UserGroup{}, ErrInvalidUserGroupUsers
+		}
 	}
 	snapshot := previous
 	snapshot.Users = normalized

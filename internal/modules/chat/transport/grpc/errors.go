@@ -104,6 +104,7 @@ var errorClasses = []errorClass{
 	{key: "service.not_starred", code: codes.FailedPrecondition, sentinel: service.ErrNotStarred},
 	{key: "service.user_group_name_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupNameTaken},
 	{key: "service.user_group_handle_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupHandleTaken},
+	{key: "service.invalid_user_group_users", code: codes.InvalidArgument, sentinel: service.ErrInvalidUserGroupUsers},
 	{key: "service.cannot_unfurl_url", code: codes.FailedPrecondition, sentinel: service.ErrCannotUnfurlURL},
 	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
 	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},

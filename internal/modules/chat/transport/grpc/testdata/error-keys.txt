@@ -87,6 +87,7 @@ service.invalid_timestamp
 service.invalid_trigger
 service.invalid_trigger_config
 service.invalid_user_group
+service.invalid_user_group_users
 service.invalid_view
 service.invalid_workflow_step
 service.invalid_workspace

@@ -10492,12 +10492,12 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 }
 
 func (h Handler) createUserGroup(w http.ResponseWriter, r *http.Request) {
-	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
+	h.mutateUserGroup(w, r, userGroupPermissionDenied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
 		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"])
 	})
 }
 func (h Handler) updateUserGroup(w http.ResponseWriter, r *http.Request) {
-	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
+	h.mutateUserGroup(w, r, userGroupPermissionDenied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
 		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"])
 	})
 }
@@ -10508,11 +10508,24 @@ func (h Handler) disableUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.toggleUserGroup(w, r, false)
 }
 func (h Handler) toggleUserGroup(w http.ResponseWriter, r *http.Request, enabled bool) {
-	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
+	// usergroups.disable declares permission_denied; usergroups.enable's pinned
+	// enum does not, and keeps no_permission.
+	denied := userGroupPermissionDenied
+	if enabled {
+		denied = userGroupNoPermission
+	}
+	h.mutateUserGroup(w, r, denied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
 		return h.Messages.SetUserGroupEnabled(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), enabled)
 	})
 }
-func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, operation func(auth.Principal, map[string]string) (domain.UserGroup, error)) {
+
+// userGroupPermissionDenied and userGroupNoPermission name a member who is not
+// allowed to change user groups: permission_denied is what usergroups.create,
+// update, disable and users.update declare for it.
+func userGroupPermissionDenied(w http.ResponseWriter) { writeError(w, "permission_denied") }
+func userGroupNoPermission(w http.ResponseWriter)     { writeError(w, "no_permission") }
+
+func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, denied func(http.ResponseWriter), operation func(auth.Principal, map[string]string) (domain.UserGroup, error)) {
 	principal, err := h.authenticate(r, auth.ScopeUserGroupsWrite)
 	if err != nil {
 		writeAuthError(w, err)
@@ -10524,6 +10537,10 @@ func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 	value, err := operation(principal, fields)
+	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+		denied(w)
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
@@ -10632,6 +10649,10 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	value, err := h.Messages.SetUserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, group, users)
+	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+		userGroupPermissionDenied(w)
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
@@ -11379,6 +11400,8 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 		return "name_already_exists"
 	case errors.Is(err, service.ErrUserGroupHandleTaken):
 		return "handle_already_exists"
+	case errors.Is(err, service.ErrInvalidUserGroupUsers):
+		return "invalid_users"
 	case errors.Is(err, service.ErrCannotUnfurlURL):
 		return "cannot_unfurl_url"
 	}

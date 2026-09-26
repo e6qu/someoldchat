@@ -286,6 +286,7 @@ func recordedNonPinnedCodes() map[string]string {
 		// alternative - succeeding with a duplicate - is what this used to do.
 		"name_already_exists":   "usergroups.create and usergroups.update: the name is taken by another group",
 		"handle_already_exists": "usergroups.create and usergroups.update: the handle is taken by another group",
+		"invalid_users":         "usergroups.users.update: a named member is not in the workspace; the snapshot's enum declares no code for it, and usergroup_not_found named the wrong missing thing",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

@@ -1276,16 +1276,19 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
   - method: usergroups.disable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
   - method: usergroups.enable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
   - method: usergroups.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1296,6 +1299,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
   - method: usergroups.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1306,6 +1310,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupUsersUpdateRequiresItsMandatoryArguments
+      - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
   - method: users.setActive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
