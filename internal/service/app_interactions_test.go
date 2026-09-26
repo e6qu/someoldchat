@@ -137,7 +137,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		"api_app_id": "A1", "team_id": "T1", "team_domain": "test",
 		"channel_id": "C1", "channel_name": "general", "user_id": "U1",
 		"user_name": "alice", "command": "/deploy", "text": "ask <@U1> in <#C1|general> <https://example.com/runbook>",
-		"token": verificationToken,
+		"token": verificationToken, "is_enterprise_install": "false",
 	} {
 		if got := slash.form.Get(field); got != want {
 			t.Errorf("slash field %s=%q, want %q", field, got, want)
@@ -262,9 +262,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	assertSlackInteractionSignature(t, signingSecret, badSubmission.body, badSubmission.timestamp, badSubmission.signature)
 	assertSlackInteractionSignature(t, signingSecret, goodSubmission.body, goodSubmission.timestamp, goodSubmission.signature)
 	var submittedPayload struct {
-		Type     string `json:"type"`
-		APIAppID string `json:"api_app_id"`
-		View     struct {
+		Type         string `json:"type"`
+		APIAppID     string `json:"api_app_id"`
+		TriggerID    string `json:"trigger_id"`
+		ResponseURLs []any  `json:"response_urls"`
+		View         struct {
 			ID              string `json:"id"`
 			AppID           string `json:"app_id"`
 			PrivateMetadata string `json:"private_metadata"`
@@ -278,6 +280,14 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	if err := json.Unmarshal([]byte(goodSubmission.form.Get("payload")), &submittedPayload); err != nil {
 		t.Fatal(err)
+	}
+	// An app opens a follow-up modal from a submission with its trigger_id,
+	// and Slack always sends response_urls, empty when no input asked for one.
+	if submittedPayload.TriggerID == "" || submittedPayload.ResponseURLs == nil || len(submittedPayload.ResponseURLs) != 0 {
+		t.Fatalf("view submission trigger_id=%q response_urls=%v: %s", submittedPayload.TriggerID, submittedPayload.ResponseURLs, goodSubmission.form.Get("payload"))
+	}
+	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", submittedPayload.TriggerID, `{"type":"modal","title":{"type":"plain_text","text":"Done"},"blocks":[]}`); err != nil {
+		t.Fatalf("the submission's trigger_id did not open a view: %v", err)
 	}
 	if submittedPayload.Type != "view_submission" || submittedPayload.APIAppID != "A1" ||
 		submittedPayload.View.ID != string(openedView.ID) || submittedPayload.View.AppID != "A1" ||
@@ -371,6 +381,60 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); err != ErrInvalidAppResponse {
 		t.Fatalf("exhausted response URL error=%v, want %v", err, ErrInvalidAppResponse)
+	}
+
+	// A message shortcut on a person's message: the message has no app, and
+	// Slack omits app_id rather than sending an empty one.
+	human, err := messages.Post(ctx, "T1", "U1", "C1", "a person wrote this", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DispatchAppShortcut(ctx, "T1", "U1", "C1", "A1", "attach_deployment", human.ID, "https://chat.example.test"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	humanShortcut := requests[len(requests)-1]
+	mu.Unlock()
+	var humanPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(humanShortcut.form.Get("payload")), &humanPayload); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := humanPayload.Message["app_id"]; present || humanPayload.Message["user"] != "U1" {
+		t.Fatalf("human message shortcut payload=%s", humanShortcut.form.Get("payload"))
+	}
+}
+
+// Slack names the channel a slash command came from by its own name only for
+// a public channel; the other conversation kinds have fixed or derived names
+// that apps branch on.
+func TestSlashCommandChannelNameFollowsSlackForEveryConversationKind(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+	for _, user := range []domain.User{{ID: "U1", WorkspaceID: "T1", Name: "carol"}, {ID: "U2", WorkspaceID: "T1", Name: "alice"}, {ID: "U3", WorkspaceID: "T1", Name: "bob"}} {
+		repository.SeedUser(user)
+	}
+	repository.SeedConversation(domain.Conversation{ID: "G1", WorkspaceID: "T1", Name: "group", Kind: domain.ConversationTypeMPIM})
+	for _, member := range []domain.UserID{"U1", "U2", "U3"} {
+		repository.SeedConversationMember("G1", member)
+	}
+	messages := Messages{Store: repository}
+	for _, test := range []struct {
+		conversation domain.Conversation
+		want         string
+	}{
+		{domain.Conversation{ID: "C1", Name: "general"}, "general"},
+		{domain.Conversation{ID: "C2", Name: "general", Kind: domain.ConversationTypePublic}, "general"},
+		{domain.Conversation{ID: "C3", Name: "secret", Kind: domain.ConversationTypePrivate}, "privategroup"},
+		{domain.Conversation{ID: "D1", Name: "direct", Kind: domain.ConversationTypeIM}, "directmessage"},
+		{domain.Conversation{ID: "G1", Name: "group", Kind: domain.ConversationTypeMPIM}, "mpdm-alice--bob--carol-1"},
+	} {
+		got, err := messages.slashCommandChannelName(ctx, test.conversation)
+		if err != nil || got != test.want {
+			t.Errorf("%s channel_name=%q err=%v, want %q", test.conversation.ID, got, err, test.want)
+		}
 	}
 }
 

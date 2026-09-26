@@ -101,19 +101,27 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return err
 	}
+	channelName, err := m.slashCommandChannelName(ctx, conversation)
+	if err != nil {
+		return err
+	}
+	// is_enterprise_install is part of Slack's slash command form, and Bolt's
+	// installation-store authorization reads it; this system has no Enterprise
+	// Grid installations, so it is always false.
 	form := url.Values{
-		"api_app_id":   {string(snapshot.App.ID)},
-		"channel_id":   {string(conversation.ID)},
-		"channel_name": {conversation.Name},
-		"command":      {command},
-		"response_url": {responseURL},
-		"team_domain":  {workspace.Domain},
-		"team_id":      {string(workspace.ID)},
-		"text":         {strings.TrimSpace(text)},
-		"token":        {verificationToken},
-		"trigger_id":   {triggerID},
-		"user_id":      {string(user.ID)},
-		"user_name":    {user.Name},
+		"api_app_id":            {string(snapshot.App.ID)},
+		"channel_id":            {string(conversation.ID)},
+		"channel_name":          {channelName},
+		"command":               {command},
+		"is_enterprise_install": {"false"},
+		"response_url":          {responseURL},
+		"team_domain":           {workspace.Domain},
+		"team_id":               {string(workspace.ID)},
+		"text":                  {strings.TrimSpace(text)},
+		"token":                 {verificationToken},
+		"trigger_id":            {triggerID},
+		"user_id":               {string(user.ID)},
+		"user_name":             {user.Name},
 	}
 	if parsed.SocketModeEnabled {
 		return m.enqueueSocketModeInteraction(ctx, snapshot.App.ID, workspaceID, userID, "slash_commands", formValuesObject(form), capability)
@@ -125,6 +133,31 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	return m.applyAppResponse(ctx, domain.AppResponseURL{
 		AppID: snapshot.App.ID, WorkspaceID: workspaceID, UserID: userID, ConversationID: conversationID,
 	}, body, "")
+}
+
+// slashCommandChannelName is the channel_name Slack sends with a slash
+// command. Only a public channel is named by its own name: Slack sends
+// "directmessage" from a DM, "privategroup" from a private channel, and the
+// mpdm-style name of a group DM, built from its members' names.
+func (m Messages) slashCommandChannelName(ctx context.Context, conversation domain.Conversation) (string, error) {
+	switch conversation.Kind.OrPublic() {
+	case domain.ConversationTypeIM:
+		return "directmessage", nil
+	case domain.ConversationTypePrivate:
+		return "privategroup", nil
+	case domain.ConversationTypeMPIM:
+		page, err := m.Store.ListConversationMembers(ctx, conversation.ID, domain.PageRequest{Limit: 100})
+		if err != nil {
+			return "", err
+		}
+		names := make([]string, 0, len(page.Users))
+		for _, member := range page.Users {
+			names = append(names, member.Name)
+		}
+		slices.Sort(names)
+		return "mpdm-" + strings.Join(names, "--") + "-1", nil
+	}
+	return conversation.Name, nil
 }
 
 func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, action domain.AppBlockAction, responseBaseURL string) error {
@@ -563,7 +596,7 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.ViewInteractionResult{}, err
 	}
 	view["state"] = state
-	_, _, capability, err := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
+	triggerID, _, capability, err := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
@@ -571,11 +604,17 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
+	// Slack's view_submission carries a trigger_id — an app opens a follow-up
+	// modal with it — and response_urls, which is empty unless an input block
+	// asked for response_url_enabled. The trigger was minted and discarded.
 	payload := map[string]any{
 		"type": "view_submission", "api_app_id": current.AppID, "token": verificationToken,
-		"team": map[string]any{"id": workspace.ID, "domain": workspace.Domain},
-		"user": map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
-		"view": view,
+		"team":                  map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"user":                  map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
+		"view":                  view,
+		"trigger_id":            triggerID,
+		"response_urls":         []any{},
+		"is_enterprise_install": false,
 	}
 	if parsed.SocketModeEnabled {
 		if err := m.enqueueSocketModeInteraction(ctx, current.AppID, workspaceID, userID, "interactive", payload, capability); err != nil {
@@ -1605,8 +1644,13 @@ func ephemeralMessageMutationEvent(value domain.EphemeralMessage, deleted bool) 
 
 func appInteractionMessage(message domain.Message) map[string]any {
 	result := map[string]any{
-		"type": "message", "user": message.AuthorID, "app_id": message.AppID, "text": message.Text,
+		"type": "message", "user": message.AuthorID, "text": message.Text,
 		"ts": domain.NewMessageTimestamp(message.CreatedAt),
+	}
+	// A human's message has no app; Slack omits the field rather than sending
+	// an empty identifier.
+	if message.AppID != "" {
+		result["app_id"] = message.AppID
 	}
 	if message.ThreadTimestamp != "" {
 		result["thread_ts"] = message.ThreadTimestamp
