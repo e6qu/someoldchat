@@ -3424,7 +3424,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.IsDirectOrGroup() || len(members) < 2 {
+	if !domain.ValidDirectMemberCount(conversation.Kind, len(members)) {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
@@ -3734,28 +3734,28 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic domain.ConversationText, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	value.Topic = topic
+	value.Topic, value.TopicSetBy, value.TopicSetAt = topic.Value, topic.SetBy, topic.SetAt
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	s.appendConversationNotices(notices)
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose domain.ConversationText, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	value.Purpose = purpose
+	value.Purpose, value.PurposeSetBy, value.PurposeSetAt = purpose.Value, purpose.SetBy, purpose.SetAt
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	s.appendConversationNotices(notices)
@@ -7946,9 +7946,22 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				continue
 			}
 		}
+		_, viewerMember := s.memberships[conversation.ID][user]
+		_, subjectMember := s.memberships[conversation.ID][memberUser]
+		// Naming a member narrows every type, public channels included:
+		// users.conversations lists what someone belongs to, not what they
+		// could read.
+		if request.MemberUserID != "" && !subjectMember {
+			continue
+		}
+		conversation.IsMember = viewerMember
+		conversation.NumMembers = 0
+		for member := range s.memberships[conversation.ID] {
+			if account, exists := s.users[member]; exists && !account.Deleted {
+				conversation.NumMembers++
+			}
+		}
 		if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
-			_, viewerMember := s.memberships[conversation.ID][user]
-			_, subjectMember := s.memberships[conversation.ID][memberUser]
 			if !viewerMember || !subjectMember {
 				continue
 			}
@@ -8038,6 +8051,21 @@ func (s *Store) IsConversationMember(_ context.Context, conversation domain.Conv
 	defer s.mu.RUnlock()
 	_, ok := s.memberships[conversation][user]
 	return ok, nil
+}
+
+func (s *Store) DirectParticipants(_ context.Context, conversation domain.ConversationID) ([]domain.UserID, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.conversations[conversation]
+	if !ok || !value.IsDirectOrGroup() {
+		return nil, store.ErrNotFound
+	}
+	participants := make([]domain.UserID, 0, len(s.memberships[conversation]))
+	for member := range s.memberships[conversation] {
+		participants = append(participants, member)
+	}
+	slices.Sort(participants)
+	return participants, nil
 }
 
 // CreateMessage applies the same normalization and referential checks the SQL

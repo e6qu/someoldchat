@@ -2238,7 +2238,8 @@ func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *test
 		s.SeedUser(domain.User{ID: domain.UserID(fmt.Sprintf("U%d", index)), WorkspaceID: "T1"})
 	}
 	messages := Messages{Store: s}
-	direct, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	directOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	direct := directOpening.Conversation
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2268,7 +2269,8 @@ func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *test
 	if err := messages.LeaveConversation(ctx, "T1", "U1", direct.ID); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("second close error=%v, want already closed", err)
 	}
-	reopened, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reopenedOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reopened := reopenedOpening.Conversation
 	if err != nil || reopened.ID != direct.ID {
 		t.Fatalf("reopened=%+v err=%v, want %s", reopened, err, direct.ID)
 	}
@@ -2304,7 +2306,8 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 		s.SeedUser(domain.User{ID: id, WorkspaceID: "T1", Name: string(id)})
 	}
 	messages := Messages{Store: s}
-	source, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	sourceOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	source := sourceOpening.Conversation
 	if err != nil {
 		t.Fatal(err)
 	}

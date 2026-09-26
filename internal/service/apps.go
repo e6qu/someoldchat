@@ -540,10 +540,11 @@ func (m Messages) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil || app.BotUserID == "" {
 		return app, view, err
 	}
-	conversation, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
+	opening, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
 	if err != nil {
 		return domain.InstalledApp{}, domain.View{}, err
 	}
+	conversation := opening.Conversation
 	fields := []events.Field{
 		events.String("target_app_id", string(app.ID)),
 		events.String("user_id", string(userID)),

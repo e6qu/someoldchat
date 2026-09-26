@@ -2909,7 +2909,8 @@ func parityCases() []parityCase {
 				requireSeed(t, target.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", Email: "carol@example.com"}))
 			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				source, err := chat.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+				sourceOpening, err := chat.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+				source := sourceOpening.Conversation
 				if err != nil {
 					return nil, err
 				}

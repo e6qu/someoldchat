@@ -83,6 +83,7 @@ func runQualification(t *testing.T, open opener) {
 		{"email identity is case folded", emailIdentityIsCaseFolded},
 		{"conversation search treats metacharacters literally", conversationSearchTreatsMetacharactersLiterally},
 		{"search folds Unicode identically", searchFoldsUnicodeIdentically},
+		{"conversation provenance and membership agree", conversationProvenanceAndMembershipAgree},
 		{"recent searches are private ordered and deduplicated", recentSearchesArePrivateOrderedAndDeduplicated},
 		{"user group mentions create visibility safe activity", userGroupMentionsCreateVisibilitySafeActivity},
 		{"messages page in both directions", messagesPageInBothDirections},

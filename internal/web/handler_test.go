@@ -5159,7 +5159,8 @@ func TestDirectMessageDetailsReviewHistoryExpansionAndConvertInPlace(t *testing.
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
 	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", RealName: "Carol Creator"})
 	messages := service.Messages{Store: s}
-	source, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	sourceOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	source := sourceOpening.Conversation
 	if err != nil {
 		t.Fatal(err)
 	}

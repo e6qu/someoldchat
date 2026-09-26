@@ -586,6 +586,78 @@ func conversationSearchTreatsMetacharactersLiterally(t *testing.T, open opener) 
 	}
 }
 
+// conversationProvenanceAndMembershipAgree covers what Slack's conversation
+// object reports beyond the name: who created a channel and when, who last set
+// its topic and purpose and when, whether the reader belongs to it, and how
+// many people do. Naming a member narrows a listing to that member's
+// conversations for every type, public channels included, in every profile.
+func conversationProvenanceAndMembershipAgree(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	created := time.Unix(1700000200, 0).UTC()
+	joined := domain.Conversation{ID: domain.ConversationID("C-provenance-" + f.suffix), WorkspaceID: f.workspaceID, Name: "provenance", Created: created, CreatorID: f.userID}
+	if err := f.repository.CreateConversation(ctx, joined, f.userID, f.event("provenance-created", "conversation.created", string(joined.ID))); err != nil {
+		t.Fatal(err)
+	}
+	stranger := domain.UserID("U-provenance-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: stranger, WorkspaceID: f.workspaceID, Email: "provenance-" + f.suffix + "@example.com", Name: "stranger"}); err != nil {
+		t.Fatal(err)
+	}
+	unjoined := domain.Conversation{ID: domain.ConversationID("C-unjoined-" + f.suffix), WorkspaceID: f.workspaceID, Name: "unjoined", Created: created, CreatorID: stranger}
+	if err := f.repository.CreateConversation(ctx, unjoined, stranger, f.event("unjoined-created", "conversation.created", string(unjoined.ID))); err != nil {
+		t.Fatal(err)
+	}
+	topicSet := time.Unix(1700000300, 0).UTC()
+	if _, err := f.repository.SetConversationTopic(ctx, joined.ID, domain.ConversationText{Value: "topic", SetBy: f.userID, SetAt: topicSet}, f.event("provenance-topic", "conversation.topic_changed", string(joined.ID))); err != nil {
+		t.Fatal(err)
+	}
+	purposeSet := time.Unix(1700000400, 0).UTC()
+	stored, err := f.repository.SetConversationPurpose(ctx, joined.ID, domain.ConversationText{Value: "purpose", SetBy: f.userID, SetAt: purposeSet}, f.event("provenance-purpose", "conversation.purpose_changed", string(joined.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := f.repository.GetConversation(ctx, joined.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, value := range map[string]domain.Conversation{"returned": stored, "read": read} {
+		if !value.Created.Equal(created) || value.CreatorID != f.userID ||
+			value.Topic != "topic" || value.TopicSetBy != f.userID || !value.TopicSetAt.Equal(topicSet) ||
+			value.Purpose != "purpose" || value.PurposeSetBy != f.userID || !value.PurposeSetAt.Equal(purposeSet) {
+			t.Fatalf("%s conversation lost its provenance: %+v", label, value)
+		}
+	}
+
+	all, err := f.repository.ListConversations(ctx, f.workspaceID, f.userID, domain.ConversationListRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[domain.ConversationID]domain.Conversation{}
+	for _, conversation := range all.Conversations {
+		listed[conversation.ID] = conversation
+	}
+	if value := listed[joined.ID]; !value.IsMember || value.NumMembers != 1 || !value.Created.Equal(created) || value.TopicSetBy != f.userID {
+		t.Fatalf("joined channel listed as %+v", value)
+	}
+	if value, present := listed[unjoined.ID]; !present || value.IsMember || value.NumMembers != 1 {
+		t.Fatalf("unjoined public channel listed as %+v (present=%v)", value, present)
+	}
+	mine, err := f.repository.ListConversations(ctx, f.workspaceID, f.userID, domain.ConversationListRequest{Limit: 10, MemberUserID: f.userID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, conversation := range mine.Conversations {
+		if conversation.ID == unjoined.ID {
+			t.Fatalf("a member-only listing included a public channel the member is not in: %+v", mine.Conversations)
+		}
+	}
+	if len(mine.Conversations) != 2 {
+		t.Fatalf("member-only listing = %+v, want the fixture channel and the joined one", mine.Conversations)
+	}
+}
+
 func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)
@@ -614,11 +686,11 @@ func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 	assertConversation("über")
-	if _, err := f.repository.SetConversationTopic(ctx, conversation.ID, "ÉCOLE", f.event("unicode-topic", "conversation.topic_changed", string(conversation.ID))); err != nil {
+	if _, err := f.repository.SetConversationTopic(ctx, conversation.ID, domain.ConversationText{Value: "ÉCOLE"}, f.event("unicode-topic", "conversation.topic_changed", string(conversation.ID))); err != nil {
 		t.Fatal(err)
 	}
 	assertConversation("école")
-	if _, err := f.repository.SetConversationPurpose(ctx, conversation.ID, "ÅNGSTRÖM", f.event("unicode-purpose", "conversation.purpose_changed", string(conversation.ID))); err != nil {
+	if _, err := f.repository.SetConversationPurpose(ctx, conversation.ID, domain.ConversationText{Value: "ÅNGSTRÖM"}, f.event("unicode-purpose", "conversation.purpose_changed", string(conversation.ID))); err != nil {
 		t.Fatal(err)
 	}
 	assertConversation("ångström")

@@ -933,6 +933,59 @@ type Conversation struct {
 	// from the other.
 	IsExtShared        bool
 	IsPendingExtShared bool
+	// Created and CreatorID record when and by whom the conversation was made.
+	// They are zero for a conversation created before schema 176, which kept no
+	// record of either; nothing reconstructs them because any guess (the first
+	// message, the first member) would be a different fact wearing their name.
+	Created   time.Time
+	CreatorID UserID
+	// Who last set the topic and the purpose, and when. Slack reports both
+	// with the value; an unset one is the empty user at the zero instant.
+	TopicSetBy   UserID
+	TopicSetAt   time.Time
+	PurposeSetBy UserID
+	PurposeSetAt time.Time
+
+	// The fields below are not stored. They are derived for one reader when a
+	// conversation is returned through the service, because each is a fact
+	// about the conversation relative to the workspace or to the reader rather
+	// than about the conversation itself.
+
+	// IsMember reports whether the reader belongs to the conversation.
+	IsMember bool
+	// IsGeneral reports that the conversation is one of the workspace's
+	// required channels: the ones a member cannot leave and nobody can
+	// archive, which is exactly what Slack's #general is.
+	IsGeneral bool
+	// NumMembers is how many people belong to the conversation.
+	NumMembers int
+	// DirectUserID is, for a one-to-one DM, the participant who is not the
+	// reader, or the reader themselves for a self-DM.
+	DirectUserID UserID
+	// DirectUserDeleted reports that DirectUserID has been deactivated.
+	DirectUserDeleted bool
+	// GroupDirectHandle is Slack's name for a group DM, derived from its
+	// participants' usernames (mpdm-alice--bob--carol-1). It is separate from
+	// Name because a group DM's stored name is either a placeholder or the
+	// label its members gave it, and first-party clients show that instead.
+	GroupDirectHandle string
+}
+
+// DirectOpening is the result of opening a direct conversation: the
+// conversation, and whether it was already open for the caller before the
+// request, which conversations.open reports as already_open.
+type DirectOpening struct {
+	Conversation Conversation
+	AlreadyOpen  bool
+}
+
+// ConversationText is a channel topic or purpose as it is written: the value,
+// who set it, and when. The three travel together so that a store cannot record
+// a new value while keeping the previous setter.
+type ConversationText struct {
+	Value string
+	SetBy UserID
+	SetAt time.Time
 }
 
 // SharedInviteStatus is the state machine CONNECT-02 requires. Approval and
@@ -1175,6 +1228,40 @@ func (t ConversationType) OrPublic() ConversationType {
 // forms a channel.
 func (c Conversation) IsDirectOrGroup() bool {
 	return c.Kind == ConversationTypeIM || c.Kind == ConversationTypeMPIM
+}
+
+// DirectKindFor is the kind of a direct conversation holding this many people,
+// the caller included: a self-DM or a one-to-one is an IM, anything larger a
+// group DM.
+func DirectKindFor(members int) ConversationType {
+	if members <= 2 {
+		return ConversationTypeIM
+	}
+	return ConversationTypeMPIM
+}
+
+// ValidDirectMemberCount reports whether a direct conversation of this kind may
+// hold this many members. An IM holds its two participants, or one person
+// writing to themselves; a group DM holds at least three. Both stores check it
+// so that neither accepts a membership the other would refuse.
+func ValidDirectMemberCount(kind ConversationType, members int) bool {
+	switch kind {
+	case ConversationTypeIM:
+		return members == 1 || members == 2
+	case ConversationTypeMPIM:
+		return members >= 3
+	}
+	return false
+}
+
+// DirectConversationIDPrefix is the first letter of a new direct conversation's
+// identifier. Slack gives IMs D-prefixed identifiers and group DMs the
+// C/G space channels use, and official SDKs model a D identifier as a DM.
+func DirectConversationIDPrefix(kind ConversationType) string {
+	if kind == ConversationTypeIM {
+		return "D"
+	}
+	return "C"
 }
 
 // PrivateFlag reports the value the stored is_private column carries for this

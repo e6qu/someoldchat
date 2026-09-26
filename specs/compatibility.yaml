@@ -227,6 +227,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestHistoryPostForm
+      - go-test:internal/api/slack:TestChannelNoticesCarryTheirSlackFieldsInHistory
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -295,16 +296,19 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
   - method: conversations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
   - method: conversations.members
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -349,6 +353,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCreatePrivateConversation
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
   - method: conversations.join
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -380,11 +385,12 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestLeavePublicConversation
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
   - method: conversations.kick
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
-      - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationsKickFollowsItsPinnedErrors
   - method: conversations.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -395,11 +401,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestSetTopicAndPurposeFollowTheirPinnedErrors
   - method: conversations.setPurpose
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestSetTopicAndPurposeFollowTheirPinnedErrors
   - method: conversations.archive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -420,6 +428,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationsOpenReusesDirectConversation
+      - go-test:internal/api/slack:TestConversationsOpenNamesUsersAndSelfAndGroupDMs
   - method: conversations.mark
     status: behavior-compatible
     provenance: slack-api-specs-openapi

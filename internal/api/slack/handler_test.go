@@ -4598,15 +4598,18 @@ func TestConversationsOpenReusesDirectConversation(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	first := httptest.NewRecorder()
 	handler.ServeHTTP(first, request)
-	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"is_im":true`) {
+	// Without return_im Slack answers with the IM's identifier alone, and a
+	// new IM's identifier is D-prefixed.
+	if first.Code != http.StatusOK || !strings.HasPrefix(first.Body.String(), `{"channel":{"id":"D`) || strings.Contains(first.Body.String(), `already_open`) {
 		t.Fatalf("first status=%d body=%s", first.Code, first.Body)
 	}
-	secondRequest := httptest.NewRequest(http.MethodPost, "/api/conversations.open", strings.NewReader("users=U2"))
+	secondRequest := httptest.NewRequest(http.MethodPost, "/api/conversations.open", strings.NewReader("users=U2&return_im=true"))
 	secondRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	secondRequest.Header.Set("Authorization", "Bearer token")
 	second := httptest.NewRecorder()
 	handler.ServeHTTP(second, secondRequest)
-	if second.Code != http.StatusOK {
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"already_open":true`) || !strings.Contains(second.Body.String(), `"no_op":true`) ||
+		!strings.Contains(second.Body.String(), `"is_im":true`) || !strings.Contains(second.Body.String(), `"user":"U2"`) || !strings.Contains(second.Body.String(), `"priority":0`) {
 		t.Fatalf("second status=%d body=%s", second.Code, second.Body)
 	}
 	var firstBody, secondBody struct {
@@ -4760,8 +4763,17 @@ func TestLeavePublicConversation(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"channel":"C1"`) {
+	if res.Code != http.StatusOK || res.Body.String() != `{"ok":true}`+"\n" {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+	// Leaving again is not an error: the pinned success schema reports it.
+	again := httptest.NewRequest(http.MethodPost, "/api/conversations.leave", strings.NewReader("channel=C1"))
+	again.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	again.Header.Set("Authorization", "Bearer token")
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, again)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"not_in_channel":true`) || !strings.Contains(res.Body.String(), `"ok":true`) {
+		t.Fatalf("second leave status=%d body=%s", res.Code, res.Body)
 	}
 }
 

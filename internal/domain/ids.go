@@ -195,6 +195,14 @@ func NewConversationID() (ConversationID, error) {
 	return ConversationID(value), err
 }
 
+// NewDirectConversationID names a new direct conversation of the given kind; see
+// DirectConversationIDPrefix. Existing conversations keep the identifier they
+// were created with, which every stored reference already names.
+func NewDirectConversationID(kind ConversationType) (ConversationID, error) {
+	value, err := PublicID(DirectConversationIDPrefix(kind))
+	return ConversationID(value), err
+}
+
 func NewBookmarkID() (BookmarkID, error) {
 	value, err := PublicID("Bk")
 	return BookmarkID(value), err

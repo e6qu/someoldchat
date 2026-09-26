@@ -5916,12 +5916,23 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	options, err := parseBoolFields(fields, "include_num_members", "include_locale")
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversationID))
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	response := conversationResponse(conversation)
+	if options[0] && conversation.Kind != domain.ConversationTypeIM {
+		response["num_members"] = conversation.NumMembers
+	}
+	if options[1] {
+		response["locale"] = workspaceLocale
+	}
 	canvas, canvasErr := h.Messages.ConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID)
 	if canvasErr == nil {
 		var document struct {
@@ -6564,15 +6575,6 @@ func profileResponse(user domain.User) map[string]any {
 	}
 }
 
-func conversationResponse(conversation domain.Conversation) map[string]any {
-	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.PrivateFlag(), "is_channel": conversation.Kind.OrPublic() == domain.ConversationTypePublic, "is_im": conversation.Kind == domain.ConversationTypeIM, "is_mpim": conversation.Kind == domain.ConversationTypeMPIM, "is_member": true, "team_id": conversation.WorkspaceID,
-		// The Slack Connect identity. Pending and shared are different facts —
-		// an outstanding invitation is not a connection — and a client renders
-		// each differently, so neither is derived from the other.
-		"is_ext_shared": conversation.IsExtShared, "is_pending_ext_shared": conversation.IsPendingExtShared,
-		"is_shared": conversation.IsExtShared}
-}
-
 func (h Handler) conversationsList(w http.ResponseWriter, r *http.Request) {
 	h.listConversations(w, r, false)
 }
@@ -6597,8 +6599,14 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	// users.conversations lists the conversations one person belongs to, the
+	// caller unless `user` names someone else. Leaving MemberUserID empty for
+	// the caller listed every public channel in the workspace instead.
 	if allowMember {
 		request.MemberUserID = domain.UserID(strings.TrimSpace(fields["user"]))
+		if request.MemberUserID == "" {
+			request.MemberUserID = principal.UserID
+		}
 	}
 	page, err := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
@@ -6607,7 +6615,16 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 	}
 	channels := make([]map[string]any, 0, len(page.Conversations))
 	for _, conversation := range page.Conversations {
-		channels = append(channels, conversationResponse(conversation))
+		channel := conversationResponse(conversation)
+		// conversations.list reports each channel's size; the pinned
+		// users.conversations schema says its objects carry neither
+		// num_members nor is_member.
+		if allowMember {
+			delete(channel, "is_member")
+		} else if !conversation.IsDirectOrGroup() {
+			channel["num_members"] = conversation.NumMembers
+		}
+		channels = append(channels, channel)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channels": channels, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -6910,18 +6927,21 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation); err != nil {
-		if errors.Is(err, service.ErrCannotLeaveDefault) {
+		switch {
+		case errors.Is(err, service.ErrCannotLeaveDefault):
 			writeError(w, "cant_leave_general")
-			return
-		}
-		if errors.Is(err, service.ErrInvalidConversation) {
+		case errors.Is(err, service.ErrConversationArchived):
 			writeError(w, "is_archived")
-			return
+		case errors.Is(err, service.ErrNotInConversation):
+			// The pinned success schema: leaving a channel you are not in
+			// succeeds and says so, rather than failing.
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "not_in_channel": true})
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
 		}
-		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversation})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
@@ -6946,10 +6966,19 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrCannotKickSelf):
+			writeError(w, "cant_kick_self")
+		case errors.Is(err, service.ErrCannotKickFromDefault):
+			writeError(w, "cant_kick_from_general")
+		case errors.Is(err, service.ErrInvalidConversation):
+			writeError(w, "method_not_supported_for_channel_type")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
@@ -7012,7 +7041,14 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, err := h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["topic"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrConversationArchived):
+			writeError(w, "is_archived")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			writeError(w, "too_long")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -7040,7 +7076,14 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 	}
 	conversation, err := h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["purpose"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrConversationArchived):
+			writeError(w, "is_archived")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			writeError(w, "too_long")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -7168,12 +7211,31 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		seen[user] = struct{}{}
 		users = append(users, user)
 	}
-	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	returnIM, err := parseBoolField(fields["return_im"])
 	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	opening, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidConversation) && len(users) > 8 {
+			writeError(w, "too_many_users")
+			return
+		}
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	// Slack answers a one-to-one open with the IM's identifier alone unless
+	// return_im asks for the full object; a group DM is always described.
+	channel := conversationResponse(opening.Conversation)
+	if opening.Conversation.Kind == domain.ConversationTypeIM && !returnIM {
+		channel = map[string]any{"id": opening.Conversation.ID}
+	}
+	response := map[string]any{"ok": true, "channel": channel}
+	if opening.AlreadyOpen {
+		response["no_op"], response["already_open"] = true, true
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
@@ -10839,6 +10901,9 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 
 func messageResponse(message domain.Message) map[string]any {
 	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt)}
+	for field, value := range domain.ChannelNoticeFields(message) {
+		result[field] = value
+	}
 	// Slack's message object reports an edit through `edited`, and clients
 	// render "(edited)" from it. It was absent from every method that returns
 	// a message, so no caller could tell an edited message from an untouched
@@ -10970,6 +11035,12 @@ func mapServiceErrorExists(err error, notFoundReason, existsReason string) strin
 func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason string) string {
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) || errors.Is(err, service.ErrWebhookTriggerSecret) || errors.Is(err, service.ErrAssistantThreadNotFound) {
 		return notFoundReason
+	}
+	// The person an operation names is missing, as distinct from the
+	// conversation it acts on: every enum that can say so declares
+	// user_not_found.
+	if errors.Is(err, service.ErrUserNotFound) {
+		return "user_not_found"
 	}
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
