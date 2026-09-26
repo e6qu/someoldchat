@@ -282,6 +282,7 @@ func buildServerBinary(t *testing.T) string {
 			serverBinaryError = err
 			return
 		}
+		serverBinaryDirectory = directory
 		binary := filepath.Join(directory, "server")
 		build := exec.Command("go", "build", "-o", binary, "./cmd/server")
 		build.Dir = repositoryRoot(t)
@@ -298,10 +299,24 @@ func buildServerBinary(t *testing.T) string {
 }
 
 var (
-	serverBinaryOnce  sync.Once
-	serverBinaryPath  string
-	serverBinaryError error
+	serverBinaryOnce      sync.Once
+	serverBinaryDirectory string
+	serverBinaryPath      string
+	serverBinaryError     error
 )
+
+// TestMain removes the compiled server once every test has run. The binary is
+// shared across the package's tests, so no single test's cleanup can own it,
+// and it used to be left in the temporary directory — about 70 MB for every
+// `go test ./...`, which filled the disk of a machine that runs the suite
+// repeatedly.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if serverBinaryDirectory != "" {
+		_ = os.RemoveAll(serverBinaryDirectory)
+	}
+	os.Exit(code)
+}
 
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
