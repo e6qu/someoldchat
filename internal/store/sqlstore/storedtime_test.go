@@ -127,7 +127,7 @@ func TestSQLiteMessageOrderIsChronologicalAcrossTrailingZeroFractions(t *testing
 		}
 	}
 
-	page, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: len(instants) + 1})
+	page, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: len(instants) + 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestSQLiteMessageOrderIsChronologicalAcrossTrailingZeroFractions(t *testing
 	seen := make([]domain.MessageID, 0, len(instants))
 	request := domain.PageRequest{Limit: 1}
 	for {
-		single, err := s.ListMessages(ctx, "C1", request)
+		single, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: request})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -353,7 +353,7 @@ func TestSQLiteStoredTimestampMigrationRewritesLegacyRows(t *testing.T) {
 			t.Fatalf("migrated timestamp %q is not fixed width", value)
 		}
 	}
-	page, err := second.ListMessages(ctx, "C1", domain.PageRequest{Limit: len(instants) + 1})
+	page, err := second.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: len(instants) + 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -759,7 +759,7 @@ func TestSQLiteMessageInstantCannotOutrunItsOwnTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stored, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	stored, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(stored.Messages) != 1 {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
@@ -840,7 +840,7 @@ func TestSQLiteMigrationRepairsMessageInstantsWrittenBeforeTruncation(t *testing
 		t.Fatal(err)
 	}
 
-	stored, err := migrated.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	stored, err := migrated.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(stored.Messages) != 1 {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}

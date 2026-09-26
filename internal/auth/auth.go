@@ -23,6 +23,11 @@ import (
 
 type Scope string
 
+// ScopeChatWritePublic lets a bot post to a public channel it has not joined.
+// chat:write does not grant it, and it never reaches a private channel or a
+// direct conversation.
+const ScopeChatWritePublic Scope = "chat:write.public"
+
 const (
 	ScopeChatWrite               Scope = "chat:write"
 	ScopeChatWriteCustomize      Scope = "chat:write.customize"
@@ -507,6 +512,7 @@ var allScopes = []Scope{
 	ScopeConversationsConnectManage,
 	ScopeChatWrite,
 	ScopeChatWriteCustomize,
+	ScopeChatWritePublic,
 	ScopeIncomingWebhook,
 	ScopeChannelsHistory,
 	ScopeUsersRead,

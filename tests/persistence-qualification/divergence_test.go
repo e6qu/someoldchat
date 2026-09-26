@@ -110,7 +110,7 @@ func messageOrderIsChronological(t *testing.T, open opener) {
 	for index, instant := range instants {
 		f.message(t, ctx, fmt.Sprintf("M%d", index), instant)
 	}
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: len(instants) + 1})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: len(instants) + 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func messageOrderIsChronological(t *testing.T, open opener) {
 	seen := make(map[domain.MessageID]struct{}, len(instants))
 	request := domain.PageRequest{Limit: 1}
 	for visited := 0; visited <= len(instants); visited++ {
-		single, err := f.repository.ListMessages(ctx, f.channelID, request)
+		single, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: request})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -665,21 +665,21 @@ func messagesPageInBothDirections(t *testing.T, open opener) {
 	if err := f.repository.UpdateMessage(ctx, deleted, f.event("delete-direction-4", "message.deleted", string(deleted.ID))); err != nil {
 		t.Fatal(err)
 	}
-	first, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Descending: true})
+	first, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 2, Descending: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := []domain.MessageID{first.Messages[0].ID, first.Messages[1].ID}; !strings.Contains(string(got[0]), "direction-5") || !strings.Contains(string(got[1]), "direction-3") || !first.HasMore || first.NextCursor == "" {
 		t.Fatalf("first descending page=%+v", first)
 	}
-	second, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Cursor: first.NextCursor, Descending: true})
+	second, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 2, Cursor: first.NextCursor, Descending: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(second.Messages) != 2 || !strings.Contains(string(second.Messages[0].ID), "direction-2") || !strings.Contains(string(second.Messages[1].ID), "direction-1") || second.HasMore {
 		t.Fatalf("second descending page=%+v", second)
 	}
-	forward, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Cursor: first.NextCursor})
+	forward, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 2, Cursor: first.NextCursor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1660,7 +1660,7 @@ func conversationNoticesCommitWithTheirChange(t *testing.T, open opener) {
 	if _, err := f.repository.RenameConversation(ctx, f.channelID, "renamed-"+f.suffix, f.event("notice-rename", "conversation.renamed", string(f.channelID)), renameNotice); err != nil {
 		t.Fatal(err)
 	}
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 50})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1715,7 +1715,7 @@ func aDeletedFileIsDeletedOnEveryMessageThatCarriesIt(t *testing.T, open opener)
 	}
 	attached := func(stage string) domain.File {
 		t.Helper()
-		page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+		page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 		if err != nil {
 			t.Fatalf("%s: %v", stage, err)
 		}
@@ -2240,7 +2240,7 @@ func retentionDeletesTheSameContentOnEveryProfile(t *testing.T, open opener) {
 		t.Fatalf("sweep=%+v, want the lone message and the dead thread's two, completely", swept)
 	}
 
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 50})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2859,7 +2859,7 @@ func fileDescriptionBelongsToItsUploader(t *testing.T, open opener) {
 	if err := f.repository.CreateMessage(ctx, message, f.event("file-message", "message.created", string(message.ID)), ""); err != nil {
 		t.Fatal(err)
 	}
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}

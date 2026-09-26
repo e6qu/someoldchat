@@ -145,12 +145,19 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAuthTestIncludesContractIdentityFields
+      - go-test:internal/api/slack:TestURLsHandedToClientsAreAbsolute
+      - go-test:internal/api/slack:TestConfiguredPublicURLWinsOverTheRequestHost
   - method: chat.postMessage
     status: schema-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/chat.postMessage/
     evidence:
       - go-test:internal/api/slack:TestPostMessageForm
+      - go-test:internal/api/slack:TestBotTokenMessagesCarryBotIdentity
+      - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
+      - go-test:internal/api/slack:TestChatWritePublicPostsWithoutJoining
+      - go-test:internal/api/slack:TestAsUserIsAcceptedFromAUserToken
+      - go-test:internal/api/slack:TestReplyingToAReplyJoinsTheRootThread
     deviations:
       - >-
         The full current payload is validated and persisted, but link-name
@@ -176,11 +183,14 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUpdateAndDeleteMessage
+      - go-test:internal/api/slack:TestChatUpdateKeepsWhatItWasNotGiven
+      - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUpdateAndDeleteMessage
+      - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
   - method: canvases.access.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -222,21 +232,32 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestGetPermalink
+      - go-test:internal/api/slack:TestURLsHandedToClientsAreAbsolute
   - method: conversations.history
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestHistoryPostForm
+      - go-test:internal/api/slack:TestHistoryListsRootsAndBroadcastRepliesOnly
+      - go-test:internal/api/slack:TestHistoryWindowIsPartOfTheRead
+      - go-test:internal/api/slack:TestThreadParentsCarryTheirSummary
+      - go-test:internal/api/slack:TestMessagesCarryReactionsAndPins
+      - go-test:internal/api/slack:TestBotTokenMessagesCarryBotIdentity
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationRepliesReturnsRootAndThread
+      - go-test:internal/api/slack:TestReplyingToAReplyJoinsTheRootThread
+      - go-test:internal/api/slack:TestThreadParentsCarryTheirSummary
+      - go-test:internal/api/slack:TestHistoryWindowIsPartOfTheRead
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
+      - go-test:internal/api/slack:TestTimestampArgumentsUseTheirOperationsCodes
   - method: reactions.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -247,11 +268,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
+      - go-test:internal/api/slack:TestReactionsGetAndListReturnWholeItems
   - method: reactions.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
+      - go-test:internal/api/slack:TestReactionsGetAndListReturnWholeItems
   - method: pins.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -267,6 +290,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddListAndRemovePin
+      - go-test:internal/api/slack:TestPinsListCarriesTheMessage
   - method: search.messages
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -300,6 +324,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -310,6 +335,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationMembers
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
   - method: team.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -425,6 +451,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestMarkConversation
+      - go-test:internal/api/slack:TestTimestampArgumentsUseTheirOperationsCodes
   - method: files.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -485,6 +512,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
   - method: users.lookupByEmail
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -946,6 +974,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestPostEphemeralReturnsMessageTimestamp
+      - go-test:internal/api/slack:TestPostEphemeralContract
   - method: chat.scheduleMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -961,6 +990,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
     deviations:
       - markdown_text, metadata, as_user, reply_broadcast, parse, link_names, and unfurl controls are not implemented
       - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
@@ -1604,7 +1634,7 @@ operations:
       - go-test:internal/api/slack:TestAdminConversationAdministration
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
-      - go-test:internal/service:TestThreadSummariesRespectAIExclusion
+      - go-test:internal/service:TestThreadSummariesAreNotGovernedByTheAIExclusion
       - go-test:internal/service:TestAssistantSearchContextRespectsAIExclusion
   - method: admin.conversations.convertToPublic
     status: behavior-compatible

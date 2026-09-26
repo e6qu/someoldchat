@@ -93,7 +93,7 @@ func TestMessageCursorRejectsAMessageWithoutACreationInstant(t *testing.T) {
 }
 
 func TestParseMessageTimestampReportsOneSentinel(t *testing.T) {
-	for _, value := range []MessageTimestamp{"", "1700000000", "1700000000.12", "abc.000000", "1700000000.abcdef"} {
+	for _, value := range []MessageTimestamp{"", "1700000000", "1700000000.12", "abc.000000", "1700000000.abcdef", "-1.000000", "+1.000000", "1700000000.-12345"} {
 		if _, err := ParseMessageTimestamp(value); !errors.Is(err, ErrInvalidMessageTimestamp) {
 			t.Fatalf("ParseMessageTimestamp(%q) err=%v, want %v", value, err, ErrInvalidMessageTimestamp)
 		}
@@ -101,5 +101,34 @@ func TestParseMessageTimestampReportsOneSentinel(t *testing.T) {
 	parsed, err := ParseMessageTimestamp("1700000000.123456")
 	if err != nil || !parsed.Equal(time.Unix(1700000000, 123456000).UTC()) {
 		t.Fatalf("ParseMessageTimestamp round trip = %s err=%v", parsed, err)
+	}
+}
+
+// A bound accepts whole seconds and short fractions that an identifier does
+// not, and the two readers agree on the instant wherever both accept a value.
+// They used to be two implementations in two packages, and reactions.add
+// accepted at the wire a ts that the service then refused.
+func TestParseTimestampBoundAcceptsWhatSlackAcceptsAsABound(t *testing.T) {
+	for raw, want := range map[string]time.Time{
+		"1700000000":        time.Unix(1700000000, 0).UTC(),
+		"1700000000.":       time.Unix(1700000000, 0).UTC(),
+		"1700000000.5":      time.Unix(1700000000, 500000000).UTC(),
+		"1700000000.000123": time.Unix(1700000000, 123000).UTC(),
+		" 0 ":               time.Unix(0, 0).UTC(),
+	} {
+		got, err := ParseTimestampBound(raw)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("ParseTimestampBound(%q) = %s, %v; want %s", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{"", "abc", "-1", "+5", "1700000000.1234567", "1700000000.abc", ".5", "9223372036854.8"} {
+		if _, err := ParseTimestampBound(raw); !errors.Is(err, ErrInvalidMessageTimestamp) {
+			t.Errorf("ParseTimestampBound(%q) accepted or misreported: %v", raw, err)
+		}
+	}
+	identifier, err := ParseMessageTimestamp("1700000000.000123")
+	bound, boundErr := ParseTimestampBound("1700000000.000123")
+	if err != nil || boundErr != nil || !identifier.Equal(bound) {
+		t.Fatalf("the two readers disagree: %s %v / %s %v", identifier, err, bound, boundErr)
 	}
 }

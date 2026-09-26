@@ -545,6 +545,7 @@ func sentinelDrivenCodes() map[string]string {
 		"channel_not_found":          "postMessageError's name for store.ErrNotFound on a message write",
 		"is_archived":                "postMessageError's name for service.ErrConversationAlreadyArchived on a message write",
 		"no_text":                    "postMessageError's name for service.ErrInvalidMessage",
+		"thread_not_found":           "postMessageError's name for service.ErrThreadNotFound: a thread_ts naming no live message is not a missing channel",
 		"invitation_expired":         "mutationErrorCode's name for service.ErrInvitationExpired: the invitation is real and the request well formed, so neither not_found nor an invalid-argument code describes it",
 		"invalid_duration":           "mutationErrorCode's name for service.ErrInvalidRetentionDuration: Slack's own code for a duration outside its documented range",
 		"channel_type_not_supported": "mutationErrorCode's name for service.ErrRetentionNotSupported: the conversation is real and the request well formed, but its type carries no retention policy",

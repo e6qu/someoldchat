@@ -37,7 +37,7 @@ func TestReminderWorkerDeliversPersonalReminderPrivately(t *testing.T) {
 	if !delivered.CompletedAt.Equal(now) || !delivered.LastDeliveredAt.Equal(now) {
 		t.Fatalf("personal reminder delivery state = %+v", delivered)
 	}
-	page, err := source.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := source.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestReminderWorkerChannelRetryUsesOneMessageForTheOccurrence(t *testing.T) 
 	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 1 {
 		t.Fatalf("retried delivery count=%d err=%v", count, err)
 	}
-	page, err := base.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := base.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}

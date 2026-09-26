@@ -164,6 +164,32 @@ message ThreadSummary {
   int32 reply_count = 1;
   repeated string participants = 2;
   string last_reply_at = 3;
+  bool subscribed = 4;
+}
+
+message MessageAnnotationsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  repeated string message_ids = 4;
+}
+
+// ReactionSummary is one emoji's row of Slack's reactions array.
+message ReactionSummary {
+  string name = 1;
+  repeated string users = 2;
+  int32 count = 3;
+}
+
+// MessageAnnotation is what a message carries beside its content: reactions
+// and pin state.
+message MessageAnnotation {
+  repeated ReactionSummary reactions = 1;
+  bool pinned = 2;
+}
+
+message MessageAnnotationsResponse {
+  map<string, MessageAnnotation> annotations = 1;
 }
 
 message ThreadSummariesResponse {
@@ -336,6 +362,7 @@ service InteractionsService {
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);
   rpc ThreadSummaries(ThreadSummariesRequest) returns (ThreadSummariesResponse);
+  rpc MessageAnnotations(MessageAnnotationsRequest) returns (MessageAnnotationsResponse);
   rpc MessageAt(MessageAtRequest) returns (Message);
   rpc DispatchSlashCommand(SlashCommandRequest) returns (InteractionMutationResponse);
   rpc DispatchBlockAction(BlockActionRequest) returns (InteractionMutationResponse);

@@ -76,7 +76,7 @@ func TestAssistantStateIsNotAMessage(t *testing.T) {
 	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking..."); err != nil {
 		t.Fatal(err)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}

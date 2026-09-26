@@ -7327,6 +7327,19 @@ func (s *Store) SetThreadFollowed(_ context.Context, workspace domain.WorkspaceI
 	return nil
 }
 
+// FollowedThreadRoots mirrors the SQL profile's one-read answer.
+func (s *Store) FollowedThreadRoots(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[domain.MessageTimestamp]bool, len(roots))
+	for _, root := range roots {
+		if s.threadFollows[threadFollowKey(workspace, user, conversation, root)] {
+			result[root] = true
+		}
+	}
+	return result, nil
+}
+
 func (s *Store) ThreadSummaries(_ context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
 	summaries := make(map[domain.MessageTimestamp]domain.ThreadSummary, len(roots))
 	if conversation == "" || len(roots) == 0 {
@@ -8669,7 +8682,11 @@ func (s *Store) ListPins(_ context.Context, conversation domain.ConversationID, 
 	}
 	values := make([]domain.Pin, 0, request.Limit+1)
 	for _, message := range s.messages[conversation] {
+		if message.Deleted {
+			continue
+		}
 		for _, pin := range s.pins[message.ID] {
+			pin.Item = s.cloneMessage(message)
 			if after == "" || pinKey(pin) > after {
 				values = appendSorted(values, pin, request.Limit+1, func(left, right domain.Pin) bool { return pinKey(left) < pinKey(right) })
 			}
@@ -11227,7 +11244,8 @@ func (s *Store) AckEvents(_ context.Context, owner string, sequences []uint64) e
 // The page boundary is decided by domain.PageRequest.PageAfter, the same
 // predicate the SQL profiles put in their WHERE clause, so the two profiles
 // cannot disagree about which row a cursor excludes.
-func (s *Store) ListMessages(_ context.Context, conversation domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
+func (s *Store) ListMessages(_ context.Context, conversation domain.ConversationID, history domain.HistoryRequest) (domain.MessagePage, error) {
+	request := history.Page
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if err := store.CheckPage(request); err != nil {
@@ -11243,26 +11261,27 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 			return domain.MessagePage{}, err
 		}
 	}
+	listed := func(message domain.Message) bool {
+		if message.Deleted || !history.Window.Contains(message.CreatedAt) {
+			return false
+		}
+		if history.RootsOnly && message.ThreadTimestamp != "" && !message.ReplyBroadcast {
+			return false
+		}
+		return request.Cursor == "" || request.PageAfter(message.CreatedAt, message.ID, createdAt, id)
+	}
 	window := make([]domain.Message, 0, request.Limit+1)
 	if request.Descending {
 		for index := len(values) - 1; index >= 0 && len(window) <= request.Limit; index-- {
-			if values[index].Deleted {
-				continue
+			if listed(values[index]) {
+				window = append(window, s.cloneMessage(values[index]))
 			}
-			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
-				continue
-			}
-			window = append(window, s.cloneMessage(values[index]))
 		}
 	} else {
 		for index := 0; index < len(values) && len(window) <= request.Limit; index++ {
-			if values[index].Deleted {
-				continue
+			if listed(values[index]) {
+				window = append(window, s.cloneMessage(values[index]))
 			}
-			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
-				continue
-			}
-			window = append(window, s.cloneMessage(values[index]))
 		}
 	}
 	hasMore := len(window) > request.Limit
@@ -11278,6 +11297,33 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 		page.NextCursor = cursor
 	}
 	return page, nil
+}
+
+// MessageAnnotations mirrors the SQL profile: one pass over the named
+// messages, reactions grouped by domain.SummarizeReactions.
+func (s *Store) MessageAnnotations(_ context.Context, conversation domain.ConversationID, ids []domain.MessageID) (map[domain.MessageID]domain.MessageAnnotation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[domain.MessageID]domain.MessageAnnotation, len(ids))
+	inConversation := make(map[domain.MessageID]bool, len(s.messages[conversation]))
+	for _, message := range s.messages[conversation] {
+		inConversation[message.ID] = true
+	}
+	for _, id := range ids {
+		if !inConversation[id] {
+			continue
+		}
+		reactions := make([]domain.Reaction, 0, len(s.reactions[id]))
+		for _, reaction := range s.reactions[id] {
+			reactions = append(reactions, reaction)
+		}
+		pinned := len(s.pins[id]) > 0
+		if len(reactions) == 0 && !pinned {
+			continue
+		}
+		result[id] = domain.MessageAnnotation{Reactions: domain.SummarizeReactions(reactions), Pinned: pinned}
+	}
+	return result, nil
 }
 
 func (s *Store) ListAuthoredMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
@@ -11457,7 +11503,8 @@ func (s *Store) messageSavedBy(message domain.MessageID, user domain.UserID) boo
 	return false
 }
 
-func (s *Store) ListThreadMessages(_ context.Context, conversation domain.ConversationID, timestamp domain.MessageTimestamp, request domain.PageRequest) (domain.MessagePage, error) {
+func (s *Store) ListThreadMessages(_ context.Context, conversation domain.ConversationID, timestamp domain.MessageTimestamp, thread domain.ThreadRequest) (domain.MessagePage, error) {
+	request := thread.Page
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.MessagePage{}, err
 	}
@@ -11472,10 +11519,12 @@ func (s *Store) ListThreadMessages(_ context.Context, conversation domain.Conver
 		if message.Deleted {
 			continue
 		}
-		if (message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp) || message.ThreadTimestamp == timestamp {
-			if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
-				values = appendSorted(values, s.cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
-			}
+		root := message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp
+		if !root && (message.ThreadTimestamp != timestamp || !thread.Window.Contains(message.CreatedAt)) {
+			continue
+		}
+		if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
+			values = appendSorted(values, s.cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
 		}
 	}
 	window := values

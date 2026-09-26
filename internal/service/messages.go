@@ -33,6 +33,13 @@ var (
 	ErrInvalidTimestamp      = errors.New("message timestamp is invalid")
 	ErrMessageNotOwned       = errors.New("message is not owned by user")
 	ErrMessageAlreadyDeleted = errors.New("message is already deleted")
+	// ErrThreadNotFound is a thread_ts that names no live message of the
+	// conversation. It is not the conversation's absence: reporting it as
+	// channel_not_found sent the caller to check a channel that exists.
+	ErrThreadNotFound = errors.New("thread parent message not found")
+	// ErrRecipientNotInConversation is an ephemeral message addressed to
+	// someone who cannot read the conversation it would appear in.
+	ErrRecipientNotInConversation = errors.New("ephemeral recipient is not in the conversation")
 	// The message describes the class rather than one member of it. It used to
 	// read "conversation name is invalid", which is right for a rejected name
 	// and wrong for the other forty-odd sites that raise it — a foreign team
@@ -1489,14 +1496,18 @@ func (m Messages) IntegrationLogs(ctx context.Context, workspaceID domain.Worksp
 	return domain.IntegrationLogPage{Page: page, Pages: pages, Total: total, Logs: logs}, nil
 }
 
-func (m Messages) History(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
+func (m Messages) History(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, request domain.HistoryRequest) (domain.MessagePage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversation); err != nil {
 		return domain.MessagePage{}, err
 	}
 	return m.Store.ListMessages(ctx, conversation, request)
 }
 
-func (m Messages) Replies(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, request domain.PageRequest) (domain.MessagePage, error) {
+// Replies pages the thread a message belongs to. Slack answers the whole
+// thread for a reply's ts as well as for the root's, so a reply is resolved to
+// its root before the thread is read; a deleted root is still the thread's
+// anchor while it has replies, and the read omits the tombstone itself.
+func (m Messages) Replies(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, request domain.ThreadRequest) (domain.MessagePage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversation); err != nil {
 		return domain.MessagePage{}, err
 	}
@@ -1504,12 +1515,15 @@ func (m Messages) Replies(ctx context.Context, workspaceID domain.WorkspaceID, u
 	if err != nil {
 		return domain.MessagePage{}, ErrInvalidTimestamp
 	}
-	root, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+	message, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
-	if root.WorkspaceID != workspaceID {
+	if message.WorkspaceID != workspaceID {
 		return domain.MessagePage{}, store.ErrNotFound
+	}
+	if message.ThreadTimestamp != "" {
+		timestamp = message.ThreadTimestamp
 	}
 	return m.Store.ListThreadMessages(ctx, conversation, timestamp, request)
 }
@@ -6470,19 +6484,41 @@ func (m Messages) ThreadSummaries(ctx context.Context, workspaceID domain.Worksp
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return nil, err
 	}
-	// A channel an administrator has kept out of Slack AI shows no AI summaries,
-	// which is the whole point of the exclusion: it is set and reported, so it must
-	// also govern the one AI surface a summary reaches. An empty result reads, to
-	// the caller, as a channel with nothing summarised — which is exactly the state
-	// the exclusion puts it in.
-	excluded, err := m.Store.ConversationsExcludedFromAI(ctx, workspaceID, []domain.ConversationID{conversationID})
+	// A thread summary is reply metadata — a count, the participants and the
+	// last reply — which Slack's message object carries as reply_count,
+	// reply_users and latest_reply in every channel. It is not an AI summary,
+	// so the Slack-AI exclusion does not govern it; applying the exclusion here
+	// erased reply counts from both the timeline and conversations.history in
+	// any excluded channel.
+	summaries, err := m.Store.ThreadSummaries(ctx, conversationID, roots)
+	if err != nil || len(summaries) == 0 {
+		return summaries, err
+	}
+	withReplies := make([]domain.MessageTimestamp, 0, len(summaries))
+	for root := range summaries {
+		withReplies = append(withReplies, root)
+	}
+	followed, err := m.Store.FollowedThreadRoots(ctx, workspaceID, userID, conversationID, withReplies)
 	if err != nil {
 		return nil, err
 	}
-	if len(excluded) > 0 {
-		return map[domain.MessageTimestamp]domain.ThreadSummary{}, nil
+	for root := range followed {
+		summary := summaries[root]
+		summary.Subscribed = true
+		summaries[root] = summary
 	}
-	return m.Store.ThreadSummaries(ctx, conversationID, roots)
+	return summaries, nil
+}
+
+// MessageAnnotations reports the reactions and pin state of messages in one
+// conversation the caller can read. Identifiers that name no message of that
+// conversation contribute nothing, so a caller cannot learn another channel's
+// reactions by naming its messages here.
+func (m Messages) MessageAnnotations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, ids []domain.MessageID) (map[domain.MessageID]domain.MessageAnnotation, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return nil, err
+	}
+	return m.Store.MessageAnnotations(ctx, conversationID, ids)
 }
 
 func (m Messages) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.ReadCursor, error) {
@@ -8548,22 +8584,15 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 	if err != nil || message.WorkspaceID != workspaceID {
 		return "", store.ErrNotFound
 	}
-	canonical := domain.NewMessageTimestamp(message.CreatedAt)
-	// Slack's shape is <origin>/archives/<channel>/p<ts without the dot>, and
-	// internal/web serves exactly that path, redirecting into the window that
-	// contains the message.
-	//
-	// The origin is deliberately omitted rather than guessed. This used to
-	// return https://sameoldchat.local/..., a host that exists nowhere, so
-	// every permalink the product handed out was unfollowable. The service
-	// does not know what origin served the request — the web and API handlers
-	// do — and a relative permalink resolves correctly against whichever one
-	// did, which is the honest answer available here.
-	return "/archives/" + url.PathEscape(string(conversation)) + "/p" + strings.ReplaceAll(string(canonical), ".", ""), nil
+	// internal/web serves this path, redirecting into the window that
+	// contains the message. The service does not know what origin served the
+	// request, so it answers the path and each transport resolves it against
+	// its own origin: chat.getPermalink returns it absolute, as Slack does.
+	return domain.MessagePermalinkPath(conversation, domain.NewMessageTimestamp(message.CreatedAt), message.ThreadTimestamp), nil
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "", "")
 }
 
 func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -9487,7 +9516,7 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 }
 
 func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "", "")
 }
 
 func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -9616,6 +9645,9 @@ func ScheduledMessagePostRequest(value domain.ScheduledMessage) (domain.MessageP
 		Parse: state.Parse, MrkdwnDisabled: state.MrkdwnDisabled, LinkNames: state.LinkNames,
 		UnfurlLinks: state.UnfurlLinks, UnfurlMedia: state.UnfurlMedia,
 		Username: state.Username, IconEmoji: state.IconEmoji, IconURL: state.IconURL,
+		// A bot's scheduled message is delivered as that bot, so it carries
+		// bot_id like a message the bot posted directly.
+		BotID: value.BotID,
 	}, nil
 }
 
@@ -9675,11 +9707,11 @@ func normalizeScheduledMessageState(raw, text, blocks string, threadTimestamp do
 	return string(encoded), nil
 }
 
-func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID) (domain.EphemeralMessage, error) {
-	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "")
+func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
+	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "", threadTimestamp)
 }
 
-func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string) (domain.EphemeralMessage, error) {
+func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
@@ -9689,16 +9721,38 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
-	if conversation == "" || recipientID == "" || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) || err != nil || attachmentErr != nil {
+	if conversation == "" || recipientID == "" || (text == "" && domain.NoStructuredContent(normalizedBlocks) && domain.NoStructuredContent(normalizedAttachments)) || messageTextTooLong(text) || err != nil || attachmentErr != nil {
 		return domain.EphemeralMessage{}, ErrInvalidEphemeral
 	}
+	// Slack names one outcome for a recipient who cannot see the message —
+	// user_not_in_channel — whether they are outside the channel or not a
+	// member of the workspace at all. Reporting store.ErrNotFound sent the
+	// caller looking for a missing channel.
 	recipient, err := m.Store.GetUser(ctx, recipientID)
 	if err != nil || recipient.WorkspaceID != workspaceID || recipient.Deleted {
-		return domain.EphemeralMessage{}, store.ErrNotFound
+		return domain.EphemeralMessage{}, ErrRecipientNotInConversation
 	}
 	isMember, err := m.Store.IsConversationMember(ctx, conversation, recipientID)
-	if err != nil || !isMember {
-		return domain.EphemeralMessage{}, store.ErrNotFound
+	if err != nil {
+		return domain.EphemeralMessage{}, err
+	}
+	if !isMember {
+		return domain.EphemeralMessage{}, ErrRecipientNotInConversation
+	}
+	if threadTimestamp != "" {
+		createdAt, err := domain.ParseMessageTimestamp(threadTimestamp)
+		if err != nil {
+			return domain.EphemeralMessage{}, ErrInvalidTimestamp
+		}
+		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+		if err != nil || parent.WorkspaceID != workspaceID || parent.Deleted {
+			return domain.EphemeralMessage{}, ErrThreadNotFound
+		}
+		// One level deep, as for a posted reply.
+		threadTimestamp = domain.NewMessageTimestamp(parent.CreatedAt)
+		if parent.ThreadTimestamp != "" {
+			threadTimestamp = parent.ThreadTimestamp
+		}
 	}
 	var id domain.MessageID
 	if idempotencyKey == "" {
@@ -9717,7 +9771,7 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 		)[:40])
 	}
 	now := domain.MessageInstant(time.Now().UTC())
-	value := domain.EphemeralMessage{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now), CreatedAt: now}
+	value := domain.EphemeralMessage{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now), ThreadTimestamp: threadTimestamp, CreatedAt: now}
 	// user_id names the single recipient. Every consumer that fans this record
 	// out has to filter on it, which is why it is a first-class payload field.
 	payload := events.NewPayload(events.EphemeralMessageTopic,
@@ -9730,6 +9784,7 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 		events.String("blocks", value.Blocks),
 		events.String("attachments", value.Attachments),
 		events.String("ts", string(value.Timestamp)),
+		events.String("thread_ts", string(value.ThreadTimestamp)),
 	)
 	event, err := newEvent(workspaceID, authorID, payload, now)
 	if err != nil {
@@ -9781,7 +9836,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(request.Blocks))
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(request.Attachments))
 	if err != nil || attachmentErr != nil || strings.TrimSpace(string(request.Conversation)) == "" ||
-		(strings.TrimSpace(request.Text) == "" && normalizedBlocks == "" && normalizedAttachments == "") ||
+		(strings.TrimSpace(request.Text) == "" && domain.NoStructuredContent(normalizedBlocks) && domain.NoStructuredContent(normalizedAttachments)) ||
 		messageTextTooLong(request.Text) || (request.MarkdownText && utf8.RuneCountInString(request.Text) > 12000) ||
 		(request.Parse != "" && request.Parse != "none" && request.Parse != "full") ||
 		(request.ReplyBroadcast && request.ThreadTimestamp == "") ||
@@ -9806,12 +9861,17 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
 		return domain.Message{}, err
 	}
-	if err := m.requireConversationMembership(ctx, workspaceID, authorID, request.Conversation); err != nil {
-		return domain.Message{}, err
-	}
 	target, err := m.Store.GetConversation(ctx, request.Conversation)
 	if err != nil || target.WorkspaceID != workspaceID {
 		return domain.Message{}, store.ErrNotFound
+	}
+	// chat:write.public lets an app post to a public channel it has not
+	// joined. It is the only exception to membership, and it never reaches a
+	// private channel or a conversation between people.
+	if !request.WritePublic || request.AppID == "" || target.PrivateFlag() || target.IsDirectOrGroup() {
+		if err := m.requireConversationMembership(ctx, workspaceID, authorID, request.Conversation); err != nil {
+			return domain.Message{}, err
+		}
 	}
 	if target.Archived {
 		return domain.Message{}, ErrConversationAlreadyArchived
@@ -9846,19 +9906,30 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 			return domain.Message{}, ErrInvalidTimestamp
 		}
 		parent, err := m.Store.GetMessageByCreatedAt(ctx, request.Conversation, createdAt)
-		if err != nil || parent.WorkspaceID != workspaceID {
-			return domain.Message{}, store.ErrNotFound
+		if err != nil || parent.WorkspaceID != workspaceID || parent.Deleted {
+			return domain.Message{}, ErrThreadNotFound
 		}
-		threadTimestampValue = request.ThreadTimestamp
+		// Slack threads are one level deep: replying to a reply joins the
+		// thread the reply belongs to. Recording the reply's own ts made a
+		// nested thread no client can open and conversations.replies on the
+		// root never returned.
+		threadTimestampValue = domain.NewMessageTimestamp(parent.CreatedAt)
+		if parent.ThreadTimestamp != "" {
+			threadTimestampValue = parent.ThreadTimestamp
+		}
 	}
 	id, err := domain.NewMessageID()
 	if err != nil {
 		return domain.Message{}, err
 	}
+	// The broadcast flag is a column on the message, not stream state; see
+	// domain.Message.ReplyBroadcast. The bot identity is stream state because
+	// it is presentation the posting credential supplies, like the username.
 	state := domain.MessageStreamState{
+		BotID:    request.BotID,
 		Username: request.Username, IconEmoji: request.IconEmoji, IconURL: request.IconURL,
-		MarkdownText: request.MarkdownText, ReplyBroadcast: request.ReplyBroadcast,
-		Parse: request.Parse, MrkdwnDisabled: request.MrkdwnDisabled, LinkNames: request.LinkNames,
+		MarkdownText: request.MarkdownText,
+		Parse:        request.Parse, MrkdwnDisabled: request.MrkdwnDisabled, LinkNames: request.LinkNames,
 		UnfurlLinks: request.UnfurlLinks, UnfurlMedia: request.UnfurlMedia,
 	}
 	streamState := ""
@@ -9871,7 +9942,8 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		ID: id, WorkspaceID: workspaceID, Conversation: request.Conversation, AuthorID: authorID,
 		AppID: request.AppID, Text: request.Text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
 		Metadata: metadata, StreamState: streamState, ThreadTimestamp: threadTimestampValue,
-		CreatedAt: domain.MessageInstant(time.Now()), Subtype: request.Subtype,
+		ReplyBroadcast: request.ReplyBroadcast,
+		CreatedAt:      domain.MessageInstant(time.Now()), Subtype: request.Subtype,
 	}
 	// A message's ts is its public identifier and it carries microseconds, so two
 	// messages in one conversation may not be created on the same microsecond.
@@ -9920,10 +9992,11 @@ func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceI
 	})
 }
 
-// UpdateMessage applies Slack's presence-sensitive chat.update rules. Omitted
-// blocks survive when text is also omitted, text without blocks removes the old
-// blocks, omitted attachments always survive, and explicit empty arrays remove
-// either collection.
+// UpdateMessage applies Slack's presence-sensitive chat.update rules: an
+// omitted field keeps its current value, and an explicit empty array removes
+// blocks or attachments. Slack documents both collections that way — "If you
+// don't include this field, the message's previous blocks will be retained" —
+// so a text-only edit no longer wipes the blocks an app posted.
 func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, patch domain.MessagePatch) (domain.Message, error) {
 	if patch.Text == nil && patch.Blocks == nil && patch.Attachments == nil {
 		return domain.Message{}, ErrInvalidMessage
@@ -9944,8 +10017,6 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 		if err != nil {
 			return domain.Message{}, ErrInvalidMessage
 		}
-	} else if patch.Text != nil {
-		message.Blocks = ""
 	}
 	if patch.Attachments != nil {
 		message.Attachments, err = domain.NormalizeAttachments([]byte(*patch.Attachments))
@@ -9955,7 +10026,7 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	}
 	if messagePayloadTooLong(message.Blocks, message.Attachments) ||
 		messageTextTooLong(message.Text) ||
-		(strings.TrimSpace(message.Text) == "" && message.Blocks == "" && message.Attachments == "") {
+		(strings.TrimSpace(message.Text) == "" && domain.NoStructuredContent(message.Blocks) && domain.NoStructuredContent(message.Attachments)) {
 		return domain.Message{}, ErrInvalidMessage
 	}
 	// The edit is recorded on the message itself, not only on the event it

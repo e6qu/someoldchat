@@ -249,7 +249,6 @@ func recordedNonPinnedCodes() map[string]string {
 		"not_enabled":                    "current views.publish method reference; returned when the app's Home tab is not enabled and absent from the legacy OpenAPI snapshot",
 		"app_not_hosted":                 "current apps.datastore.* method references; absent from the legacy OpenAPI snapshot",
 		"datastore_error":                "current apps.datastore.* structured validation error; absent from the legacy OpenAPI snapshot",
-		"as_user_not_supported":          "current chat.postMessage no longer accepts as_user for modern apps; absent from the legacy method enum",
 		"markdown_text_conflict":         "current message methods reject simultaneous text and markdown_text; absent from the legacy method enum",
 		"metadata_must_be_sent_from_app": "current Slack metadata contract requires an app identity; absent from the legacy method enum",
 		// Incoming webhooks answer plain text on hooks.slack.com, not a Web API method.

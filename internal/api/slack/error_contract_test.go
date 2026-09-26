@@ -238,10 +238,15 @@ func TestOutOfRangeLimitIsAHandledArgumentErrorNotAStoreFailure(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &list); err != nil || !list.OK {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
 	}
-	response := callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=0")
+	response := callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=-1")
 	envelope := decodeEnvelope(t, response)
 	if envelope.OK || envelope.Error != "invalid_arg_name" {
-		t.Fatalf("limit=0: body=%+v, want ok=false error=invalid_arg_name", envelope)
+		t.Fatalf("limit=-1: body=%+v, want ok=false error=invalid_arg_name", envelope)
+	}
+	// limit=0 is Slack's "use the default", and it is what the official
+	// SDKs send for an unset limit.
+	if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=0")); !envelope.OK {
+		t.Fatalf("limit=0: body=%+v, want ok=true (the default)", envelope)
 	}
 	// An oversized limit is clamped, which is what Slack does, rather than rejected.
 	clamped := callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=5000")
@@ -597,7 +602,7 @@ func TestFilesUploadSharesIntoChannels(t *testing.T) {
 	}
 	// The initial comment landed as a message carrying the file in each channel.
 	for _, channel := range []domain.ConversationID{"C1", "C2"} {
-		page, listErr := s.ListMessages(ctx, channel, domain.PageRequest{Limit: 10})
+		page, listErr := s.ListMessages(ctx, channel, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 		if listErr != nil {
 			t.Fatal(listErr)
 		}
@@ -1117,11 +1122,11 @@ func TestListItemDeleteRefusesAListInTheSingleIDField(t *testing.T) {
 // A non-threaded message used to serialise as `"thread_ts": ""`, which the
 // strictly typed SDK models parse as a timestamp.
 func TestMessageResponseOmitsAnEmptyThreadTimestamp(t *testing.T) {
-	plain := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", CreatedAt: time.Unix(1700000000, 0).UTC()})
+	plain := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", CreatedAt: time.Unix(1700000000, 0).UTC()}, "http://chat.example")
 	if _, present := plain["thread_ts"]; present {
 		t.Errorf("thread_ts present on a non-threaded message: %v", plain)
 	}
-	threaded := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", ThreadTimestamp: "1700000000.000000", CreatedAt: time.Unix(1700000001, 0).UTC()})
+	threaded := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", ThreadTimestamp: "1700000000.000000", CreatedAt: time.Unix(1700000001, 0).UTC()}, "http://chat.example")
 	if threaded["thread_ts"] != domain.MessageTimestamp("1700000000.000000") {
 		t.Errorf("thread_ts missing on a threaded message: %v", threaded)
 	}
@@ -1154,20 +1159,6 @@ func TestParseIDListUnderstandsBothDocumentedListForms(t *testing.T) {
 	}
 	if got := parseIDList[domain.UserID](``); len(got) != 0 {
 		t.Errorf("empty = %v", got)
-	}
-}
-
-func TestParseSlackTimestampRejectsWhatIsNotATimestamp(t *testing.T) {
-	if value, ok := parseSlackTimestamp("1700000000.000123"); !ok || value != 1700000000000123 {
-		t.Errorf("value=%d ok=%v", value, ok)
-	}
-	if value, ok := parseSlackTimestamp("1700000000"); !ok || value != 1700000000000000 {
-		t.Errorf("value=%d ok=%v", value, ok)
-	}
-	for _, raw := range []string{"", "abc", "-1", "1700000000.1234567", "1700000000.abc"} {
-		if _, ok := parseSlackTimestamp(raw); ok {
-			t.Errorf("parseSlackTimestamp(%q) accepted", raw)
-		}
 	}
 }
 

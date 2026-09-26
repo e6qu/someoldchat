@@ -86,6 +86,8 @@ func runQualification(t *testing.T, open opener) {
 		{"recent searches are private ordered and deduplicated", recentSearchesArePrivateOrderedAndDeduplicated},
 		{"user group mentions create visibility safe activity", userGroupMentionsCreateVisibilitySafeActivity},
 		{"messages page in both directions", messagesPageInBothDirections},
+		{"history pages roots within its window", historyPagesRootsWithinItsWindow},
+		{"message annotations agree across profiles", messageAnnotationsAgreeAcrossProfiles},
 		{"referential failures are sentinels", referentialFailuresAreSentinels},
 		{"expired Socket Mode connection is not revived", expiredSocketModeConnectionIsNotRevived},
 		{"Socket Mode batches are all or nothing", socketModeBatchesAreAllOrNothing},
@@ -915,7 +917,7 @@ func coreRepositoryContract(t *testing.T, open opener) {
 	if loadedMessage.Text != message.Text || loadedMessage.AuthorID != message.AuthorID {
 		t.Fatalf("message=%+v, want committed message", loadedMessage)
 	}
-	page, err := repository.ListMessages(ctx, conversation.ID, domain.PageRequest{Limit: 10})
+	page, err := repository.ListMessages(ctx, conversation.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}

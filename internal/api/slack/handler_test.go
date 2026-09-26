@@ -3039,15 +3039,15 @@ func TestGetPermalink(t *testing.T) {
 	if err := json.NewDecoder(posted.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	permalink := httptest.NewRequest(http.MethodGet, "/api/chat.getPermalink?channel=C1&message_ts="+response.TS, nil)
+	permalink := httptest.NewRequest(http.MethodGet, "https://chat.example.test/api/chat.getPermalink?channel=C1&message_ts="+response.TS, nil)
 	permalink.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, permalink)
-	// The permalink is Slack's shape on THIS deployment's origin. It used to
-	// name sameoldchat.local, a host that exists nowhere, so every permalink
-	// this product handed out was unfollowable; the path is now served by
+	// The permalink is Slack's shape, absolute on THIS deployment's origin.
+	// It used to name sameoldchat.local, a host that exists nowhere, and then
+	// a bare path, which no SDK can follow; the path is served by
 	// internal/web's /archives route.
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"permalink":"/archives/C1/p`) {
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"permalink":"https://chat.example.test/archives/C1/p`) {
 		t.Fatalf("permalink status=%d body=%s", result.Code, result.Body)
 	}
 	if strings.Contains(result.Body.String(), "sameoldchat.local") {
@@ -3742,13 +3742,13 @@ func TestFileMessageResponseMatchesSlackFileShareShape(t *testing.T) {
 	response := messageResponse(domain.Message{
 		ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created,
 		Files: []domain.File{{ID: "F1", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt", Title: "Report", MIMEType: "text/plain", Size: 12, CreatedAt: created, SharedChannels: []domain.ConversationID{"C1"}}},
-	})
+	}, "https://chat.example")
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := string(encoded)
-	for _, expected := range []string{`"subtype":"file_share"`, `"upload":true`, `"files":[`, `"id":"F1"`, `"mode":"hosted"`, `"url_private":"/api/files/F1"`, `"channels":["C1"]`} {
+	for _, expected := range []string{`"subtype":"file_share"`, `"upload":true`, `"files":[`, `"id":"F1"`, `"mode":"hosted"`, `"url_private":"https://chat.example/api/files/F1"`, `"channels":["C1"]`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("file share response is missing %s: %s", expected, body)
 		}

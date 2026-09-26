@@ -667,8 +667,9 @@ func (r Remote) Permalink(ctx context.Context, workspaceID domain.WorkspaceID, u
 	return out.GetPermalink(), nil
 }
 
-func (r Remote) History(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
-	in := &chatv1.HistoryRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending}
+func (r Remote) History(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, history domain.HistoryRequest) (domain.MessagePage, error) {
+	request := history.Page
+	in := &chatv1.HistoryRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending, Window: encodeProtoMessageWindow(history.Window), RootsOnly: history.RootsOnly}
 	out, err := r.messages.History(ctx, in)
 	if err != nil {
 		return domain.MessagePage{}, err
@@ -1778,8 +1779,9 @@ func (r Remote) UpdateRemoteFile(ctx context.Context, workspaceID domain.Workspa
 	return decodeProtoRemoteFile(out)
 }
 
-func (r Remote) Replies(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, request domain.PageRequest) (domain.MessagePage, error) {
-	in := &chatv1.RepliesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Limit: int32(request.Limit), Cursor: string(request.Cursor)}
+func (r Remote) Replies(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, thread domain.ThreadRequest) (domain.MessagePage, error) {
+	request := thread.Page
+	in := &chatv1.RepliesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Limit: int32(request.Limit), Cursor: string(request.Cursor), Window: encodeProtoMessageWindow(thread.Window)}
 	out, err := r.messages.Replies(ctx, in)
 	if err != nil {
 		return domain.MessagePage{}, err
@@ -4696,6 +4698,28 @@ func (r Remote) ThreadSummaries(ctx context.Context, workspaceID domain.Workspac
 		summaries[domain.MessageTimestamp(root)] = summary
 	}
 	return summaries, nil
+}
+
+func (r Remote) MessageAnnotations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, ids []domain.MessageID) (map[domain.MessageID]domain.MessageAnnotation, error) {
+	encodedIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		encodedIDs = append(encodedIDs, string(id))
+	}
+	out, err := r.interactions.MessageAnnotations(ctx, &chatv1.MessageAnnotationsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), MessageIds: encodedIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	annotations := make(map[domain.MessageID]domain.MessageAnnotation, len(out.GetAnnotations()))
+	for id, encoded := range out.GetAnnotations() {
+		annotation, err := decodeProtoMessageAnnotation(encoded)
+		if err != nil {
+			return nil, err
+		}
+		annotations[domain.MessageID(id)] = annotation
+	}
+	return annotations, nil
 }
 
 func (r Remote) DispatchSlashCommand(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, threadTimestamp domain.MessageTimestamp, command, text, responseBaseURL string) error {
@@ -8440,7 +8464,7 @@ func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chat
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {
-	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()))
+	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()), domain.MessageTimestamp(input.GetThreadTimestamp()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -9239,6 +9263,22 @@ func (s *Server) ThreadSummaries(ctx context.Context, input *chatv1.ThreadSummar
 		encoded[string(root)] = encodeProtoThreadSummary(summary)
 	}
 	return &chatv1.ThreadSummariesResponse{Summaries: encoded}, nil
+}
+
+func (s *Server) MessageAnnotations(ctx context.Context, input *chatv1.MessageAnnotationsRequest) (*chatv1.MessageAnnotationsResponse, error) {
+	ids := make([]domain.MessageID, 0, len(input.GetMessageIds()))
+	for _, id := range input.GetMessageIds() {
+		ids = append(ids, domain.MessageID(id))
+	}
+	annotations, err := s.implementation.MessageAnnotations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), ids)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encoded := make(map[string]*chatv1.MessageAnnotation, len(annotations))
+	for id, annotation := range annotations {
+		encoded[string(id)] = encodeProtoMessageAnnotation(annotation)
+	}
+	return &chatv1.MessageAnnotationsResponse{Annotations: encoded}, nil
 }
 
 func (s *Server) DispatchSlashCommand(ctx context.Context, input *chatv1.SlashCommandRequest) (*chatv1.InteractionMutationResponse, error) {
@@ -10065,7 +10105,11 @@ func (s *Server) permalinkProto(ctx context.Context, input *chatv1.PermalinkRequ
 }
 
 func (s *Server) historyProto(ctx context.Context, input *chatv1.HistoryRequest) (*chatv1.MessagePage, error) {
-	request := protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending())
+	window, err := decodeProtoMessageWindow(input.GetWindow())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	request := domain.HistoryRequest{Page: protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending()), Window: window, RootsOnly: input.GetRootsOnly()}
 	page, err := s.implementation.History(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), request)
 	if err != nil {
 		return nil, mapError(err)
@@ -10377,7 +10421,11 @@ func (s *Server) revokeTokenProto(ctx context.Context, input *chatv1.TokenReques
 }
 
 func (s *Server) repliesProto(ctx context.Context, input *chatv1.RepliesRequest) (*chatv1.MessagePage, error) {
-	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	window, err := decodeProtoMessageWindow(input.GetWindow())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	request := domain.ThreadRequest{Page: protoPageRequest(input.GetLimit(), input.GetCursor()), Window: window}
 	page, err := s.implementation.Replies(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), request)
 	if err != nil {
 		return nil, mapError(err)
@@ -11685,6 +11733,7 @@ func encodeProtoMessage(value domain.Message) *chatv1.Message {
 		Blocks: value.Blocks, Attachments: value.Attachments, AppId: string(value.AppID),
 		Metadata: value.Metadata, StreamState: value.StreamState, Files: files,
 		EditedAt: optionalRFC3339(value.EditedAt), EditedBy: string(value.EditedBy), Subtype: string(value.Subtype),
+		ReplyBroadcast: value.ReplyBroadcast,
 	}
 }
 
@@ -11719,6 +11768,7 @@ func decodeProtoMessage(value *chatv1.Message) (domain.Message, error) {
 		Attachments: value.GetAttachments(), Metadata: value.GetMetadata(), StreamState: value.GetStreamState(),
 		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(), Files: files,
 		EditedAt: edited, EditedBy: domain.UserID(value.GetEditedBy()), Subtype: domain.MessageSubtype(value.GetSubtype()),
+		ReplyBroadcast: value.GetReplyBroadcast(),
 	}, nil
 }
 
@@ -11732,12 +11782,61 @@ func encodeProtoThreadSummary(value domain.ThreadSummary) *chatv1.ThreadSummary 
 	}
 	return &chatv1.ThreadSummary{
 		ReplyCount: int32(value.ReplyCount), Participants: participants,
-		LastReplyAt: optionalRFC3339(value.LastReplyAt),
+		LastReplyAt: optionalRFC3339(value.LastReplyAt), Subscribed: value.Subscribed,
 	}
 }
 
+func encodeProtoMessageWindow(value domain.MessageWindow) *chatv1.MessageWindow {
+	return &chatv1.MessageWindow{Oldest: optionalRFC3339(value.Oldest), Latest: optionalRFC3339(value.Latest), Inclusive: value.Inclusive}
+}
+
+// decodeProtoMessageWindow refuses a malformed bound as an invalid argument
+// rather than widening the window to unbounded, which would answer strictly
+// more history than the caller asked for.
+func decodeProtoMessageWindow(value *chatv1.MessageWindow) (domain.MessageWindow, error) {
+	window := domain.MessageWindow{Inclusive: value.GetInclusive()}
+	for _, bound := range []struct {
+		raw  string
+		into *time.Time
+	}{{value.GetOldest(), &window.Oldest}, {value.GetLatest(), &window.Latest}} {
+		if bound.raw == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, bound.raw)
+		if err != nil {
+			return domain.MessageWindow{}, storepkg.InvalidArgument("message window bound is not RFC 3339")
+		}
+		*bound.into = parsed.UTC()
+	}
+	return window, nil
+}
+
+func encodeProtoMessageAnnotation(value domain.MessageAnnotation) *chatv1.MessageAnnotation {
+	reactions := make([]*chatv1.ReactionSummary, 0, len(value.Reactions))
+	for _, reaction := range value.Reactions {
+		users := make([]string, 0, len(reaction.Users))
+		for _, user := range reaction.Users {
+			users = append(users, string(user))
+		}
+		reactions = append(reactions, &chatv1.ReactionSummary{Name: reaction.Name, Users: users, Count: int32(reaction.Count)})
+	}
+	return &chatv1.MessageAnnotation{Reactions: reactions, Pinned: value.Pinned}
+}
+
+func decodeProtoMessageAnnotation(value *chatv1.MessageAnnotation) (domain.MessageAnnotation, error) {
+	annotation := domain.MessageAnnotation{Pinned: value.GetPinned()}
+	for _, reaction := range value.GetReactions() {
+		summary := domain.ReactionSummary{Name: reaction.GetName(), Count: int(reaction.GetCount())}
+		for _, user := range reaction.GetUsers() {
+			summary.Users = append(summary.Users, domain.UserID(user))
+		}
+		annotation.Reactions = append(annotation.Reactions, summary)
+	}
+	return annotation, nil
+}
+
 func decodeProtoThreadSummary(value *chatv1.ThreadSummary) (domain.ThreadSummary, error) {
-	summary := domain.ThreadSummary{ReplyCount: int(value.GetReplyCount())}
+	summary := domain.ThreadSummary{ReplyCount: int(value.GetReplyCount()), Subscribed: value.GetSubscribed()}
 	for _, participant := range value.GetParticipants() {
 		summary.Participants = append(summary.Participants, domain.UserID(participant))
 	}
@@ -11760,7 +11859,7 @@ func decodeProtoRTMConnection(value *chatv1.RTMConnection) domain.RTMConnection 
 }
 
 func encodeProtoEphemeralMessage(value domain.EphemeralMessage) *chatv1.EphemeralMessage {
-	return &chatv1.EphemeralMessage{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), AppId: string(value.AppID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, Timestamp: string(value.Timestamp), CreatedAt: string(domain.NewStoredTime(value.CreatedAt))}
+	return &chatv1.EphemeralMessage{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), AppId: string(value.AppID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, Timestamp: string(value.Timestamp), CreatedAt: string(domain.NewStoredTime(value.CreatedAt)), ThreadTimestamp: string(value.ThreadTimestamp)}
 }
 func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.EphemeralMessage, error) {
 	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetAuthorId() == "" || value.GetRecipientId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "") || value.GetTimestamp() == "" || value.GetCreatedAt() == "" {
@@ -11773,7 +11872,7 @@ func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.Ephemer
 	if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(value.GetTimestamp())); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
-	return domain.EphemeralMessage{ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), AppID: domain.AppID(value.GetAppId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Timestamp: domain.MessageTimestamp(value.GetTimestamp()), CreatedAt: createdAt}, nil
+	return domain.EphemeralMessage{ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), AppID: domain.AppID(value.GetAppId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Timestamp: domain.MessageTimestamp(value.GetTimestamp()), CreatedAt: createdAt, ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp())}, nil
 }
 
 func encodeProtoAccessLog(value domain.AccessLog) *chatv1.AccessLog {
@@ -12117,7 +12216,11 @@ func decodeProtoUserReactionPage(value *chatv1.UserReactionPage) (domain.UserRea
 }
 
 func encodeProtoPin(value domain.Pin) *chatv1.Pin {
-	return &chatv1.Pin{MessageId: string(value.Message), UserId: string(value.UserID), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano)}
+	pin := &chatv1.Pin{MessageId: string(value.Message), UserId: string(value.UserID), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano)}
+	if value.Item.ID != "" {
+		pin.Item = encodeProtoMessage(value.Item)
+	}
+	return pin
 }
 
 func decodeProtoPin(value *chatv1.Pin) (domain.Pin, error) {
@@ -12128,7 +12231,13 @@ func decodeProtoPin(value *chatv1.Pin) (domain.Pin, error) {
 	if err != nil {
 		return domain.Pin{}, errors.New("typed pin created_at is invalid")
 	}
-	return domain.Pin{Message: domain.MessageID(value.GetMessageId()), UserID: domain.UserID(value.GetUserId()), CreatedAt: created.UTC()}, nil
+	pin := domain.Pin{Message: domain.MessageID(value.GetMessageId()), UserID: domain.UserID(value.GetUserId()), CreatedAt: created.UTC()}
+	if value.GetItem() != nil {
+		if pin.Item, err = decodeProtoMessage(value.GetItem()); err != nil {
+			return domain.Pin{}, err
+		}
+	}
+	return pin, nil
 }
 
 func encodeProtoPinPage(items []domain.Pin, next domain.Cursor, more bool) *chatv1.PinPage {
@@ -12998,6 +13107,7 @@ func decodeProtoMessagePostRequest(input *chatv1.PostWithBlocksRequest) domain.M
 		AppID: domain.AppID(input.GetAppId()), MarkdownText: input.GetMarkdownText(),
 		ReplyBroadcast: input.GetReplyBroadcast(), Parse: input.GetParse(), MrkdwnDisabled: input.GetMrkdwnDisabled(),
 		LinkNames: input.GetLinkNames(), Username: input.GetUsername(), IconEmoji: input.GetIconEmoji(), IconURL: input.GetIconUrl(),
+		BotID: domain.BotID(input.GetBotId()), WritePublic: input.GetWritePublic(), Subtype: domain.MessageSubtype(input.GetSubtype()),
 	}
 	if input.GetUnfurlLinksSet() {
 		value := input.GetUnfurlLinks()
@@ -13070,7 +13180,7 @@ func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domai
 }
 
 func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "")
+	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "", "")
 }
 
 func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
@@ -13088,6 +13198,7 @@ func (r Remote) PostMessageAs(ctx context.Context, workspaceID domain.WorkspaceI
 		MarkdownText: request.MarkdownText, ReplyBroadcast: request.ReplyBroadcast, Parse: request.Parse,
 		MrkdwnDisabled: request.MrkdwnDisabled, LinkNames: request.LinkNames,
 		Username: request.Username, IconEmoji: request.IconEmoji, IconUrl: request.IconURL,
+		BotId: string(request.BotID), WritePublic: request.WritePublic, Subtype: string(request.Subtype),
 	}
 	if request.UnfurlLinks != nil {
 		input.UnfurlLinksSet = true
@@ -13151,8 +13262,8 @@ func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspac
 	return decodeProtoMessage(out)
 }
 
-func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID) (domain.EphemeralMessage, error) {
-	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID)})
+func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
+	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID), ThreadTimestamp: string(threadTimestamp)})
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}

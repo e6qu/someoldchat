@@ -129,7 +129,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	monitoringToken := flags.String("monitoring-token", os.Getenv("SAMEOLDCHAT_MONITORING_TOKEN"), "deployment bearer token publishing /monitoring/observation; empty disables authenticated access")
 	authWorkspace := flags.String("auth-workspace", os.Getenv("SAMEOLDCHAT_AUTH_WORKSPACE"), "workspace for external authorization (required when enabled)")
 	authLookupUser := flags.String("auth-lookup-user", os.Getenv("SAMEOLDCHAT_AUTH_LOOKUP_USER"), "existing user used to authorize external identity lookup (required when enabled)")
-	authPublicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public HTTPS URL used for authorization callbacks")
+	authPublicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public HTTPS URL used for authorization callbacks and for the absolute URLs the Web API returns")
 	authCookieDomain := flags.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "optional parent DNS domain for SameOldChat session cookies")
 	authStateKeyHex := flags.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
 	appCredentialKeyHex := flags.String("app-credential-key-hex", os.Getenv("SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"), "AES-256 key used to encrypt application signing credentials")
@@ -367,6 +367,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	if *apiRateLimit {
 		slackHandler.Limiter = slack.NewRateLimiter()
 	}
+	// Permalinks, file URLs and auth.test's url are absolute. Behind a proxy
+	// the request's Host is the upstream name, so the configured public URL,
+	// already validated above, is the origin they are built on.
+	slackHandler.PublicURL = strings.TrimRight(strings.TrimSpace(settings.authPublicURL), "/")
 	slackHandler.Register(mux)
 	if socketModeStore != nil {
 		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: resolved.socketHost, TLS: *socketTLS}, socketModeAuth)

@@ -37,6 +37,13 @@ The server command accepts these credentials and settings:
 -release-revision
 ```
 
+`-auth-public-url` is also the origin of every absolute URL the Web API hands
+to a client: `chat.getPermalink`, the `permalink` of search matches, pins and
+reactions, a file's `url_private` and `permalink_public`, and `auth.test`'s
+`url`. Official SDKs follow those URLs as given, so behind a proxy — where the
+request's `Host` is the upstream name — set it to the address clients use.
+Without it the URLs are built on the origin of each request.
+
 Supplying an incomplete provider configuration is invalid. OpenID Connect
 discovery requires an HTTPS issuer whose discovery document reports the same
 issuer and HTTPS authorization, token, and user-info endpoints. If any external authorization

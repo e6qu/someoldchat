@@ -100,6 +100,7 @@ service.missing_stream_recipient_user
 service.not_in_conversation
 service.not_workspace_admin
 service.oauth_app_mismatch
+service.recipient_not_in_conversation
 service.reminder_owned_by_other
 service.reminder_recurring
 service.reminder_time_in_past
@@ -112,6 +113,7 @@ service.shared_invite_settled
 service.slack_connect_full
 service.slash_command_in_thread
 service.slash_command_not_found
+service.thread_not_found
 service.trigger_type_restricted
 service.user_is_restricted
 service.user_is_ultra_restricted

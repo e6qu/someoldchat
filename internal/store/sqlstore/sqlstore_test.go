@@ -1197,7 +1197,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	if err != nil || stillGroup.Kind != domain.ConversationTypeMPIM || stillGroup.Name != "direct" {
 		t.Fatalf("conflicting conversion partially changed conversation=%+v err=%v", stillGroup, err)
 	}
-	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(beforeSuccess.Messages) != 2 {
 		t.Fatalf("conflicting conversion left a notice: history=%+v err=%v", beforeSuccess, err)
 	}
@@ -1221,7 +1221,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	if err != nil || converted.Name != "project-room-2" || converted.Kind != domain.ConversationTypePrivate {
 		t.Fatalf("reopened conversion=%+v err=%v", converted, err)
 	}
-	history, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "D2", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 3 || history.Messages[0].Text != original.Text || len(history.Messages[0].Files) != 1 {
 		t.Fatalf("reopened history=%+v err=%v", history, err)
 	}
@@ -1791,7 +1791,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), want, events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "message.created", Payload: string(want.ID), CreatedAt: want.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 10})
+	got, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(got.Messages) != 1 {
 		t.Fatalf("got = %+v, err = %v", got, err)
 	}
@@ -1804,7 +1804,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), reply, events.Event{ID: "evt_reply", WorkspaceID: "T1", Topic: "message.created", Payload: string(reply.ID), CreatedAt: reply.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
-	replies, err := s.ListThreadMessages(context.Background(), "C1", domain.NewMessageTimestamp(want.CreatedAt), domain.PageRequest{Limit: 10})
+	replies, err := s.ListThreadMessages(context.Background(), "C1", domain.NewMessageTimestamp(want.CreatedAt), domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(replies.Messages) != 2 || replies.Messages[0].ID != want.ID || replies.Messages[1].ID != reply.ID {
 		t.Fatalf("replies = %+v, err = %v", replies, err)
 	}
@@ -2204,7 +2204,7 @@ func TestSQLiteCommittedStateSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	page, err := second.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := second.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "durable" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}

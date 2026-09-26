@@ -636,7 +636,6 @@ func TestTamperedCursorsAreRefusedWithADeclaredCode(t *testing.T) {
 		{"/api/pins.list?channel=C1", "invalid_arg_name"},
 		{"/api/stars.list", "invalid_arg_name"},
 		{"/api/conversations.history?channel=C1", "invalid_arg_name"},
-		{"/api/reactions.get?channel=C1&timestamp=1", "invalid_arg_name"},
 		{"/api/chat.scheduledMessages.list", "invalid_arg_name"},
 	}
 	for _, item := range cases {
