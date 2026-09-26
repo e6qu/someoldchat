@@ -12569,13 +12569,44 @@ type incomingWebhookPayload struct {
 	Attachments json.RawMessage `json:"attachments"`
 }
 
+// maxIncomingWebhookBody bounds what an incoming webhook reads, in either
+// encoding.
+const maxIncomingWebhookBody = 1 << 20
+
+// incomingWebhookBody returns the JSON message an incoming webhook POST
+// carries. Slack accepts it as the request body or, as older integrations and
+// `curl --data-urlencode` send it, as the `payload` field of a form-encoded
+// body; the second used to be refused as invalid_payload.
+func incomingWebhookBody(r *http.Request) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxIncomingWebhookBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxIncomingWebhookBody {
+		return nil, errors.New("incoming webhook body is too large")
+	}
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaType != "application/x-www-form-urlencoded" && !bytes.HasPrefix(bytes.TrimSpace(body), []byte("payload=")) {
+		return body, nil
+	}
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return nil, err
+	}
+	payload := values.Get("payload")
+	if payload == "" {
+		return nil, errors.New("form-encoded incoming webhook has no payload field")
+	}
+	return []byte(payload), nil
+}
+
 func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 	workspaceID := domain.WorkspaceID(r.PathValue("workspace"))
 	appID := domain.AppID(r.PathValue("app"))
 	secret := r.PathValue("secret")
 	var payload incomingWebhookPayload
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	if err := decoder.Decode(&payload); err != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
+	raw, err := incomingWebhookBody(r)
+	if err != nil || json.Unmarshal(raw, &payload) != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
 		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}

@@ -3,7 +3,9 @@
 Someoldchat implements Slack Incoming Webhook delivery through the
 `/services/{workspace_id}/{app_id}/{secret}` endpoint. It accepts JSON with
 `text`, `blocks`, `attachments`, an optional `thread_ts`, and an optional
-`Idempotency-Key` header. A request carrying none of `text`, `blocks`, or
+`Idempotency-Key` header. The JSON is either the request body or, as Slack also
+accepts, the `payload` field of an `application/x-www-form-urlencoded` body;
+either encoding is limited to 1 MiB. A request carrying none of `text`, `blocks`, or
 `attachments` is rejected with `invalid_payload`. A successful request returns
 the plain-text body `ok`.
 

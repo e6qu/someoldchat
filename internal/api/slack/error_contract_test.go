@@ -994,6 +994,24 @@ func TestIncomingWebhookRejectsEverySecretItDidNotIssue(t *testing.T) {
 	if response := post(issued.Path, `{"text":"hello"}`); response.Code != http.StatusOK || response.Body.String() != "ok" {
 		t.Fatalf("valid webhook status=%d body=%s", response.Code, response.Body)
 	}
+	// Slack also takes the message as the payload field of a form, which is
+	// what `curl --data-urlencode payload=...` and older integrations send.
+	postForm := func(path, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := postForm(issued.Path, url.Values{"payload": {`{"text":"from a form"}`}}.Encode()); response.Code != http.StatusOK || response.Body.String() != "ok" {
+		t.Fatalf("form-encoded webhook status=%d body=%s", response.Code, response.Body)
+	}
+	if response := postForm(issued.Path, "text=no+payload+field"); response.Code != http.StatusBadRequest || response.Body.String() != "invalid_payload" {
+		t.Fatalf("form without payload status=%d body=%s, want 400 invalid_payload", response.Code, response.Body)
+	}
+	if response := post(issued.Path, `{"text":"a"}`+strings.Repeat(" ", 1<<20)); response.Code != http.StatusBadRequest || response.Body.String() != "invalid_payload" {
+		t.Fatalf("oversized webhook status=%d body=%s, want 400 invalid_payload", response.Code, response.Body)
+	}
 	rejections := map[string]string{
 		"wrong secret":      "/services/T1/A1/" + secret + "-wrong",
 		"blank secret":      "/services/T1/A1/%20",
